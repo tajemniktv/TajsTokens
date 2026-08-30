@@ -1,0 +1,28 @@
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore TajsTokens.sln
+
+      - name: Build
+        run: dotnet build TajsTokens.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test tests/TajsTokens.Core.Tests/TajsTokens.Core.Tests.csproj --configuration Release --no-build
