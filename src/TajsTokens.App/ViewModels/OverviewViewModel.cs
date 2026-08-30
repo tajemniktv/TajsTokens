@@ -1,4 +1,5 @@
 using CommunityToolkit.Mvvm.ComponentModel;
+using Microsoft.UI.Xaml.Controls;
 using TajsTokens.App.Models;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
@@ -21,11 +22,11 @@ public sealed partial class OverviewViewModel : ObservableObject
 
     public OverviewViewModel()
     {
-        var now = DateTimeOffset.Now;
+        var now = DateTimeOffset.UtcNow;
         var service = new ForecastingService();
 
-        var fiveHourSnapshots = BuildSnapshots(QuotaWindowKind.FiveHour, now, 200_000, now.AddHours(2.5), 54_000, 11_000);
-        var weeklySnapshots = BuildSnapshots(QuotaWindowKind.Weekly, now, 5_000_000, now.AddDays(4.5), 1_340_000, 225_000);
+        var fiveHourSnapshots = BuildSnapshots(QuotaWindowKind.FiveHour, now, now.AddHours(2.5), 46, 14, 300);
+        var weeklySnapshots = BuildSnapshots(QuotaWindowKind.Weekly, now, now.AddDays(4.5), 28, 4.5, 10_080);
 
         var fiveHourForecast = service.BuildForecast(fiveHourSnapshots, now);
         var weeklyForecast = service.BuildForecast(weeklySnapshots, now);
@@ -35,11 +36,11 @@ public sealed partial class OverviewViewModel : ObservableObject
 
         TokenSummaryCards =
         [
-            new("Input", "28.7k", "+4.2% / 24h"),
-            new("Cached input", "6.9k", "+1.1% / 24h"),
-            new("Output", "13.4k", "+3.7% / 24h"),
-            new("Reasoning", "1.8k", "-0.4% / 24h"),
-            new("Total", "50.8k", "+2.9% / 24h")
+            new("Uncached input", "28.7M", "+4.2% / 24h"),
+            new("Cache read", "69.0M", "+1.1% / 24h"),
+            new("Output", "11.6M", "+3.7% / 24h"),
+            new("Reasoning output", "1.8M", "-0.4% / 24h"),
+            new("Total", "111.1M", "+2.9% / 24h")
         ];
 
         HistoryPoints =
@@ -73,16 +74,17 @@ public sealed partial class OverviewViewModel : ObservableObject
     private static List<QuotaSnapshot> BuildSnapshots(
         QuotaWindowKind kind,
         DateTimeOffset now,
-        double limit,
         DateTimeOffset resetAt,
-        double currentUsed,
-        double growth)
+        double currentUsedPercent,
+        double growthPercent,
+        int windowMinutes)
     {
         var snapshots = new List<QuotaSnapshot>();
         for (var i = 6; i >= 0; i--)
         {
             var observed = now.AddMinutes(-i * 35);
-            snapshots.Add(new QuotaSnapshot(kind, observed, currentUsed - (i * growth / 6), limit, resetAt));
+            var used = Math.Max(0, currentUsedPercent - (i * growthPercent / 6));
+            snapshots.Add(new QuotaSnapshot(kind, observed, used, windowMinutes, resetAt, "codex", "demo", "mock"));
         }
 
         return snapshots;
@@ -90,29 +92,51 @@ public sealed partial class OverviewViewModel : ObservableObject
 
     private static QuotaCardViewModel BuildQuotaCard(string title, QuotaSnapshot snapshot, Forecast forecast)
     {
-        var remainingPercent = snapshot.RemainingPercent * 100;
+        var remainingText = snapshot.RemainingPercent is double remaining ? $"{remaining:0.0}%" : "Unknown";
         var exhaustionText = forecast.EstimatedExhaustionAtUtc is null
-            ? "No exhaustion predicted"
-            : forecast.EstimatedExhaustionAtUtc.Value.LocalDateTime.ToString("ddd HH:mm");
+            ? "Insufficient data"
+            : forecast.EstimatedExhaustionAtUtc.Value.ToLocalTime().ToString("ddd HH:mm");
+        var burnText = forecast.BurnRatePercentPerHour is double burn
+            ? $"{burn:0.0} pp/h"
+            : "Insufficient data";
+
+        var survivalMessage = forecast.SurvivesUntilReset switch
+        {
+            true => "Likely to survive until reset.",
+            false => "Likely to exhaust before reset.",
+            null => "Not enough data to compare exhaustion with reset."
+        };
+
+        var severity = forecast.SurvivesUntilReset switch
+        {
+            false => InfoBarSeverity.Warning,
+            true => InfoBarSeverity.Success,
+            null => InfoBarSeverity.Informational
+        };
 
         return new QuotaCardViewModel(
             title,
-            $"{remainingPercent:0.0}%",
-            FormatTimeSpan(snapshot.ResetsAtUtc - snapshot.CapturedAtUtc),
-            $"{forecast.BurnRatePerHour:0} tok/h",
+            remainingText,
+            snapshot.ResetsAtUtc is null ? "Unknown" : FormatTimeSpan(snapshot.ResetsAtUtc.Value - DateTimeOffset.UtcNow),
+            burnText,
             exhaustionText,
-            forecast.SurvivesUntilReset,
-            $"{snapshot.RemainingTokens / 1000:0.0}k / {snapshot.LimitTokens / 1000:0}k tokens",
-            forecast.SurvivesUntilReset ? "Likely to survive until reset." : "Likely to exhaust before reset.");
+            snapshot.RemainingPercent is double gauge ? $"{gauge:0.0}% remaining" : "Quota unavailable",
+            survivalMessage,
+            severity);
     }
 
     private static string FormatTimeSpan(TimeSpan timeSpan)
     {
+        if (timeSpan <= TimeSpan.Zero)
+        {
+            return "due now";
+        }
+
         if (timeSpan.TotalHours >= 24)
         {
             return $"{timeSpan.TotalDays:0.#}d";
         }
 
-        return $"{Math.Max(0, (int)timeSpan.TotalHours)}h {Math.Max(0, timeSpan.Minutes)}m";
+        return $"{(int)timeSpan.TotalHours}h {timeSpan.Minutes}m";
     }
 }

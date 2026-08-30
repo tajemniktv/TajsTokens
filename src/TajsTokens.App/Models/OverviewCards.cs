@@ -1,3 +1,5 @@
+using Microsoft.UI.Xaml.Controls;
+
 namespace TajsTokens.App.Models;
 
 public sealed record QuotaCardViewModel(
@@ -6,9 +8,9 @@ public sealed record QuotaCardViewModel(
     string ResetCountdown,
     string BurnRate,
     string PredictedExhaustion,
-    bool SurvivesUntilReset,
     string GaugeText,
-    string SurvivalMessage);
+    string SurvivalMessage,
+    InfoBarSeverity Severity);
 
 public sealed record TokenSummaryCard(string Label, string Value, string Trend);
 

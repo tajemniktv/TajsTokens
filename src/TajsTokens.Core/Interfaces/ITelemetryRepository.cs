@@ -1,3 +1,4 @@
+using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 
 namespace TajsTokens.Core.Interfaces;
@@ -13,5 +14,10 @@ public interface ITelemetryRepository
     Task AddResetEventAsync(ResetEvent resetEvent, CancellationToken cancellationToken);
     Task AddAnnouncementAsync(Announcement announcement, CancellationToken cancellationToken);
 
-    Task<IReadOnlyList<QuotaSnapshot>> GetRecentQuotaSnapshotsAsync(int take, CancellationToken cancellationToken);
+    Task<IReadOnlyList<QuotaSnapshot>> GetRecentQuotaSnapshotsAsync(
+        QuotaWindowKind kind,
+        string provider,
+        string profile,
+        int take,
+        CancellationToken cancellationToken);
 }

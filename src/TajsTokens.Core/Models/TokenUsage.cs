@@ -1,7 +1,13 @@
 namespace TajsTokens.Core.Models;
 
 public sealed record TokenUsage(
+    string Provider,
+    string Client,
     string Model,
-    string Scope,
     DateTimeOffset ObservedAtUtc,
-    TokenBreakdown Breakdown);
+    TokenBreakdown Breakdown,
+    string? Profile = null,
+    string? SessionId = null,
+    string? ThreadId = null,
+    string? Repository = null,
+    string? AgentId = null);

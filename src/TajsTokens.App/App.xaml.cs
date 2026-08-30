@@ -1,7 +1,6 @@
+using System.Diagnostics;
 using Microsoft.UI.Xaml;
 using TajsTokens.App.Services;
-using TajsTokens.Core.Enums;
-using TajsTokens.Core.Models;
 using TajsTokens.Infrastructure.Persistence;
 
 namespace TajsTokens.App;
@@ -9,6 +8,7 @@ namespace TajsTokens.App;
 public partial class App : Application
 {
     private Window? _window;
+    private SqliteTelemetryRepository? _repository;
     private readonly NoOpSystemTrayService _trayService = new();
 
     public App()
@@ -24,7 +24,7 @@ public partial class App : Application
         _window.Activate();
     }
 
-    private static async Task InitializeDataLayerAsync()
+    private async Task InitializeDataLayerAsync()
     {
         try
         {
@@ -32,20 +32,13 @@ public partial class App : Application
             var dbFolder = Path.Combine(appDataPath, "TajsTokens");
             Directory.CreateDirectory(dbFolder);
 
-            var repository = new SqliteTelemetryRepository(Path.Combine(dbFolder, "telemetry.db"));
-            await repository.InitializeAsync(CancellationToken.None);
-            await repository.UpsertQuotaSnapshotAsync(
-                new QuotaSnapshot(
-                    QuotaWindowKind.FiveHour,
-                    DateTimeOffset.UtcNow,
-                    54_000,
-                    200_000,
-                    DateTimeOffset.UtcNow.AddHours(2)),
-                CancellationToken.None);
+            _repository = new SqliteTelemetryRepository(Path.Combine(dbFolder, "telemetry.db"));
+            await _repository.InitializeAsync(CancellationToken.None);
         }
-        catch
+        catch (Exception exception)
         {
-            // Keep launch resilient while persistence/provider foundation is still being scaffolded.
+            // Keep bootstrap launch resilient, but never silently erase persistence failures.
+            Debug.WriteLine($"TajsTokens telemetry initialization failed: {exception}");
         }
     }
 }

@@ -1,4 +1,3 @@
-using TajsTokens.Core.Enums;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
 
@@ -8,47 +7,79 @@ public sealed class ForecastingService : IForecastingService
 {
     public Forecast BuildForecast(IReadOnlyList<QuotaSnapshot> snapshots, DateTimeOffset nowUtc)
     {
-        if (snapshots.Count < 2)
+        ArgumentNullException.ThrowIfNull(snapshots);
+        if (snapshots.Count == 0)
         {
-            return new Forecast(
-                QuotaWindowKind.FiveHour,
-                nowUtc,
-                0,
-                null,
-                true,
-                0,
-                0.2);
+            throw new ArgumentException("At least one quota snapshot is required.", nameof(snapshots));
         }
 
         var ordered = snapshots.OrderBy(x => x.CapturedAtUtc).ToArray();
         var latest = ordered[^1];
 
-        var weightedRates = new List<double>(ordered.Length - 1);
+        if (ordered.Any(x => x.Kind != latest.Kind ||
+                             !string.Equals(x.Provider, latest.Provider, StringComparison.Ordinal) ||
+                             !string.Equals(x.Profile, latest.Profile, StringComparison.Ordinal)))
+        {
+            throw new ArgumentException("Forecast snapshots must belong to one quota window/provider/profile.", nameof(snapshots));
+        }
+
+        if (latest.UsedPercent is null || latest.RemainingPercent is null)
+        {
+            return UnknownForecast(latest, nowUtc);
+        }
+
+        var observedRates = new List<double>(Math.Max(0, ordered.Length - 1));
         for (var index = 1; index < ordered.Length; index++)
         {
             var previous = ordered[index - 1];
             var current = ordered[index];
+            if (previous.UsedPercent is null || current.UsedPercent is null)
+            {
+                continue;
+            }
+
             var hours = (current.CapturedAtUtc - previous.CapturedAtUtc).TotalHours;
             if (hours <= 0)
             {
                 continue;
             }
 
-            var delta = current.UsedTokens - previous.UsedTokens;
-            weightedRates.Add(Math.Max(0, delta / hours));
+            var delta = current.UsedPercent.Value - previous.UsedPercent.Value;
+            if (delta < 0)
+            {
+                // A reset/window rollover occurred. Do not smear it into the burn-rate estimate.
+                continue;
+            }
+
+            observedRates.Add(delta / hours);
         }
 
-        var burnRate = ComputeEwma(weightedRates, 0.45);
-        var sustainablePerHour = latest.LimitTokens / Math.Max((latest.ResetsAtUtc - latest.CapturedAtUtc).TotalHours, 1);
+        if (observedRates.Count == 0)
+        {
+            return UnknownForecast(latest, nowUtc);
+        }
+
+        var burnRate = ComputeEwma(observedRates, 0.45);
+        var elapsedSinceLatestHours = Math.Max(0, (nowUtc - latest.CapturedAtUtc).TotalHours);
+        var projectedRemaining = Math.Max(0, latest.RemainingPercent.Value - (burnRate * elapsedSinceLatestHours));
 
         DateTimeOffset? exhaustion = null;
         if (burnRate > 0)
         {
-            exhaustion = latest.CapturedAtUtc.AddHours(latest.RemainingTokens / burnRate);
+            exhaustion = nowUtc.AddHours(projectedRemaining / burnRate);
         }
 
-        var survives = exhaustion is null || exhaustion >= latest.ResetsAtUtc;
-        var confidence = Math.Clamp(weightedRates.Count / 12.0, 0.25, 0.85);
+        bool? survives = null;
+        double? sustainable = null;
+        if (latest.ResetsAtUtc is not null && latest.ResetsAtUtc > nowUtc)
+        {
+            survives = exhaustion is null || exhaustion >= latest.ResetsAtUtc;
+            sustainable = projectedRemaining / (latest.ResetsAtUtc.Value - nowUtc).TotalHours;
+        }
+
+        var sampleConfidence = Math.Clamp(observedRates.Count / 12.0, 0.2, 0.85);
+        var freshnessHours = Math.Max(0, (nowUtc - latest.CapturedAtUtc).TotalHours);
+        var freshnessFactor = Math.Clamp(1.0 - (freshnessHours / 6.0), 0.25, 1.0);
 
         return new Forecast(
             latest.Kind,
@@ -56,17 +87,15 @@ public sealed class ForecastingService : IForecastingService
             burnRate,
             exhaustion,
             survives,
-            sustainablePerHour,
-            confidence);
+            sustainable,
+            sampleConfidence * freshnessFactor);
     }
+
+    private static Forecast UnknownForecast(QuotaSnapshot latest, DateTimeOffset nowUtc) =>
+        new(latest.Kind, nowUtc, null, null, null, null, 0.15);
 
     private static double ComputeEwma(IReadOnlyList<double> values, double alpha)
     {
-        if (values.Count == 0)
-        {
-            return 0;
-        }
-
         var ewma = values[0];
         for (var i = 1; i < values.Count; i++)
         {

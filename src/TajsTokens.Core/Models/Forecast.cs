@@ -5,8 +5,8 @@ namespace TajsTokens.Core.Models;
 public sealed record Forecast(
     QuotaWindowKind Kind,
     DateTimeOffset GeneratedAtUtc,
-    double BurnRatePerHour,
+    double? BurnRatePercentPerHour,
     DateTimeOffset? EstimatedExhaustionAtUtc,
-    bool SurvivesUntilReset,
-    double SustainableTokensPerHour,
+    bool? SurvivesUntilReset,
+    double? SustainablePercentPerHour,
     double Confidence);

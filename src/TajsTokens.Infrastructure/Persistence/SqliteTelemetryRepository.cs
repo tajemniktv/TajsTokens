@@ -1,3 +1,4 @@
+using System.Globalization;
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Interfaces;
@@ -7,6 +8,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 
 public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryRepository, ISessionIngestionCheckpointStore
 {
+    private const int CurrentSchemaVersion = 1;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
 
     public async Task InitializeAsync(CancellationToken cancellationToken)
@@ -14,138 +16,183 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
-        var command = connection.CreateCommand();
-        command.CommandText = """
-            CREATE TABLE IF NOT EXISTS quota_snapshots (
-                kind TEXT NOT NULL,
-                captured_at_utc TEXT NOT NULL,
-                used_tokens REAL NOT NULL,
-                limit_tokens REAL NOT NULL,
-                resets_at_utc TEXT NOT NULL,
-                PRIMARY KEY(kind, captured_at_utc)
-            );
+        var versionCommand = connection.CreateCommand();
+        versionCommand.CommandText = "PRAGMA user_version;";
+        var version = Convert.ToInt32(await versionCommand.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+        if (version > CurrentSchemaVersion)
+        {
+            throw new InvalidOperationException($"Telemetry database schema {version} is newer than supported version {CurrentSchemaVersion}.");
+        }
 
-            CREATE TABLE IF NOT EXISTS token_usage (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                observed_at_utc TEXT NOT NULL,
-                model TEXT NOT NULL,
-                scope TEXT NOT NULL,
-                input_tokens REAL NOT NULL,
-                cached_input_tokens REAL NOT NULL,
-                output_tokens REAL NOT NULL,
-                reasoning_tokens REAL NOT NULL
-            );
+        if (version == 0)
+        {
+            // PR #1 previously created incompatible token/quota/checkpoint tables and wrote only
+            // synthetic bootstrap data. Recreate those pre-release tables once, then version all
+            // future migrations explicitly.
+            var migration = connection.CreateCommand();
+            migration.CommandText = """
+                DROP TABLE IF EXISTS quota_snapshots;
+                DROP TABLE IF EXISTS token_usage;
+                DROP TABLE IF EXISTS ingestion_checkpoints;
 
-            CREATE TABLE IF NOT EXISTS sessions (
-                session_id TEXT PRIMARY KEY,
-                thread_id TEXT,
-                repository TEXT NOT NULL,
-                started_at_utc TEXT NOT NULL,
-                last_activity_at_utc TEXT,
-                status TEXT NOT NULL
-            );
+                CREATE TABLE quota_snapshots (
+                    provider TEXT NOT NULL,
+                    profile TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    captured_at_utc TEXT NOT NULL,
+                    used_percent REAL,
+                    window_minutes INTEGER,
+                    resets_at_utc TEXT,
+                    source TEXT NOT NULL,
+                    PRIMARY KEY(provider, profile, kind, captured_at_utc)
+                );
 
-            CREATE TABLE IF NOT EXISTS agents (
-                agent_id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                name TEXT NOT NULL,
-                state TEXT NOT NULL,
-                last_seen_utc TEXT NOT NULL,
-                model TEXT
-            );
+                CREATE TABLE token_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    provider TEXT NOT NULL,
+                    client TEXT NOT NULL,
+                    profile TEXT,
+                    observed_at_utc TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    session_id TEXT,
+                    thread_id TEXT,
+                    repository TEXT,
+                    agent_id TEXT,
+                    uncached_input_tokens INTEGER NOT NULL,
+                    cache_read_tokens INTEGER NOT NULL,
+                    cache_write_tokens INTEGER NOT NULL,
+                    non_reasoning_output_tokens INTEGER NOT NULL,
+                    reasoning_output_tokens INTEGER NOT NULL,
+                    reported_total_tokens INTEGER
+                );
 
-            CREATE TABLE IF NOT EXISTS agent_relationships (
-                parent_agent_id TEXT NOT NULL,
-                child_agent_id TEXT NOT NULL,
-                linked_at_utc TEXT NOT NULL,
-                PRIMARY KEY(parent_agent_id, child_agent_id)
-            );
+                CREATE TABLE IF NOT EXISTS sessions (
+                    session_id TEXT PRIMARY KEY,
+                    thread_id TEXT,
+                    repository TEXT NOT NULL,
+                    started_at_utc TEXT NOT NULL,
+                    last_activity_at_utc TEXT,
+                    status TEXT NOT NULL
+                );
 
-            CREATE TABLE IF NOT EXISTS usage_events (
-                event_id TEXT PRIMARY KEY,
-                session_id TEXT NOT NULL,
-                timestamp_utc TEXT NOT NULL,
-                event_type TEXT NOT NULL,
-                summary TEXT NOT NULL,
-                token_delta REAL
-            );
+                CREATE TABLE IF NOT EXISTS agents (
+                    agent_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    last_seen_utc TEXT NOT NULL,
+                    model TEXT
+                );
 
-            CREATE TABLE IF NOT EXISTS reset_events (
-                event_id TEXT PRIMARY KEY,
-                kind TEXT NOT NULL,
-                detected_at_utc TEXT NOT NULL,
-                effective_at_utc TEXT NOT NULL,
-                source TEXT NOT NULL
-            );
+                CREATE TABLE IF NOT EXISTS agent_relationships (
+                    parent_agent_id TEXT NOT NULL,
+                    child_agent_id TEXT NOT NULL,
+                    linked_at_utc TEXT NOT NULL,
+                    PRIMARY KEY(parent_agent_id, child_agent_id)
+                );
 
-            CREATE TABLE IF NOT EXISTS announcements (
-                announcement_id TEXT PRIMARY KEY,
-                published_at_utc TEXT NOT NULL,
-                source TEXT NOT NULL,
-                title TEXT NOT NULL,
-                body TEXT NOT NULL,
-                link TEXT
-            );
+                CREATE TABLE IF NOT EXISTS usage_events (
+                    event_id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    timestamp_utc TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    summary TEXT NOT NULL,
+                    token_delta REAL
+                );
 
-            CREATE TABLE IF NOT EXISTS ingestion_checkpoints (
-                file_path TEXT PRIMARY KEY,
-                last_byte_offset INTEGER NOT NULL,
-                updated_at_utc TEXT NOT NULL,
-                last_session_id TEXT
-            );
+                CREATE TABLE IF NOT EXISTS reset_events (
+                    event_id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    detected_at_utc TEXT NOT NULL,
+                    effective_at_utc TEXT NOT NULL,
+                    source TEXT NOT NULL
+                );
 
-            CREATE INDEX IF NOT EXISTS idx_quota_snapshots_captured ON quota_snapshots(captured_at_utc DESC);
-            CREATE INDEX IF NOT EXISTS idx_token_usage_observed ON token_usage(observed_at_utc DESC);
-            CREATE INDEX IF NOT EXISTS idx_usage_events_time ON usage_events(timestamp_utc DESC);
-        """;
+                CREATE TABLE IF NOT EXISTS announcements (
+                    announcement_id TEXT PRIMARY KEY,
+                    published_at_utc TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    body TEXT NOT NULL,
+                    link TEXT
+                );
 
-        await command.ExecuteNonQueryAsync(cancellationToken);
+                CREATE TABLE ingestion_checkpoints (
+                    file_path TEXT PRIMARY KEY,
+                    last_byte_offset INTEGER NOT NULL,
+                    updated_at_utc TEXT NOT NULL,
+                    last_session_id TEXT,
+                    parser_version TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_quota_snapshots_lookup
+                    ON quota_snapshots(provider, profile, kind, captured_at_utc DESC);
+                CREATE INDEX IF NOT EXISTS idx_token_usage_observed ON token_usage(observed_at_utc DESC);
+                CREATE INDEX IF NOT EXISTS idx_usage_events_time ON usage_events(timestamp_utc DESC);
+
+                PRAGMA user_version = 1;
+                """;
+            await migration.ExecuteNonQueryAsync(cancellationToken);
+        }
     }
 
-    public async Task UpsertQuotaSnapshotAsync(QuotaSnapshot snapshot, CancellationToken cancellationToken)
-    {
-        await ExecuteNonQueryAsync(
+    public Task UpsertQuotaSnapshotAsync(QuotaSnapshot snapshot, CancellationToken cancellationToken) =>
+        ExecutePreparedCommandAsync(
             """
-            INSERT INTO quota_snapshots(kind, captured_at_utc, used_tokens, limit_tokens, resets_at_utc)
-            VALUES($kind, $captured, $used, $limit, $resets)
-            ON CONFLICT(kind, captured_at_utc) DO UPDATE SET
-              used_tokens = excluded.used_tokens,
-              limit_tokens = excluded.limit_tokens,
-              resets_at_utc = excluded.resets_at_utc;
+            INSERT INTO quota_snapshots(provider, profile, kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, source)
+            VALUES($provider, $profile, $kind, $captured, $used, $window, $resets, $source)
+            ON CONFLICT(provider, profile, kind, captured_at_utc) DO UPDATE SET
+              used_percent = excluded.used_percent,
+              window_minutes = excluded.window_minutes,
+              resets_at_utc = excluded.resets_at_utc,
+              source = excluded.source;
             """,
             cmd =>
             {
+                cmd.Parameters.AddWithValue("$provider", snapshot.Provider);
+                cmd.Parameters.AddWithValue("$profile", snapshot.Profile);
                 cmd.Parameters.AddWithValue("$kind", snapshot.Kind.ToString());
-                cmd.Parameters.AddWithValue("$captured", snapshot.CapturedAtUtc.UtcDateTime);
-                cmd.Parameters.AddWithValue("$used", snapshot.UsedTokens);
-                cmd.Parameters.AddWithValue("$limit", snapshot.LimitTokens);
-                cmd.Parameters.AddWithValue("$resets", snapshot.ResetsAtUtc.UtcDateTime);
+                cmd.Parameters.AddWithValue("$captured", SerializeUtc(snapshot.CapturedAtUtc));
+                cmd.Parameters.AddWithValue("$used", DbValue(snapshot.UsedPercent));
+                cmd.Parameters.AddWithValue("$window", DbValue(snapshot.WindowMinutes));
+                cmd.Parameters.AddWithValue("$resets", snapshot.ResetsAtUtc is null ? DBNull.Value : SerializeUtc(snapshot.ResetsAtUtc.Value));
+                cmd.Parameters.AddWithValue("$source", snapshot.Source);
             },
             cancellationToken);
-    }
 
-    public async Task AddTokenUsageAsync(TokenUsage usage, CancellationToken cancellationToken)
-    {
-        await ExecuteNonQueryAsync(
+    public Task AddTokenUsageAsync(TokenUsage usage, CancellationToken cancellationToken) =>
+        ExecutePreparedCommandAsync(
             """
-            INSERT INTO token_usage(observed_at_utc, model, scope, input_tokens, cached_input_tokens, output_tokens, reasoning_tokens)
-            VALUES($observed, $model, $scope, $input, $cached, $output, $reasoning);
+            INSERT INTO token_usage(
+                provider, client, profile, observed_at_utc, model, session_id, thread_id, repository, agent_id,
+                uncached_input_tokens, cache_read_tokens, cache_write_tokens, non_reasoning_output_tokens,
+                reasoning_output_tokens, reported_total_tokens)
+            VALUES(
+                $provider, $client, $profile, $observed, $model, $session, $thread, $repo, $agent,
+                $uncachedInput, $cacheRead, $cacheWrite, $nonReasoningOutput, $reasoningOutput, $reportedTotal);
             """,
             cmd =>
             {
-                cmd.Parameters.AddWithValue("$observed", usage.ObservedAtUtc.UtcDateTime);
+                cmd.Parameters.AddWithValue("$provider", usage.Provider);
+                cmd.Parameters.AddWithValue("$client", usage.Client);
+                cmd.Parameters.AddWithValue("$profile", DbValue(usage.Profile));
+                cmd.Parameters.AddWithValue("$observed", SerializeUtc(usage.ObservedAtUtc));
                 cmd.Parameters.AddWithValue("$model", usage.Model);
-                cmd.Parameters.AddWithValue("$scope", usage.Scope);
-                cmd.Parameters.AddWithValue("$input", usage.Breakdown.Input);
-                cmd.Parameters.AddWithValue("$cached", usage.Breakdown.CachedInput);
-                cmd.Parameters.AddWithValue("$output", usage.Breakdown.Output);
-                cmd.Parameters.AddWithValue("$reasoning", usage.Breakdown.Reasoning);
+                cmd.Parameters.AddWithValue("$session", DbValue(usage.SessionId));
+                cmd.Parameters.AddWithValue("$thread", DbValue(usage.ThreadId));
+                cmd.Parameters.AddWithValue("$repo", DbValue(usage.Repository));
+                cmd.Parameters.AddWithValue("$agent", DbValue(usage.AgentId));
+                cmd.Parameters.AddWithValue("$uncachedInput", usage.Breakdown.UncachedInput);
+                cmd.Parameters.AddWithValue("$cacheRead", usage.Breakdown.CacheRead);
+                cmd.Parameters.AddWithValue("$cacheWrite", usage.Breakdown.CacheWrite);
+                cmd.Parameters.AddWithValue("$nonReasoningOutput", usage.Breakdown.NonReasoningOutput);
+                cmd.Parameters.AddWithValue("$reasoningOutput", usage.Breakdown.ReasoningOutput);
+                cmd.Parameters.AddWithValue("$reportedTotal", DbValue(usage.Breakdown.ReportedTotal));
             },
             cancellationToken);
-    }
 
     public Task AddSessionAsync(CodexSession session, CancellationToken cancellationToken) =>
-        ExecuteNonQueryAsync(
+        ExecutePreparedCommandAsync(
             """
             INSERT INTO sessions(session_id, thread_id, repository, started_at_utc, last_activity_at_utc, status)
             VALUES($id, $thread, $repo, $start, $last, $status)
@@ -158,16 +205,16 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
             cmd =>
             {
                 cmd.Parameters.AddWithValue("$id", session.SessionId);
-                cmd.Parameters.AddWithValue("$thread", (object?)session.ThreadId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$thread", DbValue(session.ThreadId));
                 cmd.Parameters.AddWithValue("$repo", session.Repository);
-                cmd.Parameters.AddWithValue("$start", session.StartedAtUtc.UtcDateTime);
-                cmd.Parameters.AddWithValue("$last", session.LastActivityAtUtc?.UtcDateTime ?? (object)DBNull.Value);
+                cmd.Parameters.AddWithValue("$start", SerializeUtc(session.StartedAtUtc));
+                cmd.Parameters.AddWithValue("$last", session.LastActivityAtUtc is null ? DBNull.Value : SerializeUtc(session.LastActivityAtUtc.Value));
                 cmd.Parameters.AddWithValue("$status", session.Status);
             },
             cancellationToken);
 
     public Task AddOrUpdateAgentAsync(Agent agent, CancellationToken cancellationToken) =>
-        ExecuteNonQueryAsync(
+        ExecutePreparedCommandAsync(
             """
             INSERT INTO agents(agent_id, session_id, name, state, last_seen_utc, model)
             VALUES($id, $sessionId, $name, $state, $lastSeen, $model)
@@ -184,13 +231,13 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 cmd.Parameters.AddWithValue("$sessionId", agent.SessionId);
                 cmd.Parameters.AddWithValue("$name", agent.Name);
                 cmd.Parameters.AddWithValue("$state", agent.State.ToString());
-                cmd.Parameters.AddWithValue("$lastSeen", agent.LastSeenUtc.UtcDateTime);
-                cmd.Parameters.AddWithValue("$model", (object?)agent.Model ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("$lastSeen", SerializeUtc(agent.LastSeenUtc));
+                cmd.Parameters.AddWithValue("$model", DbValue(agent.Model));
             },
             cancellationToken);
 
     public Task AddAgentRelationshipAsync(AgentRelationship relationship, CancellationToken cancellationToken) =>
-        ExecuteNonQueryAsync(
+        ExecutePreparedCommandAsync(
             """
             INSERT OR REPLACE INTO agent_relationships(parent_agent_id, child_agent_id, linked_at_utc)
             VALUES($parent, $child, $linked);
@@ -199,12 +246,12 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
             {
                 cmd.Parameters.AddWithValue("$parent", relationship.ParentAgentId);
                 cmd.Parameters.AddWithValue("$child", relationship.ChildAgentId);
-                cmd.Parameters.AddWithValue("$linked", relationship.LinkedAtUtc.UtcDateTime);
+                cmd.Parameters.AddWithValue("$linked", SerializeUtc(relationship.LinkedAtUtc));
             },
             cancellationToken);
 
     public Task AddUsageEventAsync(UsageEvent usageEvent, CancellationToken cancellationToken) =>
-        ExecuteNonQueryAsync(
+        ExecutePreparedCommandAsync(
             """
             INSERT OR REPLACE INTO usage_events(event_id, session_id, timestamp_utc, event_type, summary, token_delta)
             VALUES($id, $session, $time, $type, $summary, $delta);
@@ -213,15 +260,15 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
             {
                 cmd.Parameters.AddWithValue("$id", usageEvent.EventId);
                 cmd.Parameters.AddWithValue("$session", usageEvent.SessionId);
-                cmd.Parameters.AddWithValue("$time", usageEvent.TimestampUtc.UtcDateTime);
+                cmd.Parameters.AddWithValue("$time", SerializeUtc(usageEvent.TimestampUtc));
                 cmd.Parameters.AddWithValue("$type", usageEvent.EventType);
                 cmd.Parameters.AddWithValue("$summary", usageEvent.Summary);
-                cmd.Parameters.AddWithValue("$delta", usageEvent.TokenDelta ?? (object)DBNull.Value);
+                cmd.Parameters.AddWithValue("$delta", DbValue(usageEvent.TokenDelta));
             },
             cancellationToken);
 
     public Task AddResetEventAsync(ResetEvent resetEvent, CancellationToken cancellationToken) =>
-        ExecuteNonQueryAsync(
+        ExecutePreparedCommandAsync(
             """
             INSERT OR REPLACE INTO reset_events(event_id, kind, detected_at_utc, effective_at_utc, source)
             VALUES($id, $kind, $detected, $effective, $source);
@@ -230,14 +277,14 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
             {
                 cmd.Parameters.AddWithValue("$id", resetEvent.EventId);
                 cmd.Parameters.AddWithValue("$kind", resetEvent.Kind.ToString());
-                cmd.Parameters.AddWithValue("$detected", resetEvent.DetectedAtUtc.UtcDateTime);
-                cmd.Parameters.AddWithValue("$effective", resetEvent.EffectiveAtUtc.UtcDateTime);
+                cmd.Parameters.AddWithValue("$detected", SerializeUtc(resetEvent.DetectedAtUtc));
+                cmd.Parameters.AddWithValue("$effective", SerializeUtc(resetEvent.EffectiveAtUtc));
                 cmd.Parameters.AddWithValue("$source", resetEvent.Source);
             },
             cancellationToken);
 
     public Task AddAnnouncementAsync(Announcement announcement, CancellationToken cancellationToken) =>
-        ExecuteNonQueryAsync(
+        ExecutePreparedCommandAsync(
             """
             INSERT OR REPLACE INTO announcements(announcement_id, published_at_utc, source, title, body, link)
             VALUES($id, $published, $source, $title, $body, $link);
@@ -245,28 +292,36 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
             cmd =>
             {
                 cmd.Parameters.AddWithValue("$id", announcement.AnnouncementId);
-                cmd.Parameters.AddWithValue("$published", announcement.PublishedAtUtc.UtcDateTime);
+                cmd.Parameters.AddWithValue("$published", SerializeUtc(announcement.PublishedAtUtc));
                 cmd.Parameters.AddWithValue("$source", announcement.Source);
                 cmd.Parameters.AddWithValue("$title", announcement.Title);
                 cmd.Parameters.AddWithValue("$body", announcement.Body);
-                cmd.Parameters.AddWithValue("$link", announcement.Link?.ToString() ?? (object)DBNull.Value);
+                cmd.Parameters.AddWithValue("$link", DbValue(announcement.Link?.ToString()));
             },
             cancellationToken);
 
-    public async Task<IReadOnlyList<QuotaSnapshot>> GetRecentQuotaSnapshotsAsync(int take, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<QuotaSnapshot>> GetRecentQuotaSnapshotsAsync(
+        QuotaWindowKind kind,
+        string provider,
+        string profile,
+        int take,
+        CancellationToken cancellationToken)
     {
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
         var command = connection.CreateCommand();
-        command.CommandText =
-            """
-            SELECT kind, captured_at_utc, used_tokens, limit_tokens, resets_at_utc
+        command.CommandText = """
+            SELECT kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, provider, profile, source
             FROM quota_snapshots
+            WHERE kind = $kind AND provider = $provider AND profile = $profile
             ORDER BY captured_at_utc DESC
             LIMIT $take;
             """;
-        command.Parameters.AddWithValue("$take", take);
+        command.Parameters.AddWithValue("$kind", kind.ToString());
+        command.Parameters.AddWithValue("$provider", provider);
+        command.Parameters.AddWithValue("$profile", profile);
+        command.Parameters.AddWithValue("$take", Math.Max(0, take));
 
         var results = new List<QuotaSnapshot>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -274,10 +329,13 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
         {
             results.Add(new QuotaSnapshot(
                 Enum.Parse<QuotaWindowKind>(reader.GetString(0)),
-                DateTimeOffset.Parse(reader.GetString(1)),
-                reader.GetDouble(2),
-                reader.GetDouble(3),
-                DateTimeOffset.Parse(reader.GetString(4))));
+                ParseUtc(reader.GetString(1)),
+                reader.IsDBNull(2) ? null : reader.GetDouble(2),
+                reader.IsDBNull(3) ? null : reader.GetInt32(3),
+                reader.IsDBNull(4) ? null : ParseUtc(reader.GetString(4)),
+                reader.GetString(5),
+                reader.GetString(6),
+                reader.GetString(7)));
         }
 
         return results;
@@ -290,7 +348,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
 
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT file_path, last_byte_offset, updated_at_utc, last_session_id
+            SELECT file_path, last_byte_offset, updated_at_utc, last_session_id, parser_version
             FROM ingestion_checkpoints
             WHERE file_path = $path;
             """;
@@ -305,37 +363,48 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
         return new FileIngestionCheckpoint(
             reader.GetString(0),
             reader.GetInt64(1),
-            DateTimeOffset.Parse(reader.GetString(2)),
-            reader.IsDBNull(3) ? null : reader.GetString(3));
+            ParseUtc(reader.GetString(2)),
+            reader.IsDBNull(3) ? null : reader.GetString(3),
+            reader.GetString(4));
     }
 
     public Task SaveCheckpointAsync(FileIngestionCheckpoint checkpoint, CancellationToken cancellationToken) =>
-        ExecuteNonQueryAsync(
+        ExecutePreparedCommandAsync(
             """
-            INSERT INTO ingestion_checkpoints(file_path, last_byte_offset, updated_at_utc, last_session_id)
-            VALUES($path, $offset, $updated, $session)
+            INSERT INTO ingestion_checkpoints(file_path, last_byte_offset, updated_at_utc, last_session_id, parser_version)
+            VALUES($path, $offset, $updated, $session, $parser)
             ON CONFLICT(file_path) DO UPDATE SET
               last_byte_offset = excluded.last_byte_offset,
               updated_at_utc = excluded.updated_at_utc,
-              last_session_id = excluded.last_session_id;
+              last_session_id = excluded.last_session_id,
+              parser_version = excluded.parser_version;
             """,
             cmd =>
             {
                 cmd.Parameters.AddWithValue("$path", checkpoint.FilePath);
                 cmd.Parameters.AddWithValue("$offset", checkpoint.LastByteOffset);
-                cmd.Parameters.AddWithValue("$updated", checkpoint.UpdatedAtUtc.UtcDateTime);
-                cmd.Parameters.AddWithValue("$session", checkpoint.LastSessionId ?? (object)DBNull.Value);
+                cmd.Parameters.AddWithValue("$updated", SerializeUtc(checkpoint.UpdatedAtUtc));
+                cmd.Parameters.AddWithValue("$session", DbValue(checkpoint.LastSessionId));
+                cmd.Parameters.AddWithValue("$parser", checkpoint.ParserVersion);
             },
             cancellationToken);
 
-    private async Task ExecuteNonQueryAsync(string sql, Action<SqliteCommand> configure, CancellationToken cancellationToken)
+    private async Task ExecutePreparedCommandAsync(string sql, Action<SqliteCommand> configure, CancellationToken cancellationToken)
     {
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
         var command = connection.CreateCommand();
-        command.CommandText = sql;
+        command.CommandText = sql; // nosemgrep: csharp.lang.security.sqli.csharp-sqli -- private callers pass compile-time SQL; all external values are parameters.
         configure(command);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
+
+    private static object DbValue(object? value) => value ?? DBNull.Value;
+
+    private static string SerializeUtc(DateTimeOffset value) =>
+        value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+
+    private static DateTimeOffset ParseUtc(string value) =>
+        DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
 }
