@@ -16,6 +16,13 @@ public sealed class CodexSessionIngestionService(
             ? existing.LastByteOffset
             : 0;
 
+        if (File.Exists(filePath) && new FileInfo(filePath).Length < fromOffset)
+        {
+            // The source was truncated or replaced. Reset before opening so an empty/truncated file
+            // cannot leave an unreachable stale checkpoint indefinitely.
+            fromOffset = 0;
+        }
+
         var recordsScanned = 0;
         var lastCompleteRecordOffset = fromOffset;
 
