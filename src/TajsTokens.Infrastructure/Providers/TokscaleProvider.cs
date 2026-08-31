@@ -141,10 +141,14 @@ public sealed class TokscaleProvider : ITokscaleProvider
     private static string ReadBucketLabel(JsonElement entry)
     {
         var date = ReadString(entry, "date");
-        var hour = ReadString(entry, "hour");
-        if (hour is null && entry.TryGetProperty("hour", out var hourElement) && hourElement.ValueKind == JsonValueKind.Number)
+        string? hour;
+        if (entry.TryGetProperty("hour", out var hourElement) && hourElement.ValueKind == JsonValueKind.Number && hourElement.TryGetInt32(out var numericHour))
         {
-            hour = $"{hourElement.GetInt32():00}:00";
+            hour = $"{numericHour:00}:00";
+        }
+        else
+        {
+            hour = ReadString(entry, "hour");
         }
 
         return (date, hour) switch
