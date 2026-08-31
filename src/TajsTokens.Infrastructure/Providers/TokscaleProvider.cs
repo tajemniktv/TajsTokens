@@ -101,7 +101,7 @@ public sealed class TokscaleProvider : ITokscaleProvider
 
         if (root.ValueKind != JsonValueKind.Object)
         {
-            return [];
+            throw new JsonException("Tokscale payload root was neither an array nor a supported object.");
         }
 
         foreach (var propertyName in new[] { "entries", "hours", "data" })
@@ -112,7 +112,7 @@ public sealed class TokscaleProvider : ITokscaleProvider
             }
         }
 
-        return [];
+        throw new JsonException("Tokscale payload did not contain a supported entry array.");
     }
 
     private static TokenBreakdown ReadBreakdown(JsonElement entry)
