@@ -1,3 +1,4 @@
+using System.Text.Json;
 using TajsTokens.Core.Enums;
 using TajsTokens.Infrastructure.Providers;
 
@@ -60,6 +61,17 @@ public sealed class ProviderParsingTests
         Assert.Equal(50, usage.Breakdown.NonReasoningOutput);
         Assert.Equal(20, usage.Breakdown.ReasoningOutput);
         Assert.Equal(970, usage.Breakdown.Total);
+    }
+
+    [Fact]
+    public void TokscaleModels_RejectsUnsupportedObjectShape()
+    {
+        const string json = """{ "unexpected": [] }""";
+
+        var exception = Assert.Throws<JsonException>(() =>
+            TokscaleProvider.ParseModelUsageJson(json, DateTimeOffset.UnixEpoch));
+
+        Assert.Contains("supported entry array", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
