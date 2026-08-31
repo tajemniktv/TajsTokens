@@ -47,18 +47,9 @@ public sealed class RuntimeSettingsStore
         File.Move(temp, _path, overwrite: true);
     }
 
-    internal static RuntimeSettings Normalize(RuntimeSettings settings)
+    internal static RuntimeSettings Normalize(RuntimeSettings settings) => settings with
     {
-        var thresholds = (settings.LowQuotaThresholds ?? [])
-            .Where(value => value is > 0 and < 100)
-            .Distinct()
-            .OrderByDescending(value => value)
-            .ToArray();
-
-        return settings with
-        {
-            PollIntervalSeconds = Math.Clamp(settings.PollIntervalSeconds, 15, 3600),
-            LowQuotaThresholds = thresholds.Length == 0 ? [30, 20, 10, 5] : thresholds
-        };
-    }
+        PollIntervalSeconds = Math.Clamp(settings.PollIntervalSeconds, 15, 3600),
+        LowQuotaThresholds = RuntimeSettings.NormalizeLowQuotaThresholds(settings.LowQuotaThresholds)
+    };
 }
