@@ -41,6 +41,7 @@ public sealed partial class OverviewViewModel : ObservableObject
     public ObservableCollection<ForecastPoint> HistoryPoints { get; } = [];
     public ObservableCollection<DataSourceStatusCard> DataSources { get; } = [];
     public ObservableCollection<EventItem> RecentEvents { get; } = [];
+    public IAsyncRelayCommand RefreshCommand { get; }
 
     public OverviewViewModel(
         ITokscaleProvider tokscaleProvider,
@@ -50,10 +51,8 @@ public sealed partial class OverviewViewModel : ObservableObject
         _tokscaleProvider = tokscaleProvider;
         _quotaProvider = quotaProvider;
         _repository = repository;
+        RefreshCommand = new AsyncRelayCommand(RefreshAsync);
     }
-
-    [RelayCommand]
-    private Task RefreshCommandAsync(CancellationToken cancellationToken) => RefreshAsync(cancellationToken);
 
     public async Task RefreshAsync(CancellationToken cancellationToken)
     {
