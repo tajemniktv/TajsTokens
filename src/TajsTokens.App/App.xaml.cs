@@ -62,12 +62,16 @@ public partial class App : Application
         _dispatcher?.TryEnqueue(() =>
         {
             _trayService.UpdateStatus(BuildTrayStatus(snapshot));
+
+            // Advance alert state even while notifications are muted. Otherwise re-enabling them can
+            // replay stale threshold/provider transitions that happened while the user opted out.
+            var alerts = Services.AlertEngine.Evaluate(snapshot);
             if (!Services.Settings.NotificationsEnabled)
             {
                 return;
             }
 
-            foreach (var alert in Services.AlertEngine.Evaluate(snapshot))
+            foreach (var alert in alerts)
             {
                 _trayService.ShowNotification(alert.Title, alert.Message);
             }
