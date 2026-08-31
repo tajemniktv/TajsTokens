@@ -2,12 +2,24 @@ name: release-smoke
 
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/TajsTokens.App/**'
+      - 'src/TajsTokens.Core/**'
+      - 'src/TajsTokens.Infrastructure/**'
+      - 'tests/**'
+      - 'TajsTokens.sln'
+      - '.github/workflows/release.yml'
   push:
     tags:
       - 'v*'
 
 permissions:
   contents: read
+
+concurrency:
+  group: release-smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   publish-windows-x64:
