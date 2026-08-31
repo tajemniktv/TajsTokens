@@ -32,6 +32,42 @@ public sealed class QuotaAlertEngineTests
     }
 
     [Fact]
+    public void LowQuota_WithoutResetTimestamp_DoesNotRepeatAtHourBoundary()
+    {
+        var engine = new QuotaAlertEngine([10]);
+
+        Assert.Single(engine.Evaluate(Snapshot(9, null, DateTimeOffset.UnixEpoch.AddMinutes(1))));
+        Assert.Empty(engine.Evaluate(Snapshot(8, null, DateTimeOffset.UnixEpoch.AddHours(2))));
+    }
+
+    [Fact]
+    public void LowQuota_WithoutResetTimestamp_RearmsAfterObservedReplenishment()
+    {
+        var engine = new QuotaAlertEngine([10]);
+
+        Assert.Single(engine.Evaluate(Snapshot(9, null, DateTimeOffset.UnixEpoch.AddMinutes(1))));
+        var replenished = engine.Evaluate(Snapshot(90, null, DateTimeOffset.UnixEpoch.AddHours(1)));
+        Assert.Contains(replenished, alert => alert.Title.Contains("refreshed", StringComparison.OrdinalIgnoreCase));
+
+        var nextWindowLow = engine.Evaluate(Snapshot(9, null, DateTimeOffset.UnixEpoch.AddHours(2)));
+        Assert.Contains(nextWindowLow, alert => alert.Title.Contains("low", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void UpdateThresholds_AppliesToSubsequentEvaluations()
+    {
+        var engine = new QuotaAlertEngine([30]);
+        var reset = DateTimeOffset.UnixEpoch.AddHours(5);
+
+        Assert.Single(engine.Evaluate(Snapshot(20, reset)));
+        engine.UpdateThresholds([10]);
+
+        var alerts = engine.Evaluate(Snapshot(9, reset, DateTimeOffset.UnixEpoch.AddMinutes(2)));
+        Assert.Single(alerts);
+        Assert.Contains(":10", alerts[0].Key, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void StaleQuota_DoesNotGenerateLowQuotaAlert()
     {
         var engine = new QuotaAlertEngine([30, 20, 10, 5]);
@@ -55,9 +91,12 @@ public sealed class QuotaAlertEngineTests
         Assert.Empty(engine.Evaluate(Snapshot(remaining: 94, secondReset)));
     }
 
-    private static TelemetrySnapshot Snapshot(double remaining, DateTimeOffset reset)
+    private static TelemetrySnapshot Snapshot(
+        double remaining,
+        DateTimeOffset? reset,
+        DateTimeOffset? capturedAt = null)
     {
-        var captured = DateTimeOffset.UnixEpoch.AddMinutes(1);
+        var captured = capturedAt ?? DateTimeOffset.UnixEpoch.AddMinutes(1);
         var quota = new QuotaSnapshot(
             QuotaWindowKind.FiveHour,
             captured,
