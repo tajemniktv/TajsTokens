@@ -145,6 +145,19 @@ public sealed class ProviderParsingTests
     }
 
     [Fact]
+    public void ExternalProcess_ConcreteExecutablePathBypassesShellExpansion()
+    {
+        const string pathWithPercentSequence = @"C:\Tools\%TEMP%\codex.exe";
+
+        var startInfo = ExternalProcess.CreateStartInfo(
+            pathWithPercentSequence,
+            ["app-server", "--listen", "stdio://"]);
+
+        Assert.Equal(pathWithPercentSequence, startInfo.FileName);
+        Assert.Equal(["app-server", "--listen", "stdio://"], startInfo.ArgumentList.ToArray());
+    }
+
+    [Fact]
     public void TokscaleCommandDiscovery_FallsBackOnlyForMissingCommand()
     {
         var missing = new ExternalCommandResult(
@@ -152,12 +165,17 @@ public sealed class ProviderParsingTests
             string.Empty,
             "'tokscale' is not recognized as an internal or external command, operable program or batch file.");
         var realCliError = new ExternalCommandResult(
+            127,
+            string.Empty,
+            "Error: a Tokscale dependency exited with status 127");
+        var missingNpx = new ExternalCommandResult(
             1,
             string.Empty,
-            "Error: Invalid group-by value: client,model");
+            "'npx' is not recognized as an internal or external command, operable program or batch file.");
 
         Assert.True(TokscaleProvider.LooksLikeCommandNotFound(missing, "tokscale"));
         Assert.False(TokscaleProvider.LooksLikeCommandNotFound(realCliError, "tokscale"));
+        Assert.True(TokscaleProvider.LooksLikeCommandNotFound(missingNpx, "npx"));
     }
 
     [Fact]
