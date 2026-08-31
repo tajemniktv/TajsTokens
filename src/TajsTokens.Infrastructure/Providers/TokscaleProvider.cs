@@ -95,15 +95,21 @@ public sealed class TokscaleProvider : ITokscaleProvider
 
     internal static bool LooksLikeCommandNotFound(ExternalCommandResult result, string command)
     {
-        if (result.ExitCode == 127 || result.ExitCode == 9009)
+        if (result.ExitCode == 0)
         {
-            return true;
+            return false;
         }
 
+        // Exit codes such as 127/9009 are not enough by themselves: a real Tokscale invocation or
+        // one of its dependencies can legitimately fail with the same code. Require diagnostics that
+        // identify the command we attempted to launch before treating the result as discovery failure.
+        var commandName = Path.GetFileName(command);
         var detail = $"{result.StandardError}\n{result.StandardOutput}";
-        return detail.Contains($"'{command}' is not recognized", StringComparison.OrdinalIgnoreCase) ||
-               detail.Contains($"{command}: command not found", StringComparison.OrdinalIgnoreCase) ||
-               detail.Contains($"{command}: not found", StringComparison.OrdinalIgnoreCase);
+        return detail.Contains($"'{commandName}' is not recognized", StringComparison.OrdinalIgnoreCase) ||
+               detail.Contains($"\"{commandName}\" is not recognized", StringComparison.OrdinalIgnoreCase) ||
+               detail.Contains($"{commandName}: command not found", StringComparison.OrdinalIgnoreCase) ||
+               detail.Contains($"{commandName}: not found", StringComparison.OrdinalIgnoreCase) ||
+               detail.Contains($"not found: {commandName}", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<ExternalCommandResult> RunTokscaleAsync(
@@ -123,7 +129,7 @@ public sealed class TokscaleProvider : ITokscaleProvider
                 return direct;
             }
         }
-        catch (Win32Exception)
+        catch (Win32Exception exception) when (exception.NativeErrorCode is 2 or 3)
         {
             // No native/global Tokscale executable. The documented zero-install path is npx.
         }
@@ -133,19 +139,29 @@ public sealed class TokscaleProvider : ITokscaleProvider
 
         try
         {
-            return await ExternalProcess.RunToCompletionAsync(
+            var fallback = await ExternalProcess.RunToCompletionAsync(
                 "npx",
                 npxArguments,
                 NpxCommandTimeout,
                 cancellationToken);
+
+            if (LooksLikeCommandNotFound(fallback, "npx"))
+            {
+                throw CreateNpxUnavailableException();
+            }
+
+            return fallback;
         }
-        catch (Win32Exception exception)
+        catch (Win32Exception exception) when (exception.NativeErrorCode is 2 or 3)
         {
-            throw new InvalidOperationException(
-                "Tokscale is not installed globally and the npx fallback is unavailable. Install Tokscale or Node.js/npm, or make either command available on PATH.",
-                exception);
+            throw CreateNpxUnavailableException(exception);
         }
     }
+
+    private static InvalidOperationException CreateNpxUnavailableException(Exception? innerException = null) =>
+        new(
+            "Tokscale is not installed globally and the npx fallback is unavailable. Install Tokscale or Node.js/npm, or make either command available on PATH.",
+            innerException);
 
     private static IReadOnlyList<JsonElement> FindEntries(JsonElement root)
     {
