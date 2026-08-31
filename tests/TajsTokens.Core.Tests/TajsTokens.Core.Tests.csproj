@@ -20,6 +20,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\TajsTokens.Core\TajsTokens.Core.csproj" />
+    <ProjectReference Include="..\..\src\TajsTokens.Infrastructure\TajsTokens.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>
