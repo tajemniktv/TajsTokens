@@ -98,14 +98,14 @@ public sealed class QuotaAlertEngine
                 continue;
             }
 
-            var key = $"provider-health:{source.Provider}:{source.State}";
-            if (_emittedKeys.Add(key))
-            {
-                alerts.Add(new AlertNotification(
-                    key,
-                    $"TajsTokens: {source.Provider} unavailable",
-                    source.Detail));
-            }
+            // Consecutive identical failures are suppressed by the previous-state check. Do not put
+            // provider failures in the lifetime quota-key set: after a provider recovers, a later
+            // outage is a new actionable transition and should notify again.
+            var key = $"provider-health:{source.Provider}:{source.State}:{current.CapturedAtUtc.ToUnixTimeMilliseconds()}";
+            alerts.Add(new AlertNotification(
+                key,
+                $"TajsTokens: {source.Provider} unavailable",
+                source.Detail));
         }
     }
 
