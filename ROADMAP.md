@@ -59,7 +59,7 @@ Phase 2 intentionally does **not** require the dashboard to stay open for teleme
 - TajsTokens-native Codex token/session accounting in shadow mode
 - Native vs Tokscale reconciliation harness
 - Proven parity across counter resets, cache/reasoning semantics, inherited histories and time buckets
-- Native accounting becomes the Codex default; Tokscale remains fallback/import/reference
+- Native accounting becomes TajsTokens' default Codex accounting backend; Tokscale remains fallback/import/reference
 
 ## Phase 7 - Ecosystem / expansion
 
