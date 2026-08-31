@@ -8,8 +8,9 @@ The current Phase 2 work turns the real-data dashboard into a background Windows
 - token totals, cache/output/reasoning breakdowns, and hourly history from Tokscale;
 - one process-lifetime telemetry coordinator shared by dashboard, tray, and alert evaluation;
 - last-known-good token/quota snapshots retained and visibly marked stale after transient provider failures;
-- notification-area quota status with open, refresh, and exit controls;
+- notification-area quota status with open, refresh, notification, startup, and exit controls;
 - close-to-tray behavior so collection continues while the dashboard is hidden;
+- optional per-user Start with Windows registration for published/apphost builds;
 - deduplicated low-quota, reset, and provider-health notifications;
 - quota snapshots persisted to local SQLite so forecasting can learn from real history;
 - resilient local runtime settings under `%LOCALAPPDATA%\TajsTokens\settings.json`.
@@ -61,7 +62,9 @@ dotnet run --project src/TajsTokens.App/TajsTokens.App.csproj
 
 Phase 2 starts one background telemetry loop for the whole process. Closing the dashboard hides it by default rather than terminating TajsTokens; use the tray **Exit** action for a full shutdown. The tray can reopen the dashboard or trigger an immediate refresh.
 
-The default background poll interval is 60 seconds. Runtime settings are normalized and stored in `%LOCALAPPDATA%\TajsTokens\settings.json`; corrupt/missing settings fall back to safe defaults. A richer Settings UI and launch-at-login control are still follow-up work.
+The default background poll interval is 60 seconds. Runtime settings are normalized and stored in `%LOCALAPPDATA%\TajsTokens\settings.json`; corrupt/missing settings fall back to safe defaults. The tray exposes notification and Start with Windows toggles; a richer Settings page and editable polling/threshold controls remain follow-up work.
+
+The Start with Windows toggle uses the current-user `Run` registry entry and launches a published TajsTokens executable with `--background`. It is intentionally rejected for `dotnet run`/`dotnet.exe` development sessions because that host path would not identify the project to launch.
 
 ## Real-data integrations
 
@@ -99,13 +102,15 @@ Current quick actions:
 
 - open the dashboard;
 - refresh telemetry;
+- enable/disable notifications;
+- enable/disable Start with Windows for published builds;
 - exit TajsTokens completely.
 
 Current background alerts cover low quota thresholds (30/20/10/5% by default), detected quota-window refreshes, and provider-health transitions. Alerts are deduplicated in-process by quota/reset identity so the same threshold is not emitted every polling interval. Notification content never includes prompt/reasoning text.
 
 ## Portable release artifact
 
-The Phase 2 release workflow can publish a self-contained Windows x64 folder and upload it as a ZIP artifact after the same restore/build/test checks used by CI. This is the first distribution smoke test, not the final installer/update story.
+The Phase 2 release workflow publishes a self-contained Windows x64 folder, including the Windows App SDK runtime, and uploads it as a ZIP artifact plus SHA-256 sidecar after the same restore/build/test checks used by CI. This is the first distribution smoke test, not the final installer/update story.
 
 Code signing, a per-user installer, WinGet, update verification, and an in-app updater remain tracked in #36.
 
