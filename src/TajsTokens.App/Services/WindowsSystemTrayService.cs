@@ -109,7 +109,7 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
         _currentTip = Truncate(status.Tooltip + constrained, 127);
 
         var replacement = BuildStatusIcon(status.ConstrainedRemainingPercent, status.IsFresh);
-        var data = CreateNotifyIconData(NifTip | NifIcon);
+        var data = CreateNotifyIconData(NifTip | NifIcon | NifShowTip);
         data.Tip = _currentTip;
         data.Icon = replacement.Handle;
 
@@ -203,7 +203,7 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
             return false;
         }
 
-        var data = CreateNotifyIconData(NifMessage | NifIcon | NifTip);
+        var data = CreateNotifyIconData(NifMessage | NifIcon | NifTip | NifShowTip);
         data.CallbackMessage = TrayCallbackMessage;
         data.Icon = _ownedStatusIcon?.Handle ?? _sharedFallbackIconHandle;
         data.Tip = _currentTip;
@@ -408,6 +408,7 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
     private const uint NifIcon = 0x00000002;
     private const uint NifTip = 0x00000004;
     private const uint NifInfo = 0x00000010;
+    private const uint NifShowTip = 0x00000080;
     private const uint NiifInfo = 0x00000001;
     private const uint MfString = 0x00000000;
     private const uint MfChecked = 0x00000008;
