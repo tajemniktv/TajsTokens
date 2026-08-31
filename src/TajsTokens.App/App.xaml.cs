@@ -1,12 +1,19 @@
+using Microsoft.UI.Dispatching;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using TajsTokens.App.Services;
+using TajsTokens.Core.Enums;
+using TajsTokens.Core.Models;
 
 namespace TajsTokens.App;
 
 public partial class App : Application
 {
+    private readonly CancellationTokenSource _lifetimeCancellation = new();
+    private readonly WindowsSystemTrayService _trayService = new();
     private Window? _window;
-    private readonly NoOpSystemTrayService _trayService = new();
+    private DispatcherQueue? _dispatcher;
+    private bool _exitRequested;
 
     public App()
     {
@@ -18,8 +25,120 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        _dispatcher = DispatcherQueue.GetForCurrentThread();
+
+        _trayService.OpenDashboardRequested += (_, _) => ShowDashboard();
+        _trayService.RefreshRequested += (_, _) => _ = RefreshFromTrayAsync();
+        _trayService.ExitRequested += (_, _) => RequestExit();
         _trayService.Initialize();
+
+        Services.Telemetry.SnapshotUpdated += OnSnapshotUpdated;
+
         _window = new MainWindow();
+        _window.AppWindow.Closing += OnWindowClosing;
+        _window.Activate();
+
+        _ = Services.Telemetry.RunPeriodicAsync(
+            TimeSpan.FromSeconds(Services.Settings.PollIntervalSeconds),
+            _lifetimeCancellation.Token);
+    }
+
+    private void OnSnapshotUpdated(TelemetrySnapshot snapshot)
+    {
+        _dispatcher?.TryEnqueue(() =>
+        {
+            _trayService.UpdateStatus(BuildTrayStatus(snapshot));
+            if (!Services.Settings.NotificationsEnabled)
+            {
+                return;
+            }
+
+            foreach (var alert in Services.AlertEngine.Evaluate(snapshot))
+            {
+                _trayService.ShowNotification(alert.Title, alert.Message);
+            }
+        });
+    }
+
+    private async Task RefreshFromTrayAsync()
+    {
+        try
+        {
+            await Services.Telemetry.RefreshAsync(RefreshTrigger.Manual, _lifetimeCancellation.Token);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            // Normal application shutdown.
+        }
+    }
+
+    private void OnWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
+    {
+        if (_exitRequested || !Services.Settings.RunInBackground)
+        {
+            return;
+        }
+
+        args.Cancel = true;
+        sender.Hide();
+    }
+
+    private void ShowDashboard()
+    {
+        if (_window is null)
+        {
+            _window = new MainWindow();
+            _window.AppWindow.Closing += OnWindowClosing;
+        }
+
+        _window.AppWindow.Show();
         _window.Activate();
     }
+
+    private void RequestExit()
+    {
+        if (_exitRequested)
+        {
+            return;
+        }
+
+        _exitRequested = true;
+        _lifetimeCancellation.Cancel();
+        Services.Telemetry.SnapshotUpdated -= OnSnapshotUpdated;
+        _trayService.Dispose();
+        _window?.Close();
+        Exit();
+    }
+
+    private static SystemTrayStatus BuildTrayStatus(TelemetrySnapshot snapshot)
+    {
+        var fiveHour = LatestQuota(snapshot, QuotaWindowKind.FiveHour);
+        var weekly = LatestQuota(snapshot, QuotaWindowKind.Weekly);
+        var remainingValues = new[] { fiveHour?.RemainingPercent, weekly?.RemainingPercent }
+            .Where(value => value is not null)
+            .Select(value => value!.Value)
+            .ToArray();
+
+        int? constrained = remainingValues.Length == 0
+            ? null
+            : (int)Math.Round(remainingValues.Min(), MidpointRounding.AwayFromZero);
+
+        var health = snapshot.QuotaDataFresh
+            ? "live"
+            : snapshot.QuotaSnapshots.Count > 0
+                ? "stale"
+                : "quota unavailable";
+
+        var tooltip = $"TajsTokens · 5h {FormatQuota(fiveHour)} · week {FormatQuota(weekly)} · {health}";
+        return new SystemTrayStatus(tooltip, constrained, snapshot.QuotaDataFresh, health);
+    }
+
+    private static QuotaSnapshot? LatestQuota(TelemetrySnapshot snapshot, QuotaWindowKind kind) =>
+        snapshot.QuotaSnapshots
+            .Where(item => item.Kind == kind)
+            .OrderByDescending(item => item.CapturedAtUtc)
+            .FirstOrDefault();
+
+    private static string FormatQuota(QuotaSnapshot? snapshot) =>
+        snapshot?.RemainingPercent is double remaining ? $"{remaining:0}%" : "?";
 }
