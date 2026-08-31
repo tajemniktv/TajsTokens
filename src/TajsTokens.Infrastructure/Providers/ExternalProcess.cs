@@ -10,10 +10,11 @@ internal static class ExternalProcess
     public static ProcessStartInfo CreateStartInfo(string command, IReadOnlyList<string> arguments)
     {
         ProcessStartInfo startInfo;
-        if (OperatingSystem.IsWindows())
+        if (OperatingSystem.IsWindows() && !Path.IsPathFullyQualified(command))
         {
             // Using cmd.exe lets PATH/PATHEXT resolve both native executables and npm/bun .cmd shims.
-            // All callers in this assembly pass fixed executable names and fixed arguments.
+            // Keep this only for command names. Concrete executable paths are launched directly below
+            // so cmd.exe cannot expand shell syntax such as %VAR% inside an otherwise valid path.
             startInfo = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe");
             startInfo.ArgumentList.Add("/d");
             startInfo.ArgumentList.Add("/s");
