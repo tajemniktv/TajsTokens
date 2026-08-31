@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Globalization;
 using System.Text.Json;
 using TajsTokens.Core.Interfaces;
@@ -13,14 +14,13 @@ namespace TajsTokens.Infrastructure.Providers;
 public sealed class TokscaleProvider : ITokscaleProvider
 {
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(45);
+    private static readonly TimeSpan NpxCommandTimeout = TimeSpan.FromSeconds(90);
     private static readonly string[] TokenPropertyNames = ["input", "cacheRead", "cacheWrite", "output", "reasoning", "total"];
 
     public async Task<IReadOnlyList<TokenUsage>> GetUsageObservationsAsync(CancellationToken cancellationToken)
     {
-        var result = await ExternalProcess.RunToCompletionAsync(
-            "tokscale",
+        var result = await RunTokscaleAsync(
             ["models", "--json", "--group-by", "client,model", "--client", "codex"],
-            CommandTimeout,
             cancellationToken);
 
         EnsureSuccess(result, "Tokscale model usage");
@@ -29,10 +29,8 @@ public sealed class TokscaleProvider : ITokscaleProvider
 
     public async Task<IReadOnlyList<TokenTimeBucket>> GetHourlyUsageAsync(CancellationToken cancellationToken)
     {
-        var result = await ExternalProcess.RunToCompletionAsync(
-            "tokscale",
+        var result = await RunTokscaleAsync(
             ["hourly", "--json", "--client", "codex"],
-            CommandTimeout,
             cancellationToken);
 
         EnsureSuccess(result, "Tokscale hourly usage");
@@ -93,6 +91,60 @@ public sealed class TokscaleProvider : ITokscaleProvider
         }
 
         return results;
+    }
+
+    internal static bool LooksLikeCommandNotFound(ExternalCommandResult result, string command)
+    {
+        if (result.ExitCode == 127 || result.ExitCode == 9009)
+        {
+            return true;
+        }
+
+        var detail = $"{result.StandardError}\n{result.StandardOutput}";
+        return detail.Contains($"'{command}' is not recognized", StringComparison.OrdinalIgnoreCase) ||
+               detail.Contains($"{command}: command not found", StringComparison.OrdinalIgnoreCase) ||
+               detail.Contains($"{command}: not found", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<ExternalCommandResult> RunTokscaleAsync(
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var direct = await ExternalProcess.RunToCompletionAsync(
+                "tokscale",
+                arguments,
+                CommandTimeout,
+                cancellationToken);
+
+            if (direct.ExitCode == 0 || !LooksLikeCommandNotFound(direct, "tokscale"))
+            {
+                return direct;
+            }
+        }
+        catch (Win32Exception)
+        {
+            // No native/global Tokscale executable. The documented zero-install path is npx.
+        }
+
+        var npxArguments = new List<string>(arguments.Count + 2) { "--yes", "tokscale@latest" };
+        npxArguments.AddRange(arguments);
+
+        try
+        {
+            return await ExternalProcess.RunToCompletionAsync(
+                "npx",
+                npxArguments,
+                NpxCommandTimeout,
+                cancellationToken);
+        }
+        catch (Win32Exception exception)
+        {
+            throw new InvalidOperationException(
+                "Tokscale is not installed globally and the npx fallback is unavailable. Install Tokscale or Node.js/npm, or make either command available on PATH.",
+                exception);
+        }
     }
 
     private static IReadOnlyList<JsonElement> FindEntries(JsonElement root)
