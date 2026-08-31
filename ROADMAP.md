@@ -1,28 +1,69 @@
 # Roadmap
 
-## Phase 1 (current foundation)
+Every phase should end as a coherent working product rather than an architectural halfway house.
 
-- Multi-project architecture and WinUI shell
-- Mock-data Overview dashboard
-- Core domain interfaces/models and first forecasting service
-- SQLite schema + repositories + ingestion checkpoints
+## Phase 0 - Bootstrap foundation ✅
 
-## Phase 2 (real data ingestion)
+- Native WinUI 3/.NET shell
+- Core / Infrastructure / App / Tests separation
+- SQLite migrations and normalized domain models
+- Windows-authoritative CI
 
-- Verified Tokscale JSON contract adapter implementation
-- Codex quota provider integration
-- Typed Codex JSONL parser and topology extraction
-- Background polling + non-blocking collection loop
+## Phase 1 - Real-data MVP ✅
 
-## Phase 3 (analytics and controls)
+- Verified Tokscale JSON adapter for token accounting/hourly history
+- Provider-authoritative Codex quota through local app-server
+- Persistent quota history and basic forecasting
+- Overview source/freshness/error states
+- Robust CLI discovery/diagnostics
 
-- Historical charts and per-model/repo/session drill-down
-- Burn-rate anomaly and reset detection hardening
-- Notifications and tray actions
-- Data retention/compaction controls
+## Phase 2 - Daily-driver Windows utility 🚧
 
-## Phase 4 (platform expansion)
+- One process-lifetime background telemetry coordinator
+- Preserve last-known-good data and mark stale provider state explicitly
+- Notification-area status with open/refresh/exit controls
+- Close-to-tray application lifecycle
+- Deduplicated low-quota/reset/provider-health alerts
+- Small persistent runtime-settings model
+- Self-contained Windows x64 portable release smoke artifact
 
-- Windows Widget support
-- Optional mobile companion
-- Additional external provider integrations
+Phase 2 intentionally does **not** require the dashboard to stay open for telemetry to remain useful.
+
+## Phase 3 - Codex observatory
+
+- Sanitized real-world rollout fixture corpus
+- Incremental direct Codex JSONL ingestion
+- Root/subagent topology and lifecycle
+- Session browser/detail timeline
+- Context-window growth and compaction telemetry
+- Rollout/storage-bloat diagnostics
+
+## Phase 4 - Intelligence and historical analytics
+
+- Burn-rate/ETA forecasting and sustainable-pace guidance
+- `What ate my quota?` attribution and concurrency analysis
+- Reset/re-anchoring intelligence
+- Historical hourly/daily/minutely analytics, heatmaps, repo/model/agent drill-down
+- Scenario planner based on observed account behavior
+
+## Phase 5 - Power-user platform
+
+- Announcements/provider status timeline
+- CLI + local API
+- Mini HUD/taskbar/widget surfaces
+- Multi-account/profile groundwork
+- Full release/update/signing/WinGet work
+
+## Phase 6 - Native accounting
+
+- TajsTokens-native Codex token/session accounting in shadow mode
+- Native vs Tokscale reconciliation harness
+- Proven parity across counter resets, cache/reasoning semantics, inherited histories and time buckets
+- Native accounting becomes the Codex default; Tokscale remains fallback/import/reference
+
+## Phase 7 - Ecosystem / expansion
+
+- Additional coding-agent providers where useful
+- Git/PR efficiency metrics
+- Deterministic model/reasoning benchmark lab
+- Secure remote sync, read-only web dashboard, notification relay and optional mobile companion
