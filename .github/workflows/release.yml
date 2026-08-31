@@ -50,8 +50,13 @@ jobs:
             --configuration Release `
             --runtime win-x64 `
             --self-contained true `
+            -p:WindowsAppSDKSelfContained=true `
             --no-restore `
             --output artifacts/TajsTokens-win-x64
+
+          if (-not (Test-Path artifacts/TajsTokens-win-x64/TajsTokens.App.exe)) {
+            throw "Published TajsTokens.App.exe was not produced."
+          }
 
           Compress-Archive -Path artifacts/TajsTokens-win-x64/* -DestinationPath artifacts/TajsTokens-win-x64.zip
           $hash = (Get-FileHash artifacts/TajsTokens-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
