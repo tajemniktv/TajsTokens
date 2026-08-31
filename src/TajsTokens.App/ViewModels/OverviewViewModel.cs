@@ -1,128 +1,394 @@
+using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using Microsoft.UI.Xaml.Controls;
 using TajsTokens.App.Models;
 using TajsTokens.Core.Enums;
+using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
 using TajsTokens.Core.Services;
+using TajsTokens.Infrastructure.Persistence;
 
 namespace TajsTokens.App.ViewModels;
 
 public sealed partial class OverviewViewModel : ObservableObject
 {
-    [ObservableProperty]
-    private QuotaCardViewModel fiveHourQuota;
+    private readonly ITokscaleProvider _tokscaleProvider;
+    private readonly ICodexQuotaProvider _quotaProvider;
+    private readonly SqliteTelemetryRepository _repository;
+    private readonly ForecastingService _forecastingService = new();
+    private readonly SemaphoreSlim _refreshGate = new(1, 1);
 
     [ObservableProperty]
-    private QuotaCardViewModel weeklyQuota;
+    private QuotaCardViewModel fiveHourQuota = UnavailableQuota("5-hour quota", "Waiting for first refresh.");
 
-    public IReadOnlyList<TokenSummaryCard> TokenSummaryCards { get; }
-    public IReadOnlyList<ForecastPoint> HistoryPoints { get; }
-    public IReadOnlyList<AgentNode> ActiveAgents { get; }
-    public IReadOnlyList<EventItem> RecentEvents { get; }
+    [ObservableProperty]
+    private QuotaCardViewModel weeklyQuota = UnavailableQuota("Weekly quota", "Waiting for first refresh.");
 
-    public OverviewViewModel()
+    [ObservableProperty]
+    private string statusText = "Waiting for local telemetry providers.";
+
+    [ObservableProperty]
+    private string lastUpdatedText = "Not refreshed yet";
+
+    [ObservableProperty]
+    private string historyCaption = "Tokscale hourly history will appear after the first successful refresh.";
+
+    [ObservableProperty]
+    private bool isRefreshing;
+
+    public ObservableCollection<TokenSummaryCard> TokenSummaryCards { get; } = [];
+    public ObservableCollection<ForecastPoint> HistoryPoints { get; } = [];
+    public ObservableCollection<DataSourceStatusCard> DataSources { get; } = [];
+    public ObservableCollection<EventItem> RecentEvents { get; } = [];
+    public IAsyncRelayCommand RefreshCommand { get; }
+
+    public OverviewViewModel(
+        ITokscaleProvider tokscaleProvider,
+        ICodexQuotaProvider quotaProvider,
+        SqliteTelemetryRepository repository)
     {
-        var now = DateTimeOffset.UtcNow;
-        var service = new ForecastingService();
-
-        var fiveHourSnapshots = BuildSnapshots(QuotaWindowKind.FiveHour, now, now.AddHours(2.5), 46, 14, 300);
-        var weeklySnapshots = BuildSnapshots(QuotaWindowKind.Weekly, now, now.AddDays(4.5), 28, 4.5, 10_080);
-
-        var fiveHourForecast = service.BuildForecast(fiveHourSnapshots, now);
-        var weeklyForecast = service.BuildForecast(weeklySnapshots, now);
-
-        FiveHourQuota = BuildQuotaCard("5-hour quota", fiveHourSnapshots[^1], fiveHourForecast);
-        WeeklyQuota = BuildQuotaCard("Weekly quota", weeklySnapshots[^1], weeklyForecast);
-
-        TokenSummaryCards =
-        [
-            new("Uncached input", "28.7M", "+4.2% / 24h"),
-            new("Cache read", "69.0M", "+1.1% / 24h"),
-            new("Output", "11.6M", "+3.7% / 24h"),
-            new("Reasoning output", "1.8M", "-0.4% / 24h"),
-            new("Total", "111.1M", "+2.9% / 24h")
-        ];
-
-        HistoryPoints =
-        [
-            new("-8h", 16), new("-7h", 22), new("-6h", 18), new("-5h", 29),
-            new("-4h", 31), new("-3h", 35), new("-2h", 41), new("-1h", 48), new("Now", 52)
-        ];
-
-        ActiveAgents =
-        [
-            new AgentNode(
-                "Parent: repo-refactor-orchestrator",
-                "Running",
-                "gpt-5-codex",
-                [
-                    new AgentNode("Subagent: tests-sweeper", "Running", "gpt-5-mini"),
-                    new AgentNode("Subagent: doc-sync", "Waiting", "gpt-5-mini"),
-                    new AgentNode("Subagent: risk-analyzer", "Completed", "gpt-5-codex")
-                ])
-        ];
-
-        RecentEvents =
-        [
-            new("2m ago", "Forecast", "5h exhaustion estimate moved later by 18m after burn slowdown."),
-            new("17m ago", "Reset detection", "Detected 5h window reset and checkpointed quota baseline."),
-            new("42m ago", "Announcement", "Stub provider captured an announcement event for policy monitoring."),
-            new("1h ago", "Agent activity", "Nested subagent topology changed: doc-sync moved to waiting.")
-        ];
+        _tokscaleProvider = tokscaleProvider;
+        _quotaProvider = quotaProvider;
+        _repository = repository;
+        RefreshCommand = new AsyncRelayCommand(RefreshAsync);
     }
 
-    private static List<QuotaSnapshot> BuildSnapshots(
-        QuotaWindowKind kind,
-        DateTimeOffset now,
-        DateTimeOffset resetAt,
-        double currentUsedPercent,
-        double growthPercent,
-        int windowMinutes)
+    public async Task RefreshAsync(CancellationToken cancellationToken)
     {
-        var snapshots = new List<QuotaSnapshot>();
-        for (var i = 6; i >= 0; i--)
+        // Do not silently drop a refresh requested while another one is unwinding. Waiting here
+        // gives a newly loaded page or explicit user refresh a chance to run as soon as the active
+        // refresh releases the gate; page unload still cancels the waiter through its token.
+        await _refreshGate.WaitAsync(cancellationToken);
+
+        IsRefreshing = true;
+        StatusText = "Refreshing local telemetry…";
+        DataSources.Clear();
+        RecentEvents.Clear();
+
+        var quotaSucceeded = false;
+        var quotaReadCompleted = false;
+        var tokscaleSucceeded = false;
+        var persistenceAvailable = false;
+
+        try
         {
-            var observed = now.AddMinutes(-i * 35);
-            var used = Math.Max(0, currentUsedPercent - (i * growthPercent / 6));
-            snapshots.Add(new QuotaSnapshot(kind, observed, used, windowMinutes, resetAt, "codex", "demo", "mock"));
+            // Start the provider read before touching persistence. A broken/unwritable local database
+            // must not prevent the user from seeing live Codex quota.
+            var quotaTask = _quotaProvider.GetQuotaSnapshotsAsync(cancellationToken);
+
+            try
+            {
+                await _repository.InitializeAsync(cancellationToken);
+                persistenceAvailable = true;
+                SetDataSourceStatus("SQLite", "Ready", "Local quota history is available.");
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                var persistenceError = SummarizeError(exception);
+                SetDataSourceStatus("SQLite", "Error", persistenceError);
+                AddEvent("Persistence unavailable", persistenceError);
+            }
+
+            try
+            {
+                var usages = await _tokscaleProvider.GetUsageObservationsAsync(cancellationToken);
+                RenderTokenSummary(usages);
+
+                var hourly = await _tokscaleProvider.GetHourlyUsageAsync(cancellationToken);
+                RenderHourlyHistory(hourly);
+                tokscaleSucceeded = true;
+                SetDataSourceStatus(
+                    "Tokscale",
+                    "Live",
+                    $"{usages.Count} model row(s), {hourly.Count} hourly bucket(s) from local Codex sessions.");
+                AddEvent("Token refresh", $"Loaded {FormatTokenCount(usages.Sum(item => item.Breakdown.Total))} tokens from Tokscale.");
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                var tokscaleError = SummarizeError(exception);
+                RenderTokenUnavailable();
+                SetDataSourceStatus("Tokscale", "Unavailable", tokscaleError);
+                AddEvent("Tokscale unavailable", tokscaleError);
+            }
+
+            IReadOnlyList<QuotaSnapshot> snapshots = [];
+            try
+            {
+                snapshots = await quotaTask;
+                quotaReadCompleted = true;
+                quotaSucceeded = snapshots.Any(snapshot => snapshot.Kind is QuotaWindowKind.FiveHour or QuotaWindowKind.Weekly);
+
+                SetDataSourceStatus(
+                    "Codex app-server",
+                    quotaSucceeded ? "Live" : "No supported windows",
+                    quotaSucceeded
+                        ? $"{snapshots.Count} provider-authoritative quota window(s). No model turn was created."
+                        : "The app-server responded but did not expose a supported five-hour or weekly window.");
+                AddEvent("Quota refresh", quotaSucceeded
+                    ? "Captured provider-authoritative Codex quota and reset timestamps."
+                    : "Codex app-server returned no supported five-hour or weekly quota windows.");
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                var quotaError = SummarizeError(exception);
+                FiveHourQuota = UnavailableQuota("5-hour quota", quotaError);
+                WeeklyQuota = UnavailableQuota("Weekly quota", quotaError);
+                SetDataSourceStatus("Codex app-server", "Unavailable", quotaError);
+                AddEvent("Quota unavailable", quotaError);
+            }
+
+            if (quotaReadCompleted)
+            {
+                if (persistenceAvailable && snapshots.Count > 0)
+                {
+                    try
+                    {
+                        foreach (var snapshot in snapshots)
+                        {
+                            await _repository.UpsertQuotaSnapshotAsync(snapshot, cancellationToken);
+                        }
+                    }
+                    catch (Exception exception) when (exception is not OperationCanceledException)
+                    {
+                        persistenceAvailable = false;
+                        var persistenceError = SummarizeError(exception);
+                        SetDataSourceStatus("SQLite", "Error", persistenceError);
+                        AddEvent("Persistence error", $"Live quota is still shown, but this snapshot was not stored: {persistenceError}");
+                    }
+                }
+
+                persistenceAvailable = await RenderQuotaAsync(
+                    QuotaWindowKind.FiveHour,
+                    snapshots,
+                    persistenceAvailable,
+                    cancellationToken);
+                persistenceAvailable = await RenderQuotaAsync(
+                    QuotaWindowKind.Weekly,
+                    snapshots,
+                    persistenceAvailable,
+                    cancellationToken);
+            }
+
+            var localNow = DateTimeOffset.Now;
+            LastUpdatedText = $"Updated {localNow:HH:mm:ss}";
+            StatusText = (tokscaleSucceeded, quotaSucceeded, persistenceAvailable) switch
+            {
+                (true, true, true) => "Live local telemetry",
+                (true, true, false) => "Live telemetry · history unavailable",
+                (true, false, _) or (false, true, _) => "Partial telemetry",
+                _ => "Telemetry unavailable"
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            var error = SummarizeError(exception);
+            StatusText = "Refresh failed";
+            LastUpdatedText = "Refresh failed";
+            AddEvent("Unexpected refresh error", error);
+        }
+        finally
+        {
+            IsRefreshing = false;
+            _refreshGate.Release();
+        }
+    }
+
+    private async Task<bool> RenderQuotaAsync(
+        QuotaWindowKind kind,
+        IReadOnlyList<QuotaSnapshot> currentSnapshots,
+        bool persistenceAvailable,
+        CancellationToken cancellationToken)
+    {
+        var current = currentSnapshots
+            .Where(snapshot => snapshot.Kind == kind)
+            .OrderByDescending(snapshot => snapshot.CapturedAtUtc)
+            .FirstOrDefault();
+
+        var title = kind == QuotaWindowKind.FiveHour ? "5-hour quota" : "Weekly quota";
+        if (current is null)
+        {
+            SetQuotaCard(kind, UnavailableQuota(title, "Codex did not expose this window on the latest refresh."));
+            return persistenceAvailable;
         }
 
-        return snapshots;
+        Forecast? forecast = null;
+        if (persistenceAvailable)
+        {
+            try
+            {
+                var history = await _repository.GetRecentQuotaSnapshotsAsync(
+                    kind,
+                    current.Provider,
+                    current.Profile,
+                    96,
+                    cancellationToken);
+
+                try
+                {
+                    forecast = _forecastingService.BuildForecast(history, DateTimeOffset.UtcNow);
+                }
+                catch (ArgumentException)
+                {
+                    // One valid current snapshot is still useful even if history is not forecastable.
+                }
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                persistenceAvailable = false;
+                var persistenceError = SummarizeError(exception);
+                SetDataSourceStatus("SQLite", "Error", persistenceError);
+                AddEvent("History unavailable", $"Live quota is still shown: {persistenceError}");
+            }
+        }
+
+        SetQuotaCard(kind, BuildQuotaCard(title, current, forecast));
+        return persistenceAvailable;
     }
 
-    private static QuotaCardViewModel BuildQuotaCard(string title, QuotaSnapshot snapshot, Forecast forecast)
+    private void SetQuotaCard(QuotaWindowKind kind, QuotaCardViewModel card)
     {
-        var remainingText = snapshot.RemainingPercent is double remaining ? $"{remaining:0.0}%" : "Unknown";
-        var exhaustionText = forecast.EstimatedExhaustionAtUtc is null
-            ? "Insufficient data"
-            : forecast.EstimatedExhaustionAtUtc.Value.ToLocalTime().ToString("ddd HH:mm");
-        var burnText = forecast.BurnRatePercentPerHour is double burn
-            ? $"{burn:0.0} pp/h"
-            : "Insufficient data";
-
-        var survivalMessage = forecast.SurvivesUntilReset switch
+        if (kind == QuotaWindowKind.FiveHour)
         {
-            true => "Likely to survive until reset.",
-            false => "Likely to exhaust before reset.",
-            null => "Not enough data to compare exhaustion with reset."
-        };
+            FiveHourQuota = card;
+        }
+        else if (kind == QuotaWindowKind.Weekly)
+        {
+            WeeklyQuota = card;
+        }
+    }
 
-        var severity = forecast.SurvivesUntilReset switch
+    private void RenderTokenSummary(IReadOnlyList<TokenUsage> usages)
+    {
+        TokenSummaryCards.Clear();
+        var uncached = usages.Sum(item => item.Breakdown.UncachedInput);
+        var cacheRead = usages.Sum(item => item.Breakdown.CacheRead);
+        var cacheWrite = usages.Sum(item => item.Breakdown.CacheWrite);
+        var output = usages.Sum(item => item.Breakdown.NonReasoningOutput);
+        var reasoning = usages.Sum(item => item.Breakdown.ReasoningOutput);
+        var total = usages.Sum(item => item.Breakdown.Total);
+
+        TokenSummaryCards.Add(new TokenSummaryCard("Uncached input", FormatTokenCount(uncached), "Tokscale · disjoint input"));
+        TokenSummaryCards.Add(new TokenSummaryCard("Cache read", FormatTokenCount(cacheRead), "Tokscale · cached input"));
+        if (cacheWrite > 0)
+        {
+            TokenSummaryCards.Add(new TokenSummaryCard("Cache write", FormatTokenCount(cacheWrite), "Tokscale · cache writes"));
+        }
+        TokenSummaryCards.Add(new TokenSummaryCard("Output", FormatTokenCount(output), "Excludes reasoning"));
+        TokenSummaryCards.Add(new TokenSummaryCard("Reasoning", FormatTokenCount(reasoning), "Separate reasoning output"));
+        TokenSummaryCards.Add(new TokenSummaryCard("Total", FormatTokenCount(total), $"{usages.Count} Codex model row(s)"));
+    }
+
+    private void RenderTokenUnavailable()
+    {
+        TokenSummaryCards.Clear();
+        TokenSummaryCards.Add(new TokenSummaryCard("Token accounting", "Unavailable", "Install/update Tokscale or inspect provider status below."));
+        HistoryPoints.Clear();
+        HistoryCaption = "Hourly history unavailable because Tokscale could not be read.";
+    }
+
+    private void RenderHourlyHistory(IReadOnlyList<TokenTimeBucket> buckets)
+    {
+        HistoryPoints.Clear();
+        var visible = buckets.TakeLast(12).ToArray();
+        if (visible.Length == 0)
+        {
+            HistoryCaption = "Tokscale returned no hourly Codex buckets for the current report range.";
+            return;
+        }
+
+        var max = visible.Max(bucket => bucket.Breakdown.Total);
+        foreach (var bucket in visible)
+        {
+            var height = max <= 0 ? 10d : 18d + (92d * bucket.Breakdown.Total / max);
+            HistoryPoints.Add(new ForecastPoint(
+                CompactBucketLabel(bucket.Label),
+                height,
+                $"{bucket.Label} · {FormatTokenCount(bucket.Breakdown.Total)}"));
+        }
+
+        HistoryCaption = $"Real Tokscale hourly usage · last {visible.Length} bucket(s) · bars normalized to the busiest visible hour.";
+    }
+
+    private static QuotaCardViewModel BuildQuotaCard(string title, QuotaSnapshot snapshot, Forecast? forecast)
+    {
+        var remaining = snapshot.RemainingPercent;
+        var burn = forecast?.BurnRatePercentPerHour;
+        var resetCountdown = snapshot.ResetsAtUtc is DateTimeOffset reset
+            ? FormatTimeSpan(reset - DateTimeOffset.UtcNow)
+            : "Unknown";
+        var exhaustion = forecast?.EstimatedExhaustionAtUtc is DateTimeOffset exhaustionAt
+            ? exhaustionAt.ToLocalTime().ToString("ddd HH:mm")
+            : "Learning from history";
+
+        var survivalMessage = forecast?.SurvivesUntilReset switch
+        {
+            true => "Current burn is projected to survive until reset.",
+            false => "Current burn is projected to exhaust before reset.",
+            _ => "Quota is live; more history is needed for a burn forecast."
+        };
+        var severity = forecast?.SurvivesUntilReset switch
         {
             false => InfoBarSeverity.Warning,
             true => InfoBarSeverity.Success,
-            null => InfoBarSeverity.Informational
+            _ => InfoBarSeverity.Informational
         };
 
         return new QuotaCardViewModel(
             title,
-            remainingText,
-            snapshot.ResetsAtUtc is null ? "Unknown" : FormatTimeSpan(snapshot.ResetsAtUtc.Value - DateTimeOffset.UtcNow),
-            burnText,
-            exhaustionText,
-            snapshot.RemainingPercent is double gauge ? $"{gauge:0.0}% remaining" : "Quota unavailable",
+            remaining is double value ? $"{value:0.#}%" : "Unknown",
+            resetCountdown,
+            burn is double rate ? $"{rate:0.0} pp/h" : "Learning",
+            exhaustion,
+            remaining is double gauge ? $"{gauge:0.#}% remaining · {snapshot.Source}" : snapshot.Source,
             survivalMessage,
             severity);
+    }
+
+    private static QuotaCardViewModel UnavailableQuota(string title, string detail) =>
+        new(title, "Unavailable", "Unknown", "Unavailable", "Unavailable", "No live quota data", detail, InfoBarSeverity.Warning);
+
+    private void SetDataSourceStatus(string name, string state, string detail)
+    {
+        var replacement = new DataSourceStatusCard(name, state, detail);
+        var existing = DataSources.FirstOrDefault(item => string.Equals(item.Name, name, StringComparison.Ordinal));
+        if (existing is null)
+        {
+            DataSources.Add(replacement);
+            return;
+        }
+
+        DataSources[DataSources.IndexOf(existing)] = replacement;
+    }
+
+    private void AddEvent(string type, string description) =>
+        RecentEvents.Insert(0, new EventItem("Now", type, description));
+
+    private static string CompactBucketLabel(string label)
+    {
+        if (label.Length <= 8)
+        {
+            return label;
+        }
+
+        var separator = label.LastIndexOf(' ');
+        return separator >= 0 && separator < label.Length - 1 ? label[(separator + 1)..] : label[^8..];
+    }
+
+    private static string FormatTokenCount(long value)
+    {
+        var absolute = Math.Abs((double)value);
+        return absolute switch
+        {
+            >= 1_000_000_000 => $"{value / 1_000_000_000d:0.00}B",
+            >= 1_000_000 => $"{value / 1_000_000d:0.0}M",
+            >= 1_000 => $"{value / 1_000d:0.0}K",
+            _ => value.ToString("N0")
+        };
     }
 
     private static string FormatTimeSpan(TimeSpan timeSpan)
@@ -132,11 +398,17 @@ public sealed partial class OverviewViewModel : ObservableObject
             return "due now";
         }
 
-        if (timeSpan.TotalHours >= 24)
+        if (timeSpan.TotalDays >= 1)
         {
-            return $"{timeSpan.TotalDays:0.#}d";
+            return $"{(int)timeSpan.TotalDays}d {timeSpan.Hours}h";
         }
 
         return $"{(int)timeSpan.TotalHours}h {timeSpan.Minutes}m";
+    }
+
+    private static string SummarizeError(Exception exception)
+    {
+        var message = exception.Message.ReplaceLineEndings(" ").Trim();
+        return message.Length <= 240 ? message : message[..240] + "…";
     }
 }
