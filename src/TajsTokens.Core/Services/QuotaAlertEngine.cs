@@ -5,17 +5,19 @@ namespace TajsTokens.Core.Services;
 
 public sealed class QuotaAlertEngine
 {
-    private readonly int[] _thresholds;
+    private int[] _thresholds;
     private readonly HashSet<string> _emittedKeys = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, int> _fallbackWindowGenerations = new(StringComparer.Ordinal);
     private TelemetrySnapshot? _previous;
 
     public QuotaAlertEngine(IEnumerable<int>? thresholds = null)
     {
-        _thresholds = (thresholds ?? [30, 20, 10, 5])
-            .Where(value => value is > 0 and < 100)
-            .Distinct()
-            .OrderByDescending(value => value)
-            .ToArray();
+        _thresholds = RuntimeSettings.NormalizeLowQuotaThresholds(thresholds);
+    }
+
+    public void UpdateThresholds(IEnumerable<int>? thresholds)
+    {
+        _thresholds = RuntimeSettings.NormalizeLowQuotaThresholds(thresholds);
     }
 
     public IReadOnlyList<AlertNotification> Evaluate(TelemetrySnapshot current)
@@ -39,7 +41,9 @@ public sealed class QuotaAlertEngine
                      snapshot.RemainingPercent is not null))
         {
             var remaining = quota.RemainingPercent!.Value;
-            var identity = BuildWindowIdentity(quota);
+            var previousQuota = FindPreviousQuota(quota);
+            var fallbackGeneration = UpdateFallbackWindowGeneration(quota, previousQuota, remaining);
+            var identity = BuildWindowIdentity(quota, fallbackGeneration);
             var threshold = _thresholds
                 .Where(value => remaining <= value)
                 .DefaultIfEmpty(-1)
@@ -61,17 +65,22 @@ public sealed class QuotaAlertEngine
                 }
             }
 
-            var previousQuota = _previous?.QuotaSnapshots
-                .Where(snapshot => snapshot.Kind == quota.Kind)
-                .OrderByDescending(snapshot => snapshot.CapturedAtUtc)
-                .FirstOrDefault();
+            var replenished = previousQuota?.RemainingPercent is double previousRemaining &&
+                              remaining > previousRemaining + 5;
+            var resetChanged = previousQuota?.ResetsAtUtc is DateTimeOffset previousReset &&
+                               quota.ResetsAtUtc is DateTimeOffset currentReset &&
+                               currentReset != previousReset;
+            var resetUnknownButRecovered = previousQuota is not null &&
+                                           previousQuota.ResetsAtUtc is null &&
+                                           quota.ResetsAtUtc is null &&
+                                           replenished;
 
-            if (previousQuota?.ResetsAtUtc is DateTimeOffset previousReset &&
-                quota.ResetsAtUtc is DateTimeOffset currentReset &&
-                currentReset != previousReset &&
-                remaining > (previousQuota.RemainingPercent ?? 0) + 5)
+            if ((resetChanged && replenished) || resetUnknownButRecovered)
             {
-                var resetKey = $"quota-reset:{quota.Kind}:{currentReset.ToUnixTimeSeconds()}";
+                var resetIdentity = quota.ResetsAtUtc is DateTimeOffset resetAt
+                    ? resetAt.ToUnixTimeSeconds().ToString()
+                    : $"fallback-{fallbackGeneration}";
+                var resetKey = $"quota-reset:{quota.Provider}:{quota.Profile}:{quota.Kind}:{resetIdentity}";
                 if (_emittedKeys.Add(resetKey))
                 {
                     var label = quota.Kind == QuotaWindowKind.FiveHour ? "5-hour" : "weekly";
@@ -82,6 +91,39 @@ public sealed class QuotaAlertEngine
                 }
             }
         }
+    }
+
+    private QuotaSnapshot? FindPreviousQuota(QuotaSnapshot quota) =>
+        _previous?.QuotaSnapshots
+            .Where(snapshot =>
+                snapshot.Kind == quota.Kind &&
+                string.Equals(snapshot.Provider, quota.Provider, StringComparison.Ordinal) &&
+                string.Equals(snapshot.Profile, quota.Profile, StringComparison.Ordinal))
+            .OrderByDescending(snapshot => snapshot.CapturedAtUtc)
+            .FirstOrDefault();
+
+    private int UpdateFallbackWindowGeneration(QuotaSnapshot quota, QuotaSnapshot? previousQuota, double remaining)
+    {
+        if (quota.ResetsAtUtc is not null)
+        {
+            return 0;
+        }
+
+        var baseIdentity = BuildFallbackBaseIdentity(quota);
+        var generation = _fallbackWindowGenerations.GetValueOrDefault(baseIdentity);
+        if (previousQuota?.ResetsAtUtc is null &&
+            previousQuota.RemainingPercent is double previousRemaining &&
+            remaining > previousRemaining + 5)
+        {
+            generation++;
+            _fallbackWindowGenerations[baseIdentity] = generation;
+        }
+        else
+        {
+            _fallbackWindowGenerations.TryAdd(baseIdentity, generation);
+        }
+
+        return generation;
     }
 
     private void EvaluateProviderHealthAlerts(TelemetrySnapshot current, ICollection<AlertNotification> alerts)
@@ -109,13 +151,16 @@ public sealed class QuotaAlertEngine
         }
     }
 
-    private static string BuildWindowIdentity(QuotaSnapshot snapshot)
+    private static string BuildWindowIdentity(QuotaSnapshot snapshot, int fallbackGeneration)
     {
         if (snapshot.ResetsAtUtc is DateTimeOffset reset)
         {
             return $"{snapshot.Provider}:{snapshot.Profile}:{snapshot.Kind}:{reset.ToUnixTimeSeconds()}";
         }
 
-        return $"{snapshot.Provider}:{snapshot.Profile}:{snapshot.Kind}:{snapshot.CapturedAtUtc:yyyyMMddHH}";
+        return $"{BuildFallbackBaseIdentity(snapshot)}:{fallbackGeneration}";
     }
+
+    private static string BuildFallbackBaseIdentity(QuotaSnapshot snapshot) =>
+        $"{snapshot.Provider}:{snapshot.Profile}:{snapshot.Kind}:no-reset";
 }
