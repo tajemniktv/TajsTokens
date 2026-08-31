@@ -48,9 +48,14 @@ public sealed class AppServices
     public QuotaAlertEngine AlertEngine { get; }
     public Exception? StartupPersistenceError { get; }
 
+    public event Action<RuntimeSettings, RuntimeSettings>? SettingsChanged;
+
     public void SaveSettings(RuntimeSettings settings)
     {
+        var previous = Settings;
         SettingsStore.Save(settings);
         Settings = SettingsStore.Load();
+        AlertEngine.UpdateThresholds(Settings.LowQuotaThresholds);
+        SettingsChanged?.Invoke(previous, Settings);
     }
 }
