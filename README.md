@@ -2,25 +2,30 @@
 
 TajsTokens is a local-first native Windows telemetry dashboard for Codex/AI coding-agent usage.
 
-The current Phase 1 build replaces the starter's synthetic Overview with real local data:
+The current Phase 2 work turns the real-data dashboard into a background Windows utility:
 
 - Codex subscription quota and provider reset timestamps from the local `codex app-server`;
 - token totals, cache/output/reasoning breakdowns, and hourly history from Tokscale;
+- one process-lifetime telemetry coordinator shared by dashboard, tray, and alert evaluation;
+- last-known-good token/quota snapshots retained and visibly marked stale after transient provider failures;
+- notification-area quota status with open, refresh, and exit controls;
+- close-to-tray behavior so collection continues while the dashboard is hidden;
+- deduplicated low-quota, reset, and provider-health notifications;
 - quota snapshots persisted to local SQLite so forecasting can learn from real history;
-- explicit provider freshness/error state instead of silently substituting fake zeroes.
+- resilient local runtime settings under `%LOCALAPPDATA%\TajsTokens\settings.json`.
 
 Tokscale is intentionally the bootstrap/default token-accounting backend. TajsTokens will later grow a native accounting engine and reconcile it against Tokscale before native accounting becomes the default.
 
 ## Projects
 
-- `src/TajsTokens.App` - WinUI 3 desktop shell and composition root
-- `src/TajsTokens.Core` - domain models, service interfaces, forecasting logic
-- `src/TajsTokens.Infrastructure` - SQLite persistence, real local providers, ingestion plumbing
+- `src/TajsTokens.App` - WinUI 3 desktop shell, tray surface, and composition root
+- `src/TajsTokens.Core` - domain models, alert/forecast services, service interfaces
+- `src/TajsTokens.Infrastructure` - SQLite/settings persistence, real local providers, background telemetry coordination
 - `tests/TajsTokens.Core.Tests` - unit and provider-contract tests
 
 ## Prerequisites
 
-- .NET SDK 10.0+
+- .NET SDK 10.0+ for development builds
 - Windows 11 (or Windows 10 19041+) for launching the WinUI app
 - an externally executable Codex CLI for live app-server quota reads: on `PATH`, in a supported user-local Codex install location, or selected with `CODEX_CLI_PATH`
 - Tokscale either installed on `PATH` **or** Node.js/npm with `npx` available; TajsTokens falls back to `npx --yes tokscale@latest` when a global Tokscale command is absent
@@ -48,19 +53,21 @@ dotnet test tests/TajsTokens.Core.Tests/TajsTokens.Core.Tests.csproj -c Debug
 
 ## Run the app (Windows)
 
-The application is currently unpackaged (`WindowsPackageType=None`) for simple local development:
+The application remains unpackaged (`WindowsPackageType=None`) for local development:
 
 ```powershell
 dotnet run --project src/TajsTokens.App/TajsTokens.App.csproj
 ```
 
-The Overview refreshes once when opened and can be refreshed manually. Phase 2 will own persistent background scheduling, tray state, notifications, and release packaging.
+Phase 2 starts one background telemetry loop for the whole process. Closing the dashboard hides it by default rather than terminating TajsTokens; use the tray **Exit** action for a full shutdown. The tray can reopen the dashboard or trigger an immediate refresh.
+
+The default background poll interval is 60 seconds. Runtime settings are normalized and stored in `%LOCALAPPDATA%\TajsTokens\settings.json`; corrupt/missing settings fall back to safe defaults. A richer Settings UI and launch-at-login control are still follow-up work.
 
 ## Real-data integrations
 
 ### Tokscale
 
-Phase 1 uses Tokscale's documented machine-readable CLI boundary. TajsTokens invokes the equivalent of:
+TajsTokens uses Tokscale's documented machine-readable CLI boundary. It invokes the equivalent of:
 
 ```powershell
 tokscale models --json --group-by client,model --client codex
@@ -74,7 +81,7 @@ npx --yes tokscale@latest models --json --group-by client,model --client codex
 npx --yes tokscale@latest hourly --json --client codex
 ```
 
-If neither Tokscale nor npx is available, or Tokscale returns an unsupported payload, token cards fail independently while Codex quota can remain live. No synthetic token values are substituted.
+If neither Tokscale nor npx is available, or Tokscale returns an unsupported payload, TajsTokens retains any previous successful token snapshot as **stale** rather than turning it into fake zero usage. No synthetic token values are substituted.
 
 ### Codex quota
 
@@ -82,10 +89,30 @@ TajsTokens starts a short-lived, read-only local Codex app-server session, perfo
 
 Codex executable resolution prefers `CODEX_CLI_PATH`, then known user-local Windows Codex CLI locations, then the `codex` command on `PATH`. If app-server exits before responding, TajsTokens surfaces its bounded stderr/exit status so a missing or broken CLI is diagnosable instead of appearing as a generic stdout EOF.
 
-This quota read does **not** create a model turn.
+This quota read does **not** create a model turn. When a quota refresh fails after a successful read, the previous quota remains visible/tray-addressable as stale and low-quota alerts are suppressed until fresh quota data returns.
+
+## Tray and notifications
+
+The Phase 2 tray icon shows the most constrained known quota as a small numeric badge when quota is available. Its tooltip summarizes five-hour/weekly remaining values and whether the quota snapshot is live or stale.
+
+Current quick actions:
+
+- open the dashboard;
+- refresh telemetry;
+- exit TajsTokens completely.
+
+Current background alerts cover low quota thresholds (30/20/10/5% by default), detected quota-window refreshes, and provider-health transitions. Alerts are deduplicated in-process by quota/reset identity so the same threshold is not emitted every polling interval. Notification content never includes prompt/reasoning text.
+
+## Portable release artifact
+
+The Phase 2 release workflow can publish a self-contained Windows x64 folder and upload it as a ZIP artifact after the same restore/build/test checks used by CI. This is the first distribution smoke test, not the final installer/update story.
+
+Code signing, a per-user installer, WinGet, update verification, and an in-app updater remain tracked in #36.
 
 ## Local data and privacy
 
-The Phase 1 database remains under `%LOCALAPPDATA%\TajsTokens\telemetry.db`. Quota snapshots are stored as normalized telemetry. Tokscale model/hour aggregates are rendered directly and are not duplicated into SQLite on every refresh.
+The local database remains under `%LOCALAPPDATA%\TajsTokens\telemetry.db`; runtime settings live beside it in `settings.json`. These paths are outside the application directory so portable/update experiments do not overwrite local history.
+
+Quota snapshots are stored as normalized telemetry. Tokscale model/hour aggregates are rendered from the provider snapshot and are not duplicated into SQLite on every refresh.
 
 TajsTokens does not persist prompt text, reasoning text, shell output, or raw Codex rollout payloads in this phase.
