@@ -111,7 +111,8 @@ public sealed class QuotaAlertEngine
 
         var baseIdentity = BuildFallbackBaseIdentity(quota);
         var generation = _fallbackWindowGenerations.GetValueOrDefault(baseIdentity);
-        if (previousQuota?.ResetsAtUtc is null &&
+        if (previousQuota is not null &&
+            previousQuota.ResetsAtUtc is null &&
             previousQuota.RemainingPercent is double previousRemaining &&
             remaining > previousRemaining + 5)
         {
