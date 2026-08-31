@@ -74,19 +74,21 @@
                 <Border Grid.Column="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="14" Padding="18">
                     <StackPanel Spacing="10">
                         <TextBlock Text="Hourly token usage" FontWeight="SemiBold" FontSize="18" />
-                        <ItemsControl ItemsSource="{Binding HistoryPoints}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom" /></ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate x:DataType="models:ForecastPoint">
-                                    <StackPanel VerticalAlignment="Bottom" Spacing="4" ToolTipService.ToolTip="{x:Bind Tooltip}">
-                                        <Border Width="20" Height="{x:Bind Value}" Background="{ThemeResource AccentFillColorDefaultBrush}" CornerRadius="7" VerticalAlignment="Bottom" />
-                                        <TextBlock Text="{x:Bind Label}" FontSize="10" HorizontalAlignment="Center" />
-                                    </StackPanel>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                        <ScrollViewer HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Auto" VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
+                            <ItemsControl ItemsSource="{Binding HistoryPoints}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom" /></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="models:ForecastPoint">
+                                        <StackPanel VerticalAlignment="Bottom" Spacing="4" ToolTipService.ToolTip="{x:Bind Tooltip}">
+                                            <Border Width="20" Height="{x:Bind Value}" Background="{ThemeResource AccentFillColorDefaultBrush}" CornerRadius="7" VerticalAlignment="Bottom" />
+                                            <TextBlock Text="{x:Bind Label}" FontSize="10" HorizontalAlignment="Center" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
                         <TextBlock Text="{Binding HistoryCaption}" Opacity="0.75" TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
