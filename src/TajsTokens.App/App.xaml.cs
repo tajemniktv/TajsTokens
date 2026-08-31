@@ -11,6 +11,7 @@ public partial class App : Application
 {
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private readonly WindowsSystemTrayService _trayService = new();
+    private readonly WindowsStartupRegistrationService _startupService = new();
     private Window? _window;
     private DispatcherQueue? _dispatcher;
     private bool _exitRequested;
@@ -30,13 +31,26 @@ public partial class App : Application
         _trayService.OpenDashboardRequested += (_, _) => ShowDashboard();
         _trayService.RefreshRequested += (_, _) => _ = RefreshFromTrayAsync();
         _trayService.ExitRequested += (_, _) => RequestExit();
+        _trayService.NotificationsEnabledChanged += OnNotificationsEnabledChanged;
+        _trayService.LaunchAtLoginChanged += OnLaunchAtLoginChanged;
         _trayService.Initialize();
+        _trayService.UpdatePreferences(Services.Settings.NotificationsEnabled, Services.Settings.LaunchAtLogin);
+
+        if (!_startupService.TrySetEnabled(Services.Settings.LaunchAtLogin, out var startupError) &&
+            Services.Settings.LaunchAtLogin)
+        {
+            _trayService.ShowNotification("TajsTokens startup registration failed", startupError ?? "Unknown startup registration error.");
+        }
 
         Services.Telemetry.SnapshotUpdated += OnSnapshotUpdated;
 
-        _window = new MainWindow();
-        _window.AppWindow.Closing += OnWindowClosing;
-        _window.Activate();
+        var startHidden = args.Arguments
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Any(argument => string.Equals(argument, "--background", StringComparison.OrdinalIgnoreCase));
+        if (!startHidden)
+        {
+            ShowDashboard();
+        }
 
         _ = Services.Telemetry.RunPeriodicAsync(
             TimeSpan.FromSeconds(Services.Settings.PollIntervalSeconds),
@@ -69,6 +83,45 @@ public partial class App : Application
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
         {
             // Normal application shutdown.
+        }
+    }
+
+    private void OnNotificationsEnabledChanged(bool enabled)
+    {
+        if (!TrySaveSettings(Services.Settings with { NotificationsEnabled = enabled }))
+        {
+            _trayService.UpdatePreferences(Services.Settings.NotificationsEnabled, Services.Settings.LaunchAtLogin);
+        }
+    }
+
+    private void OnLaunchAtLoginChanged(bool enabled)
+    {
+        if (!_startupService.TrySetEnabled(enabled, out var error))
+        {
+            _trayService.UpdatePreferences(Services.Settings.NotificationsEnabled, Services.Settings.LaunchAtLogin);
+            _trayService.ShowNotification("Could not update Start with Windows", error ?? "Unknown startup registration error.");
+            return;
+        }
+
+        if (!TrySaveSettings(Services.Settings with { LaunchAtLogin = enabled }))
+        {
+            _ = _startupService.TrySetEnabled(Services.Settings.LaunchAtLogin, out _);
+            _trayService.UpdatePreferences(Services.Settings.NotificationsEnabled, Services.Settings.LaunchAtLogin);
+        }
+    }
+
+    private bool TrySaveSettings(RuntimeSettings settings)
+    {
+        try
+        {
+            Services.SaveSettings(settings);
+            _trayService.UpdatePreferences(Services.Settings.NotificationsEnabled, Services.Settings.LaunchAtLogin);
+            return true;
+        }
+        catch (Exception exception)
+        {
+            _trayService.ShowNotification("TajsTokens settings could not be saved", exception.Message.ReplaceLineEndings(" "));
+            return false;
         }
     }
 
