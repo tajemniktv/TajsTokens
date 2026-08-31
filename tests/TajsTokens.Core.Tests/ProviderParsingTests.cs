@@ -75,6 +75,31 @@ public sealed class ProviderParsingTests
     }
 
     [Fact]
+    public void TokscaleModels_AllowsAValidEmptyEntriesArray()
+    {
+        const string json = """{ "entries": [] }""";
+
+        Assert.Empty(TokscaleProvider.ParseModelUsageJson(json, DateTimeOffset.UnixEpoch));
+    }
+
+    [Fact]
+    public void TokscaleModels_RejectsMalformedRowsInsteadOfFabricatingZeroUsage()
+    {
+        const string json = """
+            {
+              "entries": [
+                { "client": "codex", "somethingElse": 123 }
+              ]
+            }
+            """;
+
+        var exception = Assert.Throws<JsonException>(() =>
+            TokscaleProvider.ParseModelUsageJson(json, DateTimeOffset.UnixEpoch));
+
+        Assert.Contains("recognized token fields", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void TokscaleHourly_AcceptsEntriesAndNumericHourLabels()
     {
         const string json = """
@@ -87,8 +112,42 @@ public sealed class ProviderParsingTests
 
         var bucket = Assert.Single(TokscaleProvider.ParseHourlyJson(json));
 
+        Assert.Equal("tokscale", bucket.Provider);
         Assert.Equal("2026-08-31 03:00", bucket.Label);
         Assert.Equal(105, bucket.Breakdown.Total);
+    }
+
+    [Fact]
+    public void TokscaleHourly_RejectsMalformedRows()
+    {
+        const string json = """
+            {
+              "entries": [
+                { "date": "2026-08-31", "hour": 3, "unexpected": 105 }
+              ]
+            }
+            """;
+
+        var exception = Assert.Throws<JsonException>(() => TokscaleProvider.ParseHourlyJson(json));
+
+        Assert.Contains("recognized token fields", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CodexInitialize_RejectsJsonRpcErrorsImmediately()
+    {
+        const string json = """
+            {
+              "id": 0,
+              "error": { "code": -32002, "message": "Not authorized" }
+            }
+            """;
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            CodexAppServerQuotaProvider.EnsureSuccessfulJsonRpcResponse(json, "initialize"));
+
+        Assert.Contains("initialize failed", exception.Message, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("Not authorized", exception.Message, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -138,5 +197,52 @@ public sealed class ProviderParsingTests
         Assert.Equal(2, snapshots.Count);
         Assert.Equal(25d, snapshots.Single(snapshot => snapshot.Kind == QuotaWindowKind.FiveHour).UsedPercent);
         Assert.Equal(40d, snapshots.Single(snapshot => snapshot.Kind == QuotaWindowKind.Weekly).UsedPercent);
+    }
+
+    [Fact]
+    public void CodexRateLimits_DoesNotMislabelAnotherLimitAsCodex()
+    {
+        const string json = """
+            {
+              "id": 1,
+              "result": {
+                "rateLimitsByLimitId": {
+                  "other": {
+                    "primary": { "usedPercent": 88, "windowDurationMins": 300, "resetsAt": 1780000001 }
+                  }
+                }
+              }
+            }
+            """;
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            CodexAppServerQuotaProvider.ParseRateLimitsResponse(json, DateTimeOffset.UnixEpoch));
+
+        Assert.Contains("identifiable Codex", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CodexRateLimits_FallsBackToLegacyViewWhenNamedCodexBucketIsAbsent()
+    {
+        const string json = """
+            {
+              "id": 1,
+              "result": {
+                "rateLimits": {
+                  "primary": { "usedPercent": 20, "windowDurationMins": 300, "resetsAt": 1780000010 }
+                },
+                "rateLimitsByLimitId": {
+                  "other": {
+                    "primary": { "usedPercent": 88, "windowDurationMins": 300, "resetsAt": 1780000001 }
+                  }
+                }
+              }
+            }
+            """;
+
+        var snapshot = Assert.Single(CodexAppServerQuotaProvider.ParseRateLimitsResponse(json, DateTimeOffset.UnixEpoch));
+
+        Assert.Equal(20d, snapshot.UsedPercent);
+        Assert.Contains("legacy", snapshot.Source, StringComparison.OrdinalIgnoreCase);
     }
 }
