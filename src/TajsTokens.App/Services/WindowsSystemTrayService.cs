@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Drawing;
 using System.Runtime.InteropServices;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
@@ -6,8 +7,8 @@ using TajsTokens.Core.Models;
 namespace TajsTokens.App.Services;
 
 /// <summary>
-/// Native notification-area surface for Phase 2. Using Shell_NotifyIcon directly avoids pulling the
-/// WPF/WindowsDesktop XAML toolchain into the WinUI project just to obtain WinForms NotifyIcon.
+/// Native notification-area surface for Phase 2. Shell_NotifyIcon owns the tray lifecycle while a
+/// small hidden Win32 window receives callbacks and Explorer's TaskbarCreated recovery broadcast.
 /// </summary>
 public sealed class WindowsSystemTrayService : ISystemTrayService
 {
@@ -23,7 +24,10 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
     private readonly string _windowClassName = $"TajsTokens.Tray.{Environment.ProcessId}.{Guid.NewGuid():N}";
     private nint _windowHandle;
     private nint _instanceHandle;
-    private nint _iconHandle;
+    private nint _sharedFallbackIconHandle;
+    private Icon? _ownedStatusIcon;
+    private uint _taskbarCreatedMessage;
+    private string _currentTip = "TajsTokens · waiting for telemetry";
     private bool _notificationsEnabled;
     private bool _launchAtLogin;
     private bool _disposed;
@@ -48,6 +52,7 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
         }
 
         _instanceHandle = GetModuleHandleW(null);
+        _taskbarCreatedMessage = RegisterWindowMessageW("TaskbarCreated");
         var windowClass = new WindowClass
         {
             Size = (uint)Marshal.SizeOf<WindowClass>(),
@@ -61,6 +66,8 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not register the TajsTokens tray window class.");
         }
 
+        // A hidden top-level window, rather than HWND_MESSAGE, is intentional: Explorer broadcasts
+        // TaskbarCreated only to top-level windows after the taskbar is recreated.
         _windowHandle = CreateWindowExW(
             0,
             _windowClassName,
@@ -70,7 +77,7 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
             0,
             0,
             0,
-            HwndMessage,
+            0,
             0,
             _instanceHandle,
             0);
@@ -79,19 +86,15 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
         {
             var error = Marshal.GetLastWin32Error();
             _ = UnregisterClassW(_windowClassName, _instanceHandle);
-            throw new Win32Exception(error, "Could not create the TajsTokens tray message window.");
+            throw new Win32Exception(error, "Could not create the TajsTokens tray window.");
         }
 
-        _iconHandle = LoadIconW(0, IdiApplication);
-        var data = CreateNotifyIconData(NifMessage | NifIcon | NifTip);
-        data.CallbackMessage = TrayCallbackMessage;
-        data.Icon = _iconHandle;
-        data.Tip = "TajsTokens · waiting for telemetry";
-
-        if (!Shell_NotifyIconW(NimAdd, ref data))
+        _sharedFallbackIconHandle = LoadIconW(0, IdiApplication);
+        if (!TryAddTrayIcon())
         {
+            var error = Marshal.GetLastWin32Error();
             DestroyTrayHost();
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Could not add the TajsTokens notification-area icon.");
+            throw new Win32Exception(error, "Could not add the TajsTokens notification-area icon.");
         }
     }
 
@@ -103,9 +106,23 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
         }
 
         var constrained = status.ConstrainedRemainingPercent is int percent ? $" · constrained {percent}%" : string.Empty;
-        var data = CreateNotifyIconData(NifTip);
-        data.Tip = Truncate(status.Tooltip + constrained, 127);
-        _ = Shell_NotifyIconW(NimModify, ref data);
+        _currentTip = Truncate(status.Tooltip + constrained, 127);
+
+        var replacement = BuildStatusIcon(status.ConstrainedRemainingPercent, status.IsFresh);
+        var data = CreateNotifyIconData(NifTip | NifIcon);
+        data.Tip = _currentTip;
+        data.Icon = replacement.Handle;
+
+        if (Shell_NotifyIconW(NimModify, ref data))
+        {
+            var previous = _ownedStatusIcon;
+            _ownedStatusIcon = replacement;
+            previous?.Dispose();
+        }
+        else
+        {
+            replacement.Dispose();
+        }
     }
 
     public void UpdatePreferences(bool notificationsEnabled, bool launchAtLogin)
@@ -142,11 +159,21 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
             _ = Shell_NotifyIconW(NimDelete, ref data);
         }
 
+        _ownedStatusIcon?.Dispose();
+        _ownedStatusIcon = null;
         DestroyTrayHost();
     }
 
     private nint HandleWindowMessage(nint window, uint message, nuint wParam, nint lParam)
     {
+        if (_taskbarCreatedMessage != 0 && message == _taskbarCreatedMessage)
+        {
+            // Explorer discarded all notification-area registrations. Re-add ours with the latest
+            // owned badge/tooltip; failure is non-fatal and a later status update can try again.
+            _ = TryAddTrayIcon();
+            return 0;
+        }
+
         if (message == TrayCallbackMessage)
         {
             var mouseMessage = unchecked((uint)lParam.ToInt64());
@@ -164,6 +191,28 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
         }
 
         return DefWindowProcW(window, message, wParam, lParam);
+    }
+
+    private bool TryAddTrayIcon()
+    {
+        if (_windowHandle == 0)
+        {
+            return false;
+        }
+
+        var data = CreateNotifyIconData(NifMessage | NifIcon | NifTip);
+        data.CallbackMessage = TrayCallbackMessage;
+        data.Icon = _ownedStatusIcon?.Handle ?? _sharedFallbackIconHandle;
+        data.Tip = _currentTip;
+        if (!Shell_NotifyIconW(NimAdd, ref data))
+        {
+            return false;
+        }
+
+        var version = CreateNotifyIconData(0);
+        version.TimeoutOrVersion = NotifyIconVersion4;
+        _ = Shell_NotifyIconW(NimSetVersion, ref version);
+        return true;
     }
 
     private void ShowContextMenu()
@@ -203,6 +252,7 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
                 0,
                 _windowHandle,
                 0);
+            _ = PostMessageW(_windowHandle, WmNull, 0, 0);
 
             switch (command)
             {
@@ -234,7 +284,10 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
         Size = (uint)Marshal.SizeOf<NotifyIconData>(),
         Window = _windowHandle,
         Id = TrayIconId,
-        Flags = flags
+        Flags = flags,
+        Tip = string.Empty,
+        Info = string.Empty,
+        InfoTitle = string.Empty
     };
 
     private void DestroyTrayHost()
@@ -251,7 +304,33 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
             _instanceHandle = 0;
         }
 
-        _iconHandle = 0; // LoadIcon returns a shared system icon; it must not be destroyed.
+        _sharedFallbackIconHandle = 0; // LoadIcon returns a shared system icon; it must not be destroyed.
+    }
+
+    private static Icon BuildStatusIcon(int? remainingPercent, bool isFresh)
+    {
+        using var bitmap = new Bitmap(32, 32);
+        using var graphics = Graphics.FromImage(bitmap);
+        graphics.Clear(isFresh ? Color.FromArgb(104, 58, 183) : Color.FromArgb(90, 90, 90));
+
+        var label = remainingPercent is int percent
+            ? Math.Clamp(percent, 0, 100).ToString(percent >= 100 ? "000" : "00")
+            : "?";
+        using var font = new Font("Segoe UI", label.Length >= 3 ? 8f : 10f, FontStyle.Bold, GraphicsUnit.Pixel);
+        var size = graphics.MeasureString(label, font);
+        using var brush = new SolidBrush(Color.White);
+        graphics.DrawString(label, font, brush, (32f - size.Width) / 2f, (32f - size.Height) / 2f);
+
+        var handle = bitmap.GetHicon();
+        try
+        {
+            using var borrowed = Icon.FromHandle(handle);
+            return (Icon)borrowed.Clone();
+        }
+        finally
+        {
+            _ = DestroyIcon(handle);
+        }
     }
 
     private static string Truncate(string value, int maxLength) =>
@@ -312,6 +391,7 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
         public int Y;
     }
 
+    private const uint WmNull = 0x0000;
     private const uint WmApp = 0x8000;
     private const uint WmLButtonDblClk = 0x0203;
     private const uint WmRButtonUp = 0x0205;
@@ -319,6 +399,8 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
     private const uint NimAdd = 0x00000000;
     private const uint NimModify = 0x00000001;
     private const uint NimDelete = 0x00000002;
+    private const uint NimSetVersion = 0x00000004;
+    private const uint NotifyIconVersion4 = 4;
     private const uint NifMessage = 0x00000001;
     private const uint NifIcon = 0x00000002;
     private const uint NifTip = 0x00000004;
@@ -331,7 +413,6 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
     private const uint TpmRightButton = 0x0002;
     private const uint TpmNoNotify = 0x0080;
     private const uint TpmReturnCmd = 0x0100;
-    private static readonly nint HwndMessage = new(-3);
     private static readonly nint IdiApplication = new(32512);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
@@ -366,6 +447,15 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern nint LoadIconW(nint instance, nint iconName);
+
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern uint RegisterWindowMessageW(string message);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool DestroyIcon(nint icon);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool PostMessageW(nint window, uint message, nuint wParam, nint lParam);
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern bool Shell_NotifyIconW(uint message, ref NotifyIconData data);
