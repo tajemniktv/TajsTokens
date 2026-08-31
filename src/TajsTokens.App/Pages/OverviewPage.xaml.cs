@@ -44,5 +44,6 @@ public sealed partial class OverviewPage : Page
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         _loadCancellation?.Cancel();
+        ViewModel.RefreshCommand.Cancel();
     }
 }
