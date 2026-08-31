@@ -20,22 +20,22 @@ public sealed partial class OverviewViewModel : ObservableObject
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
 
     [ObservableProperty]
-    public partial QuotaCardViewModel FiveHourQuota { get; set; } = UnavailableQuota("5-hour quota", "Waiting for first refresh.");
+    private QuotaCardViewModel fiveHourQuota = UnavailableQuota("5-hour quota", "Waiting for first refresh.");
 
     [ObservableProperty]
-    public partial QuotaCardViewModel WeeklyQuota { get; set; } = UnavailableQuota("Weekly quota", "Waiting for first refresh.");
+    private QuotaCardViewModel weeklyQuota = UnavailableQuota("Weekly quota", "Waiting for first refresh.");
 
     [ObservableProperty]
-    public partial string StatusText { get; set; } = "Waiting for local telemetry providers.";
+    private string statusText = "Waiting for local telemetry providers.";
 
     [ObservableProperty]
-    public partial string LastUpdatedText { get; set; } = "Not refreshed yet";
+    private string lastUpdatedText = "Not refreshed yet";
 
     [ObservableProperty]
-    public partial string HistoryCaption { get; set; } = "Tokscale hourly history will appear after the first successful refresh.";
+    private string historyCaption = "Tokscale hourly history will appear after the first successful refresh.";
 
     [ObservableProperty]
-    public partial bool IsRefreshing { get; set; }
+    private bool isRefreshing;
 
     public ObservableCollection<TokenSummaryCard> TokenSummaryCards { get; } = [];
     public ObservableCollection<ForecastPoint> HistoryPoints { get; } = [];
@@ -68,6 +68,7 @@ public sealed partial class OverviewViewModel : ObservableObject
         RecentEvents.Clear();
 
         var quotaSucceeded = false;
+        var quotaReadCompleted = false;
         var tokscaleSucceeded = false;
         var persistenceAvailable = false;
 
@@ -116,6 +117,7 @@ public sealed partial class OverviewViewModel : ObservableObject
             try
             {
                 snapshots = await quotaTask;
+                quotaReadCompleted = true;
                 quotaSucceeded = snapshots.Any(snapshot => snapshot.Kind is QuotaWindowKind.FiveHour or QuotaWindowKind.Weekly);
 
                 SetDataSourceStatus(
@@ -137,9 +139,9 @@ public sealed partial class OverviewViewModel : ObservableObject
                 AddEvent("Quota unavailable", quotaError);
             }
 
-            if (snapshots.Count > 0)
+            if (quotaReadCompleted)
             {
-                if (persistenceAvailable)
+                if (persistenceAvailable && snapshots.Count > 0)
                 {
                     try
                     {
