@@ -5,4 +5,5 @@ public sealed record FileIngestionCheckpoint(
     long LastByteOffset,
     DateTimeOffset UpdatedAtUtc,
     string? LastSessionId,
-    string ParserVersion);
+    string ParserVersion,
+    string? SourceIdentity);
