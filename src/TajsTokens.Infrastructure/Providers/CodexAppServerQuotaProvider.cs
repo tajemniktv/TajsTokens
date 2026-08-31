@@ -23,6 +23,9 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
 
         using var process = new Process
         {
+            // ExternalProcess launches fully-qualified executable paths directly on Windows. Only a
+            // PATH command name is routed through cmd/PATHEXT, so user-local paths cannot be changed
+            // by cmd.exe percent-variable expansion.
             StartInfo = ExternalProcess.CreateStartInfo(codexCommand, ["app-server", "--listen", "stdio://"])
         };
 
@@ -158,7 +161,9 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
                 throw new InvalidOperationException($"CODEX_CLI_PATH points to a file that does not exist: {configured}");
             }
 
-            return configured;
+            // Normalize even a relative override to a concrete path so Windows launches it directly
+            // rather than sending user-controlled filesystem text through cmd.exe.
+            return Path.GetFullPath(configured);
         }
 
         if (OperatingSystem.IsWindows())
