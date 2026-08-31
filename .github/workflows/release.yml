@@ -1,0 +1,72 @@
+name: release-smoke
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/TajsTokens.App/**'
+      - 'src/TajsTokens.Core/**'
+      - 'src/TajsTokens.Infrastructure/**'
+      - 'tests/**'
+      - 'TajsTokens.sln'
+      - '.github/workflows/release.yml'
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-smoke-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish-windows-x64:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore TajsTokens.sln
+
+      - name: Build
+        run: dotnet build TajsTokens.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test tests/TajsTokens.Core.Tests/TajsTokens.Core.Tests.csproj --configuration Release --no-build
+
+      - name: Publish self-contained Windows x64
+        shell: pwsh
+        run: |
+          dotnet publish src/TajsTokens.App/TajsTokens.App.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            -p:WindowsAppSDKSelfContained=true `
+            --no-restore `
+            --output artifacts/TajsTokens-win-x64
+
+          if (-not (Test-Path artifacts/TajsTokens-win-x64/TajsTokens.App.exe)) {
+            throw "Published TajsTokens.App.exe was not produced."
+          }
+
+          Compress-Archive -Path artifacts/TajsTokens-win-x64/* -DestinationPath artifacts/TajsTokens-win-x64.zip
+          $hash = (Get-FileHash artifacts/TajsTokens-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  TajsTokens-win-x64.zip" | Set-Content artifacts/TajsTokens-win-x64.sha256
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: TajsTokens-win-x64
+          path: |
+            artifacts/TajsTokens-win-x64.zip
+            artifacts/TajsTokens-win-x64.sha256
+          if-no-files-found: error

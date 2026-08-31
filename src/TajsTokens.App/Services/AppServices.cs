@@ -1,40 +1,61 @@
 using TajsTokens.Core.Interfaces;
+using TajsTokens.Core.Models;
+using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Providers;
+using TajsTokens.Infrastructure.Services;
 
 namespace TajsTokens.App.Services;
 
 /// <summary>
-/// Tiny composition root for the early local-only application. A full DI container would add more
-/// ceremony than value at this stage; provider interfaces still keep the UI isolated from adapters.
+/// Small process-lifetime composition root. Phase 2 keeps one telemetry coordinator alive for the
+/// dashboard, tray and alert engine rather than letting each surface create its own provider loop.
 /// </summary>
 public sealed class AppServices
 {
     public AppServices()
     {
         var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        var dataFolder = Path.Combine(appDataPath, "TajsTokens");
-        var databasePath = Path.Combine(dataFolder, "telemetry.db");
+        DataFolder = Path.Combine(appDataPath, "TajsTokens");
+        var databasePath = Path.Combine(DataFolder, "telemetry.db");
+        var settingsPath = Path.Combine(DataFolder, "settings.json");
 
-        // Service construction must never prevent the WinUI shell from launching. If the directory
-        // cannot be created, repository initialization will fail during refresh and the Overview can
-        // report SQLite as unavailable while still showing live Codex/Tokscale data.
         try
         {
-            Directory.CreateDirectory(dataFolder);
+            Directory.CreateDirectory(DataFolder);
         }
         catch (Exception exception)
         {
             StartupPersistenceError = exception;
         }
 
+        SettingsStore = new RuntimeSettingsStore(settingsPath);
+        Settings = SettingsStore.Load();
         Repository = new SqliteTelemetryRepository(databasePath);
         TokscaleProvider = new TokscaleProvider();
         CodexQuotaProvider = new CodexAppServerQuotaProvider();
+        Telemetry = new TelemetryCoordinator(TokscaleProvider, CodexQuotaProvider, Repository);
+        AlertEngine = new QuotaAlertEngine(Settings.LowQuotaThresholds);
     }
 
+    public string DataFolder { get; }
+    public RuntimeSettings Settings { get; private set; }
+    public RuntimeSettingsStore SettingsStore { get; }
     public SqliteTelemetryRepository Repository { get; }
     public ITokscaleProvider TokscaleProvider { get; }
     public ICodexQuotaProvider CodexQuotaProvider { get; }
+    public TelemetryCoordinator Telemetry { get; }
+    public QuotaAlertEngine AlertEngine { get; }
     public Exception? StartupPersistenceError { get; }
+
+    public event Action<RuntimeSettings, RuntimeSettings>? SettingsChanged;
+
+    public void SaveSettings(RuntimeSettings settings)
+    {
+        var previous = Settings;
+        SettingsStore.Save(settings);
+        Settings = SettingsStore.Load();
+        AlertEngine.UpdateThresholds(Settings.LowQuotaThresholds);
+        SettingsChanged?.Invoke(previous, Settings);
+    }
 }
