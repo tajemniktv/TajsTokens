@@ -13,12 +13,22 @@ public sealed class ForecastingService : IForecastingService
             throw new ArgumentException("At least one quota snapshot is required.", nameof(snapshots));
         }
 
-        var ordered = snapshots.OrderBy(x => x.CapturedAtUtc).ToArray();
-        var latest = ordered[^1];
+        // A forecast for `nowUtc` must never use observations that have not happened yet. This also
+        // makes historical/backtest forecasts deterministic when newer telemetry exists in the store.
+        var eligible = snapshots
+            .Where(x => x.CapturedAtUtc <= nowUtc)
+            .OrderBy(x => x.CapturedAtUtc)
+            .ToArray();
 
-        if (ordered.Any(x => x.Kind != latest.Kind ||
-                             !string.Equals(x.Provider, latest.Provider, StringComparison.Ordinal) ||
-                             !string.Equals(x.Profile, latest.Profile, StringComparison.Ordinal)))
+        if (eligible.Length == 0)
+        {
+            throw new ArgumentException("At least one snapshot must be captured at or before the forecast time.", nameof(snapshots));
+        }
+
+        var latest = eligible[^1];
+        if (eligible.Any(x => x.Kind != latest.Kind ||
+                              !string.Equals(x.Provider, latest.Provider, StringComparison.Ordinal) ||
+                              !string.Equals(x.Profile, latest.Profile, StringComparison.Ordinal)))
         {
             throw new ArgumentException("Forecast snapshots must belong to one quota window/provider/profile.", nameof(snapshots));
         }
@@ -28,11 +38,18 @@ public sealed class ForecastingService : IForecastingService
             return UnknownForecast(latest, nowUtc);
         }
 
-        var observedRates = new List<double>(Math.Max(0, ordered.Length - 1));
-        for (var index = 1; index < ordered.Length; index++)
+        // Reset timestamps/window duration identify the provider's quota-window instance. Restrict the
+        // burn calculation to the current instance so a reset crossing cannot look like ordinary burn,
+        // even when the first post-reset sample is numerically higher than the final pre-reset sample.
+        var currentWindow = eligible
+            .Where(x => x.WindowMinutes == latest.WindowMinutes && x.ResetsAtUtc == latest.ResetsAtUtc)
+            .ToArray();
+
+        var observedRates = new List<double>(Math.Max(0, currentWindow.Length - 1));
+        for (var index = 1; index < currentWindow.Length; index++)
         {
-            var previous = ordered[index - 1];
-            var current = ordered[index];
+            var previous = currentWindow[index - 1];
+            var current = currentWindow[index];
             if (previous.UsedPercent is null || current.UsedPercent is null)
             {
                 continue;
@@ -47,7 +64,7 @@ public sealed class ForecastingService : IForecastingService
             var delta = current.UsedPercent.Value - previous.UsedPercent.Value;
             if (delta < 0)
             {
-                // A reset/window rollover occurred. Do not smear it into the burn-rate estimate.
+                // Defensive fallback for providers that fail to advance reset metadata promptly.
                 continue;
             }
 
@@ -60,7 +77,7 @@ public sealed class ForecastingService : IForecastingService
         }
 
         var burnRate = ComputeEwma(observedRates, 0.45);
-        var elapsedSinceLatestHours = Math.Max(0, (nowUtc - latest.CapturedAtUtc).TotalHours);
+        var elapsedSinceLatestHours = (nowUtc - latest.CapturedAtUtc).TotalHours;
         var projectedRemaining = Math.Max(0, latest.RemainingPercent.Value - (burnRate * elapsedSinceLatestHours));
 
         DateTimeOffset? exhaustion = null;
@@ -78,7 +95,7 @@ public sealed class ForecastingService : IForecastingService
         }
 
         var sampleConfidence = Math.Clamp(observedRates.Count / 12.0, 0.2, 0.85);
-        var freshnessHours = Math.Max(0, (nowUtc - latest.CapturedAtUtc).TotalHours);
+        var freshnessHours = (nowUtc - latest.CapturedAtUtc).TotalHours;
         var freshnessFactor = Math.Clamp(1.0 - (freshnessHours / 6.0), 0.25, 1.0);
 
         return new Forecast(
