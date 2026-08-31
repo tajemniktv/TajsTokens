@@ -176,7 +176,10 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
 
         if (message == TrayCallbackMessage)
         {
-            var mouseMessage = unchecked((uint)lParam.ToInt64());
+            // After NIM_SETVERSION/NOTIFYICON_VERSION_4 the notification code occupies LOWORD(lParam)
+            // and the icon id occupies HIWORD(lParam). Comparing the full lParam would make every
+            // callback look different once version 4 is active and silently break tray interactions.
+            var mouseMessage = unchecked((uint)lParam.ToInt64()) & 0xFFFFu;
             if (mouseMessage == WmLButtonDblClk)
             {
                 OpenDashboardRequested?.Invoke(this, EventArgs.Empty);
