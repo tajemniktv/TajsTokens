@@ -8,7 +8,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 
 public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryRepository, ISessionIngestionCheckpointStore
 {
-    private const int CurrentSchemaVersion = 1;
+    private const int CurrentSchemaVersion = 2;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
 
     public async Task InitializeAsync(CancellationToken cancellationToken)
@@ -26,11 +26,9 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
 
         if (version == 0)
         {
-            // PR #1 previously created incompatible token/quota/checkpoint tables and wrote only
-            // synthetic bootstrap data. Recreate those pre-release tables once, then version all
-            // future migrations explicitly.
-            var migration = connection.CreateCommand();
-            migration.CommandText = """
+            // PR #1 previously created incompatible pre-release tables and wrote only synthetic
+            // bootstrap data. Recreate them atomically, then version all future migrations.
+            await ExecuteMigrationAsync(connection, """
                 DROP TABLE IF EXISTS quota_snapshots;
                 DROP TABLE IF EXISTS token_usage;
                 DROP TABLE IF EXISTS ingestion_checkpoints;
@@ -122,7 +120,8 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                     last_byte_offset INTEGER NOT NULL,
                     updated_at_utc TEXT NOT NULL,
                     last_session_id TEXT,
-                    parser_version TEXT NOT NULL
+                    parser_version TEXT NOT NULL,
+                    source_identity TEXT
                 );
 
                 CREATE INDEX IF NOT EXISTS idx_quota_snapshots_lookup
@@ -130,9 +129,17 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 CREATE INDEX IF NOT EXISTS idx_token_usage_observed ON token_usage(observed_at_utc DESC);
                 CREATE INDEX IF NOT EXISTS idx_usage_events_time ON usage_events(timestamp_utc DESC);
 
-                PRAGMA user_version = 1;
-                """;
-            await migration.ExecuteNonQueryAsync(cancellationToken);
+                PRAGMA user_version = 2;
+                """, cancellationToken);
+            return;
+        }
+
+        if (version == 1)
+        {
+            await ExecuteMigrationAsync(connection, """
+                ALTER TABLE ingestion_checkpoints ADD COLUMN source_identity TEXT;
+                PRAGMA user_version = 2;
+                """, cancellationToken);
         }
     }
 
@@ -348,7 +355,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
 
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT file_path, last_byte_offset, updated_at_utc, last_session_id, parser_version
+            SELECT file_path, last_byte_offset, updated_at_utc, last_session_id, parser_version, source_identity
             FROM ingestion_checkpoints
             WHERE file_path = $path;
             """;
@@ -365,19 +372,21 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
             reader.GetInt64(1),
             ParseUtc(reader.GetString(2)),
             reader.IsDBNull(3) ? null : reader.GetString(3),
-            reader.GetString(4));
+            reader.GetString(4),
+            reader.IsDBNull(5) ? null : reader.GetString(5));
     }
 
     public Task SaveCheckpointAsync(FileIngestionCheckpoint checkpoint, CancellationToken cancellationToken) =>
         ExecutePreparedCommandAsync(
             """
-            INSERT INTO ingestion_checkpoints(file_path, last_byte_offset, updated_at_utc, last_session_id, parser_version)
-            VALUES($path, $offset, $updated, $session, $parser)
+            INSERT INTO ingestion_checkpoints(file_path, last_byte_offset, updated_at_utc, last_session_id, parser_version, source_identity)
+            VALUES($path, $offset, $updated, $session, $parser, $identity)
             ON CONFLICT(file_path) DO UPDATE SET
               last_byte_offset = excluded.last_byte_offset,
               updated_at_utc = excluded.updated_at_utc,
               last_session_id = excluded.last_session_id,
-              parser_version = excluded.parser_version;
+              parser_version = excluded.parser_version,
+              source_identity = excluded.source_identity;
             """,
             cmd =>
             {
@@ -386,8 +395,30 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 cmd.Parameters.AddWithValue("$updated", SerializeUtc(checkpoint.UpdatedAtUtc));
                 cmd.Parameters.AddWithValue("$session", DbValue(checkpoint.LastSessionId));
                 cmd.Parameters.AddWithValue("$parser", checkpoint.ParserVersion);
+                cmd.Parameters.AddWithValue("$identity", DbValue(checkpoint.SourceIdentity));
             },
             cancellationToken);
+
+    private static async Task ExecuteMigrationAsync(
+        SqliteConnection connection,
+        string sql,
+        CancellationToken cancellationToken)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = sql; // nosemgrep: migration SQL is compile-time-only and contains no external values.
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
 
     private async Task ExecutePreparedCommandAsync(string sql, Action<SqliteCommand> configure, CancellationToken cancellationToken)
     {
@@ -395,7 +426,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
         await connection.OpenAsync(cancellationToken);
 
         var command = connection.CreateCommand();
-        command.CommandText = sql; // nosemgrep: csharp.lang.security.sqli.csharp-sqli -- private callers pass compile-time SQL; all external values are parameters.
+        command.CommandText = sql; // nosemgrep: private callers pass compile-time SQL; all external values are parameters.
         configure(command);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
