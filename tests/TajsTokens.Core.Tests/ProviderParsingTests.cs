@@ -134,6 +134,33 @@ public sealed class ProviderParsingTests
     }
 
     [Fact]
+    public void WindowsCommandLine_DoesNotPreserveQuotesAroundTokscaleGroupByValue()
+    {
+        var commandLine = ExternalProcess.BuildWindowsCommandLine(
+            "tokscale",
+            ["models", "--json", "--group-by", "client,model", "--client", "codex"]);
+
+        Assert.Contains("--group-by client,model", commandLine, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"client,model\"", commandLine, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TokscaleCommandDiscovery_FallsBackOnlyForMissingCommand()
+    {
+        var missing = new ExternalCommandResult(
+            1,
+            string.Empty,
+            "'tokscale' is not recognized as an internal or external command, operable program or batch file.");
+        var realCliError = new ExternalCommandResult(
+            1,
+            string.Empty,
+            "Error: Invalid group-by value: client,model");
+
+        Assert.True(TokscaleProvider.LooksLikeCommandNotFound(missing, "tokscale"));
+        Assert.False(TokscaleProvider.LooksLikeCommandNotFound(realCliError, "tokscale"));
+    }
+
+    [Fact]
     public void CodexInitialize_RejectsJsonRpcErrorsImmediately()
     {
         const string json = """
