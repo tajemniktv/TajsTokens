@@ -22,10 +22,12 @@ Tokscale is intentionally the bootstrap/default token-accounting backend. TajsTo
 
 - .NET SDK 10.0+
 - Windows 11 (or Windows 10 19041+) for launching the WinUI app
-- Codex installed and authenticated, with `codex` available on `PATH`
-- Tokscale installed and available on `PATH` for token accounting and hourly history
+- an externally executable Codex CLI for live app-server quota reads: on `PATH`, in a supported user-local Codex install location, or selected with `CODEX_CLI_PATH`
+- Tokscale either installed on `PATH` **or** Node.js/npm with `npx` available; TajsTokens falls back to `npx --yes tokscale@latest` when a global Tokscale command is absent
 
-TajsTokens does not install or modify either tool automatically.
+Codex Desktop may contain its own packaged/private Codex runtime while still exposing no `codex` command to ordinary desktop processes. TajsTokens deliberately does not execute protected `WindowsApps` package resources directly. A future quota fallback can use rollout telemetry when no externally executable app-server CLI is available.
+
+TajsTokens does not install or modify Codex or Tokscale automatically. The `npx` Tokscale path uses npm's normal package cache and may take longer on its first invocation.
 
 ## Build
 
@@ -58,18 +60,27 @@ The Overview refreshes once when opened and can be refreshed manually. Phase 2 w
 
 ### Tokscale
 
-Phase 1 uses Tokscale's documented machine-readable CLI boundary. TajsTokens currently invokes:
+Phase 1 uses Tokscale's documented machine-readable CLI boundary. TajsTokens invokes the equivalent of:
 
 ```powershell
 tokscale models --json --group-by client,model --client codex
 tokscale hourly --json --client codex
 ```
 
-If Tokscale is missing or returns an unsupported payload, token cards fail independently while Codex quota can remain live. No synthetic token values are substituted.
+When `tokscale` is not available globally, the same arguments are run through the documented zero-install path:
+
+```powershell
+npx --yes tokscale@latest models --json --group-by client,model --client codex
+npx --yes tokscale@latest hourly --json --client codex
+```
+
+If neither Tokscale nor npx is available, or Tokscale returns an unsupported payload, token cards fail independently while Codex quota can remain live. No synthetic token values are substituted.
 
 ### Codex quota
 
 TajsTokens starts a short-lived, read-only local Codex app-server session, performs the required initialize handshake, and calls `account/rateLimits/read`. Quota windows are identified by their provider-reported duration (300 minutes for the five-hour window and 10,080 minutes for weekly) rather than assuming `primary` always means five-hour. The provider's `resetsAt` timestamp is authoritative.
+
+Codex executable resolution prefers `CODEX_CLI_PATH`, then known user-local Windows Codex CLI locations, then the `codex` command on `PATH`. If app-server exits before responding, TajsTokens surfaces its bounded stderr/exit status so a missing or broken CLI is diagnosable instead of appearing as a generic stdout EOF.
 
 This quota read does **not** create a model turn.
 

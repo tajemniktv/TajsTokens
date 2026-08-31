@@ -10,10 +10,11 @@ internal static class ExternalProcess
     public static ProcessStartInfo CreateStartInfo(string command, IReadOnlyList<string> arguments)
     {
         ProcessStartInfo startInfo;
-        if (OperatingSystem.IsWindows())
+        if (OperatingSystem.IsWindows() && !Path.IsPathFullyQualified(command))
         {
             // Using cmd.exe lets PATH/PATHEXT resolve both native executables and npm/bun .cmd shims.
-            // All callers in this assembly pass fixed executable names and fixed arguments.
+            // Keep this only for command names. Concrete executable paths are launched directly below
+            // so cmd.exe cannot expand shell syntax such as %VAR% inside an otherwise valid path.
             startInfo = new ProcessStartInfo(Environment.GetEnvironmentVariable("ComSpec") ?? "cmd.exe");
             startInfo.ArgumentList.Add("/d");
             startInfo.ArgumentList.Add("/s");
@@ -93,7 +94,7 @@ internal static class ExternalProcess
         }
     }
 
-    private static string BuildWindowsCommandLine(string command, IReadOnlyList<string> arguments)
+    internal static string BuildWindowsCommandLine(string command, IReadOnlyList<string> arguments)
     {
         var parts = new List<string>(arguments.Count + 1) { QuoteForCmd(command) };
         parts.AddRange(arguments.Select(QuoteForCmd));
@@ -102,7 +103,11 @@ internal static class ExternalProcess
 
     private static string QuoteForCmd(string value)
     {
-        if (value.Length > 0 && value.All(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' or '.' or ':' or '/' or '\\'))
+        // Commas and @ are ordinary characters to cmd.exe and are common in CLI enums/package names
+        // such as Tokscale's client,model group-by value and tokscale@latest. Quoting those values is
+        // unnecessary and, through nested cmd -> npm .cmd shims, can preserve the quote characters as
+        // part of argv. Keep shell metacharacters (&|<>^%!()) on the quoted path instead.
+        if (value.Length > 0 && value.All(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' or '.' or ':' or '/' or '\\' or ',' or '@' or '+' or '='))
         {
             return value;
         }

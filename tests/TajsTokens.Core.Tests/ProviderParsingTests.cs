@@ -134,6 +134,51 @@ public sealed class ProviderParsingTests
     }
 
     [Fact]
+    public void WindowsCommandLine_DoesNotPreserveQuotesAroundTokscaleGroupByValue()
+    {
+        var commandLine = ExternalProcess.BuildWindowsCommandLine(
+            "tokscale",
+            ["models", "--json", "--group-by", "client,model", "--client", "codex"]);
+
+        Assert.Contains("--group-by client,model", commandLine, StringComparison.Ordinal);
+        Assert.DoesNotContain("\"client,model\"", commandLine, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ExternalProcess_ConcreteExecutablePathBypassesShellExpansion()
+    {
+        const string pathWithPercentSequence = @"C:\Tools\%TEMP%\codex.exe";
+
+        var startInfo = ExternalProcess.CreateStartInfo(
+            pathWithPercentSequence,
+            ["app-server", "--listen", "stdio://"]);
+
+        Assert.Equal(pathWithPercentSequence, startInfo.FileName);
+        Assert.Equal(["app-server", "--listen", "stdio://"], startInfo.ArgumentList.ToArray());
+    }
+
+    [Fact]
+    public void TokscaleCommandDiscovery_FallsBackOnlyForMissingCommand()
+    {
+        var missing = new ExternalCommandResult(
+            1,
+            string.Empty,
+            "'tokscale' is not recognized as an internal or external command, operable program or batch file.");
+        var realCliError = new ExternalCommandResult(
+            127,
+            string.Empty,
+            "Error: a Tokscale dependency exited with status 127");
+        var missingNpx = new ExternalCommandResult(
+            1,
+            string.Empty,
+            "'npx' is not recognized as an internal or external command, operable program or batch file.");
+
+        Assert.True(TokscaleProvider.LooksLikeCommandNotFound(missing, "tokscale"));
+        Assert.False(TokscaleProvider.LooksLikeCommandNotFound(realCliError, "tokscale"));
+        Assert.True(TokscaleProvider.LooksLikeCommandNotFound(missingNpx, "npx"));
+    }
+
+    [Fact]
     public void CodexInitialize_RejectsJsonRpcErrorsImmediately()
     {
         const string json = """
