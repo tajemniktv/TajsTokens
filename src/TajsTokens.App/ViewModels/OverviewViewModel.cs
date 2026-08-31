@@ -20,22 +20,22 @@ public sealed partial class OverviewViewModel : ObservableObject
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
 
     [ObservableProperty]
-    private QuotaCardViewModel fiveHourQuota = UnavailableQuota("5-hour quota", "Waiting for first refresh.");
+    public partial QuotaCardViewModel FiveHourQuota { get; set; } = UnavailableQuota("5-hour quota", "Waiting for first refresh.");
 
     [ObservableProperty]
-    private QuotaCardViewModel weeklyQuota = UnavailableQuota("Weekly quota", "Waiting for first refresh.");
+    public partial QuotaCardViewModel WeeklyQuota { get; set; } = UnavailableQuota("Weekly quota", "Waiting for first refresh.");
 
     [ObservableProperty]
-    private string statusText = "Waiting for local telemetry providers.";
+    public partial string StatusText { get; set; } = "Waiting for local telemetry providers.";
 
     [ObservableProperty]
-    private string lastUpdatedText = "Not refreshed yet";
+    public partial string LastUpdatedText { get; set; } = "Not refreshed yet";
 
     [ObservableProperty]
-    private string historyCaption = "Tokscale hourly history will appear after the first successful refresh.";
+    public partial string HistoryCaption { get; set; } = "Tokscale hourly history will appear after the first successful refresh.";
 
     [ObservableProperty]
-    private bool isRefreshing;
+    public partial bool IsRefreshing { get; set; }
 
     public ObservableCollection<TokenSummaryCard> TokenSummaryCards { get; } = [];
     public ObservableCollection<ForecastPoint> HistoryPoints { get; } = [];
@@ -67,11 +67,8 @@ public sealed partial class OverviewViewModel : ObservableObject
         DataSources.Clear();
         RecentEvents.Clear();
 
-        var now = DateTimeOffset.UtcNow;
         var quotaSucceeded = false;
         var tokscaleSucceeded = false;
-        string? quotaError = null;
-        string? tokscaleError = null;
 
         try
         {
@@ -97,7 +94,7 @@ public sealed partial class OverviewViewModel : ObservableObject
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                tokscaleError = SummarizeError(exception);
+                var tokscaleError = SummarizeError(exception);
                 RenderTokenUnavailable();
                 DataSources.Add(new DataSourceStatusCard("Tokscale", "Unavailable", tokscaleError));
                 AddEvent("Tokscale unavailable", tokscaleError);
@@ -127,7 +124,7 @@ public sealed partial class OverviewViewModel : ObservableObject
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                quotaError = SummarizeError(exception);
+                var quotaError = SummarizeError(exception);
                 FiveHourQuota = UnavailableQuota("5-hour quota", quotaError);
                 WeeklyQuota = UnavailableQuota("Weekly quota", quotaError);
                 DataSources.Add(new DataSourceStatusCard("Codex app-server", "Unavailable", quotaError));
