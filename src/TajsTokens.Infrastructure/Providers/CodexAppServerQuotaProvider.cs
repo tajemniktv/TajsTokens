@@ -45,7 +45,8 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
                     clientInfo = new { name = "tajs-tokens", title = "TajsTokens", version = "0.1" }
                 }
             });
-            await ReadResponseAsync(process, 0, token);
+            var initializeResponse = await ReadResponseAsync(process, 0, token);
+            EnsureSuccessfulJsonRpcResponse(initializeResponse, "initialize");
 
             // Match the stable app-server protocol exactly: neither notification nor rate-limit read
             // takes params. In particular, do not send an empty object for account/rateLimits/read.
@@ -64,6 +65,26 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
         }
     }
 
+    internal static void EnsureSuccessfulJsonRpcResponse(string json, string operation)
+    {
+        using var document = JsonDocument.Parse(json);
+        var root = document.RootElement;
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException($"Codex app-server {operation} response was not a JSON object.");
+        }
+
+        if (root.TryGetProperty("error", out var error))
+        {
+            throw new InvalidOperationException($"Codex app-server {operation} failed: {error.GetRawText()}");
+        }
+
+        if (!root.TryGetProperty("result", out _))
+        {
+            throw new InvalidOperationException($"Codex app-server {operation} response did not contain a result.");
+        }
+    }
+
     internal static IReadOnlyList<QuotaSnapshot> ParseRateLimitsResponse(string json, DateTimeOffset capturedAtUtc)
     {
         using var document = JsonDocument.Parse(json);
@@ -78,41 +99,39 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
             throw new InvalidOperationException("Codex app-server response did not contain a result object.");
         }
 
-        JsonElement limits;
+        JsonElement limits = default;
         var source = "codex-app-server";
+
+        // Newer app-server versions may expose several independent metered products. Only an
+        // explicitly named Codex bucket is safe to treat as Codex quota. Never guess from object
+        // enumeration order; when that bucket is absent, fall back only to the legacy Codex view.
         if (result.TryGetProperty("rateLimitsByLimitId", out var byLimit) && byLimit.ValueKind == JsonValueKind.Object)
         {
-            if (byLimit.TryGetProperty("codex", out var codexLimits) && codexLimits.ValueKind == JsonValueKind.Object)
+            if (byLimit.TryGetProperty("codex", out var codexLimits))
             {
+                if (codexLimits.ValueKind != JsonValueKind.Object)
+                {
+                    throw new InvalidOperationException("Codex app-server returned a malformed 'codex' rate-limit bucket.");
+                }
+
                 limits = codexLimits;
                 source += ":codex";
             }
-            else
+            else if (result.TryGetProperty("rateLimits", out var legacyLimits) && legacyLimits.ValueKind == JsonValueKind.Object)
             {
-                var first = byLimit.EnumerateObject().FirstOrDefault(property => property.Value.ValueKind == JsonValueKind.Object);
-                limits = first.Value;
-                if (limits.ValueKind == JsonValueKind.Undefined)
-                {
-                    limits = default;
-                }
-                else
-                {
-                    source += $":{first.Name}";
-                }
+                limits = legacyLimits;
+                source += ":legacy";
             }
         }
         else if (result.TryGetProperty("rateLimits", out var legacyLimits) && legacyLimits.ValueKind == JsonValueKind.Object)
         {
             limits = legacyLimits;
-        }
-        else
-        {
-            limits = default;
+            source += ":legacy";
         }
 
         if (limits.ValueKind != JsonValueKind.Object)
         {
-            throw new InvalidOperationException("Codex app-server response did not contain rate-limit windows.");
+            throw new InvalidOperationException("Codex app-server response did not contain an identifiable Codex rate-limit view.");
         }
 
         var snapshots = new List<QuotaSnapshot>(2);
