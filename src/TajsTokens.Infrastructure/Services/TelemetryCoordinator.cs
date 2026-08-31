@@ -92,8 +92,12 @@ public sealed class TelemetryCoordinator
             var tokenFresh = false;
             try
             {
-                tokenUsages = await _tokscaleProvider.GetUsageObservationsAsync(refreshToken);
-                hourlyBuckets = await _tokscaleProvider.GetHourlyUsageAsync(refreshToken);
+                // Treat Tokscale's model/hourly pair as one snapshot generation. Do not publish a
+                // newly fetched half beside last-known-good data if the second call fails.
+                var freshTokenUsages = await _tokscaleProvider.GetUsageObservationsAsync(refreshToken);
+                var freshHourlyBuckets = await _tokscaleProvider.GetHourlyUsageAsync(refreshToken);
+                tokenUsages = freshTokenUsages;
+                hourlyBuckets = freshHourlyBuckets;
                 tokenFresh = true;
                 sources.Add(new ProviderHealthSnapshot(
                     "Tokscale",
@@ -109,6 +113,8 @@ public sealed class TelemetryCoordinator
             {
                 var detail = SummarizeError(exception);
                 var hasPrevious = previous.TokenUsages.Count > 0 || previous.HourlyBuckets.Count > 0;
+                tokenUsages = previous.TokenUsages;
+                hourlyBuckets = previous.HourlyBuckets;
                 sources.Add(new ProviderHealthSnapshot(
                     "Tokscale",
                     hasPrevious ? TelemetryHealthState.Stale : TelemetryHealthState.Unavailable,
@@ -118,29 +124,56 @@ public sealed class TelemetryCoordinator
             }
 
             var quotaSnapshots = previous.QuotaSnapshots;
+            IReadOnlyList<QuotaSnapshot> freshQuotaSnapshots = [];
             var quotaFresh = false;
+            var quotaResponseHasSupportedWindow = false;
             try
             {
-                var fresh = await _quotaProvider.GetQuotaSnapshotsAsync(refreshToken);
-                quotaFresh = fresh.Any(snapshot => snapshot.Kind is QuotaWindowKind.FiveHour or QuotaWindowKind.Weekly);
+                freshQuotaSnapshots = await _quotaProvider.GetQuotaSnapshotsAsync(refreshToken);
+                var supported = freshQuotaSnapshots
+                    .Where(snapshot => snapshot.Kind is QuotaWindowKind.FiveHour or QuotaWindowKind.Weekly)
+                    .ToArray();
+                var hasFiveHour = supported.Any(snapshot => snapshot.Kind == QuotaWindowKind.FiveHour);
+                var hasWeekly = supported.Any(snapshot => snapshot.Kind == QuotaWindowKind.Weekly);
+                quotaResponseHasSupportedWindow = supported.Length > 0;
+                quotaFresh = hasFiveHour && hasWeekly;
+
                 if (quotaFresh)
                 {
-                    quotaSnapshots = fresh;
+                    quotaSnapshots = freshQuotaSnapshots;
                 }
+                else if (quotaResponseHasSupportedWindow)
+                {
+                    // A valid but partial provider response must not erase an omitted quota lane.
+                    // Merge the observed lane into last-known-good state, but keep global freshness
+                    // false so callers cannot mistake the mixed set for one complete live snapshot.
+                    quotaSnapshots = MergeQuotaSnapshots(previous.QuotaSnapshots, freshQuotaSnapshots);
+                }
+
+                var sourceState = quotaFresh
+                    ? TelemetryHealthState.Live
+                    : quotaResponseHasSupportedWindow
+                        ? TelemetryHealthState.Stale
+                        : TelemetryHealthState.Unavailable;
+                var detail = quotaFresh
+                    ? $"{supported.Length} supported provider-authoritative quota window(s). No model turn was created."
+                    : quotaResponseHasSupportedWindow
+                        ? "Codex returned only part of the supported quota set; observed lanes were merged with last-known-good data and the combined state is marked stale."
+                        : "The app-server responded but did not expose a supported five-hour or weekly window.";
 
                 sources.Add(new ProviderHealthSnapshot(
                     "Codex app-server",
-                    quotaFresh ? TelemetryHealthState.Live : TelemetryHealthState.Unavailable,
-                    quotaFresh
-                        ? $"{fresh.Count} provider-authoritative quota window(s). No model turn was created."
-                        : "The app-server responded but did not expose a supported five-hour or weekly window.",
+                    sourceState,
+                    detail,
                     quotaFresh ? startedAt : PreviousSuccess(previous, "Codex app-server")));
                 events.Add(new TelemetryRefreshEvent(
                     startedAt,
                     "Quota refresh",
                     quotaFresh
-                        ? "Captured provider-authoritative Codex quota and reset timestamps."
-                        : "Codex app-server returned no supported five-hour or weekly quota windows."));
+                        ? "Captured a complete provider-authoritative Codex quota snapshot."
+                        : quotaResponseHasSupportedWindow
+                            ? "Captured a partial Codex quota response; retained omitted last-known-good lanes as stale."
+                            : "Codex app-server returned no supported five-hour or weekly quota windows."));
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -154,11 +187,14 @@ public sealed class TelemetryCoordinator
                 events.Add(new TelemetryRefreshEvent(startedAt, "Quota unavailable", detail));
             }
 
-            if (persistenceAvailable && quotaFresh)
+            if (persistenceAvailable && quotaResponseHasSupportedWindow)
             {
                 try
                 {
-                    foreach (var snapshot in quotaSnapshots)
+                    // Persist only observations actually returned during this refresh. Never write a
+                    // retained stale lane as though the provider had just observed it again.
+                    foreach (var snapshot in freshQuotaSnapshots.Where(snapshot =>
+                                 snapshot.Kind is QuotaWindowKind.FiveHour or QuotaWindowKind.Weekly))
                     {
                         await _repository.UpsertQuotaSnapshotAsync(snapshot, refreshToken);
                     }
@@ -171,7 +207,7 @@ public sealed class TelemetryCoordinator
                     events.Add(new TelemetryRefreshEvent(
                         startedAt,
                         "Persistence error",
-                        $"Live quota is still available, but this snapshot was not stored: {detail}"));
+                        $"Live provider data is still available, but fresh quota observations were not stored: {detail}"));
                 }
             }
 
@@ -235,22 +271,50 @@ public sealed class TelemetryCoordinator
         }
 
         using var timer = new PeriodicTimer(interval);
-        while (await timer.WaitForNextTickAsync(cancellationToken))
+        try
         {
-            try
+            while (await timer.WaitForNextTickAsync(cancellationToken))
             {
-                await RefreshAsync(RefreshTrigger.Interval, cancellationToken);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch
-            {
-                // Keep the next interval alive, including when a manual refresh preempted this tick.
-                // The dashboard/tray retain the previous snapshot until a successful refresh lands.
+                try
+                {
+                    await RefreshAsync(RefreshTrigger.Interval, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch
+                {
+                    // Keep the next interval alive, including when a manual refresh preempted this tick.
+                    // The dashboard/tray retain the previous snapshot until a successful refresh lands.
+                }
             }
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            // PeriodicTimer propagates cancellation from WaitForNextTickAsync. Reconfiguration and
+            // normal shutdown both intentionally end this loop without surfacing a faulted task.
+        }
+    }
+
+    private static IReadOnlyList<QuotaSnapshot> MergeQuotaSnapshots(
+        IReadOnlyList<QuotaSnapshot> previous,
+        IReadOnlyList<QuotaSnapshot> fresh)
+    {
+        var merged = previous.ToDictionary(
+            snapshot => (snapshot.Provider, snapshot.Profile, snapshot.Kind),
+            snapshot => snapshot);
+
+        foreach (var snapshot in fresh)
+        {
+            merged[(snapshot.Provider, snapshot.Profile, snapshot.Kind)] = snapshot;
+        }
+
+        return merged.Values
+            .OrderBy(snapshot => snapshot.Kind)
+            .ThenBy(snapshot => snapshot.Provider, StringComparer.Ordinal)
+            .ThenBy(snapshot => snapshot.Profile, StringComparer.Ordinal)
+            .ToArray();
     }
 
     private static DateTimeOffset? PreviousSuccess(TelemetrySnapshot snapshot, string provider) =>
