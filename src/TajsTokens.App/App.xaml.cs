@@ -12,6 +12,7 @@ public partial class App : Application
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private readonly WindowsSystemTrayService _trayService = new();
     private readonly WindowsStartupRegistrationService _startupService = new();
+    private CancellationTokenSource? _periodicCancellation;
     private Window? _window;
     private DispatcherQueue? _dispatcher;
     private bool _exitRequested;
@@ -43,6 +44,7 @@ public partial class App : Application
         }
 
         Services.Telemetry.SnapshotUpdated += OnSnapshotUpdated;
+        Services.SettingsChanged += OnSettingsChanged;
 
         var startHidden = args.Arguments
             .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -52,9 +54,29 @@ public partial class App : Application
             ShowDashboard();
         }
 
+        StartPeriodicCollector();
+    }
+
+    private void StartPeriodicCollector()
+    {
+        var previous = Interlocked.Exchange(
+            ref _periodicCancellation,
+            CancellationTokenSource.CreateLinkedTokenSource(_lifetimeCancellation.Token));
+        previous?.Cancel();
+        previous?.Dispose();
+
+        var token = _periodicCancellation.Token;
         _ = Services.Telemetry.RunPeriodicAsync(
             TimeSpan.FromSeconds(Services.Settings.PollIntervalSeconds),
-            _lifetimeCancellation.Token);
+            token);
+    }
+
+    private void OnSettingsChanged(RuntimeSettings previous, RuntimeSettings current)
+    {
+        if (previous.PollIntervalSeconds != current.PollIntervalSeconds && !_exitRequested)
+        {
+            StartPeriodicCollector();
+        }
     }
 
     private void OnSnapshotUpdated(TelemetrySnapshot snapshot)
@@ -161,7 +183,11 @@ public partial class App : Application
 
         _exitRequested = true;
         _lifetimeCancellation.Cancel();
+        _periodicCancellation?.Cancel();
+        _periodicCancellation?.Dispose();
+        _periodicCancellation = null;
         Services.Telemetry.SnapshotUpdated -= OnSnapshotUpdated;
+        Services.SettingsChanged -= OnSettingsChanged;
         _trayService.Dispose();
         _window?.Close();
         Exit();
