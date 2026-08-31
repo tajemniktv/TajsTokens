@@ -56,6 +56,11 @@ internal static class ExternalProcess
                 throw new InvalidOperationException($"Failed to start {command}.");
             }
 
+            // One-shot CLI invocations never write to stdin. Close it immediately so commands that
+            // probe/read stdin observe EOF instead of waiting until our timeout. Long-lived protocol
+            // clients (such as Codex app-server) use CreateStartInfo directly and keep stdin open.
+            process.StandardInput.Close();
+
             var outputTask = process.StandardOutput.ReadToEndAsync(timeoutSource.Token);
             var errorTask = process.StandardError.ReadToEndAsync(timeoutSource.Token);
             await process.WaitForExitAsync(timeoutSource.Token);
