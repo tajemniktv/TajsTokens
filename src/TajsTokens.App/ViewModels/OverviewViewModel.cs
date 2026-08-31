@@ -56,10 +56,10 @@ public sealed partial class OverviewViewModel : ObservableObject
 
     public async Task RefreshAsync(CancellationToken cancellationToken)
     {
-        if (!await _refreshGate.WaitAsync(0, cancellationToken))
-        {
-            return;
-        }
+        // Do not silently drop a refresh requested while another one is unwinding. Waiting here
+        // gives a newly loaded page or explicit user refresh a chance to run as soon as the active
+        // refresh releases the gate; page unload still cancels the waiter through its token.
+        await _refreshGate.WaitAsync(cancellationToken);
 
         IsRefreshing = true;
         StatusText = "Refreshing local telemetry…";
@@ -158,8 +158,16 @@ public sealed partial class OverviewViewModel : ObservableObject
                     }
                 }
 
-                await RenderQuotaAsync(QuotaWindowKind.FiveHour, snapshots, persistenceAvailable, cancellationToken);
-                await RenderQuotaAsync(QuotaWindowKind.Weekly, snapshots, persistenceAvailable, cancellationToken);
+                persistenceAvailable = await RenderQuotaAsync(
+                    QuotaWindowKind.FiveHour,
+                    snapshots,
+                    persistenceAvailable,
+                    cancellationToken);
+                persistenceAvailable = await RenderQuotaAsync(
+                    QuotaWindowKind.Weekly,
+                    snapshots,
+                    persistenceAvailable,
+                    cancellationToken);
             }
 
             var localNow = DateTimeOffset.Now;
@@ -190,7 +198,7 @@ public sealed partial class OverviewViewModel : ObservableObject
         }
     }
 
-    private async Task RenderQuotaAsync(
+    private async Task<bool> RenderQuotaAsync(
         QuotaWindowKind kind,
         IReadOnlyList<QuotaSnapshot> currentSnapshots,
         bool persistenceAvailable,
@@ -205,7 +213,7 @@ public sealed partial class OverviewViewModel : ObservableObject
         if (current is null)
         {
             SetQuotaCard(kind, UnavailableQuota(title, "Codex did not expose this window on the latest refresh."));
-            return;
+            return persistenceAvailable;
         }
 
         Forecast? forecast = null;
@@ -231,6 +239,7 @@ public sealed partial class OverviewViewModel : ObservableObject
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
+                persistenceAvailable = false;
                 var persistenceError = SummarizeError(exception);
                 SetDataSourceStatus("SQLite", "Error", persistenceError);
                 AddEvent("History unavailable", $"Live quota is still shown: {persistenceError}");
@@ -238,6 +247,7 @@ public sealed partial class OverviewViewModel : ObservableObject
         }
 
         SetQuotaCard(kind, BuildQuotaCard(title, current, forecast));
+        return persistenceAvailable;
     }
 
     private void SetQuotaCard(QuotaWindowKind kind, QuotaCardViewModel card)
