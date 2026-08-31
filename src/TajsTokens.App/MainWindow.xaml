@@ -1,0 +1,28 @@
+<Window
+    x:Class="TajsTokens.App.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:local="using:TajsTokens.App"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d"
+    Title="TajsTokens">
+
+    <Grid>
+        <NavigationView x:Name="AppNavigation"
+                        IsBackButtonVisible="Collapsed"
+                        IsSettingsVisible="False"
+                        PaneDisplayMode="LeftCompact"
+                        SelectionChanged="OnNavigationSelectionChanged">
+            <NavigationView.MenuItems>
+                <NavigationViewItem Content="Overview" Tag="overview" Icon="View" IsSelected="True" />
+                <NavigationViewItem Content="Usage" Tag="usage" Icon="AllApps" />
+                <NavigationViewItem Content="Agents" Tag="agents" Icon="People" />
+                <NavigationViewItem Content="Forecasts" Tag="forecasts" Icon="Preview" />
+                <NavigationViewItem Content="Events" Tag="events" Icon="Calendar" />
+                <NavigationViewItem Content="Settings" Tag="settings" Icon="Setting" />
+            </NavigationView.MenuItems>
+            <Frame x:Name="ContentFrame" />
+        </NavigationView>
+    </Grid>
+</Window>
