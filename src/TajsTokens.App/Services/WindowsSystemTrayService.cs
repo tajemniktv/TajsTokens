@@ -13,12 +13,16 @@ namespace TajsTokens.App.Services;
 public sealed class WindowsSystemTrayService : ISystemTrayService
 {
     private Forms.NotifyIcon? _notifyIcon;
+    private Forms.ToolStripMenuItem? _notificationsItem;
+    private Forms.ToolStripMenuItem? _launchAtLoginItem;
     private Icon? _statusIcon;
     private bool _disposed;
 
     public event EventHandler? OpenDashboardRequested;
     public event EventHandler? RefreshRequested;
     public event EventHandler? ExitRequested;
+    public event Action<bool>? NotificationsEnabledChanged;
+    public event Action<bool>? LaunchAtLoginChanged;
 
     public void Initialize()
     {
@@ -35,11 +39,26 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
         var refreshItem = new Forms.ToolStripMenuItem("Refresh telemetry");
         refreshItem.Click += (_, _) => RefreshRequested?.Invoke(this, EventArgs.Empty);
 
+        _notificationsItem = new Forms.ToolStripMenuItem("Notifications enabled")
+        {
+            CheckOnClick = true
+        };
+        _notificationsItem.Click += (_, _) => NotificationsEnabledChanged?.Invoke(_notificationsItem.Checked);
+
+        _launchAtLoginItem = new Forms.ToolStripMenuItem("Start with Windows")
+        {
+            CheckOnClick = true
+        };
+        _launchAtLoginItem.Click += (_, _) => LaunchAtLoginChanged?.Invoke(_launchAtLoginItem.Checked);
+
         var exitItem = new Forms.ToolStripMenuItem("Exit");
         exitItem.Click += (_, _) => ExitRequested?.Invoke(this, EventArgs.Empty);
 
         menu.Items.Add(openItem);
         menu.Items.Add(refreshItem);
+        menu.Items.Add(new Forms.ToolStripSeparator());
+        menu.Items.Add(_notificationsItem);
+        menu.Items.Add(_launchAtLoginItem);
         menu.Items.Add(new Forms.ToolStripSeparator());
         menu.Items.Add(exitItem);
 
@@ -66,6 +85,24 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
         _notifyIcon.Icon = replacement;
         _statusIcon?.Dispose();
         _statusIcon = replacement;
+    }
+
+    public void UpdatePreferences(bool notificationsEnabled, bool launchAtLogin)
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (_notificationsItem is not null)
+        {
+            _notificationsItem.Checked = notificationsEnabled;
+        }
+
+        if (_launchAtLoginItem is not null)
+        {
+            _launchAtLoginItem.Checked = launchAtLogin;
+        }
     }
 
     public void ShowNotification(string title, string message)
@@ -97,6 +134,8 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
             _notifyIcon = null;
         }
 
+        _notificationsItem = null;
+        _launchAtLoginItem = null;
         _statusIcon?.Dispose();
         _statusIcon = null;
     }
