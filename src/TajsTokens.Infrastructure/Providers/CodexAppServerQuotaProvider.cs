@@ -32,7 +32,10 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
                 throw new InvalidOperationException("Failed to start Codex app-server.");
             }
 
-            var stderrTask = process.StandardError.ReadToEndAsync(token);
+            // Keep stderr drained so a noisy app-server cannot block on a full pipe. Provider errors
+            // are surfaced through the JSON-RPC response/timeout rather than copied into telemetry.
+            _ = process.StandardError.ReadToEndAsync(token);
+
             await WriteJsonLineAsync(process, new
             {
                 method = "initialize",
@@ -44,8 +47,10 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
             });
             await ReadResponseAsync(process, 0, token);
 
-            await WriteJsonLineAsync(process, new { method = "initialized", @params = new { } });
-            await WriteJsonLineAsync(process, new { method = "account/rateLimits/read", id = 1, @params = new { } });
+            // Match the stable app-server protocol exactly: neither notification nor rate-limit read
+            // takes params. In particular, do not send an empty object for account/rateLimits/read.
+            await WriteJsonLineAsync(process, new { method = "initialized" });
+            await WriteJsonLineAsync(process, new { method = "account/rateLimits/read", id = 1 });
             var response = await ReadResponseAsync(process, 1, token);
             return ParseRateLimitsResponse(response, DateTimeOffset.UtcNow);
         }
