@@ -19,10 +19,11 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
         using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutSource.CancelAfter(RequestTimeout);
         var token = timeoutSource.Token;
+        var codexCommand = ResolveCodexCommand();
 
         using var process = new Process
         {
-            StartInfo = ExternalProcess.CreateStartInfo("codex", ["app-server", "--listen", "stdio://"])
+            StartInfo = ExternalProcess.CreateStartInfo(codexCommand, ["app-server", "--listen", "stdio://"])
         };
 
         try
@@ -32,9 +33,10 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
                 throw new InvalidOperationException("Failed to start Codex app-server.");
             }
 
-            // Keep stderr drained so a noisy app-server cannot block on a full pipe. Provider errors
-            // are surfaced through the JSON-RPC response/timeout rather than copied into telemetry.
-            _ = process.StandardError.ReadToEndAsync(token);
+            // Drain stderr continuously so a noisy app-server cannot block. Unlike the original
+            // bootstrap implementation, keep the task so an early process exit can surface the real
+            // startup error (for example a missing CLI) instead of collapsing into a generic EOF.
+            var stderrTask = process.StandardError.ReadToEndAsync(token);
 
             await WriteJsonLineAsync(process, new
             {
@@ -45,14 +47,14 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
                     clientInfo = new { name = "tajs-tokens", title = "TajsTokens", version = "0.1" }
                 }
             });
-            var initializeResponse = await ReadResponseAsync(process, 0, token);
+            var initializeResponse = await ReadResponseAsync(process, 0, codexCommand, stderrTask, token);
             EnsureSuccessfulJsonRpcResponse(initializeResponse, "initialize");
 
             // Match the stable app-server protocol exactly: neither notification nor rate-limit read
             // takes params. In particular, do not send an empty object for account/rateLimits/read.
             await WriteJsonLineAsync(process, new { method = "initialized" });
             await WriteJsonLineAsync(process, new { method = "account/rateLimits/read", id = 1 });
-            var response = await ReadResponseAsync(process, 1, token);
+            var response = await ReadResponseAsync(process, 1, codexCommand, stderrTask, token);
             return ParseRateLimitsResponse(response, DateTimeOffset.UtcNow);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -146,6 +148,44 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
             .ToArray();
     }
 
+    internal static string ResolveCodexCommand()
+    {
+        var configured = Environment.GetEnvironmentVariable("CODEX_CLI_PATH");
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            if (!File.Exists(configured))
+            {
+                throw new InvalidOperationException($"CODEX_CLI_PATH points to a file that does not exist: {configured}");
+            }
+
+            return configured;
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (!string.IsNullOrWhiteSpace(localAppData))
+            {
+                // The standalone Windows installer and some Desktop builds place an executable copy
+                // in one of these user-local locations. Prefer those over protected WindowsApps
+                // package resources, which may exist but cannot be launched by another desktop app.
+                var candidates = new[]
+                {
+                    Path.Combine(localAppData, "Programs", "OpenAI", "Codex", "bin", "codex.exe"),
+                    Path.Combine(localAppData, "OpenAI", "Codex", "bin", "codex.exe")
+                };
+
+                var candidate = candidates.FirstOrDefault(File.Exists);
+                if (candidate is not null)
+                {
+                    return candidate;
+                }
+            }
+        }
+
+        return "codex";
+    }
+
     private static void AddWindow(
         JsonElement limits,
         string propertyName,
@@ -219,14 +259,34 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
         await process.StandardInput.FlushAsync();
     }
 
-    private static async Task<string> ReadResponseAsync(Process process, int id, CancellationToken cancellationToken)
+    private static async Task<string> ReadResponseAsync(
+        Process process,
+        int id,
+        string codexCommand,
+        Task<string> stderrTask,
+        CancellationToken cancellationToken)
     {
         while (true)
         {
             var line = await process.StandardOutput.ReadLineAsync(cancellationToken);
             if (line is null)
             {
-                throw new InvalidOperationException("Codex app-server closed stdout before returning the requested response.");
+                await process.WaitForExitAsync(cancellationToken);
+                var stderr = (await stderrTask).ReplaceLineEndings(" ").Trim();
+                if (stderr.Length > 500)
+                {
+                    stderr = stderr[..500] + "…";
+                }
+
+                if (LooksLikeMissingCodexCommand(stderr, codexCommand))
+                {
+                    throw new InvalidOperationException(
+                        "Codex CLI is not available to TajsTokens. Codex Desktop can run with a bundled/private CLI that is not exposed to normal desktop processes. Install the standalone Codex CLI, put it on PATH, or set CODEX_CLI_PATH to an executable user-local codex.exe.");
+                }
+
+                var detail = string.IsNullOrWhiteSpace(stderr) ? "No stderr was produced." : stderr;
+                throw new InvalidOperationException(
+                    $"Codex app-server exited with code {process.ExitCode} before returning response {id}: {detail}");
             }
 
             try
@@ -246,5 +306,13 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
                 // the expected response never arrives before the timeout.
             }
         }
+    }
+
+    private static bool LooksLikeMissingCodexCommand(string stderr, string codexCommand)
+    {
+        var commandName = Path.GetFileNameWithoutExtension(codexCommand);
+        return stderr.Contains($"'{commandName}' is not recognized", StringComparison.OrdinalIgnoreCase) ||
+               stderr.Contains($"{commandName}: command not found", StringComparison.OrdinalIgnoreCase) ||
+               stderr.Contains($"{commandName}: not found", StringComparison.OrdinalIgnoreCase);
     }
 }
