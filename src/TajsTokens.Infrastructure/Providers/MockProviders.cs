@@ -31,11 +31,17 @@ public sealed class MockTokscaleProvider : ITokscaleProvider
 
         return Task.FromResult<IReadOnlyList<TokenUsage>>(usage);
     }
-}
 
-// A concrete Tokscale JSON adapter intentionally does not live in this bootstrap PR. Issue #3 will
-// bind to a verified/versioned Tokscale machine-readable contract with fixture tests instead of
-// guessing property names and silently dropping fields.
+    public Task<IReadOnlyList<TokenTimeBucket>> GetHourlyUsageAsync(CancellationToken cancellationToken)
+    {
+        IReadOnlyList<TokenTimeBucket> buckets =
+        [
+            new("09:00", null, new TokenBreakdown(3_000, 7_000, 0, 800, 200, 11_000)),
+            new("10:00", null, new TokenBreakdown(4_000, 9_000, 0, 900, 250, 14_150))
+        ];
+        return Task.FromResult(buckets);
+    }
+}
 
 public sealed class StubCodexQuotaProvider : ICodexQuotaProvider
 {
