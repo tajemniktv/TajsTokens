@@ -16,6 +16,8 @@ public sealed partial class OverviewViewModel : ObservableObject
     private readonly TelemetryCoordinator _telemetry;
     private readonly SqliteTelemetryRepository _repository;
     private readonly ForecastingService _forecastingService = new();
+    private readonly SemaphoreSlim _applyGate = new(1, 1);
+    private long _newestRequestedSnapshotTicks = DateTimeOffset.MinValue.UtcDateTime.Ticks;
 
     [ObservableProperty]
     private QuotaCardViewModel fiveHourQuota = UnavailableQuota("5-hour quota", "Waiting for first background refresh.");
@@ -75,50 +77,98 @@ public sealed partial class OverviewViewModel : ObservableObject
 
     public async Task ApplySnapshotAsync(TelemetrySnapshot snapshot, CancellationToken cancellationToken)
     {
-        DataSources.Clear();
-        foreach (var source in snapshot.Sources)
+        var snapshotTicks = snapshot.CapturedAtUtc.UtcDateTime.Ticks;
+        RegisterNewestRequestedSnapshot(snapshotTicks);
+
+        await _applyGate.WaitAsync(cancellationToken);
+        try
         {
-            DataSources.Add(new DataSourceStatusCard(
-                source.Provider,
-                FormatHealth(source.State),
-                source.Detail));
+            // Event dispatch, initial page load and manual refresh can all request renders. Reject an
+            // older snapshot if a newer coordinator snapshot was already requested before this one
+            // acquired the render gate, so an awaited SQLite history read cannot restore stale UI.
+            if (IsSuperseded(snapshotTicks))
+            {
+                return;
+            }
+
+            DataSources.Clear();
+            foreach (var source in snapshot.Sources)
+            {
+                DataSources.Add(new DataSourceStatusCard(
+                    source.Provider,
+                    FormatHealth(source.State),
+                    source.Detail));
+            }
+
+            RecentEvents.Clear();
+            foreach (var telemetryEvent in snapshot.Events.OrderByDescending(item => item.TimestampUtc))
+            {
+                RecentEvents.Add(new EventItem(
+                    telemetryEvent.TimestampUtc.ToLocalTime().ToString("HH:mm:ss"),
+                    telemetryEvent.Type,
+                    telemetryEvent.Description));
+            }
+
+            if (snapshot.TokenDataFresh || snapshot.TokenUsages.Count > 0 || snapshot.HourlyBuckets.Count > 0)
+            {
+                RenderTokenSummary(snapshot.TokenUsages, snapshot.TokenDataFresh);
+                RenderHourlyHistory(snapshot.HourlyBuckets, snapshot.TokenDataFresh);
+            }
+            else
+            {
+                RenderTokenUnavailable();
+            }
+
+            await RenderQuotaAsync(QuotaWindowKind.FiveHour, snapshot, cancellationToken);
+            if (IsSuperseded(snapshotTicks))
+            {
+                return;
+            }
+
+            await RenderQuotaAsync(QuotaWindowKind.Weekly, snapshot, cancellationToken);
+            if (IsSuperseded(snapshotTicks))
+            {
+                return;
+            }
+
+            LastUpdatedText = snapshot.CapturedAtUtc == DateTimeOffset.MinValue
+                ? "Not refreshed yet"
+                : $"Checked {snapshot.CapturedAtUtc.ToLocalTime():HH:mm:ss}";
+
+            StatusText = (snapshot.TokenDataFresh, snapshot.QuotaDataFresh, snapshot.PersistenceAvailable, snapshot.HasAnyData) switch
+            {
+                (true, true, true, _) => "Live background telemetry",
+                (true, true, false, _) => "Live telemetry · history unavailable",
+                (true, false, _, _) or (false, true, _, _) => "Partial telemetry",
+                (false, false, _, true) => "Stale telemetry · using last known good data",
+                _ => "Telemetry unavailable"
+            };
         }
-
-        RecentEvents.Clear();
-        foreach (var telemetryEvent in snapshot.Events.OrderByDescending(item => item.TimestampUtc))
+        finally
         {
-            RecentEvents.Add(new EventItem(
-                telemetryEvent.TimestampUtc.ToLocalTime().ToString("HH:mm:ss"),
-                telemetryEvent.Type,
-                telemetryEvent.Description));
+            _applyGate.Release();
         }
-
-        if (snapshot.TokenUsages.Count > 0)
-        {
-            RenderTokenSummary(snapshot.TokenUsages, snapshot.TokenDataFresh);
-            RenderHourlyHistory(snapshot.HourlyBuckets, snapshot.TokenDataFresh);
-        }
-        else
-        {
-            RenderTokenUnavailable();
-        }
-
-        await RenderQuotaAsync(QuotaWindowKind.FiveHour, snapshot, cancellationToken);
-        await RenderQuotaAsync(QuotaWindowKind.Weekly, snapshot, cancellationToken);
-
-        LastUpdatedText = snapshot.CapturedAtUtc == DateTimeOffset.MinValue
-            ? "Not refreshed yet"
-            : $"Checked {snapshot.CapturedAtUtc.ToLocalTime():HH:mm:ss}";
-
-        StatusText = (snapshot.TokenDataFresh, snapshot.QuotaDataFresh, snapshot.PersistenceAvailable, snapshot.HasAnyData) switch
-        {
-            (true, true, true, _) => "Live background telemetry",
-            (true, true, false, _) => "Live telemetry · history unavailable",
-            (true, false, _, _) or (false, true, _, _) => "Partial telemetry",
-            (false, false, _, true) => "Stale telemetry · using last known good data",
-            _ => "Telemetry unavailable"
-        };
     }
+
+    private void RegisterNewestRequestedSnapshot(long snapshotTicks)
+    {
+        while (true)
+        {
+            var observed = Volatile.Read(ref _newestRequestedSnapshotTicks);
+            if (snapshotTicks <= observed)
+            {
+                return;
+            }
+
+            if (Interlocked.CompareExchange(ref _newestRequestedSnapshotTicks, snapshotTicks, observed) == observed)
+            {
+                return;
+            }
+        }
+    }
+
+    private bool IsSuperseded(long snapshotTicks) =>
+        snapshotTicks < Volatile.Read(ref _newestRequestedSnapshotTicks);
 
     private async Task RenderQuotaAsync(
         QuotaWindowKind kind,
