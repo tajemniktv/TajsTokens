@@ -13,6 +13,7 @@ namespace TajsTokens.Infrastructure.Providers;
 public sealed class TokscaleProvider : ITokscaleProvider
 {
     private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(45);
+    private static readonly string[] TokenPropertyNames = ["input", "cacheRead", "cacheWrite", "output", "reasoning", "total"];
 
     public async Task<IReadOnlyList<TokenUsage>> GetUsageObservationsAsync(CancellationToken cancellationToken)
     {
@@ -46,9 +47,13 @@ public sealed class TokscaleProvider : ITokscaleProvider
 
         foreach (var entry in entries)
         {
-            if (entry.ValueKind != JsonValueKind.Object)
+            EnsureObjectRow(entry, "model");
+            ValidateTokenFields(entry, "model");
+
+            var model = ReadString(entry, "model");
+            if (string.IsNullOrWhiteSpace(model))
             {
-                continue;
+                throw new JsonException("Tokscale model row did not contain a non-empty model identifier.");
             }
 
             var client = ReadString(entry, "client") ?? "codex";
@@ -61,7 +66,7 @@ public sealed class TokscaleProvider : ITokscaleProvider
             results.Add(new TokenUsage(
                 "tokscale",
                 client,
-                ReadString(entry, "model") ?? "unknown",
+                model,
                 observedAtUtc,
                 breakdown,
                 Profile: ReadString(entry, "profile") ?? "default",
@@ -79,14 +84,12 @@ public sealed class TokscaleProvider : ITokscaleProvider
 
         foreach (var entry in entries)
         {
-            if (entry.ValueKind != JsonValueKind.Object)
-            {
-                continue;
-            }
+            EnsureObjectRow(entry, "hourly");
+            ValidateTokenFields(entry, "hourly");
 
             var label = ReadBucketLabel(entry);
             var startUtc = ReadBucketTimestamp(entry);
-            results.Add(new TokenTimeBucket(label, startUtc, ReadBreakdown(entry)));
+            results.Add(new TokenTimeBucket("tokscale", label, startUtc, ReadBreakdown(entry)));
         }
 
         return results;
@@ -113,6 +116,37 @@ public sealed class TokscaleProvider : ITokscaleProvider
         }
 
         throw new JsonException("Tokscale payload did not contain a supported entry array.");
+    }
+
+    private static void EnsureObjectRow(JsonElement entry, string rowKind)
+    {
+        if (entry.ValueKind != JsonValueKind.Object)
+        {
+            throw new JsonException($"Tokscale {rowKind} entry was not an object.");
+        }
+    }
+
+    private static void ValidateTokenFields(JsonElement entry, string rowKind)
+    {
+        var foundAny = false;
+        foreach (var propertyName in TokenPropertyNames)
+        {
+            if (!entry.TryGetProperty(propertyName, out var property))
+            {
+                continue;
+            }
+
+            foundAny = true;
+            if (!TryReadLongValue(property, out var value) || value < 0)
+            {
+                throw new JsonException($"Tokscale {rowKind} row contained an invalid '{propertyName}' token value.");
+            }
+        }
+
+        if (!foundAny)
+        {
+            throw new JsonException($"Tokscale {rowKind} row did not contain any recognized token fields.");
+        }
     }
 
     private static TokenBreakdown ReadBreakdown(JsonElement entry)
@@ -144,6 +178,11 @@ public sealed class TokscaleProvider : ITokscaleProvider
         string? hour;
         if (entry.TryGetProperty("hour", out var hourElement) && hourElement.ValueKind == JsonValueKind.Number && hourElement.TryGetInt32(out var numericHour))
         {
+            if (numericHour is < 0 or > 23)
+            {
+                throw new JsonException("Tokscale hourly row contained an hour outside the 0-23 range.");
+            }
+
             hour = $"{numericHour:00}:00";
         }
         else
@@ -151,12 +190,19 @@ public sealed class TokscaleProvider : ITokscaleProvider
             hour = ReadString(entry, "hour");
         }
 
-        return (date, hour) switch
+        var label = (date, hour) switch
         {
             ({ Length: > 0 }, { Length: > 0 }) => $"{date} {hour}",
             (_, { Length: > 0 }) => hour,
-            _ => ReadString(entry, "label") ?? ReadString(entry, "timestamp") ?? "hour"
+            _ => ReadString(entry, "label") ?? ReadString(entry, "timestamp") ?? ReadString(entry, "startUtc") ?? ReadString(entry, "start")
         };
+
+        if (string.IsNullOrWhiteSpace(label))
+        {
+            throw new JsonException("Tokscale hourly row did not contain a supported time-bucket identifier.");
+        }
+
+        return label;
     }
 
     private static DateTimeOffset? ReadBucketTimestamp(JsonElement entry)
@@ -197,17 +243,23 @@ public sealed class TokscaleProvider : ITokscaleProvider
             return null;
         }
 
-        if (property.ValueKind == JsonValueKind.Number && property.TryGetInt64(out var number))
+        return TryReadLongValue(property, out var value) ? value : null;
+    }
+
+    private static bool TryReadLongValue(JsonElement property, out long value)
+    {
+        if (property.ValueKind == JsonValueKind.Number && property.TryGetInt64(out value))
         {
-            return number;
+            return true;
         }
 
-        if (property.ValueKind == JsonValueKind.String && long.TryParse(property.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out number))
+        if (property.ValueKind == JsonValueKind.String && long.TryParse(property.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out value))
         {
-            return number;
+            return true;
         }
 
-        return null;
+        value = 0;
+        return false;
     }
 
     private static void EnsureSuccess(ExternalCommandResult result, string operation)
