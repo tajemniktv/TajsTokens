@@ -17,6 +17,9 @@ public sealed class TelemetryCoordinator
     private readonly ICodexQuotaProvider _quotaProvider;
     private readonly SqliteTelemetryRepository _repository;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private readonly object _activeRefreshSync = new();
+    private CancellationTokenSource? _activeRefreshCancellation;
+    private RefreshTrigger? _activeRefreshTrigger;
     private TelemetrySnapshot _latest = TelemetrySnapshot.Empty;
 
     public TelemetryCoordinator(
@@ -35,7 +38,29 @@ public sealed class TelemetryCoordinator
 
     public async Task<TelemetrySnapshot> RefreshAsync(RefreshTrigger trigger, CancellationToken cancellationToken)
     {
+        // An explicit user refresh should not sit behind a 20-90 second provider call started by the
+        // background timer. Cancel only non-manual work; another manual refresh simply queues behind
+        // the one already requested rather than starting a competing provider scan.
+        if (trigger == RefreshTrigger.Manual)
+        {
+            lock (_activeRefreshSync)
+            {
+                if (_activeRefreshTrigger is not null and not RefreshTrigger.Manual)
+                {
+                    _activeRefreshCancellation?.Cancel();
+                }
+            }
+        }
+
         await _refreshGate.WaitAsync(cancellationToken);
+        using var refreshCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        lock (_activeRefreshSync)
+        {
+            _activeRefreshCancellation = refreshCancellation;
+            _activeRefreshTrigger = trigger;
+        }
+
+        var refreshToken = refreshCancellation.Token;
         try
         {
             var startedAt = DateTimeOffset.UtcNow;
@@ -47,7 +72,7 @@ public sealed class TelemetryCoordinator
             var persistenceAvailable = false;
             try
             {
-                await _repository.InitializeAsync(cancellationToken);
+                await _repository.InitializeAsync(refreshToken);
                 persistenceAvailable = true;
                 sources.Add(new ProviderHealthSnapshot(
                     "SQLite",
@@ -67,8 +92,8 @@ public sealed class TelemetryCoordinator
             var tokenFresh = false;
             try
             {
-                tokenUsages = await _tokscaleProvider.GetUsageObservationsAsync(cancellationToken);
-                hourlyBuckets = await _tokscaleProvider.GetHourlyUsageAsync(cancellationToken);
+                tokenUsages = await _tokscaleProvider.GetUsageObservationsAsync(refreshToken);
+                hourlyBuckets = await _tokscaleProvider.GetHourlyUsageAsync(refreshToken);
                 tokenFresh = true;
                 sources.Add(new ProviderHealthSnapshot(
                     "Tokscale",
@@ -96,7 +121,7 @@ public sealed class TelemetryCoordinator
             var quotaFresh = false;
             try
             {
-                var fresh = await _quotaProvider.GetQuotaSnapshotsAsync(cancellationToken);
+                var fresh = await _quotaProvider.GetQuotaSnapshotsAsync(refreshToken);
                 quotaFresh = fresh.Any(snapshot => snapshot.Kind is QuotaWindowKind.FiveHour or QuotaWindowKind.Weekly);
                 if (quotaFresh)
                 {
@@ -135,7 +160,7 @@ public sealed class TelemetryCoordinator
                 {
                     foreach (var snapshot in quotaSnapshots)
                     {
-                        await _repository.UpsertQuotaSnapshotAsync(snapshot, cancellationToken);
+                        await _repository.UpsertQuotaSnapshotAsync(snapshot, refreshToken);
                     }
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
@@ -150,6 +175,7 @@ public sealed class TelemetryCoordinator
                 }
             }
 
+            refreshToken.ThrowIfCancellationRequested();
             stopwatch.Stop();
             events.Add(new TelemetryRefreshEvent(
                 DateTimeOffset.UtcNow,
@@ -174,6 +200,15 @@ public sealed class TelemetryCoordinator
         }
         finally
         {
+            lock (_activeRefreshSync)
+            {
+                if (ReferenceEquals(_activeRefreshCancellation, refreshCancellation))
+                {
+                    _activeRefreshCancellation = null;
+                    _activeRefreshTrigger = null;
+                }
+            }
+
             _refreshGate.Release();
         }
     }
@@ -195,8 +230,8 @@ public sealed class TelemetryCoordinator
         }
         catch
         {
-            // Individual provider failures are normalized into snapshots. This outer guard is only
-            // for an unexpected coordinator failure; the periodic chain must still survive it.
+            // A manual refresh can preempt startup work, and unexpected coordinator failures must not
+            // kill the periodic chain. Provider failures themselves are normalized into snapshots.
         }
 
         using var timer = new PeriodicTimer(interval);
@@ -212,7 +247,8 @@ public sealed class TelemetryCoordinator
             }
             catch
             {
-                // Keep the next interval alive. The dashboard/tray retain the previous snapshot.
+                // Keep the next interval alive, including when a manual refresh preempted this tick.
+                // The dashboard/tray retain the previous snapshot until a successful refresh lands.
             }
         }
     }
@@ -239,8 +275,8 @@ public sealed class TelemetryCoordinator
         return absolute switch
         {
             >= 1_000_000_000 => $"{value / 1_000_000_000d:0.00}B",
-            >= 1_000_000 => $"{value / 1_000_000d:0.0}M",
-            >= 1_000 => $"{value / 1_000d:0.0}K",
+            >= 1_000_000 => $"{value / 1_000_000d:0.0M}M",
+            >= 1_000 => $"{value / 1_000d:0.0K}K",
             _ => value.ToString("N0")
         };
     }
