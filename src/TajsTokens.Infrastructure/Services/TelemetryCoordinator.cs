@@ -275,8 +275,8 @@ public sealed class TelemetryCoordinator
         return absolute switch
         {
             >= 1_000_000_000 => $"{value / 1_000_000_000d:0.00}B",
-            >= 1_000_000 => $"{value / 1_000_000d:0.0M}M",
-            >= 1_000 => $"{value / 1_000d:0.0K}K",
+            >= 1_000_000 => $"{value / 1_000_000d:0.0}M",
+            >= 1_000 => $"{value / 1_000d:0.0}K",
             _ => value.ToString("N0")
         };
     }
