@@ -2,7 +2,7 @@
 
 TajsTokens is a local-first native Windows telemetry dashboard for Codex/AI coding-agent usage.
 
-The current Phase 2 work turns the real-data dashboard into a background Windows utility:
+Through Phase 2 the application is a usable background Windows utility rather than a mock dashboard:
 
 - Codex subscription quota and provider reset timestamps from the local `codex app-server`;
 - token totals, cache/output/reasoning breakdowns, and hourly history from Tokscale;
@@ -13,16 +13,19 @@ The current Phase 2 work turns the real-data dashboard into a background Windows
 - optional per-user Start with Windows registration for published/apphost builds;
 - deduplicated low-quota, reset, and provider-health notifications;
 - quota snapshots persisted to local SQLite so forecasting can learn from real history;
-- resilient local runtime settings under `%LOCALAPPDATA%\TajsTokens\settings.json`.
+- resilient local runtime settings under `%LOCALAPPDATA%\TajsTokens\settings.json`;
+- a self-contained Windows x64 portable publish smoke artifact.
 
-Tokscale is intentionally the bootstrap/default token-accounting backend. TajsTokens will later grow a native accounting engine and reconcile it against Tokscale before native accounting becomes the default.
+Tokscale is intentionally the bootstrap/default token-accounting backend. Phase 3 adds direct Codex rollout/session observability; native accounting later runs beside Tokscale in reconciliation mode before becoming the default.
 
 ## Projects
 
 - `src/TajsTokens.App` - WinUI 3 desktop shell, tray surface, and composition root
 - `src/TajsTokens.Core` - domain models, alert/forecast services, service interfaces
 - `src/TajsTokens.Infrastructure` - SQLite/settings persistence, real local providers, background telemetry coordination
-- `tests/TajsTokens.Core.Tests` - unit and provider-contract tests
+- `tests/TajsTokens.Core.Tests` - unit, persistence, and provider-contract tests
+
+See `ARCHITECTURE.md` for the current data flow, SQLite schema, lifecycle, and privacy boundaries, and `ROADMAP.md` for the phase plan.
 
 ## Prerequisites
 
@@ -60,7 +63,7 @@ The application remains unpackaged (`WindowsPackageType=None`) for local develop
 dotnet run --project src/TajsTokens.App/TajsTokens.App.csproj
 ```
 
-Phase 2 starts one background telemetry loop for the whole process. Closing the dashboard hides it by default rather than terminating TajsTokens; use the tray **Exit** action for a full shutdown. The tray can reopen the dashboard or trigger an immediate refresh.
+TajsTokens starts one background telemetry loop for the whole process. Closing the dashboard hides it by default rather than terminating TajsTokens; use the tray **Exit** action for a full shutdown. The tray can reopen the dashboard or trigger an immediate refresh.
 
 The default background poll interval is 60 seconds. Runtime settings are normalized and stored in `%LOCALAPPDATA%\TajsTokens\settings.json`; corrupt/missing settings fall back to safe defaults. The tray exposes notification and Start with Windows toggles; a richer Settings page and editable polling/threshold controls remain follow-up work.
 
@@ -96,7 +99,7 @@ This quota read does **not** create a model turn. When a quota refresh fails aft
 
 ## Tray and notifications
 
-The Phase 2 tray icon shows the most constrained known quota as a small numeric badge when quota is available. Its tooltip summarizes five-hour/weekly remaining values and whether the quota snapshot is live or stale.
+The tray icon shows the most constrained known quota as a small numeric badge when quota is available. Its tooltip summarizes five-hour/weekly remaining values and whether the quota snapshot is live or stale. Explorer/taskbar restarts re-register the icon automatically.
 
 Current quick actions:
 
@@ -110,7 +113,7 @@ Current background alerts cover low quota thresholds (30/20/10/5% by default), d
 
 ## Portable release artifact
 
-The Phase 2 release workflow publishes a self-contained Windows x64 folder, including the Windows App SDK runtime, and uploads it as a ZIP artifact plus SHA-256 sidecar after the same restore/build/test checks used by CI. This is the first distribution smoke test, not the final installer/update story.
+The release smoke workflow publishes a self-contained Windows x64 folder, including the Windows App SDK runtime, and uploads it as a ZIP artifact plus SHA-256 sidecar after the same restore/build/test checks used by CI. This is the first distribution milestone, not the final installer/update story.
 
 Code signing, a per-user installer, WinGet, update verification, and an in-app updater remain tracked in #36.
 
@@ -118,6 +121,8 @@ Code signing, a per-user installer, WinGet, update verification, and an in-app u
 
 The local database remains under `%LOCALAPPDATA%\TajsTokens\telemetry.db`; runtime settings live beside it in `settings.json`. These paths are outside the application directory so portable/update experiments do not overwrite local history.
 
-Quota snapshots are stored as normalized telemetry. Tokscale model/hour aggregates are rendered from the provider snapshot and are not duplicated into SQLite on every refresh.
+SQLite schema version 3 includes the normalized foundation for quota/token/session/agent/event/reset/announcement/checkpoint data plus repository/workspace identities and forecast snapshots. Phase 1/2 actively persist quota history; later collectors populate the reserved normalized tables rather than redesigning persistence.
 
-TajsTokens does not persist prompt text, reasoning text, shell output, or raw Codex rollout payloads in this phase.
+Tokscale model/hour aggregates are currently rendered from the provider snapshot and are not duplicated into SQLite on every refresh.
+
+TajsTokens does not persist prompt text, reasoning text, shell output, auth material, or raw Codex rollout payloads.
