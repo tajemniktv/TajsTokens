@@ -96,7 +96,7 @@ public sealed class ProviderParsingTests
         var snapshot = Assert.Single(CodexAppServerQuotaProvider.ParseRateLimitsResponse(json, DateTimeOffset.UnixEpoch));
 
         Assert.Equal(QuotaWindowKind.Weekly, snapshot.Kind);
-        Assert.Equal(55, snapshot.RemainingPercent);
+        Assert.Equal(55d, snapshot.RemainingPercent);
         Assert.Equal(10_080, snapshot.WindowMinutes);
     }
 
@@ -124,7 +124,7 @@ public sealed class ProviderParsingTests
         var snapshots = CodexAppServerQuotaProvider.ParseRateLimitsResponse(json, DateTimeOffset.UnixEpoch);
 
         Assert.Equal(2, snapshots.Count);
-        Assert.Equal(25, snapshots.Single(snapshot => snapshot.Kind == QuotaWindowKind.FiveHour).UsedPercent);
-        Assert.Equal(40, snapshots.Single(snapshot => snapshot.Kind == QuotaWindowKind.Weekly).UsedPercent);
+        Assert.Equal(25d, snapshots.Single(snapshot => snapshot.Kind == QuotaWindowKind.FiveHour).UsedPercent);
+        Assert.Equal(40d, snapshots.Single(snapshot => snapshot.Kind == QuotaWindowKind.Weekly).UsedPercent);
     }
 }

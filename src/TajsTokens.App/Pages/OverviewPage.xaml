@@ -5,12 +5,7 @@
     xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
     xmlns:models="using:TajsTokens.App.Models"
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    xmlns:vm="using:TajsTokens.App.ViewModels"
     mc:Ignorable="d">
-
-    <Page.DataContext>
-        <vm:OverviewViewModel />
-    </Page.DataContext>
 
     <ScrollViewer HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled">
         <Grid Padding="20" RowSpacing="14" MinWidth="520">
@@ -21,10 +16,24 @@
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <StackPanel Grid.Row="0" Spacing="2">
-                <TextBlock FontSize="30" FontWeight="SemiBold" Text="Overview" />
-                <TextBlock Text="Local-first telemetry cockpit for Codex and agent usage." Opacity="0.85" />
-            </StackPanel>
+            <Grid Grid.Row="0" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel Spacing="3">
+                    <TextBlock FontSize="30" FontWeight="SemiBold" Text="Overview" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <TextBlock Text="{Binding StatusText}" Opacity="0.9" />
+                        <TextBlock Text="·" Opacity="0.5" />
+                        <TextBlock Text="{Binding LastUpdatedText}" Opacity="0.7" />
+                    </StackPanel>
+                </StackPanel>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
+                    <ProgressRing Width="20" Height="20" IsActive="{Binding IsRefreshing}" />
+                    <Button Command="{Binding RefreshCommand}" Content="Refresh" />
+                </StackPanel>
+            </Grid>
 
             <Grid Grid.Row="1" ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
@@ -35,11 +44,11 @@
                 <Border Grid.Column="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="14" Padding="18">
                     <StackPanel Spacing="7">
                         <TextBlock Text="{Binding FiveHourQuota.Title}" FontWeight="SemiBold" FontSize="18" />
-                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Remaining:" FontSize="16" /><TextBlock Text="{Binding FiveHourQuota.RemainingPercent}" FontSize="16" /></StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Remaining:" FontSize="16" /><TextBlock Text="{Binding FiveHourQuota.RemainingPercent}" FontSize="16" FontWeight="SemiBold" /></StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Reset in:" /><TextBlock Text="{Binding FiveHourQuota.ResetCountdown}" /></StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Burn rate:" /><TextBlock Text="{Binding FiveHourQuota.BurnRate}" /></StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Predicted exhaustion:" /><TextBlock Text="{Binding FiveHourQuota.PredictedExhaustion}" /></StackPanel>
-                        <TextBlock Text="{Binding FiveHourQuota.GaugeText}" Opacity="0.8" />
+                        <TextBlock Text="{Binding FiveHourQuota.GaugeText}" Opacity="0.75" TextWrapping="Wrap" />
                         <InfoBar IsOpen="True" IsClosable="False" Severity="{Binding FiveHourQuota.Severity}" Message="{Binding FiveHourQuota.SurvivalMessage}" />
                     </StackPanel>
                 </Border>
@@ -47,40 +56,90 @@
                 <Border Grid.Column="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="14" Padding="18">
                     <StackPanel Spacing="7">
                         <TextBlock Text="{Binding WeeklyQuota.Title}" FontWeight="SemiBold" FontSize="18" />
-                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Remaining:" FontSize="16" /><TextBlock Text="{Binding WeeklyQuota.RemainingPercent}" FontSize="16" /></StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Remaining:" FontSize="16" /><TextBlock Text="{Binding WeeklyQuota.RemainingPercent}" FontSize="16" FontWeight="SemiBold" /></StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Reset in:" /><TextBlock Text="{Binding WeeklyQuota.ResetCountdown}" /></StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Burn rate:" /><TextBlock Text="{Binding WeeklyQuota.BurnRate}" /></StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Predicted exhaustion:" /><TextBlock Text="{Binding WeeklyQuota.PredictedExhaustion}" /></StackPanel>
-                        <TextBlock Text="{Binding WeeklyQuota.GaugeText}" Opacity="0.8" />
+                        <TextBlock Text="{Binding WeeklyQuota.GaugeText}" Opacity="0.75" TextWrapping="Wrap" />
                         <InfoBar IsOpen="True" IsClosable="False" Severity="{Binding WeeklyQuota.Severity}" Message="{Binding WeeklyQuota.SurvivalMessage}" />
                     </StackPanel>
                 </Border>
             </Grid>
 
             <Grid Grid.Row="2" ColumnSpacing="12">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="2*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="2*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
                 <Border Grid.Column="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="14" Padding="18">
                     <StackPanel Spacing="10">
-                        <TextBlock Text="Token / quota history" FontWeight="SemiBold" FontSize="18" />
+                        <TextBlock Text="Hourly token usage" FontWeight="SemiBold" FontSize="18" />
                         <ItemsControl ItemsSource="{Binding HistoryPoints}">
-                            <ItemsControl.ItemsPanel><ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate><DataTemplate x:DataType="models:ForecastPoint"><StackPanel VerticalAlignment="Bottom" Spacing="4"><Border Width="18" Height="{x:Bind Value}" Background="{ThemeResource AccentFillColorDefaultBrush}" CornerRadius="8" VerticalAlignment="Bottom" /><TextBlock Text="{x:Bind Label}" FontSize="11" HorizontalAlignment="Center" /></StackPanel></DataTemplate></ItemsControl.ItemTemplate>
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom" /></ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="models:ForecastPoint">
+                                    <StackPanel VerticalAlignment="Bottom" Spacing="4" ToolTipService.ToolTip="{x:Bind Tooltip}">
+                                        <Border Width="20" Height="{x:Bind Value}" Background="{ThemeResource AccentFillColorDefaultBrush}" CornerRadius="7" VerticalAlignment="Bottom" />
+                                        <TextBlock Text="{x:Bind Label}" FontSize="10" HorizontalAlignment="Center" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
                         </ItemsControl>
-                        <TextBlock Text="Forecast confidence is heuristic and intentionally conservative in this starter build." Opacity="0.75" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding HistoryCaption}" Opacity="0.75" TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
                 <Border Grid.Column="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="14" Padding="18">
-                    <StackPanel Spacing="10"><TextBlock Text="Token summary" FontWeight="SemiBold" FontSize="18" /><ItemsControl ItemsSource="{Binding TokenSummaryCards}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:TokenSummaryCard"><Grid Margin="0,2"><Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions><StackPanel><TextBlock Text="{x:Bind Label}" FontWeight="SemiBold" /><TextBlock Text="{x:Bind Trend}" Opacity="0.75" FontSize="12" /></StackPanel><TextBlock Grid.Column="1" Text="{x:Bind Value}" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" /></Grid></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Token summary" FontWeight="SemiBold" FontSize="18" />
+                        <ItemsControl ItemsSource="{Binding TokenSummaryCards}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="models:TokenSummaryCard">
+                                    <Grid Margin="0,2">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="{x:Bind Label}" FontWeight="SemiBold" /><TextBlock Text="{x:Bind Detail}" Opacity="0.7" FontSize="11" TextWrapping="Wrap" /></StackPanel>
+                                        <TextBlock Grid.Column="1" Text="{x:Bind Value}" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" Margin="12,0,0,0" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
                 </Border>
             </Grid>
 
             <Grid Grid.Row="3" ColumnSpacing="12">
-                <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
                 <Border Grid.Column="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="14" Padding="18">
-                    <StackPanel Spacing="10"><TextBlock Text="Active agents" FontWeight="SemiBold" FontSize="18" /><ItemsControl ItemsSource="{Binding ActiveAgents}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:AgentNode"><StackPanel Spacing="4"><TextBlock Text="{x:Bind Name}" FontWeight="SemiBold" /><TextBlock Text="{x:Bind State}" Opacity="0.85" /><TextBlock Text="{x:Bind Model}" Opacity="0.85" /><ItemsControl ItemsSource="{x:Bind Children}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:AgentNode"><TextBlock Margin="16,0,0,0" Text="{x:Bind Name}" Opacity="0.85" /></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Data sources" FontWeight="SemiBold" FontSize="18" />
+                        <ItemsControl ItemsSource="{Binding DataSources}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="models:DataSourceStatusCard">
+                                    <Grid Margin="0,2,0,8">
+                                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                                        <StackPanel><TextBlock Text="{x:Bind Name}" FontWeight="SemiBold" /><TextBlock Text="{x:Bind Detail}" TextWrapping="Wrap" Opacity="0.75" FontSize="12" /></StackPanel>
+                                        <TextBlock Grid.Column="1" Text="{x:Bind State}" FontWeight="SemiBold" Margin="12,0,0,0" />
+                                    </Grid>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
                 </Border>
                 <Border Grid.Column="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="14" Padding="18">
-                    <StackPanel Spacing="10"><TextBlock Text="Recent events" FontWeight="SemiBold" FontSize="18" /><ItemsControl ItemsSource="{Binding RecentEvents}"><ItemsControl.ItemTemplate><DataTemplate x:DataType="models:EventItem"><StackPanel Margin="0,2,0,8"><TextBlock Text="{x:Bind Time}" FontWeight="SemiBold" /><TextBlock Text="{x:Bind Type}" FontWeight="SemiBold" /><TextBlock Text="{x:Bind Description}" TextWrapping="Wrap" Opacity="0.85" /></StackPanel></DataTemplate></ItemsControl.ItemTemplate></ItemsControl></StackPanel>
+                    <StackPanel Spacing="10">
+                        <TextBlock Text="Refresh log" FontWeight="SemiBold" FontSize="18" />
+                        <ItemsControl ItemsSource="{Binding RecentEvents}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="models:EventItem">
+                                    <StackPanel Margin="0,2,0,8"><StackPanel Orientation="Horizontal" Spacing="6"><TextBlock Text="{x:Bind Time}" FontWeight="SemiBold" /><TextBlock Text="{x:Bind Type}" FontWeight="SemiBold" /></StackPanel><TextBlock Text="{x:Bind Description}" TextWrapping="Wrap" Opacity="0.8" FontSize="12" /></StackPanel>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </StackPanel>
                 </Border>
             </Grid>
         </Grid>
