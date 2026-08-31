@@ -1,22 +1,22 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using TajsTokens.App.ViewModels;
+using TajsTokens.Core.Models;
 
 namespace TajsTokens.App.Pages;
 
 public sealed partial class OverviewPage : Page
 {
-    private CancellationTokenSource? _loadCancellation;
+    private readonly App _app;
 
     public OverviewPage()
     {
         InitializeComponent();
 
-        var app = (App)Application.Current;
+        _app = (App)Application.Current;
         ViewModel = new OverviewViewModel(
-            app.Services.TokscaleProvider,
-            app.Services.CodexQuotaProvider,
-            app.Services.Repository);
+            _app.Services.Telemetry,
+            _app.Services.Repository);
         DataContext = ViewModel;
 
         Loaded += OnLoaded;
@@ -27,23 +27,40 @@ public sealed partial class OverviewPage : Page
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        _loadCancellation?.Cancel();
-        _loadCancellation?.Dispose();
-        _loadCancellation = new CancellationTokenSource();
+        _app.Services.Telemetry.SnapshotUpdated += OnSnapshotUpdated;
 
-        try
+        var latest = _app.Services.Telemetry.Latest;
+        if (latest.CapturedAtUtc != DateTimeOffset.MinValue)
         {
-            await ViewModel.RefreshAsync(_loadCancellation.Token);
-        }
-        catch (OperationCanceledException)
-        {
-            // Navigation away from the page cancels an in-flight provider scan.
+            try
+            {
+                await ViewModel.ApplySnapshotAsync(latest, CancellationToken.None);
+            }
+            catch (OperationCanceledException)
+            {
+                // No page-scoped provider request exists anymore; this is defensive only.
+            }
         }
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
-        _loadCancellation?.Cancel();
+        _app.Services.Telemetry.SnapshotUpdated -= OnSnapshotUpdated;
         ViewModel.RefreshCommand.Cancel();
+    }
+
+    private void OnSnapshotUpdated(TelemetrySnapshot snapshot)
+    {
+        DispatcherQueue.TryEnqueue(async () =>
+        {
+            try
+            {
+                await ViewModel.ApplySnapshotAsync(snapshot, CancellationToken.None);
+            }
+            catch (OperationCanceledException)
+            {
+                // Application shutdown/navigation can abandon a UI-only render safely.
+            }
+        });
     }
 }
