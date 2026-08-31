@@ -17,7 +17,7 @@ Every phase should end as a coherent working product rather than an architectura
 - Overview source/freshness/error states
 - Robust CLI discovery/diagnostics
 
-## Phase 2 - Daily-driver Windows utility 🚧
+## Phase 2 - Daily-driver Windows utility ✅
 
 - One process-lifetime background telemetry coordinator
 - Preserve last-known-good data and mark stale provider state explicitly

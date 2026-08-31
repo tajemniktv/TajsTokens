@@ -8,7 +8,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 
 public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryRepository, ISessionIngestionCheckpointStore
 {
-    private const int CurrentSchemaVersion = 2;
+    private const int CurrentSchemaVersion = 3;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
 
     public async Task InitializeAsync(CancellationToken cancellationToken)
@@ -32,6 +32,9 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 DROP TABLE IF EXISTS quota_snapshots;
                 DROP TABLE IF EXISTS token_usage;
                 DROP TABLE IF EXISTS ingestion_checkpoints;
+                DROP TABLE IF EXISTS workspaces;
+                DROP TABLE IF EXISTS repositories;
+                DROP TABLE IF EXISTS forecast_snapshots;
 
                 CREATE TABLE quota_snapshots (
                     provider TEXT NOT NULL,
@@ -124,12 +127,45 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                     source_identity TEXT
                 );
 
+                CREATE TABLE repositories (
+                    repository_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    root_path TEXT,
+                    remote_url TEXT,
+                    first_seen_at_utc TEXT NOT NULL,
+                    last_seen_at_utc TEXT NOT NULL
+                );
+
+                CREATE TABLE workspaces (
+                    workspace_id TEXT PRIMARY KEY,
+                    path TEXT NOT NULL,
+                    repository_id TEXT,
+                    first_seen_at_utc TEXT NOT NULL,
+                    last_seen_at_utc TEXT NOT NULL
+                );
+
+                CREATE TABLE forecast_snapshots (
+                    provider TEXT NOT NULL,
+                    profile TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    generated_at_utc TEXT NOT NULL,
+                    burn_rate_percent_per_hour REAL,
+                    estimated_exhaustion_at_utc TEXT,
+                    survives_until_reset INTEGER,
+                    sustainable_percent_per_hour REAL,
+                    confidence REAL NOT NULL,
+                    PRIMARY KEY(provider, profile, kind, generated_at_utc)
+                );
+
                 CREATE INDEX IF NOT EXISTS idx_quota_snapshots_lookup
                     ON quota_snapshots(provider, profile, kind, captured_at_utc DESC);
                 CREATE INDEX IF NOT EXISTS idx_token_usage_observed ON token_usage(observed_at_utc DESC);
                 CREATE INDEX IF NOT EXISTS idx_usage_events_time ON usage_events(timestamp_utc DESC);
+                CREATE INDEX IF NOT EXISTS idx_workspaces_repository ON workspaces(repository_id);
+                CREATE INDEX IF NOT EXISTS idx_forecast_snapshots_lookup
+                    ON forecast_snapshots(provider, profile, kind, generated_at_utc DESC);
 
-                PRAGMA user_version = 2;
+                PRAGMA user_version = 3;
                 """, cancellationToken);
             return;
         }
@@ -139,6 +175,48 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
             await ExecuteMigrationAsync(connection, """
                 ALTER TABLE ingestion_checkpoints ADD COLUMN source_identity TEXT;
                 PRAGMA user_version = 2;
+                """, cancellationToken);
+            version = 2;
+        }
+
+        if (version == 2)
+        {
+            await ExecuteMigrationAsync(connection, """
+                CREATE TABLE repositories (
+                    repository_id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    root_path TEXT,
+                    remote_url TEXT,
+                    first_seen_at_utc TEXT NOT NULL,
+                    last_seen_at_utc TEXT NOT NULL
+                );
+
+                CREATE TABLE workspaces (
+                    workspace_id TEXT PRIMARY KEY,
+                    path TEXT NOT NULL,
+                    repository_id TEXT,
+                    first_seen_at_utc TEXT NOT NULL,
+                    last_seen_at_utc TEXT NOT NULL
+                );
+
+                CREATE TABLE forecast_snapshots (
+                    provider TEXT NOT NULL,
+                    profile TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    generated_at_utc TEXT NOT NULL,
+                    burn_rate_percent_per_hour REAL,
+                    estimated_exhaustion_at_utc TEXT,
+                    survives_until_reset INTEGER,
+                    sustainable_percent_per_hour REAL,
+                    confidence REAL NOT NULL,
+                    PRIMARY KEY(provider, profile, kind, generated_at_utc)
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_workspaces_repository ON workspaces(repository_id);
+                CREATE INDEX IF NOT EXISTS idx_forecast_snapshots_lookup
+                    ON forecast_snapshots(provider, profile, kind, generated_at_utc DESC);
+
+                PRAGMA user_version = 3;
                 """, cancellationToken);
         }
     }
@@ -307,6 +385,79 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
             },
             cancellationToken);
 
+    public Task UpsertRepositoryAsync(RepositoryIdentity repository, CancellationToken cancellationToken) =>
+        ExecutePreparedCommandAsync(
+            """
+            INSERT INTO repositories(repository_id, name, root_path, remote_url, first_seen_at_utc, last_seen_at_utc)
+            VALUES($id, $name, $rootPath, $remoteUrl, $firstSeen, $lastSeen)
+            ON CONFLICT(repository_id) DO UPDATE SET
+              name = excluded.name,
+              root_path = COALESCE(excluded.root_path, repositories.root_path),
+              remote_url = COALESCE(excluded.remote_url, repositories.remote_url),
+              first_seen_at_utc = MIN(repositories.first_seen_at_utc, excluded.first_seen_at_utc),
+              last_seen_at_utc = MAX(repositories.last_seen_at_utc, excluded.last_seen_at_utc);
+            """,
+            cmd =>
+            {
+                cmd.Parameters.AddWithValue("$id", repository.RepositoryId);
+                cmd.Parameters.AddWithValue("$name", repository.Name);
+                cmd.Parameters.AddWithValue("$rootPath", DbValue(repository.RootPath));
+                cmd.Parameters.AddWithValue("$remoteUrl", DbValue(repository.RemoteUrl));
+                cmd.Parameters.AddWithValue("$firstSeen", SerializeUtc(repository.FirstSeenAtUtc));
+                cmd.Parameters.AddWithValue("$lastSeen", SerializeUtc(repository.LastSeenAtUtc));
+            },
+            cancellationToken);
+
+    public Task UpsertWorkspaceAsync(WorkspaceIdentity workspace, CancellationToken cancellationToken) =>
+        ExecutePreparedCommandAsync(
+            """
+            INSERT INTO workspaces(workspace_id, path, repository_id, first_seen_at_utc, last_seen_at_utc)
+            VALUES($id, $path, $repositoryId, $firstSeen, $lastSeen)
+            ON CONFLICT(workspace_id) DO UPDATE SET
+              path = excluded.path,
+              repository_id = COALESCE(excluded.repository_id, workspaces.repository_id),
+              first_seen_at_utc = MIN(workspaces.first_seen_at_utc, excluded.first_seen_at_utc),
+              last_seen_at_utc = MAX(workspaces.last_seen_at_utc, excluded.last_seen_at_utc);
+            """,
+            cmd =>
+            {
+                cmd.Parameters.AddWithValue("$id", workspace.WorkspaceId);
+                cmd.Parameters.AddWithValue("$path", workspace.Path);
+                cmd.Parameters.AddWithValue("$repositoryId", DbValue(workspace.RepositoryId));
+                cmd.Parameters.AddWithValue("$firstSeen", SerializeUtc(workspace.FirstSeenAtUtc));
+                cmd.Parameters.AddWithValue("$lastSeen", SerializeUtc(workspace.LastSeenAtUtc));
+            },
+            cancellationToken);
+
+    public Task UpsertForecastSnapshotAsync(ForecastSnapshot snapshot, CancellationToken cancellationToken) =>
+        ExecutePreparedCommandAsync(
+            """
+            INSERT INTO forecast_snapshots(
+                provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
+                estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence)
+            VALUES($provider, $profile, $kind, $generated, $burnRate, $exhaustion, $survives, $sustainable, $confidence)
+            ON CONFLICT(provider, profile, kind, generated_at_utc) DO UPDATE SET
+              burn_rate_percent_per_hour = excluded.burn_rate_percent_per_hour,
+              estimated_exhaustion_at_utc = excluded.estimated_exhaustion_at_utc,
+              survives_until_reset = excluded.survives_until_reset,
+              sustainable_percent_per_hour = excluded.sustainable_percent_per_hour,
+              confidence = excluded.confidence;
+            """,
+            cmd =>
+            {
+                var forecast = snapshot.Forecast;
+                cmd.Parameters.AddWithValue("$provider", snapshot.Provider);
+                cmd.Parameters.AddWithValue("$profile", snapshot.Profile);
+                cmd.Parameters.AddWithValue("$kind", forecast.Kind.ToString());
+                cmd.Parameters.AddWithValue("$generated", SerializeUtc(forecast.GeneratedAtUtc));
+                cmd.Parameters.AddWithValue("$burnRate", DbValue(forecast.BurnRatePercentPerHour));
+                cmd.Parameters.AddWithValue("$exhaustion", forecast.EstimatedExhaustionAtUtc is null ? DBNull.Value : SerializeUtc(forecast.EstimatedExhaustionAtUtc.Value));
+                cmd.Parameters.AddWithValue("$survives", DbValue(forecast.SurvivesUntilReset is bool survives ? (survives ? 1 : 0) : null));
+                cmd.Parameters.AddWithValue("$sustainable", DbValue(forecast.SustainablePercentPerHour));
+                cmd.Parameters.AddWithValue("$confidence", forecast.Confidence);
+            },
+            cancellationToken);
+
     public async Task<IReadOnlyList<QuotaSnapshot>> GetRecentQuotaSnapshotsAsync(
         QuotaWindowKind kind,
         string provider,
@@ -343,6 +494,50 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 reader.GetString(5),
                 reader.GetString(6),
                 reader.GetString(7)));
+        }
+
+        return results;
+    }
+
+    public async Task<IReadOnlyList<ForecastSnapshot>> GetRecentForecastSnapshotsAsync(
+        QuotaWindowKind kind,
+        string provider,
+        string profile,
+        int take,
+        CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
+                   estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence
+            FROM forecast_snapshots
+            WHERE kind = $kind AND provider = $provider AND profile = $profile
+            ORDER BY generated_at_utc DESC
+            LIMIT $take;
+            """;
+        command.Parameters.AddWithValue("$kind", kind.ToString());
+        command.Parameters.AddWithValue("$provider", provider);
+        command.Parameters.AddWithValue("$profile", profile);
+        command.Parameters.AddWithValue("$take", Math.Max(0, take));
+
+        var results = new List<ForecastSnapshot>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            results.Add(new ForecastSnapshot(
+                reader.GetString(0),
+                reader.GetString(1),
+                new Forecast(
+                    Enum.Parse<QuotaWindowKind>(reader.GetString(2)),
+                    ParseUtc(reader.GetString(3)),
+                    reader.IsDBNull(4) ? null : reader.GetDouble(4),
+                    reader.IsDBNull(5) ? null : ParseUtc(reader.GetString(5)),
+                    reader.IsDBNull(6) ? null : reader.GetInt32(6) != 0,
+                    reader.IsDBNull(7) ? null : reader.GetDouble(7),
+                    reader.GetDouble(8))));
         }
 
         return results;
