@@ -42,7 +42,7 @@ Phase 2 intentionally does **not** require the dashboard to stay open for teleme
 - Stable-identity rollout storage diagnostics without raw payload or absolute-path persistence in the observatory surface
 - Runtime hotfix keeping historical rollout/SQLite work off the WinUI dispatcher while provider telemetry publishes progressively
 
-Phase 3 proves direct/native Codex observability but does **not** replace Tokscale as the default accounting source. Full reconciliation/cutover is now pulled forward into Phase 4.6 rather than waiting for the old Phase 6 slot.
+Phase 3 proved direct/native Codex observability. The later native cutover moved forward into Phase 4.7 rather than waiting for the old Phase 6 slot.
 
 ## Phase 3.5 - Runtime, concurrency, UX, and forecast hardening ✅
 
@@ -94,27 +94,47 @@ Representative real-corpus validation completed on 2026-09-01:
 
 The primary Phase 4.5 product target is therefore met: **warm idle Observatory refresh is effectively invisible**. Remaining cumulative-token commit amplification is a cold-import optimization rather than a steady-state architectural blocker.
 
-## Phase 4.6 - Product plumbing and native accounting cutover 🚧
+## Phase 4.6 - Product plumbing and Observatory read performance ✅
 
-Tracked by #65, with #61 owning Settings and #62 owning the native-accounting cutover. #63 tracks remote/cloud-only Codex coverage separately.
+Implemented by PR #64 and tracked by #61/#65/#51.
 
-### Product plumbing / Observatory read performance
-- replace the Settings placeholder with a real WinUI surface;
-- materialize a normalized/versioned `settings.json` on first successful startup and preserve safe fallback for corrupt/inaccessible settings;
-- optimize Observatory session-list loading after profiling identified `SearchSessionsAsync` correlated SQLite aggregates as the dominant read-side hotspot;
-- keep session/search/filter semantics correct while avoiding repeated scans of the same token/context/storage/activity rows;
-- make refresh diagnostics distinguish catalog/discovered scope from actual changed/scanned work;
-- re-profile the representative 318-session history after the query change.
+- replaced the Settings placeholder with a real WinUI surface;
+- materialized normalized/versioned `settings.json` defaults and hardened concurrent/apply behavior;
+- optimized Observatory `SearchSessionsAsync` away from repeated correlated per-session aggregates;
+- improved changed/scanned rollout diagnostics and session-list regression coverage;
+- fixed narrow Usage breakdown layout behavior discovered during real Windows testing.
 
-### Native Codex accounting cutover
-- reconcile native vs Tokscale over identical local session/model/hour scopes instead of declaring parity by vibes;
-- compare uncached input, cache read/write, output, reasoning, reported totals, session totals, model attribution and time buckets;
-- port/adapt mature Tokscale Codex edge-case semantics where evidence shows TajsTokens is weaker, preserving MIT provenance/notice requirements;
-- make native Codex accounting sufficient to drive normal Overview/Usage data without launching Tokscale;
-- promote native accounting to the default Codex source after parity gates;
-- disable Tokscale by default for Codex steady-state collection while retaining it explicitly for reconciliation/fallback and future non-Codex breadth during the transition.
+Representative re-profiling remains useful under #51, but the product-plumbing implementation slice is merged.
 
-Remote/cloud-only sessions are not a cutover blocker. Until #63 finds a supported source, local native aggregates must say they represent local/partial history rather than silently treating unseen remote activity as zero.
+## Phase 4.7 - Native Codex accounting cutover ✅ operationally / 🚧 semantically
+
+Implemented operationally by PR #67 and tracked by #62/#63/#65.
+
+- native local-history Codex accounting is the default displayed source;
+- Overview model/hour summaries come from TajsTokens-owned normalized SQLite token events;
+- native projection runs after incremental Observatory persistence so new turns can appear in the same final refresh generation;
+- Tokscale is disabled by default and retained only as explicit reconciliation/fallback;
+- local-only coverage is stated explicitly while remote/cloud-only sessions remain #63;
+- the normal refresh path no longer requires Tokscale/npx.
+
+The cutover is **not semantic certification**. #62 remains open for measured native-vs-Tokscale reconciliation around cumulative regressions, `last_token_usage`, forks/replay, model-less events and related parser edge cases.
+
+## Phase 4.8 - Metric ownership and data-semantics hardening 🚧
+
+Tracked by #70 with implementation slices #71, #72, #73 and #74. The audit is documented in `docs/ARCHITECTURE_DATA_FLOW_AUDIT_2026-09-01.md`.
+
+The post-cutover re-audit found that the raw-source/ingestion architecture is healthy, but user-facing read semantics have diverged as features accumulated. Before Phase 5:
+
+- replace global quota/token freshness booleans with lane/generation-aware structured provenance (#71);
+- stop treating “zero Observatory errors” as equivalent to source coverage being present (#71);
+- make Overview, Usage, Observatory and Analytics share canonical token total/model attribution semantics even when query shapes differ (#72);
+- expose reported-vs-disjoint accounting integrity instead of hiding it behind one `Total` property (#72);
+- make multi-query intelligence dashboards read one committed SQLite generation (#72);
+- establish one current forecast owner and structured quota-source authority instead of independently forecasting in Overview and intelligence refresh (#73);
+- finish native/Tokscale parser-semantic certification under #62;
+- remove dead bootstrap-era telemetry writers/schema ambiguity only after the correctness contracts converge (#74).
+
+**Phase 5 is intentionally paused until the Phase 4.8 correctness slices are resolved or deliberately descoped.** The goal is to know exactly what every number means before exposing those numbers through more APIs/widgets.
 
 ## Phase 5 - Power-user platform
 
@@ -126,7 +146,7 @@ Remote/cloud-only sessions are not a cutover blocker. Until #63 finds a supporte
 
 ## Phase 6 - Accounting expansion and hardening
 
-The old "first native cutover" role has moved forward to Phase 4.6 because the implementation matured faster than the roadmap.
+The old "first native cutover" role moved forward to Phase 4.7 because the implementation matured faster than the roadmap.
 
 - expand reconciliation/coverage tooling beyond the initial Codex cutover;
 - improve remote-inclusive/account-global coverage when supported provider surfaces exist;
