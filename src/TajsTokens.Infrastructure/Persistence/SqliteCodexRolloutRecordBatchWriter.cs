@@ -1,19 +1,21 @@
 using System.Globalization;
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.Data.Sqlite;
+using TajsTokens.Core.Interfaces;
 using TajsTokens.Infrastructure.Ingestion;
 
 namespace TajsTokens.Infrastructure.Persistence;
 
 /// <summary>
-/// High-volume storage-metadata writer for rollout ingestion. The broader Observatory store retains
-/// semantic writes/accounting; this path removes the previous connection+transaction+file-upsert cost
-/// paid for every single JSONL record.
+/// High-volume storage-metadata writer for rollout ingestion. The broader Observatory store owns
+/// canonical rollout-file identity/label/upsert semantics; this path batches only per-record metadata
+/// so the two persistence paths cannot drift while still avoiding a transaction per JSONL record.
 /// </summary>
-internal sealed class SqliteCodexRolloutRecordBatchWriter(string databasePath) : ICodexRolloutRecordBatchWriter
+internal sealed class SqliteCodexRolloutRecordBatchWriter(
+    string databasePath,
+    ICodexObservatoryStore observatoryStore) : ICodexRolloutRecordBatchWriter
 {
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
+    private readonly ICodexObservatoryStore _observatoryStore = observatoryStore;
     private readonly SemaphoreSlim _writeGate = new(1, 1);
 
     public async Task WriteBatchAsync(
@@ -31,13 +33,35 @@ internal sealed class SqliteCodexRolloutRecordBatchWriter(string databasePath) :
         await _writeGate.WaitAsync(cancellationToken);
         try
         {
+            var sessionId = records
+                .Select(record => record.SessionId)
+                .LastOrDefault(value => !string.IsNullOrWhiteSpace(value));
+            var lastSeen = records.Max(record => record.ObservedAtUtc);
+
+            // Canonical file-label hashing, path-replacement cleanup and rollout_files upsert live in
+            // one place: SqliteCodexObservatoryStore. If the following record transaction fails, the
+            // checkpoint is not advanced; replay safely repeats this idempotent file upsert before
+            // retrying ON CONFLICT-safe record inserts.
+            await _observatoryStore.UpsertRolloutFileAsync(
+                sourceIdentity,
+                filePath,
+                sessionId,
+                fileSizeBytes,
+                lastSeen,
+                cancellationToken);
+
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
-            using var transaction = connection.BeginTransaction();
 
+            var labelCommand = connection.CreateCommand();
+            labelCommand.CommandText = "SELECT file_path FROM rollout_files WHERE source_identity = $identity LIMIT 1;";
+            labelCommand.Parameters.AddWithValue("$identity", sourceIdentity);
+            var safeFileLabel = await labelCommand.ExecuteScalarAsync(cancellationToken) as string
+                ?? throw new InvalidOperationException("Canonical rollout file metadata was not available after upsert.");
+
+            using var transaction = connection.BeginTransaction();
             try
             {
-                var safeFileLabel = BuildSafeFileLabel(filePath);
                 var insertRecord = connection.CreateCommand();
                 insertRecord.Transaction = transaction;
                 insertRecord.CommandText = """
@@ -69,39 +93,6 @@ internal sealed class SqliteCodexRolloutRecordBatchWriter(string databasePath) :
                     await insertRecord.ExecuteNonQueryAsync(cancellationToken);
                 }
 
-                // A file path can be reused after replacement. Remove the old source-identity alias
-                // before upserting this generation, exactly as the Observatory store's scalar path did.
-                var removePathAlias = connection.CreateCommand();
-                removePathAlias.Transaction = transaction;
-                removePathAlias.CommandText =
-                    "DELETE FROM rollout_files WHERE file_path = $file AND source_identity <> $identity;";
-                removePathAlias.Parameters.AddWithValue("$file", safeFileLabel);
-                removePathAlias.Parameters.AddWithValue("$identity", sourceIdentity);
-                await removePathAlias.ExecuteNonQueryAsync(cancellationToken);
-
-                var sessionId = records
-                    .Select(record => record.SessionId)
-                    .LastOrDefault(value => !string.IsNullOrWhiteSpace(value));
-                var lastSeen = records.Max(record => record.ObservedAtUtc);
-
-                var upsertFile = connection.CreateCommand();
-                upsertFile.Transaction = transaction;
-                upsertFile.CommandText = """
-                    INSERT INTO rollout_files(source_identity, file_path, session_id, size_bytes, last_seen_at_utc)
-                    VALUES($identity, $file, $session, $size, $seen)
-                    ON CONFLICT(source_identity) DO UPDATE SET
-                      file_path = excluded.file_path,
-                      session_id = COALESCE(excluded.session_id, rollout_files.session_id),
-                      size_bytes = excluded.size_bytes,
-                      last_seen_at_utc = MAX(rollout_files.last_seen_at_utc, excluded.last_seen_at_utc);
-                    """;
-                upsertFile.Parameters.AddWithValue("$identity", sourceIdentity);
-                upsertFile.Parameters.AddWithValue("$file", safeFileLabel);
-                upsertFile.Parameters.AddWithValue("$session", sessionId is null ? DBNull.Value : sessionId);
-                upsertFile.Parameters.AddWithValue("$size", Math.Max(0, fileSizeBytes));
-                upsertFile.Parameters.AddWithValue("$seen", SerializeUtc(lastSeen));
-                await upsertFile.ExecuteNonQueryAsync(cancellationToken);
-
                 transaction.Commit();
             }
             catch
@@ -114,33 +105,6 @@ internal sealed class SqliteCodexRolloutRecordBatchWriter(string databasePath) :
         {
             _writeGate.Release();
         }
-    }
-
-    private static string BuildSafeFileLabel(string filePath)
-    {
-        var fileName = Path.GetFileName(filePath);
-        if (string.IsNullOrWhiteSpace(fileName))
-        {
-            fileName = "rollout.jsonl";
-        }
-
-        string normalized;
-        try
-        {
-            normalized = Path.GetFullPath(filePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-        }
-        catch
-        {
-            normalized = filePath;
-        }
-
-        if (OperatingSystem.IsWindows())
-        {
-            normalized = normalized.ToUpperInvariant();
-        }
-
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized))).ToLowerInvariant()[..12];
-        return $"{fileName} [{hash}]";
     }
 
     private static string SerializeUtc(DateTimeOffset value) =>
