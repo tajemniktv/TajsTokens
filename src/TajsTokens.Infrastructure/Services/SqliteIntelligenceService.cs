@@ -22,8 +22,17 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
     private readonly ForecastingService _forecasting = new();
     private readonly QuotaResetDetector _resetDetector = new();
     private readonly ScenarioPlannerService _scenarioPlanner = new();
+    private readonly Func<string, CancellationToken, Task>? _queryStageObserver;
 
     public SqliteIntelligenceService(string databasePath, SqliteTelemetryRepository telemetryRepository)
+        : this(databasePath, telemetryRepository, null)
+    {
+    }
+
+    internal SqliteIntelligenceService(
+        string databasePath,
+        SqliteTelemetryRepository telemetryRepository,
+        Func<string, CancellationToken, Task>? queryStageObserver)
     {
         _connectionString = new SqliteConnectionStringBuilder
         {
@@ -31,6 +40,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             Mode = SqliteOpenMode.ReadOnly
         }.ToString();
         _telemetryRepository = telemetryRepository;
+        _queryStageObserver = queryStageObserver;
     }
 
     public async Task<IntelligenceRefreshResult> RefreshAsync(CancellationToken cancellationToken)
@@ -92,7 +102,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
 
         // Keep every constituent SELECT on the same SQLite read snapshot. QueryAsync returns one
         // dashboard generation, not a collage assembled across commits that happened mid-query.
-        await ExecuteTransactionControlAsync(connection, "BEGIN DEFERRED;", cancellationToken);
+        await BeginReadSnapshotAsync(connection, cancellationToken);
         try
         {
             var hasNativeEvents = await TableExistsAsync(connection, "codex_native_token_events", cancellationToken);
@@ -100,6 +110,10 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             var usage = hasNativeEvents
                 ? await LoadUsageHistoryAsync(connection, effective, hasContext, cancellationToken)
                 : [];
+            if (_queryStageObserver is not null)
+            {
+                await _queryStageObserver("usage-loaded", cancellationToken);
+            }
             var dimensions = hasNativeEvents
                 ? await LoadDimensionsAsync(connection, effective, cancellationToken)
                 : [];
@@ -139,7 +153,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 resets,
                 fiveHourForecasts,
                 weeklyForecasts);
-            await ExecuteTransactionControlAsync(connection, "COMMIT;", cancellationToken);
+            await CommitReadSnapshotAsync(connection, cancellationToken);
             return dashboard;
         }
         catch
@@ -953,13 +967,17 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         return $"quota-burn-{hash[..24]}";
     }
 
-    private static async Task ExecuteTransactionControlAsync(
-        SqliteConnection connection,
-        string statement,
-        CancellationToken cancellationToken)
+    private static async Task BeginReadSnapshotAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
         var command = connection.CreateCommand();
-        command.CommandText = statement;
+        command.CommandText = "BEGIN DEFERRED;";
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task CommitReadSnapshotAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = "COMMIT;";
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 

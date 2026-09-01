@@ -19,6 +19,16 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
+        // WAL preserves one coherent read snapshot without making dashboard readers block
+        // ingestion/quota commits for the lifetime of the read transaction.
+        var journalMode = connection.CreateCommand();
+        journalMode.CommandText = "PRAGMA journal_mode=WAL;";
+        var activeJournalMode = Convert.ToString(await journalMode.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+        if (!string.Equals(activeJournalMode, "wal", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException($"Failed to enable SQLite WAL mode (active mode: {activeJournalMode ?? "unknown"}).");
+        }
+
         var versionCommand = connection.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version;";
         var version = Convert.ToInt32(await versionCommand.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);

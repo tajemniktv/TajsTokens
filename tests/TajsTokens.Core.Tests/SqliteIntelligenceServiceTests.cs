@@ -156,6 +156,59 @@ public sealed class SqliteIntelligenceServiceTests
     }
 
     [Fact]
+    public async Task Query_HoldsOneSnapshotWhileWalAllowsConcurrentNativeCommit()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-intelligence-snapshot-");
+        var database = Path.Combine(directory.FullName, "telemetry.db");
+        var observed = DateTimeOffset.UtcNow.AddMinutes(-5);
+        var queryPaused = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resumeQuery = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            var repository = new SqliteTelemetryRepository(database);
+            var store = new SqliteCodexObservatoryStore(database);
+            await repository.InitializeAsync(CancellationToken.None);
+            await store.InitializeAsync(CancellationToken.None);
+            await store.ApplyCumulativeTokenObservationAsync(
+                new CodexCumulativeTokenObservation("first", "session.jsonl", "session", "session", observed, "model-a", "high", 100, 0, 0, 10, 0, 110),
+                CancellationToken.None);
+            var intelligence = new SqliteIntelligenceService(database, repository, async (stage, token) =>
+            {
+                if (stage == "usage-loaded")
+                {
+                    queryPaused.TrySetResult();
+                    await resumeQuery.Task.WaitAsync(token);
+                }
+            });
+            var queryTask = intelligence.QueryAsync(
+                new IntelligenceQuery(observed.AddHours(-1), observed.AddHours(1), AnalyticsBucketSize.Hour, 24),
+                CancellationToken.None);
+            await queryPaused.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            var writer = store.ApplyCumulativeTokenObservationAsync(
+                new CodexCumulativeTokenObservation("second", "session.jsonl", "session", "session", observed.AddMinutes(1), "model-b", "high", 200, 0, 0, 20, 0, 220),
+                CancellationToken.None);
+            var completed = await Task.WhenAny(writer, Task.Delay(TimeSpan.FromSeconds(5)));
+            Assert.Same(writer, completed);
+            await writer;
+            resumeQuery.TrySetResult();
+
+            var dashboard = await queryTask;
+            Assert.Equal(110, Assert.Single(dashboard.UsageHistory).NativeTokens);
+            var models = dashboard.Dimensions.Where(item => item.Dimension == "Model").ToArray();
+            Assert.Single(models);
+            Assert.Equal("model-a", models[0].Value);
+            Assert.Equal(110, models[0].NativeTokens);
+        }
+        finally
+        {
+            resumeQuery.TrySetResult();
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task NativeAndUsage_KeepMissingEventModelUnknownDespiteLaterAgentModel()
     {
         var directory = Directory.CreateTempSubdirectory("tajstokens-model-attribution-");
