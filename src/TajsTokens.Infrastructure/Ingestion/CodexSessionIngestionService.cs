@@ -12,7 +12,7 @@ namespace TajsTokens.Infrastructure.Ingestion;
 public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
 {
     private const string BoundaryParserVersion = "boundary-v2";
-    private const string TypedParserVersion = "typed-v2";
+    private const string TypedParserVersion = "typed-v3";
     private readonly ICodexSessionEventProvider _sessionEventProvider;
     private readonly ISessionIngestionCheckpointStore _checkpointStore;
     private readonly ICodexObservatoryStore? _observatoryStore;
