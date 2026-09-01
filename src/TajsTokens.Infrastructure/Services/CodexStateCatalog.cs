@@ -80,10 +80,10 @@ internal sealed class CodexStateCatalog
                 throw;
             }
             catch (Exception exception) when (
-                exception is SqliteException or IOException or UnauthorizedAccessException or InvalidDataException)
+                exception is SqliteException or IOException or UnauthorizedAccessException or InvalidDataException or ArgumentException or NotSupportedException)
             {
                 // A private Codex DB can disappear, rotate, be locked by an incompatible build, or
-                // change schema at any time. The observatory caller owns the filesystem fallback.
+                // change schema/data shape at any time. The observatory caller owns the filesystem fallback.
             }
         }
 
@@ -100,22 +100,46 @@ internal sealed class CodexStateCatalog
         try
         {
             return Directory
-                .EnumerateFiles(_codexHome, "state*.sqlite", SearchOption.TopDirectoryOnly)
-                .Select(path => new
-                {
-                    Path = Path.GetFullPath(path),
-                    LastWrite = TryGetLastWriteUtc(path)
-                })
-                .OrderByDescending(candidate => candidate.LastWrite)
-                .ThenByDescending(candidate => candidate.Path, StringComparer.OrdinalIgnoreCase)
+                .EnumerateFiles(_codexHome, "state_*.sqlite", SearchOption.TopDirectoryOnly)
+                .Select(path => TryBuildCandidate(path))
+                .Where(candidate => candidate is not null)
+                .Select(candidate => candidate!)
+                .OrderByDescending(candidate => candidate.Generation)
+                .ThenByDescending(candidate => candidate.LastWrite)
                 .Select(candidate => candidate.Path)
                 .ToArray();
         }
-        catch (Exception exception) when (
-            exception is IOException or UnauthorizedAccessException or DirectoryNotFoundException)
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
             return [];
         }
+    }
+
+    private static StateDatabaseCandidate? TryBuildCandidate(string path)
+    {
+        var fileName = Path.GetFileName(path);
+        const string prefix = "state_";
+        const string suffix = ".sqlite";
+        if (!fileName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
+            !fileName.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        var generationText = fileName[prefix.Length..^suffix.Length];
+        if (!int.TryParse(
+                generationText,
+                System.Globalization.NumberStyles.None,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var generation))
+        {
+            return null;
+        }
+
+        return new StateDatabaseCandidate(
+            Path.GetFullPath(path),
+            generation,
+            TryGetLastWriteUtc(path));
     }
 
     private static async Task<CodexStateCatalogBatch?> TryReadDatabaseAsync(
@@ -170,7 +194,7 @@ internal sealed class CodexStateCatalog
                 var rolloutPath = reader.GetString(1);
                 if (string.IsNullOrWhiteSpace(rolloutPath))
                 {
-                    continue;
+                    throw new InvalidDataException("Recognized Codex state contains an empty rollout_path.");
                 }
 
                 var normalizedPath = Path.GetFullPath(rolloutPath);
@@ -234,14 +258,19 @@ internal sealed class CodexStateCatalog
 
         var edges = new List<CodexStateEdge>();
         var command = connection.CreateCommand();
-        command.CommandText = "SELECT parent_thread_id, child_thread_id, status FROM thread_spawn_edges;";
+        command.CommandText = """
+            SELECT e.parent_thread_id, e.child_thread_id, e.status
+            FROM thread_spawn_edges e
+            JOIN threads parent ON parent.id = e.parent_thread_id
+            JOIN threads child ON child.id = e.child_thread_id
+            WHERE e.parent_thread_id <> e.child_thread_id;
+            """;
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
             var parent = reader.GetString(0);
             var child = reader.GetString(1);
-            if (string.IsNullOrWhiteSpace(parent) || string.IsNullOrWhiteSpace(child) ||
-                string.Equals(parent, child, StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrWhiteSpace(parent) || string.IsNullOrWhiteSpace(child))
             {
                 continue;
             }
@@ -252,7 +281,49 @@ internal sealed class CodexStateCatalog
                 reader.IsDBNull(2) ? "unknown" : reader.GetString(2)));
         }
 
-        return edges;
+        return RemoveCyclicEdges(edges);
+    }
+
+    private static IReadOnlyList<CodexStateEdge> RemoveCyclicEdges(IReadOnlyList<CodexStateEdge> edges)
+    {
+        var accepted = new List<CodexStateEdge>(edges.Count);
+        var parentsByChild = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var edge in edges)
+        {
+            // Codex currently enforces one parent per child by primary key. Keep that invariant even
+            // if a future/private schema or corrupted copy violates it.
+            if (parentsByChild.ContainsKey(edge.ChildThreadId))
+            {
+                continue;
+            }
+
+            var cursor = edge.ParentThreadId;
+            var cycle = false;
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                edge.ChildThreadId
+            };
+            while (parentsByChild.TryGetValue(cursor, out var parent))
+            {
+                if (!visited.Add(cursor))
+                {
+                    cycle = true;
+                    break;
+                }
+                cursor = parent;
+            }
+
+            if (cycle || !visited.Add(cursor))
+            {
+                continue;
+            }
+
+            parentsByChild[edge.ChildThreadId] = edge.ParentThreadId;
+            accepted.Add(edge);
+        }
+
+        return accepted;
     }
 
     private static string HashPath(string path)
@@ -275,4 +346,6 @@ internal sealed class CodexStateCatalog
             return DateTime.MinValue;
         }
     }
+
+    private sealed record StateDatabaseCandidate(string Path, int Generation, DateTime LastWrite);
 }
