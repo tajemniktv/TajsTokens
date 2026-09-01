@@ -20,6 +20,12 @@ internal sealed record CodexStateThreadFingerprint(
         string.Equals(ReasoningEffort, thread.ReasoningEffort, StringComparison.Ordinal) &&
         Archived == thread.Archived &&
         string.Equals(RolloutPathHash, thread.RolloutPathHash, StringComparison.Ordinal);
+
+    public bool CatalogMetadataMatches(CodexStateThread thread) =>
+        string.Equals(Model, thread.Model, StringComparison.Ordinal) &&
+        string.Equals(ReasoningEffort, thread.ReasoningEffort, StringComparison.Ordinal) &&
+        Archived == thread.Archived &&
+        string.Equals(RolloutPathHash, thread.RolloutPathHash, StringComparison.Ordinal);
 }
 
 /// <summary>
@@ -171,6 +177,22 @@ internal sealed class SqliteCodexStateIndexStore
         }
 
         return results;
+    }
+
+    public async Task<long?> GetPersistedCounterTotalAsync(
+        string sessionId,
+        CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken);
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = "SELECT total_tokens FROM codex_counter_state WHERE session_id = $session LIMIT 1;";
+        command.Parameters.AddWithValue("$session", sessionId);
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is null || result is DBNull
+            ? null
+            : Convert.ToInt64(result, CultureInfo.InvariantCulture);
     }
 
     public async Task CommitAsync(
