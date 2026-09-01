@@ -3,6 +3,7 @@ using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 using TajsTokens.Infrastructure.Ingestion;
 using TajsTokens.Infrastructure.Persistence;
+using TajsTokens.Infrastructure.Providers;
 
 namespace TajsTokens.Core.Tests;
 
@@ -70,6 +71,62 @@ public sealed class SqliteCodexIngestionBatchWriterTests
             Assert.Equal(70, totals.NativeTokens.CacheRead);
             Assert.Equal(26, totals.NativeTokens.NonReasoningOutput);
             Assert.Equal(9, totals.NativeTokens.ReasoningOutput);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task WriteBatchAsync_ReplacedPathRetiresOldTokenGenerationAndCounterState()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-ingestion-replace-");
+        var database = Path.Combine(directory.FullName, "telemetry.db");
+        var sourcePath = Path.Combine(directory.FullName, "private", "rollout.jsonl");
+
+        try
+        {
+            var repository = new SqliteTelemetryRepository(database);
+            await repository.InitializeAsync(CancellationToken.None);
+            var observatory = new SqliteCodexObservatoryStore(database);
+            await observatory.InitializeAsync(CancellationToken.None);
+            var writer = new SqliteCodexIngestionBatchWriter(database, observatory);
+            var start = DateTimeOffset.Parse("2026-09-01T10:00:00Z");
+
+            await writer.WriteBatchAsync(
+                "source-old",
+                sourcePath,
+                2_000,
+                [
+                    BuildRecord("old-1", sourcePath, start, 100, 40, 20, 5, 10),
+                    BuildRecord("old-2", sourcePath, start.AddMinutes(1), 180, 70, 35, 9, 12)
+                ],
+                CancellationToken.None);
+
+            await writer.WriteBatchAsync(
+                "source-new",
+                sourcePath,
+                900,
+                [BuildRecord("new-1", sourcePath, start.AddMinutes(2), 50, 10, 5, 1, 14)],
+                CancellationToken.None);
+
+            await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = database }.ToString());
+            await connection.OpenAsync();
+
+            Assert.Equal(1L, await CountAsync(connection, "rollout_files"));
+            Assert.Equal(1L, await CountAsync(connection, "rollout_records"));
+            Assert.Equal(1L, await CountAsync(connection, "codex_native_token_events"));
+            Assert.Equal(1L, await CountAsync(connection, "codex_counter_state"));
+
+            var sourceCommand = connection.CreateCommand();
+            sourceCommand.CommandText = "SELECT source_identity FROM rollout_files LIMIT 1;";
+            Assert.Equal("source-new", (string?)await sourceCommand.ExecuteScalarAsync());
+
+            var accounting = await new SqliteNativeCodexAccountingProvider(database)
+                .GetSnapshotAsync(CancellationToken.None);
+            Assert.Equal(55, Assert.Single(accounting.Usage).Breakdown.Total);
         }
         finally
         {
