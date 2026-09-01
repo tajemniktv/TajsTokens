@@ -7,11 +7,13 @@ The current product combines:
 - provider-authoritative Codex subscription quota and reset timestamps from the local `codex app-server` without creating a model turn;
 - broad token totals/cache/output/reasoning breakdowns and hourly history from Tokscale;
 - direct incremental Codex rollout ingestion for privacy-safe session/root/subagent, native-shadow token, context/compaction, activity and storage telemetry;
-- one process-lifetime telemetry coordinator shared by Overview, tray, alerts and Observatory;
+- one process-lifetime telemetry coordinator shared by Overview, tray, alerts, Observatory and the intelligence refresh path;
 - last-known-good provider data with explicit stale/unavailable states;
 - background collection, close-to-tray lifecycle, Start with Windows, native notification-area status and deduplicated quota/provider alerts;
 - SQLite quota/history and normalized Observatory persistence under `%LOCALAPPDATA%\TajsTokens`;
 - reset-aware quota forecasting with sustainable pace, burn pressure, confidence, quantized-meter uncertainty and margin-at-reset;
+- Phase 4 intelligence foundations: persisted forecast history, reset/re-anchor events, bounded historical aggregates, interval-based quota-burn correlation and account-local workload scenarios;
+- native Usage, Forecasts and Analytics surfaces over normalized/query-bounded data contracts;
 - a self-contained Windows x64 portable publish smoke artifact.
 
 Tokscale intentionally remains the bootstrap/default **broad accounting** backend. Native Codex accounting already runs in shadow mode from rollout telemetry, but it does not become the default until later reconciliation demonstrates parity.
@@ -19,11 +21,11 @@ Tokscale intentionally remains the bootstrap/default **broad accounting** backen
 ## Projects
 
 - `src/TajsTokens.App` - WinUI 3 desktop shell, native Windows surfaces and composition root
-- `src/TajsTokens.Core` - provider-independent domain models, accounting/alert/forecast services and interfaces
-- `src/TajsTokens.Infrastructure` - SQLite/settings persistence, local providers, rollout ingestion and telemetry coordination
-- `tests/TajsTokens.Core.Tests` - accounting, persistence, provider, ingestion, concurrency and privacy regressions
+- `src/TajsTokens.Core` - provider-independent domain models, accounting/alert/forecast/intelligence services and interfaces
+- `src/TajsTokens.Infrastructure` - SQLite/settings persistence, local providers, rollout ingestion, telemetry coordination and historical intelligence queries
+- `tests/TajsTokens.Core.Tests` - accounting, persistence, provider, ingestion, concurrency, intelligence and privacy regressions
 
-Repository-level coding-agent instructions **and** the current architecture/threading/privacy contract live in [`AGENTS.md`](AGENTS.md). `ROADMAP.md` describes the working-product phase plan and `PERFORMANCE.md` records the Phase 3.5 runtime budgets/profiling baseline.
+Repository-level coding-agent instructions **and** the current architecture/threading/privacy contract live in [`AGENTS.md`](AGENTS.md). `ROADMAP.md` describes the working-product phase plan, `PERFORMANCE.md` records the Phase 3.5 runtime budgets/profiling baseline, and [`docs/PHASE4_INTELLIGENCE.md`](docs/PHASE4_INTELLIGENCE.md) defines the Phase 4 evidence/attribution semantics.
 
 ## Prerequisites
 
@@ -111,7 +113,7 @@ Phase 3.5 batches high-volume `rollout_records` metadata at durable checkpoint b
 
 The Observatory UI is a master-detail explorer: search/select sessions on the left, then load Overview, Agents, Timeline, Context, Tokens or Storage detail on demand rather than rendering every domain at once.
 
-## Forecast semantics
+## Forecast and intelligence semantics
 
 Forecasts are scoped to the provider's current quota-window/reset identity.
 
@@ -121,8 +123,21 @@ Forecasts are scoped to the provider's current quota-window/reset identity.
 - Sustainable pace is remaining quota divided by remaining reset time; burn pressure compares recent observed pace with that sustainable pace.
 - Flat rounded provider samples mean `flat within meter precision`, not confident exact-zero burn.
 - Sparse/stale data lowers confidence or suppresses forecasting.
+- Phase 4 persists those reset-aware forecasts during the shared telemetry refresh so forecast history/baselines exist across restarts.
 
-TajsTokens does not pretend local token count maps deterministically to subscription quota consumption.
+Phase 4 also derives **quota-burn intervals** only between adjacent provider observations that belong to the same provider/profile/window identity and whose used percentage increased. Those intervals can be correlated with native token activity, root/subagent participation, model/reasoning metadata and compactions. The provider-observed meter change is a fact; the contributor ranking is an estimate because subscription meters can be rounded or delayed.
+
+Reset history uses provider identity changes and before/after meter observations. Expected reset, rolling-window re-anchor and unusual/full-reset evidence have explicit classifications/confidence. Backend `resetsAt` wins over locally predicted schedules.
+
+The scenario planner learns only from this account's historical quota-drop intervals and workload concurrency. It returns ranges, sample counts and confidence, or an explicit insufficient-history state. TajsTokens does not pretend local token count maps deterministically to subscription quota consumption.
+
+## Native intelligence surfaces
+
+- **Usage**: bounded minute/hour/day history, disjoint native token classes, root/subagent splits, repo/model/role breakdowns and UTC day/hour heatmap data with exact values.
+- **Forecasts**: persisted five-hour/weekly forecast history and an account-local workload scenario planner.
+- **Analytics**: provider-observed quota-burn intervals, synchronized local activity, estimated contributor ranking, and reset/re-anchor timeline.
+
+Queries/downsampling happen outside the WinUI dispatcher. These pages do not parse rollout JSONL or issue raw SQLite queries from XAML/code-behind.
 
 ## Tray and notifications
 
@@ -151,3 +166,5 @@ Code signing, a per-user installer, WinGet, update verification and an in-app up
 The local database lives at `%LOCALAPPDATA%\TajsTokens\telemetry.db`; settings live beside it in `settings.json`. These paths are outside the application directory so portable/update experiments do not overwrite local history.
 
 Normal telemetry does **not** persist ordinary prompt/message text, reasoning text, source-code bodies, shell commands/output, tool result payloads, credentials/auth material or raw rollout JSON. Large content-bearing rollout records are transient parser input and are reduced to normalized type/status/size/timing/identity metadata.
+
+Phase 4 intelligence is computed only from those already-normalized content-free records plus quota/forecast/reset history. Attribution and scenario rows therefore do not create a second content-bearing analytics store behind the user's back, a standard which the software industry has somehow made noteworthy.
