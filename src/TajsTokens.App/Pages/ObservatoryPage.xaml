@@ -6,138 +6,166 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <ScrollViewer>
-        <Grid Padding="28" RowSpacing="18">
-            <Grid.RowDefinitions>
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
-            </Grid.RowDefinitions>
+    <Grid Padding="24" RowSpacing="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
 
-            <Grid Grid.Row="0" ColumnSpacing="12">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
-                </Grid.ColumnDefinitions>
+        <Grid Grid.Row="0" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="Codex Observatory" FontSize="28" FontWeight="SemiBold" />
+                <TextBlock Text="Privacy-safe local session telemetry. Native accounting remains shadow data while Tokscale is the broad default source."
+                           Opacity="0.72" TextWrapping="Wrap" Margin="0,4,0,0" />
+                <TextBlock x:Name="StatusText" Text="Loading local Codex sessions…" Opacity="0.72" Margin="0,8,0,0" TextWrapping="Wrap" />
+            </StackPanel>
+            <Button Grid.Column="1" Content="Refresh" Click="OnRefreshClicked" VerticalAlignment="Top" />
+        </Grid>
+
+        <Grid Grid.Row="1" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Border Padding="14" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                 <StackPanel>
-                    <TextBlock Text="Codex Observatory" FontSize="28" FontWeight="SemiBold" />
-                    <TextBlock Text="Direct privacy-safe rollout telemetry. Native accounting is shadow data; Tokscale remains the default accounting source."
-                               Opacity="0.72" TextWrapping="Wrap" Margin="0,4,0,0" />
-                    <TextBlock x:Name="StatusText" Text="Loading local Codex sessions…" Opacity="0.72" Margin="0,8,0,0" />
+                    <TextBlock Text="Sessions" Opacity="0.65" />
+                    <TextBlock x:Name="SessionCountText" Text="—" FontSize="22" FontWeight="SemiBold" />
                 </StackPanel>
-                <Button Grid.Column="1" Content="Refresh" Click="OnRefreshClicked" VerticalAlignment="Top" />
-            </Grid>
+            </Border>
+            <Border Grid.Column="1" Padding="14" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                <StackPanel>
+                    <TextBlock Text="Native shadow tokens" Opacity="0.65" />
+                    <TextBlock x:Name="NativeTokensText" Text="—" FontSize="22" FontWeight="SemiBold" />
+                </StackPanel>
+            </Border>
+            <Border Grid.Column="2" Padding="14" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                <StackPanel>
+                    <TextBlock Text="Rollout storage observed" Opacity="0.65" />
+                    <TextBlock x:Name="StorageText" Text="—" FontSize="22" FontWeight="SemiBold" />
+                </StackPanel>
+            </Border>
+        </Grid>
 
-            <Grid Grid.Row="1" ColumnSpacing="12">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
-                <Border Padding="16" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                    <StackPanel>
-                        <TextBlock Text="Sessions" Opacity="0.65" />
-                        <TextBlock x:Name="SessionCountText" Text="—" FontSize="24" FontWeight="SemiBold" />
-                    </StackPanel>
-                </Border>
-                <Border Grid.Column="1" Padding="16" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                    <StackPanel>
-                        <TextBlock Text="Native shadow tokens" Opacity="0.65" />
-                        <TextBlock x:Name="NativeTokensText" Text="—" FontSize="24" FontWeight="SemiBold" />
-                    </StackPanel>
-                </Border>
-                <Border Grid.Column="2" Padding="16" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                    <StackPanel>
-                        <TextBlock Text="Rollout storage observed" Opacity="0.65" />
-                        <TextBlock x:Name="StorageText" Text="—" FontSize="24" FontWeight="SemiBold" />
-                    </StackPanel>
-                </Border>
-            </Grid>
+        <Grid Grid.Row="2" ColumnSpacing="14" MinHeight="420">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="360" MinWidth="300" />
+                <ColumnDefinition Width="*" MinWidth="420" />
+            </Grid.ColumnDefinitions>
 
-            <Grid Grid.Row="2" ColumnSpacing="18">
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="1.05*" MinWidth="320" />
-                    <ColumnDefinition Width="1.35*" MinWidth="380" />
-                </Grid.ColumnDefinitions>
-
-                <Border Padding="14" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                    <Grid RowSpacing="10">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="460" />
-                        </Grid.RowDefinitions>
-                        <TextBlock Text="Sessions / agents" FontSize="18" FontWeight="SemiBold" />
-                        <ListView x:Name="SessionList" Grid.Row="1" SelectionChanged="OnSessionSelectionChanged">
-                            <ListView.ItemTemplate>
-                                <DataTemplate>
-                                    <StackPanel Padding="4,7" Spacing="3">
-                                        <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Text="{Binding Subtitle}" Opacity="0.68" TextTrimming="CharacterEllipsis" />
-                                        <TextBlock Text="{Binding Metrics}" Opacity="0.78" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                </DataTemplate>
-                            </ListView.ItemTemplate>
-                        </ListView>
-                    </Grid>
-                </Border>
-
-                <Border Grid.Column="1" Padding="14" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                    <Grid RowSpacing="10">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="190" />
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="220" />
-                        </Grid.RowDefinitions>
-                        <TextBlock x:Name="SelectedSessionTitle" Text="Select a session" FontSize="18" FontWeight="SemiBold" />
-                        <TextBlock x:Name="SelectedSessionSummary" Grid.Row="1" Text="Timeline, tree and context telemetry will appear here." Opacity="0.7" TextWrapping="Wrap" />
-                        <ListView x:Name="AgentTreeList" Grid.Row="2" SelectionMode="None">
-                            <ListView.ItemTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding Text}" Margin="2,3" TextWrapping="Wrap" />
-                                </DataTemplate>
-                            </ListView.ItemTemplate>
-                        </ListView>
-                        <TextBlock Grid.Row="3" Text="Recent normalized timeline" FontWeight="SemiBold" Margin="0,4,0,0" />
-                        <ListView x:Name="TimelineList" Grid.Row="4" SelectionMode="None">
-                            <ListView.ItemTemplate>
-                                <DataTemplate>
-                                    <StackPanel Padding="2,4" Spacing="2">
-                                        <TextBlock Text="{Binding Header}" FontWeight="SemiBold" />
-                                        <TextBlock Text="{Binding Detail}" Opacity="0.7" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                </DataTemplate>
-                            </ListView.ItemTemplate>
-                        </ListView>
-                    </Grid>
-                </Border>
-            </Grid>
-
-            <Border Grid.Row="3" Padding="14" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                <Grid RowSpacing="8">
+            <Border Padding="12" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                <Grid RowSpacing="10">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto" />
-                        <RowDefinition Height="220" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <TextBlock Text="Largest rollout files" FontSize="18" FontWeight="SemiBold" />
-                    <ListView x:Name="StorageList" Grid.Row="1" SelectionMode="None">
+                    <TextBlock Text="Sessions / agents" FontSize="18" FontWeight="SemiBold" />
+                    <TextBox x:Name="SessionSearch"
+                             Grid.Row="1"
+                             PlaceholderText="Search session, repository, model or state"
+                             TextChanged="OnSessionSearchChanged" />
+                    <ListView x:Name="SessionList"
+                              Grid.Row="2"
+                              SelectionMode="Single"
+                              IsItemClickEnabled="False"
+                              SelectionChanged="OnSessionSelectionChanged"
+                              ScrollViewer.IsDeferredScrollingEnabled="True">
                         <ListView.ItemTemplate>
                             <DataTemplate>
-                                <Grid Padding="2,5" ColumnSpacing="12">
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis" />
-                                    <TextBlock Grid.Column="1" Text="{Binding Detail}" Opacity="0.72" />
-                                </Grid>
+                                <StackPanel Padding="4,7" Spacing="3">
+                                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding Subtitle}" Opacity="0.68" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding Metrics}" Opacity="0.78" TextWrapping="Wrap" />
+                                </StackPanel>
                             </DataTemplate>
                         </ListView.ItemTemplate>
                     </ListView>
                 </Grid>
             </Border>
+
+            <Border Grid.Column="1" Padding="12" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                <Grid RowSpacing="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <TextBlock x:Name="SelectedSessionTitle" Text="Select a session" FontSize="18" FontWeight="SemiBold" />
+                    <TextBlock x:Name="SelectedSessionSummary" Grid.Row="1" Text="Choose a session to load focused detail on demand." Opacity="0.7" TextWrapping="Wrap" />
+
+                    <TabView x:Name="DetailTabs"
+                             Grid.Row="2"
+                             IsAddTabButtonVisible="False"
+                             SelectionChanged="OnDetailTabSelectionChanged">
+                        <TabViewItem Header="Overview">
+                            <ScrollViewer Padding="8">
+                                <TextBlock x:Name="OverviewDetailText" Text="Select a session." TextWrapping="Wrap" />
+                            </ScrollViewer>
+                        </TabViewItem>
+                        <TabViewItem Header="Agents">
+                            <ListView x:Name="AgentTreeList" SelectionMode="None">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding Text}" Margin="4,5" TextWrapping="Wrap" />
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </TabViewItem>
+                        <TabViewItem Header="Timeline">
+                            <ListView x:Name="TimelineList" SelectionMode="None" ScrollViewer.IsDeferredScrollingEnabled="True">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Padding="4,5" Spacing="2">
+                                            <TextBlock Text="{Binding Header}" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding Detail}" Opacity="0.7" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </TabViewItem>
+                        <TabViewItem Header="Context">
+                            <ListView x:Name="ContextList" SelectionMode="None" ScrollViewer.IsDeferredScrollingEnabled="True">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Padding="4,5" Spacing="2">
+                                            <TextBlock Text="{Binding Header}" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding Detail}" Opacity="0.7" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </TabViewItem>
+                        <TabViewItem Header="Tokens">
+                            <ScrollViewer Padding="8">
+                                <TextBlock x:Name="TokenDetailText" Text="Select a session." TextWrapping="Wrap" />
+                            </ScrollViewer>
+                        </TabViewItem>
+                        <TabViewItem Header="Storage">
+                            <ListView x:Name="StorageList" SelectionMode="None" ScrollViewer.IsDeferredScrollingEnabled="True">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid Padding="4,5" ColumnSpacing="12">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding FileName}" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Grid.Column="1" Text="{Binding Detail}" Opacity="0.72" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </TabViewItem>
+                    </TabView>
+                </Grid>
+            </Border>
         </Grid>
-    </ScrollViewer>
+    </Grid>
 </Page>
