@@ -1,4 +1,6 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Interfaces;
@@ -154,8 +156,6 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
 
             if (version == 1)
             {
-                // Preserve the most recent raw cumulative counter state per session, but rebuild
-                // storage diagnostics on the typed-v2 replay because v1 keyed files only by path.
                 await ExecuteMigrationAsync(connection, """
                     CREATE TABLE codex_counter_state_v2 (
                         session_id TEXT PRIMARY KEY,
@@ -249,6 +249,28 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                     """, cancellationToken);
             }
 
+            // Scrub rows written by pre-hardening Phase 3 builds. typed-v3 forces one safe replay so
+            // current sources regain basename+hash labels and repository names without retaining paths.
+            var privacyScrub = connection.CreateCommand();
+            privacyScrub.CommandText = """
+                UPDATE rollout_records
+                SET file_path = '[redacted]'
+                WHERE instr(file_path, '/') > 0 OR instr(file_path, char(92)) > 0;
+
+                UPDATE rollout_files
+                SET file_path = '[redacted]'
+                WHERE instr(file_path, '/') > 0 OR instr(file_path, char(92)) > 0;
+
+                UPDATE codex_parser_state
+                SET repository = '(unknown)'
+                WHERE instr(repository, '/') > 0 OR instr(repository, char(92)) > 0;
+
+                UPDATE sessions
+                SET repository = '(unknown)'
+                WHERE instr(repository, '/') > 0 OR instr(repository, char(92)) > 0;
+                """;
+            await privacyScrub.ExecuteNonQueryAsync(cancellationToken);
+
             _initialized = true;
         }
         finally
@@ -260,6 +282,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
     public async Task UpsertSessionAsync(CodexSession session, CancellationToken cancellationToken)
     {
         await EnsureInitializedAsync(cancellationToken);
+        var safeRepository = SafeRepositoryLabel(session.Repository);
         await ExecuteAsync(
             """
             INSERT INTO sessions(session_id, thread_id, repository, started_at_utc, last_activity_at_utc, status)
@@ -279,7 +302,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             {
                 command.Parameters.AddWithValue("$id", session.SessionId);
                 command.Parameters.AddWithValue("$thread", DbValue(session.ThreadId));
-                command.Parameters.AddWithValue("$repo", session.Repository);
+                command.Parameters.AddWithValue("$repo", safeRepository);
                 command.Parameters.AddWithValue("$start", SerializeUtc(session.StartedAtUtc));
                 command.Parameters.AddWithValue("$last", session.LastActivityAtUtc is null ? DBNull.Value : SerializeUtc(session.LastActivityAtUtc.Value));
                 command.Parameters.AddWithValue("$status", session.Status);
@@ -433,8 +456,6 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
 
         if (previous is not null && observation.ObservedAtUtc < previous.LastObservedAtUtc)
         {
-            // A copied/rotated historical file can surface after a newer observation. Remember the
-            // source event idempotently, but do not move the live cumulative state backwards.
             await InsertNativeTokenEventAsync(
                 connection,
                 transaction,
@@ -480,8 +501,6 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
 
         if (inserted == 0)
         {
-            // Another writer committed the same source event. Never regress cumulative state after
-            // an ON CONFLICT no-op.
             transaction.Commit();
             return;
         }
@@ -507,7 +526,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
               last_observed_at_utc = excluded.last_observed_at_utc;
             """;
         upsertState.Parameters.AddWithValue("$session", observation.SessionId);
-        upsertState.Parameters.AddWithValue("$file", observation.SourceFile);
+        upsertState.Parameters.AddWithValue("$file", BuildSafeFileLabel(observation.SourceFile));
         upsertState.Parameters.AddWithValue("$epoch", epoch);
         upsertState.Parameters.AddWithValue("$input", observation.InputTokens);
         upsertState.Parameters.AddWithValue("$cached", observation.CachedInputTokens);
@@ -585,6 +604,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
     public async Task UpsertParserResumeStateAsync(CodexParserResumeState state, CancellationToken cancellationToken)
     {
         await EnsureInitializedAsync(cancellationToken);
+        var safeRepository = SafeRepositoryLabel(state.Repository);
         await ExecuteAsync(
             """
             INSERT INTO codex_parser_state(
@@ -610,7 +630,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                 command.Parameters.AddWithValue("$session", state.SessionId);
                 command.Parameters.AddWithValue("$parent", DbValue(state.ParentSessionId));
                 command.Parameters.AddWithValue("$name", state.AgentName);
-                command.Parameters.AddWithValue("$repository", state.Repository);
+                command.Parameters.AddWithValue("$repository", safeRepository);
                 command.Parameters.AddWithValue("$started", SerializeUtc(state.StartedAtUtc));
                 command.Parameters.AddWithValue("$model", DbValue(state.CurrentModel));
                 command.Parameters.AddWithValue("$reasoning", DbValue(state.ReasoningEffort));
@@ -629,6 +649,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         CancellationToken cancellationToken)
     {
         await EnsureInitializedAsync(cancellationToken);
+        var safeFileLabel = BuildSafeFileLabel(filePath);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
@@ -636,7 +657,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         var removePathAlias = connection.CreateCommand();
         removePathAlias.Transaction = transaction;
         removePathAlias.CommandText = "DELETE FROM rollout_files WHERE file_path = $file AND source_identity <> $identity;";
-        removePathAlias.Parameters.AddWithValue("$file", filePath);
+        removePathAlias.Parameters.AddWithValue("$file", safeFileLabel);
         removePathAlias.Parameters.AddWithValue("$identity", sourceIdentity);
         await removePathAlias.ExecuteNonQueryAsync(cancellationToken);
 
@@ -652,7 +673,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
               last_seen_at_utc = MAX(rollout_files.last_seen_at_utc, excluded.last_seen_at_utc);
             """;
         upsert.Parameters.AddWithValue("$identity", sourceIdentity);
-        upsert.Parameters.AddWithValue("$file", filePath);
+        upsert.Parameters.AddWithValue("$file", safeFileLabel);
         upsert.Parameters.AddWithValue("$session", DbValue(sessionId));
         upsert.Parameters.AddWithValue("$size", Math.Max(0, fileSizeBytes));
         upsert.Parameters.AddWithValue("$seen", SerializeUtc(observedAtUtc));
@@ -673,6 +694,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         CancellationToken cancellationToken)
     {
         await EnsureInitializedAsync(cancellationToken);
+        var safeFileLabel = BuildSafeFileLabel(filePath);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
@@ -686,7 +708,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             """;
         record.Parameters.AddWithValue("$id", sourceRecordId);
         record.Parameters.AddWithValue("$identity", sourceIdentity);
-        record.Parameters.AddWithValue("$file", filePath);
+        record.Parameters.AddWithValue("$file", safeFileLabel);
         record.Parameters.AddWithValue("$session", DbValue(sessionId));
         record.Parameters.AddWithValue("$class", eventClass);
         record.Parameters.AddWithValue("$bytes", Math.Max(0, recordBytes));
@@ -696,7 +718,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         var removePathAlias = connection.CreateCommand();
         removePathAlias.Transaction = transaction;
         removePathAlias.CommandText = "DELETE FROM rollout_files WHERE file_path = $file AND source_identity <> $identity;";
-        removePathAlias.Parameters.AddWithValue("$file", filePath);
+        removePathAlias.Parameters.AddWithValue("$file", safeFileLabel);
         removePathAlias.Parameters.AddWithValue("$identity", sourceIdentity);
         await removePathAlias.ExecuteNonQueryAsync(cancellationToken);
 
@@ -712,7 +734,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
               last_seen_at_utc = MAX(rollout_files.last_seen_at_utc, excluded.last_seen_at_utc);
             """;
         file.Parameters.AddWithValue("$identity", sourceIdentity);
-        file.Parameters.AddWithValue("$file", filePath);
+        file.Parameters.AddWithValue("$file", safeFileLabel);
         file.Parameters.AddWithValue("$session", DbValue(sessionId));
         file.Parameters.AddWithValue("$size", Math.Max(0, fileSizeBytes));
         file.Parameters.AddWithValue("$seen", SerializeUtc(observedAtUtc));
@@ -949,7 +971,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             ON CONFLICT(source_event_id) DO NOTHING;
             """;
         insert.Parameters.AddWithValue("$event", observation.SourceEventId);
-        insert.Parameters.AddWithValue("$file", observation.SourceFile);
+        insert.Parameters.AddWithValue("$file", BuildSafeFileLabel(observation.SourceFile));
         insert.Parameters.AddWithValue("$session", observation.SessionId);
         insert.Parameters.AddWithValue("$agent", DbValue(observation.AgentId));
         insert.Parameters.AddWithValue("$observed", SerializeUtc(observation.ObservedAtUtc));
@@ -999,6 +1021,54 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         command.CommandText = sql; // nosemgrep: private callers provide compile-time SQL and bind every runtime value.
         configure(command);
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static string BuildSafeFileLabel(string filePath)
+    {
+        var fileName = Path.GetFileName(filePath);
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            fileName = "rollout.jsonl";
+        }
+
+        string normalized;
+        try
+        {
+            normalized = Path.GetFullPath(filePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch
+        {
+            normalized = filePath;
+        }
+        if (OperatingSystem.IsWindows())
+        {
+            normalized = normalized.ToUpperInvariant();
+        }
+
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized))).ToLowerInvariant()[..12];
+        return $"{fileName} [{hash}]";
+    }
+
+    private static string SafeRepositoryLabel(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || string.Equals(value, "(unknown)", StringComparison.Ordinal))
+        {
+            return "(unknown)";
+        }
+
+        var normalized = value.Replace('\\', '/').Trim().TrimEnd('/');
+        var separator = normalized.LastIndexOf('/');
+        var label = separator >= 0 ? normalized[(separator + 1)..] : normalized;
+        if (label.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
+        {
+            label = label[..^4];
+        }
+        label = label.Trim();
+        if (label.Length == 0)
+        {
+            return "(unknown)";
+        }
+        return label.Length <= 160 ? label : label[..160];
     }
 
     private static object DbValue(object? value) => value ?? DBNull.Value;
