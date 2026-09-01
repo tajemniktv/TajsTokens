@@ -66,8 +66,14 @@ public partial class App : Application
         previous?.Dispose();
 
         var token = _periodicCancellation.Token;
-        _ = Services.Telemetry.RunPeriodicAsync(
-            TimeSpan.FromSeconds(Services.Settings.PollIntervalSeconds),
+        var interval = TimeSpan.FromSeconds(Services.Settings.PollIntervalSeconds);
+
+        // Microsoft.Data.Sqlite performs its SQLite work synchronously even behind many async APIs.
+        // Starting the collector directly from OnLaunched therefore lets its continuations inherit
+        // WinUI's DispatcherQueueSynchronizationContext and can freeze the window during a first-run
+        // rollout scan. Keep the entire process-lifetime collector on the thread pool instead.
+        _ = Task.Run(
+            () => Services.Telemetry.RunPeriodicAsync(interval, token),
             token);
     }
 

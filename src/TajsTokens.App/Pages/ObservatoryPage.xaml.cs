@@ -8,34 +8,106 @@ namespace TajsTokens.App.Pages;
 public sealed partial class ObservatoryPage : Page
 {
     private readonly Dictionary<string, CodexSessionOverview> _sessionsById = new(StringComparer.OrdinalIgnoreCase);
+    private CancellationTokenSource? _pageCancellation;
+    private bool _isLoaded;
     private bool _loading;
+    private bool _reloadRequested;
     private long _selectionGeneration;
 
     public ObservatoryPage()
     {
         InitializeComponent();
         Loaded += OnLoaded;
+        Unloaded += OnUnloaded;
     }
 
     private App App => (App)Application.Current;
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        Loaded -= OnLoaded;
-        await LoadAsync();
+        _isLoaded = true;
+        var previous = Interlocked.Exchange(ref _pageCancellation, new CancellationTokenSource());
+        previous?.Cancel();
+        previous?.Dispose();
+
+        App.Services.Telemetry.SnapshotUpdated -= OnSnapshotUpdated;
+        App.Services.Telemetry.SnapshotUpdated += OnSnapshotUpdated;
+
+        try
+        {
+            await LoadAsync(_pageCancellation.Token);
+        }
+        catch (OperationCanceledException) when (_pageCancellation?.IsCancellationRequested != false)
+        {
+            // Navigation can cancel a page-scoped load after it leaves the visual tree.
+        }
+    }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        _isLoaded = false;
+        App.Services.Telemetry.SnapshotUpdated -= OnSnapshotUpdated;
+        Interlocked.Increment(ref _selectionGeneration);
+
+        var cancellation = Interlocked.Exchange(ref _pageCancellation, null);
+        cancellation?.Cancel();
+        cancellation?.Dispose();
+    }
+
+    private void OnSnapshotUpdated(TelemetrySnapshot snapshot)
+    {
+        if (!_isLoaded || !snapshot.Sources.Any(source =>
+                string.Equals(source.Provider, "Codex rollouts", StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        var cancellation = _pageCancellation;
+        if (cancellation is null || cancellation.IsCancellationRequested)
+        {
+            return;
+        }
+
+        DispatcherQueue.TryEnqueue(async () =>
+        {
+            if (!_isLoaded || cancellation.IsCancellationRequested || !ReferenceEquals(_pageCancellation, cancellation))
+            {
+                return;
+            }
+
+            try
+            {
+                await LoadAsync(cancellation.Token);
+            }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+            {
+                // A queued snapshot callback may outlive navigation; detached pages do no work.
+            }
+        });
     }
 
     private async void OnRefreshClicked(object sender, RoutedEventArgs e)
     {
+        var cancellation = _pageCancellation;
+        if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested)
+        {
+            return;
+        }
+
         if (_loading)
         {
+            _reloadRequested = true;
             return;
         }
 
         try
         {
             StatusText.Text = "Refreshing providers and local rollouts…";
-            await App.Services.Telemetry.RefreshAsync(RefreshTrigger.Manual, CancellationToken.None);
+            await App.Services.Telemetry.RefreshAsync(RefreshTrigger.Manual, cancellation.Token);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            return;
         }
         catch (OperationCanceledException)
         {
@@ -46,74 +118,130 @@ public sealed partial class ObservatoryPage : Page
             StatusText.Text = $"Refresh failed: {Summarize(exception.Message)}";
         }
 
-        await LoadAsync();
+        if (_isLoaded && !cancellation.IsCancellationRequested && ReferenceEquals(_pageCancellation, cancellation))
+        {
+            await LoadAsync(cancellation.Token);
+        }
     }
 
-    private async Task LoadAsync()
+    private async Task LoadAsync(CancellationToken cancellationToken)
     {
-        if (_loading)
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!_isLoaded)
         {
             return;
         }
 
-        _loading = true;
-        try
+        if (_loading)
         {
-            var store = App.Services.ObservatoryStore;
-            await App.Services.Repository.InitializeAsync(CancellationToken.None);
-            await store.InitializeAsync(CancellationToken.None);
+            _reloadRequested = true;
+            return;
+        }
 
-            var summaryTask = store.GetSummaryAsync(CancellationToken.None);
-            var sessionsTask = store.GetSessionOverviewsAsync(500, CancellationToken.None);
-            var storageTask = store.GetRolloutStorageAsync(40, CancellationToken.None);
-            await Task.WhenAll(summaryTask, sessionsTask, storageTask);
-
-            var summary = await summaryTask;
-            var sessions = await sessionsTask;
-            var storage = await storageTask;
-            _sessionsById.Clear();
-            foreach (var session in sessions)
+        do
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_isLoaded)
             {
-                _sessionsById[session.SessionId] = session;
+                return;
             }
 
-            var selectedId = (SessionList.SelectedItem as SessionRow)?.SessionId;
-            var rows = sessions.Select(ToSessionRow).ToArray();
-            SessionList.ItemsSource = rows;
-            SessionCountText.Text = summary.SessionCount.ToString("N0");
-            NativeTokensText.Text = FormatCount(summary.NativeTokens.ReportedTotal);
-            StorageText.Text = FormatBytes(summary.RolloutBytes);
-            StorageList.ItemsSource = storage.Select(item => new StorageRow(
-                Path.GetFileName(item.FilePath),
-                $"{FormatBytes(item.SizeBytes)} · {item.RecordsSeen:N0} records · max {FormatBytes(item.LargestRecordBytes)}")).ToArray();
-
-            StatusText.Text = summary.SessionCount == 0
-                ? "No normalized Codex sessions yet. The background collector will ingest discovered rollout JSONL sources without storing transcript content."
-                : $"{summary.SessionCount:N0} normalized session(s). Last view refresh {DateTimeOffset.Now:t}.";
-
-            if (selectedId is not null)
+            _reloadRequested = false;
+            _loading = true;
+            try
             {
-                SessionList.SelectedItem = rows.FirstOrDefault(row => string.Equals(row.SessionId, selectedId, StringComparison.OrdinalIgnoreCase));
+                var store = App.Services.ObservatoryStore;
+                var repository = App.Services.Repository;
+
+                // Microsoft.Data.Sqlite's async API still performs SQLite calls synchronously. Keep
+                // aggregate/session/storage queries on the thread pool so a large telemetry database
+                // cannot stall WinUI while Observatory is rendering or a scan is committing records.
+                var data = await Task.Run(async () =>
+                {
+                    await repository.InitializeAsync(cancellationToken);
+                    await store.InitializeAsync(cancellationToken);
+
+                    var summaryTask = store.GetSummaryAsync(cancellationToken);
+                    var sessionsTask = store.GetSessionOverviewsAsync(500, cancellationToken);
+                    var storageTask = store.GetRolloutStorageAsync(40, cancellationToken);
+                    await Task.WhenAll(summaryTask, sessionsTask, storageTask);
+
+                    return (
+                        Summary: await summaryTask,
+                        Sessions: await sessionsTask,
+                        Storage: await storageTask);
+                }, cancellationToken);
+
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!_isLoaded)
+                {
+                    return;
+                }
+
+                var summary = data.Summary;
+                var sessions = data.Sessions;
+                var storage = data.Storage;
+                _sessionsById.Clear();
+                foreach (var session in sessions)
+                {
+                    _sessionsById[session.SessionId] = session;
+                }
+
+                var selectedId = (SessionList.SelectedItem as SessionRow)?.SessionId;
+                var rows = sessions.Select(ToSessionRow).ToArray();
+                SessionList.ItemsSource = rows;
+                SessionCountText.Text = summary.SessionCount.ToString("N0");
+                NativeTokensText.Text = FormatCount(summary.NativeTokens.ReportedTotal);
+                StorageText.Text = FormatBytes(summary.RolloutBytes);
+                StorageList.ItemsSource = storage.Select(item => new StorageRow(
+                    Path.GetFileName(item.FilePath),
+                    $"{FormatBytes(item.SizeBytes)} · {item.RecordsSeen:N0} records · max {FormatBytes(item.LargestRecordBytes)}")).ToArray();
+
+                var rolloutSource = App.Services.Telemetry.Latest.Sources.FirstOrDefault(source =>
+                    string.Equals(source.Provider, "Codex rollouts", StringComparison.OrdinalIgnoreCase));
+                var scanning = rolloutSource?.Detail.Contains("Scanning local Codex rollout history", StringComparison.OrdinalIgnoreCase) == true;
+                StatusText.Text = scanning
+                    ? summary.SessionCount == 0
+                        ? "Importing local Codex history in the background. Sessions will appear here as the scan commits them."
+                        : $"Importing local Codex history in the background · {summary.SessionCount:N0} session(s) available so far."
+                    : summary.SessionCount == 0
+                        ? "No normalized Codex sessions yet. The background collector will ingest discovered rollout JSONL sources without storing transcript content."
+                        : $"{summary.SessionCount:N0} normalized session(s). Last view refresh {DateTimeOffset.Now:t}.";
+
+                if (selectedId is not null)
+                {
+                    SessionList.SelectedItem = rows.FirstOrDefault(row => string.Equals(row.SessionId, selectedId, StringComparison.OrdinalIgnoreCase));
+                }
+                if (SessionList.SelectedItem is null && rows.Length > 0)
+                {
+                    SessionList.SelectedIndex = 0;
+                }
             }
-            if (SessionList.SelectedItem is null && rows.Length > 0)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
-                SessionList.SelectedIndex = 0;
+                return;
+            }
+            catch (Exception exception)
+            {
+                if (_isLoaded)
+                {
+                    StatusText.Text = $"Observatory data unavailable: {Summarize(exception.Message)}";
+                }
+            }
+            finally
+            {
+                _loading = false;
             }
         }
-        catch (Exception exception)
-        {
-            StatusText.Text = $"Observatory data unavailable: {Summarize(exception.Message)}";
-        }
-        finally
-        {
-            _loading = false;
-        }
+        while (_reloadRequested && _isLoaded && !cancellationToken.IsCancellationRequested);
     }
 
     private async void OnSessionSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         var generation = Interlocked.Increment(ref _selectionGeneration);
-        if (SessionList.SelectedItem is not SessionRow row || !_sessionsById.TryGetValue(row.SessionId, out var session))
+        var cancellation = _pageCancellation;
+        if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested ||
+            SessionList.SelectedItem is not SessionRow row || !_sessionsById.TryGetValue(row.SessionId, out var session))
         {
             return;
         }
@@ -121,23 +249,33 @@ public sealed partial class ObservatoryPage : Page
         try
         {
             var store = App.Services.ObservatoryStore;
-            var timelineTask = store.GetTimelineAsync(session.SessionId, 80, CancellationToken.None);
-            var contextTask = store.GetContextObservationsAsync(session.SessionId, 80, CancellationToken.None);
-            var agentsTask = store.GetAgentsAsync(null, CancellationToken.None);
-            var relationshipsTask = store.GetAgentRelationshipsAsync(CancellationToken.None);
-            await Task.WhenAll(timelineTask, contextTask, agentsTask, relationshipsTask);
+            var data = await Task.Run(async () =>
+            {
+                var timelineTask = store.GetTimelineAsync(session.SessionId, 80, cancellation.Token);
+                var contextTask = store.GetContextObservationsAsync(session.SessionId, 80, cancellation.Token);
+                var agentsTask = store.GetAgentsAsync(null, cancellation.Token);
+                var relationshipsTask = store.GetAgentRelationshipsAsync(cancellation.Token);
+                await Task.WhenAll(timelineTask, contextTask, agentsTask, relationshipsTask);
 
-            if (generation != Volatile.Read(ref _selectionGeneration) ||
+                return (
+                    Timeline: await timelineTask,
+                    Context: await contextTask,
+                    Agents: await agentsTask,
+                    Relationships: await relationshipsTask);
+            }, cancellation.Token);
+
+            if (!_isLoaded || cancellation.IsCancellationRequested || !ReferenceEquals(_pageCancellation, cancellation) ||
+                generation != Volatile.Read(ref _selectionGeneration) ||
                 SessionList.SelectedItem is not SessionRow current ||
                 !string.Equals(current.SessionId, row.SessionId, StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
 
-            var timeline = await timelineTask;
-            var context = await contextTask;
-            var agents = await agentsTask;
-            var relationships = await relationshipsTask;
+            var timeline = data.Timeline;
+            var context = data.Context;
+            var agents = data.Agents;
+            var relationships = data.Relationships;
 
             SelectedSessionTitle.Text = session.DisplayName;
             var peak = session.PeakContextPercent is double peakValue ? $" · peak context {peakValue:0.0}%" : string.Empty;
@@ -161,9 +299,14 @@ public sealed partial class ObservatoryPage : Page
                 SelectedSessionSummary.Text += $" · {detail}";
             }
         }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            // Navigation cancels detached session-detail queries.
+        }
         catch (Exception exception)
         {
-            if (generation == Volatile.Read(ref _selectionGeneration))
+            if (_isLoaded && ReferenceEquals(_pageCancellation, cancellation) &&
+                generation == Volatile.Read(ref _selectionGeneration))
             {
                 SelectedSessionSummary.Text = $"Session detail unavailable: {Summarize(exception.Message)}";
             }
