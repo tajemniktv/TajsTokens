@@ -143,7 +143,8 @@
             </Border>
 
             <StackPanel Orientation="Horizontal" Spacing="10">
-                <Button Content="Save settings"
+                <Button x:Name="SaveButton"
+                        Content="Save settings"
                         Style="{StaticResource AccentButtonStyle}"
                         Click="OnSaveClicked" />
                 <Button Content="Reload"
