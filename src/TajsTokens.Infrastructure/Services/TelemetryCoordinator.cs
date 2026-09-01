@@ -112,6 +112,7 @@ public sealed class TelemetryCoordinator
             var tokenUsages = previous.TokenUsages;
             var hourlyBuckets = previous.HourlyBuckets;
             var tokenFresh = false;
+            var observatoryFresh = _observatoryService is null;
 
             var quotaSnapshots = previous.QuotaSnapshots;
             IReadOnlyList<QuotaSnapshot> freshQuotaSnapshots = [];
@@ -230,16 +231,22 @@ public sealed class TelemetryCoordinator
                 try
                 {
                     var observatory = await observatoryTask;
-                    var state = observatory.Errors > 0 ? TelemetryHealthState.Stale : TelemetryHealthState.Live;
+                    observatoryFresh = observatory.Errors == 0;
+                    var state = observatoryFresh ? TelemetryHealthState.Live : TelemetryHealthState.Stale;
                     var detail = observatory.FilesDiscovered == 0
                         ? "No local Codex rollout JSONL sources were discovered."
                         : $"{observatory.FilesDiscovered} catalog rollout(s), {observatory.FilesScanned} changed file(s) scanned, {observatory.RecordsScanned} new complete record(s), {observatory.RecordsNormalized} normalized, {observatory.SessionsTouched} touched session(s), {FormatByteCount(observatory.BytesObserved)} observed on changed sources." +
                           (observatory.Errors > 0 ? $" {observatory.Errors} file(s) could not be refreshed and will retry." : string.Empty);
-                    sources.Add(new ProviderHealthSnapshot("Codex rollouts", state, detail, startedAt));
+                    sources.Add(new ProviderHealthSnapshot(
+                        "Codex rollouts",
+                        state,
+                        detail,
+                        observatoryFresh ? startedAt : PreviousSuccess(previous, "Codex rollouts")));
                     events.Add(new TelemetryRefreshEvent(startedAt, "Codex observatory", detail));
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
+                    observatoryFresh = false;
                     var detail = SummarizeError(exception);
                     sources.Add(new ProviderHealthSnapshot(
                         "Codex rollouts",
@@ -255,26 +262,57 @@ public sealed class TelemetryCoordinator
             try
             {
                 var accounting = await _tokenProvider.GetSnapshotAsync(refreshToken);
-                tokenUsages = accounting.Usage;
-                hourlyBuckets = accounting.Hourly;
-                tokenFresh = true;
-                _lastTokenSourceName = accounting.Source;
+                var projectedUsages = accounting.Usage;
+                var projectedHourly = accounting.Hourly;
+                var hasPreviousTokenGeneration = previous.TokenUsages.Count > 0 || previous.HourlyBuckets.Count > 0;
 
-                var accountingDetail = $"{tokenUsages.Count} model row(s), {hourlyBuckets.Count} hourly bucket(s). {accounting.Coverage}";
+                if (observatoryFresh)
+                {
+                    tokenUsages = projectedUsages;
+                    hourlyBuckets = projectedHourly;
+                    tokenFresh = !accounting.IsFallback;
+                    _lastTokenSourceName = accounting.Source;
+                }
+                else if (!hasPreviousTokenGeneration)
+                {
+                    // A first-run partial projection can still be useful, but it must never be labelled
+                    // live. Once a complete generation exists, failed ingestion preserves that last
+                    // known-good generation instead of promoting partially refreshed SQLite rows.
+                    tokenUsages = projectedUsages;
+                    hourlyBuckets = projectedHourly;
+                    tokenFresh = false;
+                }
+
+                var accountingDetail = $"{projectedUsages.Count} model row(s), {projectedHourly.Count} hourly bucket(s). {accounting.Coverage}";
+                if (!observatoryFresh)
+                {
+                    accountingDetail += hasPreviousTokenGeneration
+                        ? " Upstream rollout ingestion was incomplete; preserving the last complete displayed token generation."
+                        : " Upstream rollout ingestion was incomplete; this first available projection is marked stale.";
+                }
                 if (!string.IsNullOrWhiteSpace(accounting.Diagnostic))
                 {
                     accountingDetail += $" {accounting.Diagnostic}";
                 }
 
+                var accountingState = !observatoryFresh || accounting.IsFallback
+                    ? (tokenUsages.Count > 0 || hourlyBuckets.Count > 0
+                        ? TelemetryHealthState.Stale
+                        : TelemetryHealthState.Unavailable)
+                    : TelemetryHealthState.Live;
                 sources.Add(new ProviderHealthSnapshot(
                     accounting.Source,
-                    accounting.IsFallback ? TelemetryHealthState.Stale : TelemetryHealthState.Live,
+                    accountingState,
                     accountingDetail,
-                    startedAt));
+                    accountingState == TelemetryHealthState.Live
+                        ? startedAt
+                        : PreviousSuccess(previous, accounting.Source)));
                 events.Add(new TelemetryRefreshEvent(
                     startedAt,
-                    "Token refresh",
-                    $"Loaded {FormatTokenCount(tokenUsages.Sum(item => item.Breakdown.Total))} local-history tokens from {accounting.Source}."));
+                    observatoryFresh ? "Token refresh" : "Token generation stale",
+                    observatoryFresh
+                        ? $"Loaded {FormatTokenCount(projectedUsages.Sum(item => item.Breakdown.Total))} local-history tokens from {accounting.Source}."
+                        : "Native accounting projection remained usable, but upstream rollout ingestion was incomplete so the generation was not promoted as live."));
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
@@ -282,6 +320,7 @@ public sealed class TelemetryCoordinator
                 var hasPrevious = previous.TokenUsages.Count > 0 || previous.HourlyBuckets.Count > 0;
                 tokenUsages = previous.TokenUsages;
                 hourlyBuckets = previous.HourlyBuckets;
+                tokenFresh = false;
                 sources.Add(new ProviderHealthSnapshot(
                     _lastTokenSourceName,
                     hasPrevious ? TelemetryHealthState.Stale : TelemetryHealthState.Unavailable,
@@ -313,7 +352,7 @@ public sealed class TelemetryCoordinator
             // shared provider/Observatory refresh gate while the heavier history scan is running.
             // A second request while one intelligence refresh is active is intentionally coalesced;
             // the next normal telemetry cadence will derive any newer persisted observations.
-            if (persistenceAvailable && _intelligenceService is not null)
+            if (persistenceAvailable && observatoryFresh && _intelligenceService is not null)
             {
                 QueueIntelligenceRefresh(cancellationToken);
             }
