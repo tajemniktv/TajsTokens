@@ -7,6 +7,8 @@ namespace TajsTokens.App.Pages;
 
 public sealed partial class SettingsPage : Page
 {
+    private RuntimeSettings? _renderedSettings;
+
     public SettingsPage()
     {
         InitializeComponent();
@@ -37,7 +39,8 @@ public sealed partial class SettingsPage : Page
             return;
         }
 
-        var candidate = App.Services.Settings with
+        var baseline = _renderedSettings ?? App.Services.Settings;
+        var candidate = baseline with
         {
             RunInBackground = RunInBackgroundToggle.IsOn,
             LaunchAtLogin = LaunchAtLoginToggle.IsOn,
@@ -49,7 +52,7 @@ public sealed partial class SettingsPage : Page
         SaveButton.IsEnabled = false;
         try
         {
-            var result = await App.TryApplySettingsAsync(candidate);
+            var result = await App.TryApplySettingsAsync(baseline, candidate);
             if (!result.Success)
             {
                 RenderSettings();
@@ -69,6 +72,7 @@ public sealed partial class SettingsPage : Page
     private void RenderSettings()
     {
         var settings = App.Services.Settings;
+        _renderedSettings = settings;
         RunInBackgroundToggle.IsOn = settings.RunInBackground;
         LaunchAtLoginToggle.IsOn = settings.LaunchAtLogin;
         PollIntervalBox.Value = settings.PollIntervalSeconds;
