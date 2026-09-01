@@ -38,6 +38,13 @@ public sealed class RuntimeSettingsStore
 
     public void Save(RuntimeSettings settings)
     {
+        var persistedVersion = ReadPersistedSchemaVersion();
+        if (persistedVersion > RuntimeSettings.CurrentSchemaVersion)
+        {
+            throw new InvalidOperationException(
+                $"Persisted runtime settings schema {persistedVersion} is newer than supported version {RuntimeSettings.CurrentSchemaVersion}; refusing to overwrite it.");
+        }
+
         var normalized = Normalize(settings);
         var directory = Path.GetDirectoryName(_path);
         if (!string.IsNullOrWhiteSpace(directory))
@@ -48,6 +55,33 @@ public sealed class RuntimeSettingsStore
         var temp = _path + ".tmp";
         File.WriteAllText(temp, JsonSerializer.Serialize(normalized, JsonOptions));
         File.Move(temp, _path, overwrite: true);
+    }
+
+    private int? ReadPersistedSchemaVersion()
+    {
+        if (!File.Exists(_path))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var document = JsonDocument.Parse(File.ReadAllText(_path));
+            if (!document.RootElement.TryGetProperty(nameof(RuntimeSettings.SchemaVersion), out var property))
+            {
+                return 0;
+            }
+
+            return property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out var version)
+                ? version
+                : 0;
+        }
+        catch (JsonException)
+        {
+            // A corrupt current-version file may be replaced by an explicit successful save. Only a
+            // parseable future schema is protected from older binaries.
+            return null;
+        }
     }
 
     internal static RuntimeSettings Normalize(RuntimeSettings settings)
