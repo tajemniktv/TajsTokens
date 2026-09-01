@@ -20,17 +20,25 @@ Those numbers are profiler observations from one development run, not stable cro
 
 ### Tray
 
-The notification-area icon now caches rendered badge variants by `(remaining percentage, freshness)` and skips shell/icon updates entirely when both visible badge state and tooltip are unchanged. Expensive font/icon construction therefore moves from every telemetry snapshot to the first encounter of a distinct visible state.
+The notification-area icon caches rendered badge variants by `(remaining percentage, freshness)` and skips shell/icon updates when both visible badge state and tooltip are unchanged. A cache miss is rendered on a thread-pool worker, so `System.Drawing` font-family discovery and bitmap/icon rasterization no longer run synchronously from the WinUI dispatcher. Only a completed cached icon is posted back to the hidden tray window for the cheap `Shell_NotifyIcon` application step. The latest desired tooltip/badge state is retained independently of whether Explorer temporarily accepts `NIM_MODIFY`, so taskbar recreation cannot resurrect stale quota health.
 
 ### Rollout metadata persistence
 
-Production rollout ingestion now batches `rollout_records` metadata at the same 128-record durable checkpoint cadence. A batch uses one SQLite connection + transaction, one prepared insert command, and one rollout-file upsert instead of paying a connection/transaction/file-upsert cycle for every JSONL record.
+Production rollout ingestion batches `rollout_records` metadata at the same 128-record durable checkpoint cadence. Each durable batch performs one canonical rollout-file upsert through the Observatory store, then one SQLite transaction with a prepared command for up to 128 record rows. This replaces the previous per-JSONL-line file-stat/file-upsert/record-transaction cycle while keeping the canonical safe-file-label and path-replacement rules in one persistence implementation.
 
-Semantic session/agent/token/context writes remain ordered and idempotent. The source byte checkpoint advances only after the corresponding metadata batch has committed, so batching cannot trade away replay correctness.
+Semantic session/agent/token/context writes remain ordered and idempotent. The source byte checkpoint advances only after both the canonical file metadata update and the record batch complete. If the record batch fails after the file upsert, replay safely repeats the idempotent file update and `ON CONFLICT`-safe record inserts instead of advancing past uncommitted metadata.
 
 ### UI data loading
 
-Observatory is now a fixed master-detail surface rather than a nested whole-page scroll containing every detail domain simultaneously. Session detail tabs load agent topology, timeline, context, token and storage information on demand. Long lists remain inside virtualizing `ListView` surfaces and page/selection generation guards prevent stale asynchronous detail from replacing the current selection.
+Observatory is now a fixed master-detail surface rather than a nested whole-page scroll containing every detail domain simultaneously. Session search is executed in SQLite before limiting results, so an older matching session remains discoverable after the corpus grows beyond the default recent-session window. Agent topology is traversed for the selected root/subagent tree through a bounded recursive query, and Storage applies its session predicate before ordering/limiting. Timeline, context, token, and storage information otherwise load on demand through detail tabs.
+
+Long lists remain inside virtualizing `ListView` surfaces. Search is debounced, and page/search/selection generation guards prevent stale asynchronous data from replacing the current query or selection.
+
+### Forecasting and persistence
+
+Phase 3.5 forecasting is scoped to the provider's current reset identity. Mixed flat/moving meter intervals retain their zero-rate samples instead of modelling only active-burn periods, while a wholly flat rounded meter is represented as uncertainty rather than confident zero burn. Exhaustion ETA is emitted only when exhaustion is projected before the authoritative reset; otherwise the useful result is the projected remaining margin at reset.
+
+The reset-aware forecast fields are persisted in telemetry schema v4, including forecast state, burn pressure, reset margin, trend, and the quantized-flat marker. The v3-to-v4 migration assigns safe defaults to older rows instead of silently dropping Phase 3.5 semantics on new rows after restart.
 
 ## Product budgets
 
@@ -54,10 +62,10 @@ For a representative Windows run with an existing `.codex` corpus:
 1. start with a fresh or copied TajsTokens telemetry database so first-import behavior is exercised;
 2. capture startup through provider publication and at least one substantial rollout import;
 3. inspect WinUI dispatcher hot paths separately from aggregate process wall time;
-4. confirm repeated unchanged snapshots do not repeatedly construct tray fonts/icons;
-5. compare `rollout_records` transaction/command counts with record count and verify they occur in bounded batches;
+4. confirm repeated unchanged snapshots do not repeatedly construct tray fonts/icons, and confirm a new badge cache miss performs `System.Drawing` work off the dispatcher;
+5. compare `rollout_records` transaction/command counts with record count and verify record writes occur in bounded batches rather than per line;
 6. record total import time, complete records processed, records/sec, database growth and peak process/managed memory;
 7. leave the app idle for several polling cycles and record CPU/I/O/wakeup behavior;
-8. repeat selection/navigation across sessions with timeline/context/storage tabs to catch materialization or stale-result regressions.
+8. repeat selection/navigation across sessions with timeline/context/storage tabs and search for an older session to catch global materialization, limit-before-filter, or stale-result regressions.
 
 Do not make normal CI depend on narrow wall-clock thresholds. Correctness CI should verify batching/checkpoint semantics; performance regression jobs or manual profiling can use broad throughput/allocation guardrails on controlled runners.
