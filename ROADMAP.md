@@ -57,15 +57,22 @@ Phase 3 proves direct/native Codex observability but does **not** replace Toksca
 - Record Windows profiling evidence, budgets and a repeatable re-profiling procedure
 - Consolidate repository agent/architecture guidance into root `AGENTS.md`
 
-Phase 3.5 stabilizes the real local product before deeper Phase 4 analytics multiply the amount of data, rendering and background work.
+The Phase 3.5 code milestone is merged. The issue remains open only for its post-change representative Windows re-profile/steady-state measurement; Phase 4 is not blocked on pretending CI is dotTrace.
 
-## Phase 4 - Intelligence and historical analytics
+## Phase 4 - Intelligence and historical analytics 🚧
 
-- Rich forecast history/baselines and longer-horizon pacing intelligence on top of the Phase 3.5 reset-aware model
-- `What ate my quota?` attribution and concurrency analysis
-- Reset/re-anchoring intelligence
-- Historical hourly/daily/minutely analytics, heatmaps, repo/model/agent drill-down
-- Scenario planner based on observed account behavior
+Tracked by #56, with the detailed domain issues remaining authoritative for their full acceptance criteria.
+
+Current Phase 4 implementation direction:
+
+- persist reset-aware forecast snapshots during the shared telemetry refresh and expose forecast-history/baseline views (#9);
+- derive provider-observed quota-burn intervals without crossing reset/re-anchor boundaries and correlate them with native root/subagent activity (#11);
+- detect/deduplicate expected resets, rolling-window re-anchors and unusual/full-reset evidence while keeping provider `resetsAt` authoritative (#14);
+- query bounded minute/hour/day native history, token classes, root/subagent splits, repo/model dimensions and day/hour heatmap data in SQLite rather than materializing raw history in XAML (#17);
+- estimate dual-window workload scenarios from the user's own historical quota-drop/concurrency observations, with ranges/sample counts/confidence and honest insufficient-history states (#10);
+- ship real native Usage, Forecasts and Analytics surfaces over normalized intelligence contracts rather than placeholder pages.
+
+Phase 4 attribution remains interval-based and explicitly estimated. TajsTokens must never invent a universal local-token-to-subscription-quota conversion merely because two numbers happen to be available in the same database.
 
 ## Phase 5 - Power-user platform
 
