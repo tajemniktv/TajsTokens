@@ -14,6 +14,7 @@ FileSystemCodexSessionEventProvider
         v
 CodexSessionIngestionService
   stable file identity + exact byte checkpoint
+  matching content-free parser resume state
         |
         v
 CodexRolloutParser
@@ -36,11 +37,13 @@ The normal process-lifetime `TelemetryCoordinator` runs the observatory refresh 
 
 Codex rollout filenames normally contain the owning session UUID. The parser waits for the `session_meta.id` matching that UUID before normalizing semantic telemetry. This is important for subagent rollouts that begin with a copied parent prefix. `subagent_history_start_ordinal` is useful when present but is deliberately not required for this ownership boundary.
 
-If a rollout filename does not contain a UUID, the parser falls back conservatively to the first session metadata record. Such sources should be treated as lower-confidence coverage until a verified source contract provides a stronger identity.
+A fresh rollout whose filename does **not** contain a corroborating UUID is storage-diagnostics-only in Phase 3. TajsTokens does not guess that the first `session_meta` is the owner because that record may belong to copied parent history. A future verified source contract can safely broaden ownership detection without contaminating existing accounting.
+
+Incremental resumes restore the content-free parser metadata that existed at the exact checkpoint byte offset: owning/parent session, agent nickname, repository, start time, model, reasoning effort and context-window size. If parser state and the byte checkpoint do not match, ingestion replays safely from byte zero instead of normalizing with placeholder metadata.
 
 ## Native shadow accounting
 
-`token_count.info.total_token_usage` is treated as a cumulative counter stream, not a session lifetime scalar. For each source/session pair TajsTokens persists the last raw counters and an epoch number. A decrease in cumulative total/component counters starts a new epoch. Repeated snapshots produce zero delta.
+`token_count.info.total_token_usage` is treated as a cumulative per-session counter stream, not a session lifetime scalar tied to one physical file. TajsTokens persists the latest raw counters and epoch by session id, so archive/rotation paths do not restart lifetime accounting. A decrease in chronological cumulative total/component counters starts a new epoch.
 
 Persisted shadow buckets are disjoint:
 
@@ -51,13 +54,15 @@ Persisted shadow buckets are disjoint:
 - reasoning output;
 - provider-reported total delta.
 
-Every native event has a deterministic source-event id derived from source-file identity plus byte offsets. Replaying a previously committed record therefore cannot add its token delta twice.
+Every native event has a deterministic source-event id derived from stable source-file identity plus byte offsets. A duplicate event is rejected before cumulative state can advance or regress. Historical observations discovered later from copied/rotated sources are remembered as zero-delta events and cannot move newer counter state backwards.
 
 This data is intentionally labelled **native shadow**. Phase 3 does not replace Tokscale or claim parity. Full reconciliation and cutover remain Phase 6.
 
 ## Quota source fusion
 
-When a rollout `token_count` event contains `rate_limits`, each recognizable quota window is persisted into the same `quota_snapshots` history used by app-server observations, with `codex-rollout:*` source provenance. Common 300-minute and 10,080-minute windows map to five-hour and weekly kinds; other durations remain `Unknown` rather than being relabelled.
+When a rollout `token_count` event contains `rate_limits`, recognized five-hour (300 minute) and weekly (10,080 minute) windows are persisted into the same `quota_snapshots` history used by app-server observations, with `codex-rollout:*` source provenance.
+
+The current canonical quota table has one identity per known kind/timestamp, so arbitrary additional durations are deliberately not persisted as a shared `Unknown` kind yet: multiple lanes in one event would collide. Lane-aware dynamic-window identity belongs in the broader quota-model work rather than silently overwriting observations.
 
 The provider's `resets_at` value is retained as authoritative. Rollout observations do not fabricate missing app-server lanes and do not make the top-level dashboard call itself live when its active provider read failed.
 
@@ -70,11 +75,13 @@ Token-count records contribute content-free `last_token_usage.input_tokens` plus
 Every complete record can contribute only:
 
 - deterministic source-record id;
-- source file path used locally for checkpoint/storage association;
+- stable source-file identity plus its current path;
 - owning session id when known;
 - normalized event class;
 - byte length;
 - timestamp.
+
+Rollout files are keyed by stable source identity rather than path, so moving a physical file from the active sessions tree into an archive updates its path instead of doubling storage. Replacing a path with a different physical file retires the stale path alias.
 
 The original JSON payload is discarded after parsing. This lets the UI identify giant records/files and event-class-heavy sessions without duplicating tool output into `telemetry.db`.
 
@@ -85,6 +92,7 @@ The base telemetry repository remains owner of `PRAGMA user_version`. Phase 3 ad
 - `observatory_schema`
 - `codex_native_token_events`
 - `codex_counter_state`
+- `codex_parser_state`
 - `context_observations`
 - `rollout_records`
 - `rollout_files`
@@ -93,6 +101,6 @@ The component writes existing normalized `sessions`, `agents`, `agent_relationsh
 
 ## Privacy boundary
 
-Normal Phase 3 ingestion must not persist prompt/message text, reasoning text, source code, command arguments, shell/tool output, credentials, or raw JSONL records. Timeline summaries are intentionally generic (`Tool call`, `Task completed`, `Context compaction`, etc.).
+Normal Phase 3 ingestion must not persist prompt/message text, reasoning text, source code, command arguments, shell/tool output, credentials, or raw JSONL records. Timeline summaries are intentionally generic (`Tool call`, `Task completed`, `Context compaction`, etc.). Parser-resume state contains only identifiers and telemetry metadata required for correct incremental normalization.
 
 The regression fixtures under `tests/TajsTokens.Core.Tests/Fixtures/CodexRollouts` are hand-authored synthetic structures. Real personal rollouts are not repository assets.
