@@ -11,7 +11,8 @@ public sealed record CodexObservatoryRuntime(
 
 /// <summary>
 /// Infrastructure composition boundary for the local Codex observatory. UI code receives only the
-/// normalized interfaces and never constructs rollout readers or parser/ingestion implementations.
+/// normalized interfaces and never constructs rollout readers, Codex-private state readers, or
+/// parser/ingestion implementations.
 /// </summary>
 public static class CodexObservatoryRuntimeFactory
 {
@@ -27,7 +28,14 @@ public static class CodexObservatoryRuntimeFactory
             checkpointStore,
             store,
             rolloutRecordBatchWriter);
-        var service = new CodexObservatoryService(ingestion, store);
+
+        var stateIndexStore = new SqliteCodexStateIndexStore(databasePath);
+        var stateCatalog = new CodexStateCatalog(CodexObservatoryService.GetCodexHome());
+        var service = new CodexObservatoryService(
+            ingestion,
+            store,
+            stateCatalog,
+            stateIndexStore);
         return new CodexObservatoryRuntime(store, ingestion, service);
     }
 }
