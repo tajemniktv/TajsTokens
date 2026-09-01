@@ -6,17 +6,17 @@ namespace TajsTokens.Core.Tests;
 
 public sealed class ScenarioPlannerServiceTests
 {
+    private static readonly DateTimeOffset EvaluationTime = new(2026, 8, 24, 0, 0, 0, TimeSpan.Zero);
     private readonly ScenarioPlannerService _planner = new();
 
     [Fact]
     public void Estimate_WithSparseHistory_ReturnsHonestInsufficientState()
     {
-        var now = DateTimeOffset.UtcNow;
         var history = Enumerable.Range(0, 3)
-            .Select(index => Sample(QuotaWindowKind.FiveHour, now.AddHours(-index - 1), 4 + index, 1, 0))
+            .Select(index => Sample(QuotaWindowKind.FiveHour, EvaluationTime.AddHours(-index - 2), 4 + index, 1, 0))
             .ToArray();
 
-        var estimate = _planner.Estimate(new ScenarioRequest(2, 1, 0), history);
+        var estimate = _planner.Estimate(new ScenarioRequest(2, 1, 0), history, EvaluationTime);
 
         Assert.False(estimate.FiveHour.HasEnoughHistory);
         Assert.False(estimate.Weekly.HasEnoughHistory);
@@ -29,7 +29,10 @@ public sealed class ScenarioPlannerServiceTests
     {
         var history = BuildSyntheticHistory();
 
-        var estimate = _planner.Estimate(new ScenarioRequest(2, 1, 2, 1.0, "gpt-5.6-luna", "xhigh"), history);
+        var estimate = _planner.Estimate(
+            new ScenarioRequest(2, 1, 2, 1.0, "gpt-5.6-luna", "xhigh"),
+            history,
+            EvaluationTime);
 
         Assert.True(estimate.FiveHour.HasEnoughHistory);
         Assert.True(estimate.Weekly.HasEnoughHistory);
@@ -37,7 +40,7 @@ public sealed class ScenarioPlannerServiceTests
         Assert.NotNull(estimate.Weekly.ExpectedQuotaDeltaPercent);
         Assert.True(estimate.FiveHour.LowerQuotaDeltaPercent <= estimate.FiveHour.ExpectedQuotaDeltaPercent);
         Assert.True(estimate.FiveHour.UpperQuotaDeltaPercent >= estimate.FiveHour.ExpectedQuotaDeltaPercent);
-        Assert.InRange(estimate.FiveHour.Confidence, 0.1, 0.92);
+        Assert.True(estimate.FiveHour.Confidence > 0.5);
         Assert.Contains("No universal token", estimate.Methodology, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -46,8 +49,8 @@ public sealed class ScenarioPlannerServiceTests
     {
         var history = BuildSyntheticHistory();
 
-        var light = _planner.Estimate(new ScenarioRequest(1, 1, 0, 0.7), history);
-        var heavy = _planner.Estimate(new ScenarioRequest(3, 2, 4, 1.4), history);
+        var light = _planner.Estimate(new ScenarioRequest(1, 1, 0, 0.7), history, EvaluationTime);
+        var heavy = _planner.Estimate(new ScenarioRequest(3, 2, 4, 1.4), history, EvaluationTime);
 
         Assert.True(light.FiveHour.HasEnoughHistory);
         Assert.True(heavy.FiveHour.HasEnoughHistory);
@@ -60,12 +63,44 @@ public sealed class ScenarioPlannerServiceTests
     {
         var history = BuildSyntheticHistory();
 
-        var baseline = _planner.Estimate(new ScenarioRequest(2, 1, 1), history);
-        var unknownModel = _planner.Estimate(new ScenarioRequest(2, 1, 1, 1, "never-seen-model", "ultra-never-seen"), history);
+        var baseline = _planner.Estimate(new ScenarioRequest(2, 1, 1), history, EvaluationTime);
+        var unknownModel = _planner.Estimate(
+            new ScenarioRequest(2, 1, 1, 1, "never-seen-model", "ultra-never-seen"),
+            history,
+            EvaluationTime);
 
         Assert.True(unknownModel.FiveHour.HasEnoughHistory);
         Assert.True(unknownModel.FiveHour.Confidence < baseline.FiveHour.Confidence);
         Assert.Contains("broader account cohort", unknownModel.FiveHour.Explanation, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Estimate_ReasoningFallbackAfterModelMatch_ReportsRetainedModelCohort()
+    {
+        var history = BuildSyntheticHistory();
+
+        var estimate = _planner.Estimate(
+            new ScenarioRequest(2, 1, 1, 1, "gpt-5.6-luna", "never-seen-reasoning"),
+            history,
+            EvaluationTime);
+
+        Assert.True(estimate.FiveHour.HasEnoughHistory);
+        Assert.Contains("model gpt-5.6-luna cohort was retained", estimate.FiveHour.Explanation, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("broader account cohort was used", estimate.FiveHour.Explanation, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Estimate_WhenNewestHistoryIsStale_ReturnsUnavailableInsteadOfConfidentPrediction()
+    {
+        var history = BuildSyntheticHistory();
+        var evaluation = EvaluationTime.AddDays(40);
+
+        var estimate = _planner.Estimate(new ScenarioRequest(2, 1, 1), history, evaluation);
+
+        Assert.False(estimate.FiveHour.HasEnoughHistory);
+        Assert.False(estimate.Weekly.HasEnoughHistory);
+        Assert.Null(estimate.FiveHour.ExpectedQuotaDeltaPercent);
+        Assert.Contains("stale", estimate.FiveHour.Explanation, StringComparison.OrdinalIgnoreCase);
     }
 
     private static ScenarioHistorySample[] BuildSyntheticHistory()
