@@ -12,6 +12,7 @@ public partial class App : Application
     private readonly CancellationTokenSource _lifetimeCancellation = new();
     private readonly WindowsSystemTrayService _trayService = new();
     private readonly WindowsStartupRegistrationService _startupService = new();
+    private readonly SemaphoreSlim _settingsApplyGate = new(1, 1);
     private CancellationTokenSource? _periodicCancellation;
     private Window? _window;
     private DispatcherQueue? _dispatcher;
@@ -36,12 +37,7 @@ public partial class App : Application
         _trayService.LaunchAtLoginChanged += OnLaunchAtLoginChanged;
         _trayService.Initialize();
         _trayService.UpdatePreferences(Services.Settings.NotificationsEnabled, Services.Settings.LaunchAtLogin);
-
-        if (!_startupService.TrySetEnabled(Services.Settings.LaunchAtLogin, out var startupError) &&
-            Services.Settings.LaunchAtLogin)
-        {
-            _trayService.ShowNotification("TajsTokens startup registration failed", startupError ?? "Unknown startup registration error.");
-        }
+        _ = ReconcileStartupRegistrationAsync();
 
         Services.Telemetry.SnapshotUpdated += OnSnapshotUpdated;
         Services.SettingsChanged += OnSettingsChanged;
@@ -55,6 +51,56 @@ public partial class App : Application
         }
 
         StartPeriodicCollector();
+    }
+
+    private async Task ReconcileStartupRegistrationAsync()
+    {
+        try
+        {
+            (bool Success, string? Error, bool Enabled) result;
+            await _settingsApplyGate.WaitAsync();
+            try
+            {
+                // Read the desired value only after entering the same gate used by interactive
+                // settings changes. A slow launch-time registry write therefore cannot apply an old
+                // preference after a newer user choice.
+                var enabled = Services.Settings.LaunchAtLogin;
+                var applied = await Task.Run(() =>
+                {
+                    try
+                    {
+                        var success = _startupService.TrySetEnabled(enabled, out var error);
+                        return (Success: success, Error: error);
+                    }
+                    catch (Exception exception)
+                    {
+                        return (Success: false, Error: exception.Message.ReplaceLineEndings(" "));
+                    }
+                });
+                result = (applied.Success, applied.Error, enabled);
+            }
+            finally
+            {
+                _settingsApplyGate.Release();
+            }
+
+            if (!result.Success && result.Enabled)
+            {
+                RunOnDispatcher(() =>
+                    _trayService.ShowNotification(
+                        "TajsTokens startup registration failed",
+                        result.Error ?? "Unknown startup registration error."));
+            }
+        }
+        catch (Exception exception)
+        {
+            // This operation is intentionally detached from launch. Observe every failure here so a
+            // registry or runtime surprise cannot become an unobserved fire-and-forget exception.
+            RunOnDispatcher(() =>
+                _trayService.ShowNotification(
+                    "TajsTokens startup registration failed",
+                    exception.Message.ReplaceLineEndings(" ")));
+        }
     }
 
     private void StartPeriodicCollector()
@@ -118,43 +164,123 @@ public partial class App : Application
         }
     }
 
-    private void OnNotificationsEnabledChanged(bool enabled)
+    private async void OnNotificationsEnabledChanged(bool enabled)
     {
-        if (!TrySaveSettings(Services.Settings with { NotificationsEnabled = enabled }))
+        if (!await TrySaveSettingsUpdateAsync(current => current with { NotificationsEnabled = enabled }))
         {
-            _trayService.UpdatePreferences(Services.Settings.NotificationsEnabled, Services.Settings.LaunchAtLogin);
+            UpdateTrayPreferences(Services.Settings);
         }
     }
 
-    private void OnLaunchAtLoginChanged(bool enabled)
+    private async void OnLaunchAtLoginChanged(bool enabled)
     {
-        if (!_startupService.TrySetEnabled(enabled, out var error))
+        if (!await TrySaveSettingsUpdateAsync(current => current with { LaunchAtLogin = enabled }))
         {
-            _trayService.UpdatePreferences(Services.Settings.NotificationsEnabled, Services.Settings.LaunchAtLogin);
-            _trayService.ShowNotification("Could not update Start with Windows", error ?? "Unknown startup registration error.");
-            return;
-        }
-
-        if (!TrySaveSettings(Services.Settings with { LaunchAtLogin = enabled }))
-        {
-            _ = _startupService.TrySetEnabled(Services.Settings.LaunchAtLogin, out _);
-            _trayService.UpdatePreferences(Services.Settings.NotificationsEnabled, Services.Settings.LaunchAtLogin);
+            UpdateTrayPreferences(Services.Settings);
         }
     }
 
-    private bool TrySaveSettings(RuntimeSettings settings)
+    /// <summary>
+    /// Applies the complete Settings-page form only if it is still based on the current runtime
+    /// settings generation. If another surface changed settings since the page rendered, the save is
+    /// rejected instead of silently reverting that newer change.
+    /// </summary>
+    public Task<(bool Success, string? Error)> TryApplySettingsAsync(
+        RuntimeSettings expectedBase,
+        RuntimeSettings settings) =>
+        ApplySettingsAsync(_ => settings, expectedBase);
+
+    private Task<(bool Success, string? Error)> TryUpdateSettingsAsync(
+        Func<RuntimeSettings, RuntimeSettings> update) =>
+        ApplySettingsAsync(update, expectedBase: null);
+
+    private async Task<(bool Success, string? Error)> ApplySettingsAsync(
+        Func<RuntimeSettings, RuntimeSettings> update,
+        RuntimeSettings? expectedBase)
     {
+        await _settingsApplyGate.WaitAsync();
         try
         {
+            var previous = Services.Settings;
+            if (expectedBase is not null && !ReferenceEquals(previous, expectedBase))
+            {
+                return (false, "Settings changed from another surface while this page was open. Reload the current values and apply your changes again.");
+            }
+
+            // Build field-specific tray updates only after entering the gate. That prevents a queued
+            // toggle from carrying a stale full settings snapshot that reverts unrelated fields.
+            var settings = update(previous);
+            var result = await Task.Run(() => ApplySettingsCore(previous, settings));
+            UpdateTrayPreferences(result.Success ? Services.Settings : previous);
+            return result;
+        }
+        finally
+        {
+            _settingsApplyGate.Release();
+        }
+    }
+
+    private (bool Success, string? Error) ApplySettingsCore(RuntimeSettings previous, RuntimeSettings settings)
+    {
+        var startupChanged = previous.LaunchAtLogin != settings.LaunchAtLogin;
+
+        try
+        {
+            if (startupChanged && !_startupService.TrySetEnabled(settings.LaunchAtLogin, out var startupError))
+            {
+                return (false, startupError ?? "Start-with-Windows registration could not be updated.");
+            }
+
             Services.SaveSettings(settings);
-            _trayService.UpdatePreferences(Services.Settings.NotificationsEnabled, Services.Settings.LaunchAtLogin);
-            return true;
+            return (true, null);
         }
         catch (Exception exception)
         {
-            _trayService.ShowNotification("TajsTokens settings could not be saved", exception.Message.ReplaceLineEndings(" "));
-            return false;
+            if (startupChanged)
+            {
+                try
+                {
+                    _ = _startupService.TrySetEnabled(previous.LaunchAtLogin, out _);
+                }
+                catch
+                {
+                    // The original settings remain authoritative even if best-effort registry
+                    // rollback itself fails. The caller receives the primary apply error.
+                }
+            }
+
+            return (false, exception.Message.ReplaceLineEndings(" "));
         }
+    }
+
+    private async Task<bool> TrySaveSettingsUpdateAsync(Func<RuntimeSettings, RuntimeSettings> update)
+    {
+        var result = await TryUpdateSettingsAsync(update);
+        if (result.Success)
+        {
+            return true;
+        }
+
+        RunOnDispatcher(() =>
+            _trayService.ShowNotification(
+                "TajsTokens settings could not be applied",
+                result.Error ?? "Unknown settings error."));
+        return false;
+    }
+
+    private void UpdateTrayPreferences(RuntimeSettings settings) =>
+        RunOnDispatcher(() =>
+            _trayService.UpdatePreferences(settings.NotificationsEnabled, settings.LaunchAtLogin));
+
+    private void RunOnDispatcher(Action action)
+    {
+        if (_dispatcher is null || _dispatcher.HasThreadAccess)
+        {
+            action();
+            return;
+        }
+
+        _dispatcher.TryEnqueue(() => action());
     }
 
     private void OnWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)

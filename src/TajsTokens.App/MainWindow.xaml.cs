@@ -27,7 +27,7 @@ public sealed partial class MainWindow : Window
             "forecasts" => typeof(ForecastsPage),
             "analytics" => typeof(AnalyticsPage),
             "diagnostics" => typeof(PlaceholderPage),
-            "settings" => typeof(PlaceholderPage),
+            "settings" => typeof(SettingsPage),
             _ => typeof(OverviewPage)
         };
 

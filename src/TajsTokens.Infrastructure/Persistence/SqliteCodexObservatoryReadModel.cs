@@ -24,39 +24,73 @@ public sealed class SqliteCodexObservatoryReadModel(string databasePath)
 
         var command = connection.CreateCommand();
         command.CommandText = """
+            WITH
+            parent_map AS (
+                SELECT child_agent_id, MIN(parent_agent_id) AS parent_agent_id
+                FROM agent_relationships
+                GROUP BY child_agent_id
+            ),
+            token_totals AS (
+                SELECT session_id,
+                       SUM(uncached_input_tokens) AS uncached_input_tokens,
+                       SUM(cache_read_tokens) AS cache_read_tokens,
+                       SUM(cache_write_tokens) AS cache_write_tokens,
+                       SUM(non_reasoning_output_tokens) AS non_reasoning_output_tokens,
+                       SUM(reasoning_output_tokens) AS reasoning_output_tokens,
+                       SUM(reported_total_tokens) AS reported_total_tokens
+                FROM codex_native_token_events
+                GROUP BY session_id
+            ),
+            context_totals AS (
+                SELECT session_id,
+                       SUM(CASE WHEN is_compaction = 1 THEN 1 ELSE 0 END) AS compactions,
+                       MAX(CASE WHEN context_window_tokens > 0 AND input_tokens IS NOT NULL
+                                THEN input_tokens * 100.0 / context_window_tokens END) AS peak_context_percent
+                FROM context_observations
+                GROUP BY session_id
+            ),
+            storage_totals AS (
+                SELECT r.session_id, SUM(r.record_bytes) AS rollout_bytes
+                FROM rollout_records r
+                WHERE r.session_id IS NOT NULL
+                  AND EXISTS(SELECT 1 FROM rollout_files f WHERE f.source_identity = r.source_identity)
+                GROUP BY r.session_id
+            ),
+            usage_totals AS (
+                SELECT session_id, COUNT(*) AS event_count
+                FROM usage_events
+                GROUP BY session_id
+            )
             SELECT s.session_id,
-                   (SELECT ar.parent_agent_id FROM agent_relationships ar WHERE ar.child_agent_id = s.session_id LIMIT 1),
-                   COALESCE((SELECT a.name FROM agents a WHERE a.agent_id = s.session_id LIMIT 1), s.session_id),
+                   p.parent_agent_id,
+                   COALESCE(a.name, s.session_id),
                    s.repository, s.started_at_utc, s.last_activity_at_utc, s.status,
-                   (SELECT a.model FROM agents a WHERE a.agent_id = s.session_id LIMIT 1),
-                   COALESCE((SELECT SUM(t.uncached_input_tokens) FROM codex_native_token_events t WHERE t.session_id = s.session_id), 0),
-                   COALESCE((SELECT SUM(t.cache_read_tokens) FROM codex_native_token_events t WHERE t.session_id = s.session_id), 0),
-                   COALESCE((SELECT SUM(t.cache_write_tokens) FROM codex_native_token_events t WHERE t.session_id = s.session_id), 0),
-                   COALESCE((SELECT SUM(t.non_reasoning_output_tokens) FROM codex_native_token_events t WHERE t.session_id = s.session_id), 0),
-                   COALESCE((SELECT SUM(t.reasoning_output_tokens) FROM codex_native_token_events t WHERE t.session_id = s.session_id), 0),
-                   COALESCE((SELECT SUM(t.reported_total_tokens) FROM codex_native_token_events t WHERE t.session_id = s.session_id), 0),
-                   COALESCE((SELECT COUNT(*) FROM context_observations c WHERE c.session_id = s.session_id AND c.is_compaction = 1), 0),
-                   (SELECT MAX(CASE WHEN c.context_window_tokens > 0 AND c.input_tokens IS NOT NULL
-                                    THEN c.input_tokens * 100.0 / c.context_window_tokens END)
-                    FROM context_observations c WHERE c.session_id = s.session_id),
-                   COALESCE((SELECT SUM(r.record_bytes)
-                             FROM rollout_records r
-                             WHERE r.session_id = s.session_id
-                               AND EXISTS(SELECT 1 FROM rollout_files f WHERE f.source_identity = r.source_identity)), 0),
-                   COALESCE((SELECT COUNT(*) FROM usage_events e WHERE e.session_id = s.session_id), 0)
+                   a.model,
+                   COALESCE(t.uncached_input_tokens, 0),
+                   COALESCE(t.cache_read_tokens, 0),
+                   COALESCE(t.cache_write_tokens, 0),
+                   COALESCE(t.non_reasoning_output_tokens, 0),
+                   COALESCE(t.reasoning_output_tokens, 0),
+                   COALESCE(t.reported_total_tokens, 0),
+                   COALESCE(c.compactions, 0),
+                   c.peak_context_percent,
+                   COALESCE(r.rollout_bytes, 0),
+                   COALESCE(u.event_count, 0)
             FROM sessions s
+            LEFT JOIN agents a ON a.agent_id = s.session_id
+            LEFT JOIN parent_map p ON p.child_agent_id = s.session_id
+            LEFT JOIN token_totals t ON t.session_id = s.session_id
+            LEFT JOIN context_totals c ON c.session_id = s.session_id
+            LEFT JOIN storage_totals r ON r.session_id = s.session_id
+            LEFT JOIN usage_totals u ON u.session_id = s.session_id
             WHERE EXISTS(SELECT 1 FROM rollout_files f WHERE f.session_id = s.session_id)
               AND (
                   $search = '' OR
                   instr(lower(s.session_id), lower($search)) > 0 OR
                   instr(lower(s.repository), lower($search)) > 0 OR
                   instr(lower(s.status), lower($search)) > 0 OR
-                  EXISTS(
-                      SELECT 1 FROM agents a
-                      WHERE a.agent_id = s.session_id
-                        AND (instr(lower(a.name), lower($search)) > 0 OR
-                             instr(lower(COALESCE(a.model, '')), lower($search)) > 0)
-                  )
+                  instr(lower(COALESCE(a.name, '')), lower($search)) > 0 OR
+                  instr(lower(COALESCE(a.model, '')), lower($search)) > 0
               )
             ORDER BY COALESCE(s.last_activity_at_utc, s.started_at_utc) DESC
             LIMIT $take;

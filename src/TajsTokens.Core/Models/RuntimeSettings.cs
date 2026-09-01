@@ -4,8 +4,10 @@ public sealed record RuntimeSettings
 {
     private static readonly int[] DefaultThresholdValues = [30, 20, 10, 5];
 
+    public const int CurrentSchemaVersion = 1;
     public static IReadOnlyList<int> DefaultLowQuotaThresholds { get; } = Array.AsReadOnly(DefaultThresholdValues);
 
+    public int SchemaVersion { get; init; } = CurrentSchemaVersion;
     public bool RunInBackground { get; init; } = true;
     public int PollIntervalSeconds { get; init; } = 60;
     public bool NotificationsEnabled { get; init; } = true;

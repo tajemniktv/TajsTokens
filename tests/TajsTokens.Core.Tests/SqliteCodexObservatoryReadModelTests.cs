@@ -8,7 +8,7 @@ namespace TajsTokens.Core.Tests;
 public sealed class SqliteCodexObservatoryReadModelTests
 {
     [Fact]
-    public async Task Queries_FilterBeforeLimit_AndScopeTopologyAndStorageToSelectedSession()
+    public async Task Queries_FilterBeforeLimit_AndPreserveSessionAggregatesTopologyAndStorage()
     {
         var directory = Directory.CreateTempSubdirectory("tajstokens-observatory-read-");
         var databasePath = Path.Combine(directory.FullName, "telemetry.db");
@@ -38,9 +38,54 @@ public sealed class SqliteCodexObservatoryReadModelTests
             await store.UpsertRolloutFileAsync("child-source", @"C:\rollouts\child.jsonl", "child", 10, now, CancellationToken.None);
             await store.UpsertRolloutFileAsync("other-source", @"C:\rollouts\other.jsonl", "unrelated", 10_000, now, CancellationToken.None);
 
+            await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString()))
+            {
+                await connection.OpenAsync(CancellationToken.None);
+                var seed = connection.CreateCommand();
+                seed.CommandText = """
+                    INSERT INTO codex_native_token_events(
+                        source_event_id, source_file, session_id, agent_id, observed_at_utc, model, reasoning_effort,
+                        counter_epoch, uncached_input_tokens, cache_read_tokens, cache_write_tokens,
+                        non_reasoning_output_tokens, reasoning_output_tokens, reported_total_tokens)
+                    VALUES
+                        ('tok-1', 'child.jsonl', 'child', 'child', '2026-09-01T04:00:00.0000000+00:00', 'model-child', 'high', 0, 10, 20, 3, 4, 5, 42),
+                        ('tok-2', 'child.jsonl', 'child', 'child', '2026-09-01T04:30:00.0000000+00:00', 'model-child', 'high', 0, 1, 2, 0, 6, 7, 58);
+
+                    INSERT INTO context_observations(
+                        event_id, session_id, agent_id, observed_at_utc, model, input_tokens,
+                        context_window_tokens, is_compaction, record_bytes)
+                    VALUES
+                        ('ctx-1', 'child', 'child', '2026-09-01T04:10:00.0000000+00:00', 'model-child', 75, 100, 1, 20),
+                        ('ctx-2', 'child', 'child', '2026-09-01T04:20:00.0000000+00:00', 'model-child', 90, 100, 0, 20);
+
+                    INSERT INTO rollout_records(
+                        source_record_id, source_identity, file_path, session_id, event_class, record_bytes, observed_at_utc)
+                    VALUES('record-1', 'child-source', 'child.jsonl', 'child', 'token_count', 123, '2026-09-01T04:30:00.0000000+00:00');
+
+                    INSERT INTO usage_events(event_id, session_id, timestamp_utc, event_type, summary, token_delta)
+                    VALUES
+                        ('usage-1', 'child', '2026-09-01T04:00:00.0000000+00:00', 'token_count', 'fixture', NULL),
+                        ('usage-2', 'child', '2026-09-01T04:30:00.0000000+00:00', 'task_complete', 'fixture', NULL);
+                    """;
+                await seed.ExecuteNonQueryAsync(CancellationToken.None);
+            }
+
             // The newest global row is unrelated, but search is applied in SQLite before LIMIT.
             var search = await readModel.SearchSessionsAsync("Needle worker", 1, CancellationToken.None);
-            Assert.Equal("child", Assert.Single(search).SessionId);
+            var selected = Assert.Single(search);
+            Assert.Equal("child", selected.SessionId);
+            Assert.Equal("root", selected.ParentSessionId);
+            Assert.Equal("model-child", selected.Model);
+            Assert.Equal(11, selected.NativeTokens.UncachedInput);
+            Assert.Equal(22, selected.NativeTokens.CacheRead);
+            Assert.Equal(3, selected.NativeTokens.CacheWrite);
+            Assert.Equal(10, selected.NativeTokens.NonReasoningOutput);
+            Assert.Equal(12, selected.NativeTokens.ReasoningOutput);
+            Assert.Equal(100, selected.NativeTokens.ReportedTotal);
+            Assert.Equal(1, selected.CompactionCount);
+            Assert.Equal(90, selected.PeakContextPercent);
+            Assert.Equal(123, selected.RolloutBytes);
+            Assert.Equal(2, selected.TimelineEventCount);
 
             var topology = await readModel.GetAgentTopologyAsync("child", CancellationToken.None);
             Assert.Equal(new[] { "root", "child" }, topology.Agents.Select(agent => agent.AgentId).ToArray());
