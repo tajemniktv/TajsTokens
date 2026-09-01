@@ -10,7 +10,7 @@ public sealed partial class AnalyticsPage : Page
     private readonly Dictionary<string, QuotaBurnInterval> _intervalsById = new(StringComparer.Ordinal);
     private CancellationTokenSource? _pageCancellation;
     private bool _isLoaded;
-    private bool _loading;
+    private long _loadGeneration;
     private long _selectionGeneration;
 
     public AnalyticsPage()
@@ -28,12 +28,14 @@ public sealed partial class AnalyticsPage : Page
         var previous = Interlocked.Exchange(ref _pageCancellation, new CancellationTokenSource());
         previous?.Cancel();
         previous?.Dispose();
-        await LoadAsync(_pageCancellation.Token);
+        var generation = Interlocked.Increment(ref _loadGeneration);
+        await LoadAsync(_pageCancellation.Token, generation);
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         _isLoaded = false;
+        Interlocked.Increment(ref _loadGeneration);
         Interlocked.Increment(ref _selectionGeneration);
         var cancellation = Interlocked.Exchange(ref _pageCancellation, null);
         cancellation?.Cancel();
@@ -43,21 +45,21 @@ public sealed partial class AnalyticsPage : Page
     private async void OnRefreshClicked(object sender, RoutedEventArgs e)
     {
         var cancellation = _pageCancellation;
-        if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested || _loading)
+        if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested)
         {
             return;
         }
-        await LoadAsync(cancellation.Token);
+        var generation = Interlocked.Increment(ref _loadGeneration);
+        await LoadAsync(cancellation.Token, generation);
     }
 
-    private async Task LoadAsync(CancellationToken cancellationToken)
+    private async Task LoadAsync(CancellationToken cancellationToken, long generation)
     {
-        if (_loading || !_isLoaded)
+        if (!_isLoaded)
         {
             return;
         }
 
-        _loading = true;
         try
         {
             StatusText.Text = "Correlating quota observations with normalized Codex activity…";
@@ -70,7 +72,7 @@ public sealed partial class AnalyticsPage : Page
                 cancellationToken);
 
             cancellationToken.ThrowIfCancellationRequested();
-            if (!_isLoaded)
+            if (!_isLoaded || generation != Volatile.Read(ref _loadGeneration))
             {
                 return;
             }
@@ -82,14 +84,10 @@ public sealed partial class AnalyticsPage : Page
         }
         catch (Exception exception)
         {
-            if (_isLoaded)
+            if (_isLoaded && generation == Volatile.Read(ref _loadGeneration))
             {
                 StatusText.Text = $"Quota intelligence unavailable: {Summarize(exception.Message)}";
             }
-        }
-        finally
-        {
-            _loading = false;
         }
     }
 
@@ -131,6 +129,13 @@ public sealed partial class AnalyticsPage : Page
         {
             BurnIntervalList.SelectedIndex = 0;
         }
+        if (dashboard.QuotaBurnIntervals.Count == 0)
+        {
+            Interlocked.Increment(ref _selectionGeneration);
+            ContributorList.ItemsSource = null;
+            SelectedIntervalTitle.Text = "Select a quota-burn interval";
+            SelectedIntervalFacts.Text = "Observed provider facts and estimated local contributors will appear here.";
+        }
 
         ResetList.ItemsSource = dashboard.ResetEvents.Count == 0
             ? new[] { new ResetRow("No reset/re-anchor events", "No provider history in this range met the reset detector's evidence thresholds.") }
@@ -154,6 +159,8 @@ public sealed partial class AnalyticsPage : Page
             !_intervalsById.TryGetValue(row.IntervalId, out var interval))
         {
             ContributorList.ItemsSource = null;
+            SelectedIntervalTitle.Text = "Select a quota-burn interval";
+            SelectedIntervalFacts.Text = "Observed provider facts and estimated local contributors will appear here.";
             return;
         }
 
