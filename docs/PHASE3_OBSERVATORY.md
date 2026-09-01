@@ -82,9 +82,9 @@ Every complete record can contribute only:
 - byte length;
 - timestamp.
 
-Rollout files are keyed by stable source identity rather than path, so moving a physical file from the active sessions tree into an archive updates its display label instead of doubling storage. Replacing a path with a different physical file retires the stale alias. Absolute rollout paths are used transiently for local file I/O and checkpointing, but observatory tables do not persist them.
+Rollout files are keyed by stable source identity rather than path, so moving a physical file from the active sessions tree into an archive updates the one stored row instead of doubling storage. The display hash may change with the new local path; it is a privacy-safe discriminator, not the identity key. Replacing a path with a different physical file retires the stale display-label alias.
 
-Repository/workspace values extracted from rollout metadata are reduced to a final repository label (for example `TajsTokens`) before observatory/session persistence. They are not retained as user-home or workspace absolute paths by the observatory store.
+Absolute rollout paths are used transiently for local file I/O and checkpointing, but observatory tables do not persist them. Repository/workspace values extracted from rollout metadata are reduced to a final repository label (for example `TajsTokens`) before observatory/session persistence. They are not retained as user-home or workspace absolute paths by the observatory store.
 
 The original JSON payload is discarded after parsing. This lets the UI identify giant records/files and event-class-heavy sessions without duplicating tool output into `telemetry.db`.
 
