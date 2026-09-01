@@ -88,6 +88,35 @@ public sealed class RuntimeSettingsStoreTests
     }
 
     [Fact]
+    public void Load_NewerSchemaReturnsDefaultsWithoutOverwritingFile()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        var path = Path.Combine(directory, "settings.json");
+        var original = """
+            {
+              "SchemaVersion": 999,
+              "RunInBackground": false,
+              "PollIntervalSeconds": 777
+            }
+            """;
+        File.WriteAllText(path, original);
+
+        try
+        {
+            var settings = new RuntimeSettingsStore(path).Load();
+            Assert.Equal(RuntimeSettings.CurrentSchemaVersion, settings.SchemaVersion);
+            Assert.True(settings.RunInBackground);
+            Assert.Equal(60, settings.PollIntervalSeconds);
+            Assert.Equal(original, File.ReadAllText(path));
+        }
+        finally
+        {
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Save_NormalizesPollingAndThresholdsAndRoundTrips()
     {
         var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
@@ -98,7 +127,6 @@ public sealed class RuntimeSettingsStoreTests
         {
             store.Save(new RuntimeSettings
             {
-                SchemaVersion = 999,
                 PollIntervalSeconds = 1,
                 LowQuotaThresholds = [10, 30, 10, -1, 500],
                 NotificationsEnabled = false
@@ -109,6 +137,29 @@ public sealed class RuntimeSettingsStoreTests
             Assert.Equal(15, settings.PollIntervalSeconds);
             Assert.Equal([30, 10], settings.LowQuotaThresholds);
             Assert.False(settings.NotificationsEnabled);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void Save_RejectsNewerSchema()
+    {
+        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        var path = Path.Combine(directory, "settings.json");
+        var store = new RuntimeSettingsStore(path);
+
+        try
+        {
+            var exception = Assert.Throws<InvalidOperationException>(() =>
+                store.Save(new RuntimeSettings { SchemaVersion = RuntimeSettings.CurrentSchemaVersion + 1 }));
+            Assert.Contains("newer than supported", exception.Message, StringComparison.OrdinalIgnoreCase);
+            Assert.False(File.Exists(path));
         }
         finally
         {
