@@ -9,6 +9,7 @@ namespace TajsTokens.Infrastructure.Services;
 public sealed class CodexObservatoryService : ICodexObservatoryService
 {
     private const long StateOverlapMs = 60_000;
+    private const long StateRolloutVisibilityToleranceMs = 250;
 
     private readonly ICodexSessionIngestionService _ingestionService;
     private readonly ICodexObservatoryStore _store;
@@ -62,7 +63,8 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
                 throw;
             }
             catch (Exception exception) when (
-                exception is SqliteException or IOException or UnauthorizedAccessException or InvalidOperationException or InvalidDataException)
+                exception is SqliteException or IOException or UnauthorizedAccessException or InvalidOperationException or InvalidDataException or
+                    InvalidCastException or FormatException or OverflowException or ArgumentException or NotSupportedException)
             {
                 // Codex's state database is a private optional acceleration source. Any state/index
                 // incompatibility fails open to the existing rollout filesystem discovery path.
@@ -103,6 +105,11 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
                 !fingerprint.Matches(thread))
             .ToArray();
 
+        // Edge persistence is intentionally independent of rollout selection. Codex can insert a
+        // spawn edge without changing the child's thread fingerprint, and relationships are cheap to
+        // reconcile against the already-normalized TajsTokens graph.
+        await ReconcileSpawnEdgesAsync(catalog.Edges, cancellationToken);
+
         var filesScanned = 0;
         var recordsScanned = 0;
         var normalized = 0;
@@ -110,40 +117,39 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
         long bytes = 0;
         var sessionsTouched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var appliedThreads = new List<CodexStateThread>(changedThreads.Length);
-        long? earliestFailedUpdatedAtMs = null;
-
-        var edgesByChild = catalog.Edges
-            .GroupBy(edge => edge.ChildThreadId, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
+        long? earliestUnappliedUpdatedAtMs = null;
 
         foreach (var thread in changedThreads)
         {
             cancellationToken.ThrowIfCancellationRequested();
             filesScanned++;
+            fingerprints.TryGetValue(thread.ThreadId, out var previousFingerprint);
 
             try
             {
                 if (!File.Exists(thread.RolloutPath))
                 {
                     errors++;
-                    earliestFailedUpdatedAtMs = MinTimestamp(earliestFailedUpdatedAtMs, thread.UpdatedAtMs);
+                    earliestUnappliedUpdatedAtMs = MinTimestamp(earliestUnappliedUpdatedAtMs, thread.UpdatedAtMs);
                     continue;
                 }
 
-                var info = new FileInfo(thread.RolloutPath);
-                bytes = checked(bytes + info.Length);
+                var infoBefore = new FileInfo(thread.RolloutPath);
+                bytes = checked(bytes + infoBefore.Length);
 
                 var result = await _ingestionService.IngestAsync(thread.RolloutPath, cancellationToken);
                 recordsScanned += result.RecordsScanned;
                 normalized += result.RecordsNormalized;
 
+                var infoAfter = new FileInfo(thread.RolloutPath);
+                infoAfter.Refresh();
                 var sourceIdentity = CodexSessionIngestionService.GetSourceIdentity(thread.RolloutPath);
                 var touchedSessionId = result.SessionId ?? thread.ThreadId;
                 await _store.UpsertRolloutFileAsync(
                     sourceIdentity,
                     thread.RolloutPath,
                     touchedSessionId,
-                    info.Exists ? info.Length : 0,
+                    infoAfter.Exists ? infoAfter.Length : 0,
                     DateTimeOffset.UtcNow,
                     cancellationToken);
 
@@ -152,15 +158,18 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
                     sessionsTouched.Add(touchedSessionId);
                 }
 
-                if (edgesByChild.TryGetValue(thread.ThreadId, out var edges))
+                if (!await CanCommitFingerprintAsync(
+                        thread,
+                        previousFingerprint,
+                        result,
+                        infoAfter,
+                        cancellationToken))
                 {
-                    var linkedAt = FromUnixMillisecondsOrEpoch(thread.CreatedAtMs);
-                    foreach (var edge in edges)
-                    {
-                        await _store.UpsertAgentRelationshipAsync(
-                            new AgentRelationship(edge.ParentThreadId, edge.ChildThreadId, linkedAt),
-                            cancellationToken);
-                    }
+                    // State and rollout are separate provider persistence surfaces. If state appears
+                    // ahead of the authoritative rollout, keep the thread inside the overlap window
+                    // and retry rather than permanently teaching the fast path to skip it.
+                    earliestUnappliedUpdatedAtMs = MinTimestamp(earliestUnappliedUpdatedAtMs, thread.UpdatedAtMs);
+                    continue;
                 }
 
                 appliedThreads.Add(thread);
@@ -172,12 +181,12 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
             catch (Exception) when (File.Exists(thread.RolloutPath))
             {
                 errors++;
-                earliestFailedUpdatedAtMs = MinTimestamp(earliestFailedUpdatedAtMs, thread.UpdatedAtMs);
+                earliestUnappliedUpdatedAtMs = MinTimestamp(earliestUnappliedUpdatedAtMs, thread.UpdatedAtMs);
             }
         }
 
-        var nextWatermark = earliestFailedUpdatedAtMs is long failedAt
-            ? Math.Max(0, failedAt - StateOverlapMs)
+        var nextWatermark = earliestUnappliedUpdatedAtMs is long unappliedAt
+            ? Math.Max(0, unappliedAt - StateOverlapMs)
             : Math.Max(watermark, catalog.MaxUpdatedAtMs);
 
         if (appliedThreads.Count > 0 || nextWatermark != watermark)
@@ -186,8 +195,9 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
         }
 
         // Reconciliation is considered complete only after the full catalog path reached its normal
-        // return. A failed/cancelled first pass retries the full comparison on the next refresh.
-        if (minimumUpdatedAtMs == 0 && earliestFailedUpdatedAtMs is null)
+        // return with no state-ahead or failed threads. A failed/cancelled first pass retries the full
+        // comparison on the next refresh.
+        if (minimumUpdatedAtMs == 0 && earliestUnappliedUpdatedAtMs is null)
         {
             _stateCatalogReconciledThisProcess = true;
         }
@@ -200,6 +210,77 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
             sessionsTouched.Count,
             errors,
             bytes);
+    }
+
+    private async Task<bool> CanCommitFingerprintAsync(
+        CodexStateThread thread,
+        CodexStateThreadFingerprint? previousFingerprint,
+        CodexIngestionResult result,
+        FileInfo fileInfo,
+        CancellationToken cancellationToken)
+    {
+        if (!fileInfo.Exists || result.LastCompleteRecordOffset < fileInfo.Length)
+        {
+            return false;
+        }
+
+        // A path/archive/model/reasoning correction that did not change the thread activity/token
+        // cursor is provider metadata, not evidence that a rollout event is still pending.
+        if (previousFingerprint is not null &&
+            previousFingerprint.UpdatedAtMs == thread.UpdatedAtMs &&
+            previousFingerprint.TokensUsed == thread.TokensUsed &&
+            !previousFingerprint.CatalogMetadataMatches(thread))
+        {
+            return true;
+        }
+
+        var persistedCounterTotal = await _stateIndexStore!.GetPersistedCounterTotalAsync(
+            thread.ThreadId,
+            cancellationToken);
+        if (persistedCounterTotal == thread.TokensUsed)
+        {
+            return true;
+        }
+
+        // Some valid Codex threads have a state-reported cumulative total without a parseable
+        // token_count in the retained rollout. In that degraded-coverage case, accept the fingerprint
+        // only when the rollout itself has reached EOF and its write timestamp has caught up to the
+        // state update. The tolerance covers the observed few-millisecond state-vs-rollout skew.
+        var stateUpdatedUtc = FromUnixMillisecondsOrEpoch(thread.UpdatedAtMs).UtcDateTime;
+        return fileInfo.LastWriteTimeUtc >= stateUpdatedUtc.AddMilliseconds(-StateRolloutVisibilityToleranceMs);
+    }
+
+    private async Task ReconcileSpawnEdgesAsync(
+        IReadOnlyList<CodexStateEdge> edges,
+        CancellationToken cancellationToken)
+    {
+        if (edges.Count == 0)
+        {
+            return;
+        }
+
+        var existing = await _store.GetAgentRelationshipsAsync(cancellationToken);
+        var known = new HashSet<string>(
+            existing.Select(relationship => RelationshipKey(
+                relationship.ParentAgentId,
+                relationship.ChildAgentId)),
+            StringComparer.OrdinalIgnoreCase);
+
+        foreach (var edge in edges)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!known.Add(RelationshipKey(edge.ParentThreadId, edge.ChildThreadId)))
+            {
+                continue;
+            }
+
+            await _store.UpsertAgentRelationshipAsync(
+                new AgentRelationship(
+                    edge.ParentThreadId,
+                    edge.ChildThreadId,
+                    FromUnixMillisecondsOrEpoch(edge.ChildCreatedAtMs)),
+                cancellationToken);
+        }
     }
 
     private async Task<CodexObservatoryRefreshResult> RefreshFromFilesystemAsync(
@@ -344,6 +425,8 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
 
         return Path.GetFullPath(codexHome);
     }
+
+    private static string RelationshipKey(string parent, string child) => $"{parent}\0{child}";
 
     private static long? MinTimestamp(long? current, long candidate) =>
         current is null ? candidate : Math.Min(current.Value, candidate);
