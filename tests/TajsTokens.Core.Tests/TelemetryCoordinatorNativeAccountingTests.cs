@@ -173,7 +173,9 @@ public sealed class TelemetryCoordinatorNativeAccountingTests
     }
 
     private static CodexObservatoryRefreshResult Result(int errors, int filesDiscovered = 1) =>
-        new(filesDiscovered, filesDiscovered == 0 ? 0 : 1, 1, 1, 1, errors, 100);
+        filesDiscovered == 0
+            ? new(0, 0, 0, 0, 0, errors, 0)
+            : new(1, 1, 1, 1, 1, errors, 100);
 
     private static CodexTokenAccountingSnapshot TokenSnapshot(long total)
     {
