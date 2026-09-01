@@ -2,7 +2,7 @@
 
 This file is the repository-level source of truth for coding-agent instructions and the current architectural contract.
 
-TajsTokens is a local-first native Windows observability application for Codex and AI coding-agent usage. The product is deliberately deeper than a token counter: it correlates subscription quota, token accounting, local Codex sessions/agents, context/compaction behavior, storage growth, and later forecasting/attribution while keeping ordinary conversation contents out of its telemetry store.
+TajsTokens is a local-first native Windows observability application for Codex and AI coding-agent usage. The product is deliberately deeper than a token counter: it correlates subscription quota, token accounting, local Codex sessions/agents, context/compaction behavior, storage growth, forecasting and attribution while keeping ordinary conversation contents out of its telemetry store.
 
 ## Product state
 
@@ -12,30 +12,34 @@ The application currently has:
 - Tokscale-backed broad token accounting;
 - provider-authoritative Codex quota through the local `codex app-server`;
 - SQLite quota/history persistence;
-- a process-lifetime telemetry coordinator shared by Overview, tray, alerts, and Observatory;
+- a process-lifetime telemetry coordinator shared by Overview, tray, alerts, Observatory and Phase 4 intelligence refresh;
 - background collection, close-to-tray lifecycle, notifications, runtime settings, Start with Windows, and a self-contained Windows x64 portable publish path;
 - direct incremental Codex rollout ingestion with privacy-safe session/root/subagent, token, quota, context/compaction, activity, and storage metadata;
-- native Codex accounting in shadow/reconciliation mode while Tokscale remains the displayed/default broad accounting source.
+- native Codex accounting in shadow/reconciliation mode while Tokscale remains the displayed/default broad accounting source;
+- Phase 4 intelligence foundations for persisted forecast history, reset/re-anchor events, bounded historical aggregates, interval-based quota attribution and account-local scenario estimation;
+- real Usage, Forecasts and Analytics pages over normalized intelligence/query contracts.
 
-Phase 3.5 hardens runtime performance, concurrency/cancellation, information architecture, scalable session exploration, and reset-aware forecast semantics before Phase 4 adds deeper analytics.
+Phase 3.5's code hardening is merged; its empirical post-change Windows re-profile remains tracked separately. Phase 4 now builds the intelligence layer without weakening the Phase 6 native-accounting parity gate.
 
 ## Solution layout and dependency direction
 
 ### `TajsTokens.Core`
 
-Owns provider-independent domain models, interfaces, accounting semantics, alerts, and analytics/forecasting logic.
+Owns provider-independent domain models, interfaces, accounting semantics, alerts, forecasting and inference semantics.
 
 - Must not reference App or Infrastructure.
 - Quota percentages and token counters are independent telemetry streams. Never invent a universal token-to-subscription-quota conversion.
 - Provider adapters and native accounting must normalize inclusive counters into disjoint buckets so cache/reasoning are never double-counted.
+- Attribution/reset/scenario models must encode uncertainty and keep observed facts distinct from inference.
 
 ### `TajsTokens.Infrastructure`
 
-Implements Core contracts for SQLite, local Codex files, provider processes/RPC, settings, ingestion, and process-lifetime coordination.
+Implements Core contracts for SQLite, local Codex files, provider processes/RPC, settings, ingestion, process-lifetime coordination and historical intelligence queries.
 
 - Depends on Core only.
 - UI must not parse provider JSON, rollout JSONL, invoke Tokscale/Codex directly, or query SQLite directly.
 - Prefer provider-owned/local read paths over copied credentials or undocumented web scraping.
+- Large historical queries must be bounded/downsampled before crossing into App.
 
 ### `TajsTokens.App`
 
@@ -47,7 +51,7 @@ Windows composition/UI layer using WinUI 3 / Windows App SDK.
 
 ### `TajsTokens.Core.Tests`
 
-Regression suite for accounting, forecasting, provider contracts, settings/alerts, coordinator behavior, incremental ingestion, SQLite migrations, privacy, and threading/cancellation boundaries.
+Regression suite for accounting, forecasting, reset detection, scenario planning, historical intelligence, provider contracts, settings/alerts, coordinator behavior, incremental ingestion, SQLite migrations, privacy, and threading/cancellation boundaries.
 
 ## Current data flow
 
@@ -60,11 +64,17 @@ Codex local rollout JSONL -> ingestion --/        |                 |        |  
                                                    |                 |        +----------> tray
                                                    |                 +-------------------> Overview
                                                    +-------------------------------------> Observatory refresh signal
+                                                   |
+                                                   +-> Phase 4 intelligence refresh
+                                                        -> forecast history
+                                                        -> reset/re-anchor events
 
 normalized history -------------------------------> SQLite
+                                                       |
+                                                       +-> bounded Usage/Forecasts/Analytics queries
 ```
 
-Provider telemetry is published before a potentially long historical rollout scan. A first-run import must never keep quota/Tokscale blank merely because local history is large.
+Provider telemetry is published before a potentially long historical rollout scan. A first-run import must never keep quota/Tokscale blank merely because local history is large. Phase 4 intelligence is derived after normalized persistence and must fail independently of provider freshness.
 
 ## Execution, threading, and concurrency contract
 
@@ -84,6 +94,7 @@ Not allowed:
 - rollout discovery/read/parse;
 - SQLite reads/writes;
 - token/context aggregation;
+- attribution/reset scans/scenario fitting;
 - expensive icon/font rendering;
 - large list transformation or analytics.
 
@@ -100,6 +111,7 @@ One process-lifetime coordinator is authoritative for startup, periodic, manual,
 - Refreshes are serialized.
 - Manual refresh may supersede stale non-manual work.
 - Provider/interim snapshots may publish before the longer Observatory import, then a final snapshot follows.
+- Intelligence refresh runs only against persisted normalized telemetry and its failure cannot invalidate provider/Observatory data.
 - Snapshot consumers must tolerate multiple snapshots per refresh and reject stale asynchronous results.
 - Subscriber callbacks must remain cheap; heavy subscriber work is queued/coalesced outside producer paths.
 
@@ -142,6 +154,13 @@ TajsTokens is itself an observability tool, so it should not become the workload
 - WAL/synchronous configuration may be tuned only with an explicit durability rationale.
 - Large first-run imports may take time, but remain progressive, cancellable, and non-blocking to UI/provider freshness.
 
+### Historical intelligence
+
+- Query/filter/aggregate at the SQLite layer rather than returning raw histories to XAML.
+- Minute/hour/day resolution may be coarsened automatically to satisfy a bounded result budget.
+- Quota-burn detail queries are scoped to the selected interval.
+- Scenario fitting uses bounded historical intervals and never runs synchronously on the dispatcher.
+
 ### Large UI collections
 
 - Query/filter/page at the repository layer instead of materializing arbitrary history into XAML.
@@ -161,15 +180,56 @@ Forecasting is reset-window-aware, not generic linear extrapolation.
 - Short-window and weekly estimators may use different horizons/strategies.
 - Sparse/stale data lowers confidence or suppresses the forecast.
 - Never claim token count deterministically predicts quota consumption.
+- Phase 4 persists these complete forecast semantics so history cannot degrade to a less expressive model after restart.
+
+## Phase 4 intelligence semantics
+
+The detailed evidence contract lives in `docs/PHASE4_INTELLIGENCE.md`. These rules are architectural, not presentation suggestions.
+
+### Evidence levels
+
+Keep separate:
+
+1. provider-observed quota facts;
+2. locally observed normalized activity;
+3. inferred attribution/reset classification/scenario estimates.
+
+Do not phrase an inferred contributor score as provider-confirmed quota billing.
+
+### Quota-burn intervals
+
+- Build intervals only from adjacent positive quota movement within the same provider/profile/window/reset identity.
+- Never bridge a reset/re-anchor boundary to manufacture burn.
+- Correlate local activity in `(previous observation, current observation]`.
+- Meter rounding/delay means attribution is interval-based, not event-exact.
+- Root and subagent contribution remain inspectable separately and as aggregate activity.
+
+The initial contributor heuristic is transparent and intentionally simple: 55% native token share, 25% uncached-input share, 15% cache-read share, 5% compaction share, each normalized within the selected interval. It is a ranking score, not a probability.
+
+### Reset/re-anchor history
+
+- Backend `resetsAt`/window identity wins over `previous reset + duration` arithmetic.
+- Expected resets, rolling-window re-anchors, unusual-reset evidence and full-reset evidence are distinct classifications.
+- Persist before/after meter state, previous/current reset timestamps, source, confidence and explanation.
+- Event identity must be deterministic so repeated scans are idempotent.
+
+### Scenario planning
+
+- Use only this account/profile/window's observed quota movement and content-free workload context.
+- Fit five-hour and weekly windows independently.
+- Report sample count, expected movement, uncertainty/range and confidence.
+- If history is insufficient, return `not enough data` rather than importing assumptions from another account/model/provider.
+- Optional model/reasoning cohorts may refine estimates only when enough matching samples exist; fallback must reduce confidence explicitly.
 
 ## Information architecture
 
 Top-level navigation is organized around user questions rather than data-source implementation details:
 
 - **Overview**: quota health, reset-aware pace/forecast, current Codex work, recent important activity/anomalies, source health.
-- **Usage**: totals, time series, token classes, models, repositories/workspaces, providers/accounts.
+- **Usage**: bounded historical totals/time buckets, token classes, model/repository/agent-role breakdowns and heatmap-ready data.
 - **Codex / Observatory**: sessions, agents, timeline, context/compactions, native accounting, rollout/storage diagnostics.
-- **Forecasts**: short-window/weekly pacing, confidence, history, and later scenario planning.
+- **Forecasts**: short-window/weekly pacing, persisted forecast history/confidence and account-local scenario planning.
+- **Analytics**: quota-burn microscope, estimated contributors, reset/re-anchor timeline and deeper cross-signal analysis.
 - **Diagnostics**: sources, app-server/Tokscale/rollout/SQLite health, refresh/import progress, failures, doctor data, later incidents/announcements.
 - **Settings**: general, collection, notifications, startup/background, providers, privacy/storage.
 
@@ -217,9 +277,11 @@ Direct rollout ingestion is content-minimal and incremental.
 
 ## SQLite persistence
 
-Base telemetry currently uses `%LOCALAPPDATA%\TajsTokens\telemetry.db`. `SqliteTelemetryRepository` owns the base `PRAGMA user_version`; the Codex Observatory has its own component schema version in the same database.
+Base telemetry currently uses `%LOCALAPPDATA%\TajsTokens\telemetry.db`. `SqliteTelemetryRepository` owns the base `PRAGMA user_version`; the Codex Observatory and Phase 4 intelligence each have independent component schema versions in the same database.
 
-Persist normalized telemetry and content-free identities, including quota/token history, session/agent relationships, normalized activity, context/compaction metadata, rollout storage metadata, parser/checkpoint state, and forecast snapshots.
+Persist normalized telemetry and content-free identities, including quota/token history, session/agent relationships, normalized activity, context/compaction metadata, rollout storage metadata, parser/checkpoint state, forecast snapshots and reset/re-anchor events.
+
+Phase 4 historical usage/attribution is primarily derived from normalized facts rather than duplicating raw activity into another analytics warehouse.
 
 Settings remain separate in `%LOCALAPPDATA%\TajsTokens\settings.json` and contain no auth material.
 
@@ -237,6 +299,8 @@ Normal telemetry must not persist ordinary:
 
 Large content-bearing rollout records are transient parser input and are reduced to type/status/size/timing/identity metadata. Sanitized fixtures use hand-authored structure or deterministic filler, never copied personal rollout payloads.
 
+Phase 4 intelligence consumes this existing normalized store. Do not create a parallel content-bearing cache for attribution or scenario fitting.
+
 ## Build and validation
 
 Authoritative Windows validation:
@@ -250,13 +314,13 @@ Release smoke additionally exercises the self-contained Windows x64 publish.
 
 Non-Windows builds compile a placeholder App target only. Never claim the WinUI/XAML application is validated based solely on Linux/macOS compilation.
 
-Every runtime bug involving rollout/accounting/privacy/checkpoint semantics should gain a compact sanitized regression test/fixture. Performance tests should use broad deterministic workloads/benchmarks rather than flaky millisecond assertions in normal CI.
+Every runtime bug involving rollout/accounting/privacy/checkpoint/intelligence semantics should gain a compact sanitized regression test/fixture. Performance tests should use broad deterministic workloads/benchmarks rather than flaky millisecond assertions in normal CI.
 
 ## Coding expectations
 
 - Nullable reference types remain enabled.
 - Persist UTC timestamps losslessly with explicit offsets/round-trip formatting.
-- Keep provider/persistence failures isolated and preserve last-known-good data with explicit stale provenance.
+- Keep provider/persistence/intelligence failures isolated and preserve last-known-good data with explicit stale provenance.
 - Favor explicit ownership and bounded concurrency over scattering `Task.Run` or locks without a model.
 - Keep changes incremental and testable, but do not preserve obsolete architecture merely because it already exists.
-- Do not silently weaken accounting idempotence, source provenance, privacy boundaries, or checkpoint durability to make a benchmark prettier.
+- Do not silently weaken accounting idempotence, source provenance, privacy boundaries, checkpoint durability, or evidence labels to make a benchmark or attribution score prettier.
