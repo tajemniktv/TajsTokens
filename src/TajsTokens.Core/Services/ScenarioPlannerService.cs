@@ -11,11 +11,13 @@ namespace TajsTokens.Core.Services;
 public sealed class ScenarioPlannerService
 {
     private const int MinimumSamples = 6;
+    private const int MaximumSampleAgeDays = 30;
     private const double Ridge = 0.15;
 
     public ScenarioEstimate Estimate(
         ScenarioRequest request,
-        IReadOnlyList<ScenarioHistorySample> history)
+        IReadOnlyList<ScenarioHistorySample> history,
+        DateTimeOffset? evaluatedAtUtc = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(history);
@@ -35,30 +37,51 @@ public sealed class ScenarioPlannerService
             throw new ArgumentOutOfRangeException(nameof(request), "Intensity multiplier must be greater than 0 and at most 5.");
         }
 
-        var fiveHour = BuildEstimate(QuotaWindowKind.FiveHour, request, history);
-        var weekly = BuildEstimate(QuotaWindowKind.Weekly, request, history);
+        var evaluationTime = (evaluatedAtUtc ?? DateTimeOffset.UtcNow).ToUniversalTime();
+        var fiveHour = BuildEstimate(QuotaWindowKind.FiveHour, request, history, evaluationTime);
+        var weekly = BuildEstimate(QuotaWindowKind.Weekly, request, history, evaluationTime);
         return new ScenarioEstimate(
             request,
             fiveHour,
             weekly,
-            "Account-local ridge regression over observed quota-drop intervals. Features are elapsed hours, root-agent-hours and subagent-hours; requested intensity scales those workload features. Prediction ranges come from historical residual error. No universal token→quota conversion is assumed.");
+            "Account-local ridge regression over observed quota-drop intervals. Features are elapsed hours, root-agent-hours and subagent-hours; requested intensity scales those workload features. Prediction ranges come from historical residual error. Estimates require a usable interval within the last 30 days. No universal token→quota conversion is assumed.");
     }
 
     private static ScenarioWindowEstimate BuildEstimate(
         QuotaWindowKind kind,
         ScenarioRequest request,
-        IReadOnlyList<ScenarioHistorySample> history)
+        IReadOnlyList<ScenarioHistorySample> history,
+        DateTimeOffset evaluationTime)
     {
         var baseSamples = history
             .Where(sample => sample.Kind == kind &&
                              sample.QuotaDeltaPercent > 0 &&
                              sample.EndUtc > sample.StartUtc &&
-                             sample.RootAgents + sample.Subagents > 0)
+                             sample.RootAgents + sample.Subagents > 0 &&
+                             sample.EndUtc <= evaluationTime)
             .ToArray();
+
+        if (baseSamples.Length > 0)
+        {
+            var newestSample = baseSamples.Max(sample => sample.EndUtc);
+            if (evaluationTime - newestSample > TimeSpan.FromDays(MaximumSampleAgeDays))
+            {
+                return new ScenarioWindowEstimate(
+                    kind,
+                    false,
+                    baseSamples.Length,
+                    null,
+                    null,
+                    null,
+                    0.05,
+                    $"{kind} history is stale. The newest usable interval ended {newestSample:yyyy-MM-dd}; a sample within the last {MaximumSampleAgeDays} days is required.");
+            }
+        }
 
         var cohort = baseSamples;
         var cohortLabel = "all observed workloads";
         var cohortPenalty = 1d;
+        var fallbackNotes = new List<string>();
 
         if (!string.IsNullOrWhiteSpace(request.Model))
         {
@@ -73,6 +96,7 @@ public sealed class ScenarioPlannerService
             else
             {
                 cohortPenalty *= 0.85;
+                fallbackNotes.Add($"Model {request.Model} did not have enough matching history, so the broader account cohort was used.");
             }
         }
 
@@ -89,6 +113,10 @@ public sealed class ScenarioPlannerService
             else
             {
                 cohortPenalty *= 0.85;
+                fallbackNotes.Add(
+                    cohortLabel == "all observed workloads"
+                        ? $"Reasoning {request.ReasoningEffort} did not have enough matching history, so the broader account cohort was used."
+                        : $"Reasoning {request.ReasoningEffort} did not have enough matching history, so the {cohortLabel} cohort was retained.");
             }
         }
 
@@ -133,8 +161,8 @@ public sealed class ScenarioPlannerService
         var sampleFactor = Math.Clamp(cohort.Length / 24d, 0.25, 1);
         var confidence = Math.Clamp(sampleFactor * fitFactor * cohortPenalty, 0.1, 0.92);
 
-        var fallbackNote = cohortPenalty < 1
-            ? " Requested model/reasoning did not have enough matching history, so the broader account cohort was used and confidence was reduced."
+        var fallbackNote = fallbackNotes.Count > 0
+            ? $" {string.Join(" ", fallbackNotes)} Confidence was reduced."
             : string.Empty;
 
         return new ScenarioWindowEstimate(
