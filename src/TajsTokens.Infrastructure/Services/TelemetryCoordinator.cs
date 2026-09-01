@@ -389,6 +389,10 @@ public sealed class TelemetryCoordinator
         {
             return;
         }
+        catch (OperationCanceledException)
+        {
+            // A manual refresh intentionally supersedes an in-flight startup refresh.
+        }
         catch (Exception exception)
         {
             _backgroundEvents.Enqueue(new TelemetryRefreshEvent(
@@ -409,6 +413,10 @@ public sealed class TelemetryCoordinator
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
                     break;
+                }
+                catch (OperationCanceledException)
+                {
+                    // Manual refreshes intentionally supersede interval refreshes; this is not a failure.
                 }
                 catch (Exception exception)
                 {

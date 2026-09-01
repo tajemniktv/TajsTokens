@@ -66,7 +66,8 @@ public sealed partial class OverviewPage : Page
         }
         catch (Exception exception)
         {
-            System.Diagnostics.Debug.WriteLine($"Overview snapshot render failed: {exception}");
+            var detail = exception.GetBaseException().Message.ReplaceLineEndings(" ").Trim();
+            ViewModel.StatusText = $"Snapshot render failed: {(detail.Length <= 240 ? detail : detail[..240] + "…")}";
         }
     }
 }
