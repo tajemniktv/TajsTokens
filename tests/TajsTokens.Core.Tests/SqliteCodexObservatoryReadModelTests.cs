@@ -140,11 +140,43 @@ public sealed class SqliteCodexObservatoryReadModelTests
 
             var versionCommand = verify.CreateCommand();
             versionCommand.CommandText = "SELECT version FROM observatory_schema WHERE component = 'codex-observatory';";
-            Assert.Equal(3L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
+            Assert.Equal(4L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
 
             var indexCommand = verify.CreateCommand();
             indexCommand.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_native_tokens_observed_time';";
             Assert.Equal(1L, (long)(await indexCommand.ExecuteScalarAsync(CancellationToken.None))!);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Initialize_FreshDatabaseReopensWithSchemaVersion4()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-observatory-reopen-");
+        var databasePath = Path.Combine(directory.FullName, "telemetry.db");
+
+        try
+        {
+            var repository = new SqliteTelemetryRepository(databasePath);
+            await repository.InitializeAsync(CancellationToken.None);
+
+            var firstStore = new SqliteCodexObservatoryStore(databasePath);
+            await firstStore.InitializeAsync(CancellationToken.None);
+            firstStore.Dispose();
+
+            var secondStore = new SqliteCodexObservatoryStore(databasePath);
+            await secondStore.InitializeAsync(CancellationToken.None);
+            secondStore.Dispose();
+
+            await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString());
+            await connection.OpenAsync(CancellationToken.None);
+            var version = connection.CreateCommand();
+            version.CommandText = "SELECT version FROM observatory_schema WHERE component = 'codex-observatory';";
+            Assert.Equal(4L, (long)(await version.ExecuteScalarAsync(CancellationToken.None))!);
         }
         finally
         {
