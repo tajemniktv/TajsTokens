@@ -206,6 +206,24 @@ public sealed class ForecastingServiceTests
     }
 
     [Fact]
+    public void BuildForecast_MixedFlatAndMovingIntervals_RetainsFlatSamplesInEwma()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var reset = now.AddHours(4);
+        var snapshots = new[]
+        {
+            Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-2), 10, reset),
+            Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-1), 10, reset),
+            Snapshot(QuotaWindowKind.FiveHour, now, 30, reset)
+        };
+
+        var forecast = _service.BuildForecast(snapshots, now);
+
+        Assert.False(forecast.IsQuantizedFlat);
+        Assert.InRange(forecast.BurnRatePercentPerHour!.Value, 8.99, 9.01);
+    }
+
+    [Fact]
     public void BuildForecast_ExpiredObservedEpoch_ReturnsLearningUntilNewProviderSample()
     {
         var now = DateTimeOffset.UtcNow;
