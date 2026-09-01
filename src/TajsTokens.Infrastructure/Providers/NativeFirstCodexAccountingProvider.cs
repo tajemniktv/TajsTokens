@@ -14,6 +14,8 @@ public sealed class NativeFirstCodexAccountingProvider(
     Func<bool> reconciliationEnabled,
     Func<bool> fallbackEnabled) : ICodexTokenAccountingProvider
 {
+    private readonly ICodexTokenAccountingProvider _tokscaleAccounting = tokscaleProvider;
+
     public async Task<CodexTokenAccountingSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
     {
         CodexTokenAccountingSnapshot native;
@@ -23,7 +25,7 @@ public sealed class NativeFirstCodexAccountingProvider(
         }
         catch (Exception nativeException) when (nativeException is not OperationCanceledException && fallbackEnabled())
         {
-            var fallback = await tokscaleProvider.GetSnapshotAsync(cancellationToken);
+            var fallback = await _tokscaleAccounting.GetSnapshotAsync(cancellationToken);
             return fallback with
             {
                 Source = "Tokscale fallback",
@@ -39,7 +41,7 @@ public sealed class NativeFirstCodexAccountingProvider(
 
         try
         {
-            var reference = await tokscaleProvider.GetSnapshotAsync(cancellationToken);
+            var reference = await _tokscaleAccounting.GetSnapshotAsync(cancellationToken);
             var reconciliation = Reconcile(native, reference);
             return native with
             {
