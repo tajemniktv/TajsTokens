@@ -9,7 +9,8 @@ public sealed partial class ForecastsPage : Page
 {
     private CancellationTokenSource? _pageCancellation;
     private bool _isLoaded;
-    private bool _loading;
+    private long _loadGeneration;
+    private long _estimateGeneration;
 
     public ForecastsPage()
     {
@@ -26,12 +27,15 @@ public sealed partial class ForecastsPage : Page
         var previous = Interlocked.Exchange(ref _pageCancellation, new CancellationTokenSource());
         previous?.Cancel();
         previous?.Dispose();
-        await LoadAsync(_pageCancellation.Token);
+        var generation = Interlocked.Increment(ref _loadGeneration);
+        await LoadAsync(_pageCancellation.Token, generation);
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         _isLoaded = false;
+        Interlocked.Increment(ref _loadGeneration);
+        Interlocked.Increment(ref _estimateGeneration);
         var cancellation = Interlocked.Exchange(ref _pageCancellation, null);
         cancellation?.Cancel();
         cancellation?.Dispose();
@@ -40,21 +44,22 @@ public sealed partial class ForecastsPage : Page
     private async void OnRefreshClicked(object sender, RoutedEventArgs e)
     {
         var cancellation = _pageCancellation;
-        if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested || _loading)
+        if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested)
         {
             return;
         }
-        await LoadAsync(cancellation.Token);
+
+        var generation = Interlocked.Increment(ref _loadGeneration);
+        await LoadAsync(cancellation.Token, generation);
     }
 
-    private async Task LoadAsync(CancellationToken cancellationToken)
+    private async Task LoadAsync(CancellationToken cancellationToken, long generation)
     {
-        if (_loading || !_isLoaded)
+        if (!_isLoaded)
         {
             return;
         }
 
-        _loading = true;
         try
         {
             StatusText.Text = "Loading persisted forecast history…";
@@ -67,7 +72,7 @@ public sealed partial class ForecastsPage : Page
                 cancellationToken);
 
             cancellationToken.ThrowIfCancellationRequested();
-            if (!_isLoaded)
+            if (!_isLoaded || generation != Volatile.Read(ref _loadGeneration))
             {
                 return;
             }
@@ -78,14 +83,10 @@ public sealed partial class ForecastsPage : Page
         }
         catch (Exception exception)
         {
-            if (_isLoaded)
+            if (_isLoaded && generation == Volatile.Read(ref _loadGeneration))
             {
                 StatusText.Text = $"Forecast history unavailable: {Summarize(exception.Message)}";
             }
-        }
-        finally
-        {
-            _loading = false;
         }
     }
 
@@ -136,6 +137,7 @@ public sealed partial class ForecastsPage : Page
             return;
         }
 
+        var generation = Interlocked.Increment(ref _estimateGeneration);
         try
         {
             var request = new ScenarioRequest(
@@ -150,11 +152,12 @@ public sealed partial class ForecastsPage : Page
             ScenarioInfo.Severity = InfoBarSeverity.Informational;
             ScenarioInfo.Title = "Estimating…";
             ScenarioInfo.Message = "Fitting account-local history for both quota windows.";
+            ScenarioMethodText.Text = string.Empty;
 
             var estimate = await Task.Run(
                 () => App.Services.Intelligence.EstimateScenarioAsync(request, historyFrom, cancellation.Token),
                 cancellation.Token);
-            if (!_isLoaded || cancellation.IsCancellationRequested)
+            if (!_isLoaded || cancellation.IsCancellationRequested || generation != Volatile.Read(ref _estimateGeneration))
             {
                 return;
             }
@@ -170,10 +173,15 @@ public sealed partial class ForecastsPage : Page
         }
         catch (Exception exception)
         {
+            if (!_isLoaded || generation != Volatile.Read(ref _estimateGeneration))
+            {
+                return;
+            }
             ScenarioInfo.IsOpen = true;
             ScenarioInfo.Severity = InfoBarSeverity.Error;
             ScenarioInfo.Title = "Scenario unavailable";
             ScenarioInfo.Message = Summarize(exception.Message);
+            ScenarioMethodText.Text = string.Empty;
         }
     }
 
