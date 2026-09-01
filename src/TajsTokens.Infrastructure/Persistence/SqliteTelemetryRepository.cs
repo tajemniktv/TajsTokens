@@ -580,7 +580,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                     reader.IsDBNull(10) ? null : reader.GetDouble(10),
                     reader.IsDBNull(11) ? null : reader.GetDouble(11),
                     reader.IsDBNull(12) ? null : reader.GetString(12),
-                    !reader.IsDBNull(13) && reader.GetInt32(13) != 0))));
+                    !reader.IsDBNull(13) && reader.GetInt32(13) != 0)));
         }
 
         return results;
