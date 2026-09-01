@@ -55,14 +55,34 @@ public partial class App : Application
 
     private async Task ReconcileStartupRegistrationAsync()
     {
-        var enabled = Services.Settings.LaunchAtLogin;
-        var result = await Task.Run(() =>
+        (bool Success, string? Error, bool Enabled) result;
+        await _settingsApplyGate.WaitAsync();
+        try
         {
-            var success = _startupService.TrySetEnabled(enabled, out var error);
-            return (Success: success, Error: error);
-        });
+            // Read the desired value only after entering the same gate used by interactive settings
+            // changes. Otherwise a slow launch-time registry write could race a newer user choice and
+            // apply the stale startup value last.
+            var enabled = Services.Settings.LaunchAtLogin;
+            var applied = await Task.Run(() =>
+            {
+                try
+                {
+                    var success = _startupService.TrySetEnabled(enabled, out var error);
+                    return (Success: success, Error: error);
+                }
+                catch (Exception exception)
+                {
+                    return (Success: false, Error: exception.Message.ReplaceLineEndings(" "));
+                }
+            });
+            result = (applied.Success, applied.Error, enabled);
+        }
+        finally
+        {
+            _settingsApplyGate.Release();
+        }
 
-        if (!result.Success && enabled)
+        if (!result.Success && result.Enabled)
         {
             RunOnDispatcher(() =>
                 _trayService.ShowNotification(
@@ -174,13 +194,13 @@ public partial class App : Application
     {
         var startupChanged = previous.LaunchAtLogin != settings.LaunchAtLogin;
 
-        if (startupChanged && !_startupService.TrySetEnabled(settings.LaunchAtLogin, out var startupError))
-        {
-            return (false, startupError ?? "Start-with-Windows registration could not be updated.");
-        }
-
         try
         {
+            if (startupChanged && !_startupService.TrySetEnabled(settings.LaunchAtLogin, out var startupError))
+            {
+                return (false, startupError ?? "Start-with-Windows registration could not be updated.");
+            }
+
             Services.SaveSettings(settings);
             return (true, null);
         }
@@ -188,7 +208,15 @@ public partial class App : Application
         {
             if (startupChanged)
             {
-                _ = _startupService.TrySetEnabled(previous.LaunchAtLogin, out _);
+                try
+                {
+                    _ = _startupService.TrySetEnabled(previous.LaunchAtLogin, out _);
+                }
+                catch
+                {
+                    // The original settings remain authoritative even if best-effort registry
+                    // rollback itself fails. The caller receives the primary apply error.
+                }
             }
 
             return (false, exception.Message.ReplaceLineEndings(" "));
