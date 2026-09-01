@@ -24,7 +24,7 @@ public sealed class SqliteTelemetryRepositoryTests
     ];
 
     [Fact]
-    public async Task InitializeAsync_CreatesCompleteVersion4FoundationSchema()
+    public async Task InitializeAsync_CreatesCompleteVersion5FoundationSchema()
     {
         var directory = CreateTempDirectory();
         var path = Path.Combine(directory, "telemetry.db");
@@ -38,7 +38,7 @@ public sealed class SqliteTelemetryRepositoryTests
             {
                 await connection.OpenAsync();
 
-                Assert.Equal(4, await ReadSchemaVersionAsync(connection));
+                Assert.Equal(5, await ReadSchemaVersionAsync(connection));
                 var tables = await ReadTableNamesAsync(connection);
                 foreach (var expected in FoundationTables)
                 {
@@ -89,10 +89,11 @@ public sealed class SqliteTelemetryRepositoryTests
             await using (var migrated = new SqliteConnection($"Data Source={path}"))
             {
                 await migrated.OpenAsync();
-                Assert.Equal(4, await ReadSchemaVersionAsync(migrated));
+                Assert.Equal(5, await ReadSchemaVersionAsync(migrated));
                 Assert.Contains("repositories", await ReadTableNamesAsync(migrated));
                 Assert.Contains("workspaces", await ReadTableNamesAsync(migrated));
                 Assert.Contains("forecast_snapshots", await ReadTableNamesAsync(migrated));
+                Assert.Contains("agent_relationships", await ReadTableNamesAsync(migrated));
 
                 var countCommand = migrated.CreateCommand();
                 countCommand.CommandText = "SELECT COUNT(*) FROM quota_snapshots;";
