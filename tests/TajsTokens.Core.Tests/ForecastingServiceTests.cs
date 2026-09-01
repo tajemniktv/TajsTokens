@@ -23,8 +23,10 @@ public sealed class ForecastingServiceTests
         var forecast = _service.BuildForecast(snapshots, now);
 
         Assert.False(forecast.SurvivesUntilReset);
+        Assert.Equal(ForecastState.ExhaustionLikelyBeforeReset, forecast.State);
         Assert.NotNull(forecast.EstimatedExhaustionAtUtc);
         Assert.True(forecast.EstimatedExhaustionAtUtc < snapshots[^1].ResetsAtUtc);
+        Assert.Equal(0, forecast.ProjectedRemainingAtResetPercent);
     }
 
     [Fact]
@@ -42,8 +44,11 @@ public sealed class ForecastingServiceTests
         var forecast = _service.BuildForecast(snapshots, now);
 
         Assert.True(forecast.SurvivesUntilReset);
+        Assert.Equal(ForecastState.SafeUntilReset, forecast.State);
         Assert.True(forecast.BurnRatePercentPerHour > 0);
         Assert.True(forecast.SustainablePercentPerHour > 0);
+        Assert.True(forecast.ProjectedRemainingAtResetPercent > 0);
+        Assert.Null(forecast.EstimatedExhaustionAtUtc);
     }
 
     [Fact]
@@ -55,9 +60,11 @@ public sealed class ForecastingServiceTests
         var forecast = _service.BuildForecast(snapshots, now);
 
         Assert.Equal(QuotaWindowKind.Weekly, forecast.Kind);
+        Assert.Equal(ForecastState.Learning, forecast.State);
         Assert.Null(forecast.BurnRatePercentPerHour);
         Assert.Null(forecast.EstimatedExhaustionAtUtc);
         Assert.Null(forecast.SurvivesUntilReset);
+        Assert.NotNull(forecast.SustainablePercentPerHour);
     }
 
     [Fact]
@@ -150,8 +157,90 @@ public sealed class ForecastingServiceTests
         };
 
         var forecast = _service.BuildForecast(snapshots, now);
+        Assert.Equal(ForecastState.Learning, forecast.State);
         Assert.Null(forecast.BurnRatePercentPerHour);
         Assert.Null(forecast.SurvivesUntilReset);
+    }
+
+    [Fact]
+    public void BuildForecast_ExhaustionAfterReset_IsSuppressedAndMarginIsPrimary()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var reset = now.AddHours(1);
+        var snapshots = new[]
+        {
+            Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-2), 20, reset),
+            Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-1), 22, reset),
+            Snapshot(QuotaWindowKind.FiveHour, now, 24, reset)
+        };
+
+        var forecast = _service.BuildForecast(snapshots, now);
+
+        Assert.True(forecast.SurvivesUntilReset);
+        Assert.Null(forecast.EstimatedExhaustionAtUtc);
+        Assert.InRange(forecast.ProjectedRemainingAtResetPercent!.Value, 73.9, 74.1);
+        Assert.InRange(forecast.BurnPressure!.Value, 0, 1);
+    }
+
+    [Fact]
+    public void BuildForecast_FlatQuantizedMeter_DoesNotClaimExactZeroBurn()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var reset = now.AddHours(2);
+        var snapshots = new[]
+        {
+            Snapshot(QuotaWindowKind.FiveHour, now.AddMinutes(-30), 41, reset),
+            Snapshot(QuotaWindowKind.FiveHour, now.AddMinutes(-20), 41, reset),
+            Snapshot(QuotaWindowKind.FiveHour, now.AddMinutes(-10), 41, reset),
+            Snapshot(QuotaWindowKind.FiveHour, now, 41, reset)
+        };
+
+        var forecast = _service.BuildForecast(snapshots, now);
+
+        Assert.Equal(ForecastState.IdleWithinMeterPrecision, forecast.State);
+        Assert.True(forecast.IsQuantizedFlat);
+        Assert.Null(forecast.BurnRatePercentPerHour);
+        Assert.Null(forecast.EstimatedExhaustionAtUtc);
+        Assert.Null(forecast.SurvivesUntilReset);
+        Assert.True(forecast.Confidence < 0.5);
+    }
+
+    [Fact]
+    public void BuildForecast_ExpiredObservedEpoch_ReturnsLearningUntilNewProviderSample()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var expiredReset = now.AddMinutes(-1);
+        var snapshots = new[]
+        {
+            Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-2), 30, expiredReset),
+            Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-1), 50, expiredReset)
+        };
+
+        var forecast = _service.BuildForecast(snapshots, now);
+
+        Assert.Equal(ForecastState.Learning, forecast.State);
+        Assert.Null(forecast.BurnRatePercentPerHour);
+        Assert.Null(forecast.EstimatedExhaustionAtUtc);
+        Assert.Null(forecast.SurvivesUntilReset);
+    }
+
+    [Fact]
+    public void BuildForecast_RisingRecentRates_ReportsAcceleratingTrend()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var reset = now.AddHours(2);
+        var snapshots = new[]
+        {
+            Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-4), 10, reset),
+            Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-3), 12, reset),
+            Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-2), 16, reset),
+            Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-1), 24, reset),
+            Snapshot(QuotaWindowKind.FiveHour, now, 36, reset)
+        };
+
+        var forecast = _service.BuildForecast(snapshots, now);
+
+        Assert.Equal("accelerating", forecast.Trend);
     }
 
     private static QuotaSnapshot Snapshot(QuotaWindowKind kind, DateTimeOffset captured, double used, DateTimeOffset reset) =>
