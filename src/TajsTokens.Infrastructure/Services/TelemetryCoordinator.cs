@@ -389,8 +389,12 @@ public sealed class TelemetryCoordinator
         {
             return;
         }
-        catch
+        catch (Exception exception)
         {
+            _backgroundEvents.Enqueue(new TelemetryRefreshEvent(
+                DateTimeOffset.UtcNow,
+                "Startup refresh failed",
+                $"Periodic telemetry will retry. {SummarizeError(exception)}"));
         }
 
         using var timer = new PeriodicTimer(interval);
@@ -406,8 +410,12 @@ public sealed class TelemetryCoordinator
                 {
                     break;
                 }
-                catch
+                catch (Exception exception)
                 {
+                    _backgroundEvents.Enqueue(new TelemetryRefreshEvent(
+                        DateTimeOffset.UtcNow,
+                        "Periodic refresh failed",
+                        $"Telemetry will retry on the next interval. {SummarizeError(exception)}"));
                 }
             }
         }

@@ -21,13 +21,11 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
         var token = timeoutSource.Token;
         var codexCommand = ResolveCodexCommand();
 
-        using var process = new Process
-        {
-            // ExternalProcess launches fully-qualified executable paths directly on Windows. Only a
-            // PATH command name is routed through cmd/PATHEXT, so user-local paths cannot be changed
-            // by cmd.exe percent-variable expansion.
-            StartInfo = ExternalProcess.CreateStartInfo(codexCommand, ["app-server", "--listen", "stdio://"])
-        };
+        using var process = new Process();
+        // ExternalProcess launches fully-qualified executable paths directly on Windows. Only a
+        // PATH command name is routed through cmd/PATHEXT, so user-local paths cannot be changed
+        // by cmd.exe percent-variable expansion.
+        process.StartInfo = ExternalProcess.CreateStartInfo(codexCommand, ["app-server", "--listen", "stdio://"]);
 
         try
         {

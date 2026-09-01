@@ -147,7 +147,7 @@ public sealed class ScenarioPlannerService
         var expected = Math.Clamp(rawPrediction, 0, 100);
 
         var residuals = cohort
-            .Select((sample, index) => y[index] - Dot(coefficients, x[index]))
+            .Select((_, index) => y[index] - Dot(coefficients, x[index]))
             .ToArray();
         var residualVariance = residuals.Sum(value => value * value) / Math.Max(1, residuals.Length - coefficients.Length);
         var residualSigma = Math.Sqrt(Math.Max(0, residualVariance));

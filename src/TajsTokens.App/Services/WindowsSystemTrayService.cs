@@ -29,7 +29,6 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
     private nint _windowHandle;
     private nint _instanceHandle;
     private nint _sharedFallbackIconHandle;
-    private Icon? _currentStatusIcon;
     private StatusIconKey? _desiredIconKey;
     private StatusIconKey? _currentIconKey;
     private uint _taskbarCreatedMessage;
@@ -197,7 +196,6 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
             }
             _statusIconCache.Clear();
             _pendingIconKeys.Clear();
-            _currentStatusIcon = null;
             _desiredIconKey = null;
             _currentIconKey = null;
         }
@@ -277,7 +275,6 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
         {
             _lastAppliedTip = desiredTip;
             _currentIconKey = desiredKey;
-            _currentStatusIcon = desiredIcon;
         }
 
         var version = CreateNotifyIconData(0);
@@ -388,7 +385,6 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
 
             _lastAppliedTip = tip;
             _currentIconKey = key;
-            _currentStatusIcon = icon;
         }
     }
 
