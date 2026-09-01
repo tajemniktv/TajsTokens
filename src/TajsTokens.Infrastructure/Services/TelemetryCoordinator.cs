@@ -7,8 +7,8 @@ using TajsTokens.Infrastructure.Persistence;
 namespace TajsTokens.Infrastructure.Services;
 
 /// <summary>
-/// Owns provider refresh serialization for the whole process. Dashboard, tray, alerts, and the
-/// Phase 3 rollout observatory consume one refresh cadence rather than creating competing loops.
+/// Owns provider refresh serialization for the whole process. Dashboard, tray, alerts, Observatory,
+/// and Phase 4 intelligence consume one refresh cadence rather than creating competing loops.
 /// </summary>
 public sealed class TelemetryCoordinator
 {
@@ -16,6 +16,7 @@ public sealed class TelemetryCoordinator
     private readonly ICodexQuotaProvider _quotaProvider;
     private readonly SqliteTelemetryRepository _repository;
     private readonly ICodexObservatoryService? _observatoryService;
+    private readonly IIntelligenceService? _intelligenceService;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly object _activeRefreshSync = new();
     private CancellationTokenSource? _activeRefreshCancellation;
@@ -26,12 +27,14 @@ public sealed class TelemetryCoordinator
         ITokscaleProvider tokscaleProvider,
         ICodexQuotaProvider quotaProvider,
         SqliteTelemetryRepository repository,
-        ICodexObservatoryService? observatoryService = null)
+        ICodexObservatoryService? observatoryService = null,
+        IIntelligenceService? intelligenceService = null)
     {
         _tokscaleProvider = tokscaleProvider;
         _quotaProvider = quotaProvider;
         _repository = repository;
         _observatoryService = observatoryService;
+        _intelligenceService = intelligenceService;
     }
 
     public TelemetrySnapshot Latest => Volatile.Read(ref _latest);
@@ -73,7 +76,7 @@ public sealed class TelemetryCoordinator
             var startedAt = DateTimeOffset.UtcNow;
             var stopwatch = Stopwatch.StartNew();
             var previous = Latest;
-            var sources = new List<ProviderHealthSnapshot>(4);
+            var sources = new List<ProviderHealthSnapshot>(5);
             var events = new List<TelemetryRefreshEvent>();
 
             var persistenceAvailable = false;
@@ -265,6 +268,28 @@ public sealed class TelemetryCoordinator
                         $"Rollout observatory refresh failed; previously normalized history remains available. {detail}",
                         PreviousSuccess(previous, "Codex rollouts")));
                     events.Add(new TelemetryRefreshEvent(startedAt, "Codex observatory unavailable", detail));
+                }
+            }
+
+            // Intelligence runs after rollout ingestion so embedded quota observations from this scan
+            // participate in reset detection/forecast history immediately. Its failures are isolated:
+            // live provider telemetry and normalized history remain valid even if analytics cannot run.
+            if (persistenceAvailable && _intelligenceService is not null)
+            {
+                try
+                {
+                    var intelligence = await _intelligenceService.RefreshAsync(refreshToken);
+                    events.Add(new TelemetryRefreshEvent(
+                        DateTimeOffset.UtcNow,
+                        "Phase 4 intelligence",
+                        $"Persisted {intelligence.ForecastsPersisted} forecast snapshot(s); detected {intelligence.ResetEventsDetected} new reset/re-anchor event(s)."));
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    events.Add(new TelemetryRefreshEvent(
+                        DateTimeOffset.UtcNow,
+                        "Intelligence unavailable",
+                        $"Telemetry remains available; historical intelligence will retry. {SummarizeError(exception)}"));
                 }
             }
 
