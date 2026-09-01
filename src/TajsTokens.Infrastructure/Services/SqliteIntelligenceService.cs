@@ -90,50 +90,63 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
-        var hasNativeEvents = await TableExistsAsync(connection, "codex_native_token_events", cancellationToken);
-        var hasContext = await TableExistsAsync(connection, "context_observations", cancellationToken);
-        var usage = hasNativeEvents
-            ? await LoadUsageHistoryAsync(connection, effective, hasContext, cancellationToken)
-            : [];
-        var dimensions = hasNativeEvents
-            ? await LoadDimensionsAsync(connection, effective, cancellationToken)
-            : [];
-        var heatmap = hasNativeEvents
-            ? await LoadHeatmapAsync(connection, effective, cancellationToken)
-            : [];
-        var burnIntervals = await LoadQuotaBurnIntervalsAsync(
-            connection,
-            effective.FromUtc,
-            effective.ToUtc,
-            MaxBurnIntervals,
-            hasNativeEvents,
-            hasContext,
-            cancellationToken);
-        var resets = await LoadResetEventsAsync(connection, effective.FromUtc, effective.ToUtc, 200, cancellationToken);
-        var fiveHourForecasts = await LoadForecastHistoryAsync(
-            connection,
-            QuotaWindowKind.FiveHour,
-            effective.FromUtc,
-            effective.ToUtc,
-            500,
-            cancellationToken);
-        var weeklyForecasts = await LoadForecastHistoryAsync(
-            connection,
-            QuotaWindowKind.Weekly,
-            effective.FromUtc,
-            effective.ToUtc,
-            500,
-            cancellationToken);
+        // Keep every constituent SELECT on the same SQLite read snapshot. QueryAsync returns one
+        // dashboard generation, not a collage assembled across commits that happened mid-query.
+        await ExecuteTransactionControlAsync(connection, "BEGIN DEFERRED;", cancellationToken);
+        try
+        {
+            var hasNativeEvents = await TableExistsAsync(connection, "codex_native_token_events", cancellationToken);
+            var hasContext = await TableExistsAsync(connection, "context_observations", cancellationToken);
+            var usage = hasNativeEvents
+                ? await LoadUsageHistoryAsync(connection, effective, hasContext, cancellationToken)
+                : [];
+            var dimensions = hasNativeEvents
+                ? await LoadDimensionsAsync(connection, effective, cancellationToken)
+                : [];
+            var heatmap = hasNativeEvents
+                ? await LoadHeatmapAsync(connection, effective, cancellationToken)
+                : [];
+            var burnIntervals = await LoadQuotaBurnIntervalsAsync(
+                connection,
+                effective.FromUtc,
+                effective.ToUtc,
+                MaxBurnIntervals,
+                hasNativeEvents,
+                hasContext,
+                cancellationToken);
+            var resets = await LoadResetEventsAsync(connection, effective.FromUtc, effective.ToUtc, 200, cancellationToken);
+            var fiveHourForecasts = await LoadForecastHistoryAsync(
+                connection,
+                QuotaWindowKind.FiveHour,
+                effective.FromUtc,
+                effective.ToUtc,
+                500,
+                cancellationToken);
+            var weeklyForecasts = await LoadForecastHistoryAsync(
+                connection,
+                QuotaWindowKind.Weekly,
+                effective.FromUtc,
+                effective.ToUtc,
+                500,
+                cancellationToken);
 
-        return new IntelligenceDashboard(
-            effective,
-            usage,
-            dimensions,
-            heatmap,
-            burnIntervals,
-            resets,
-            fiveHourForecasts,
-            weeklyForecasts);
+            var dashboard = new IntelligenceDashboard(
+                effective,
+                usage,
+                dimensions,
+                heatmap,
+                burnIntervals,
+                resets,
+                fiveHourForecasts,
+                weeklyForecasts);
+            await ExecuteTransactionControlAsync(connection, "COMMIT;", cancellationToken);
+            return dashboard;
+        }
+        catch
+        {
+            await TryRollbackReadTransactionAsync(connection);
+            throw;
+        }
     }
 
     public async Task<QuotaBurnDetail> GetQuotaBurnDetailAsync(
@@ -503,8 +516,8 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         await AppendDimensionAsync(
             connection,
             results,
-            "Repository",
-            "COALESCE(NULLIF(s.repository, ''), 'unknown')",
+            "Session repository",
+            "COALESCE(NULLIF(s.repository, ''), '(unknown)')",
             "LEFT JOIN sessions s ON s.session_id = e.session_id",
             query,
             cancellationToken);
@@ -512,7 +525,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             connection,
             results,
             "Model",
-            "COALESCE(NULLIF(e.model, ''), 'unknown')",
+            "COALESCE(NULLIF(e.model, ''), '(unknown)')",
             string.Empty,
             query,
             cancellationToken);
@@ -542,6 +555,8 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                    COALESCE(SUM(e.reported_total_tokens), 0),
                    COALESCE(SUM(e.uncached_input_tokens), 0),
                    COALESCE(SUM(e.cache_read_tokens), 0),
+                   COALESCE(SUM(e.cache_write_tokens), 0),
+                   COALESCE(SUM(e.non_reasoning_output_tokens), 0),
                    COALESCE(SUM(e.reasoning_output_tokens), 0),
                    COUNT(DISTINCT e.session_id)
             FROM codex_native_token_events e
@@ -563,7 +578,9 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 reader.GetInt64(2),
                 reader.GetInt64(3),
                 reader.GetInt64(4),
-                reader.GetInt32(5)));
+                reader.GetInt64(5),
+                reader.GetInt64(6),
+                reader.GetInt32(7)));
         }
     }
 
@@ -934,6 +951,30 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             current.ResetsAtUtc?.ToUniversalTime().ToString("O") ?? "none");
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material))).ToLowerInvariant();
         return $"quota-burn-{hash[..24]}";
+    }
+
+    private static async Task ExecuteTransactionControlAsync(
+        SqliteConnection connection,
+        string statement,
+        CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = statement;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task TryRollbackReadTransactionAsync(SqliteConnection connection)
+    {
+        try
+        {
+            var rollback = connection.CreateCommand();
+            rollback.CommandText = "ROLLBACK;";
+            await rollback.ExecuteNonQueryAsync(CancellationToken.None);
+        }
+        catch (SqliteException)
+        {
+            // Preserve the query failure if SQLite already ended the transaction.
+        }
     }
 
     private static string SerializeUtc(DateTimeOffset value) =>

@@ -99,7 +99,7 @@ public sealed class SqliteIntelligenceServiceTests
                 CancellationToken.None);
 
             Assert.NotEmpty(dashboard.UsageHistory);
-            Assert.Contains(dashboard.Dimensions, item => item.Dimension == "Repository" && item.Value == "fixture-repo");
+            Assert.Contains(dashboard.Dimensions, item => item.Dimension == "Session repository" && item.Value == "fixture-repo");
             Assert.Contains(dashboard.Dimensions, item => item.Dimension == "Agent role" && item.Value == "Root");
             Assert.Contains(dashboard.Dimensions, item => item.Dimension == "Agent role" && item.Value == "Subagent");
             Assert.NotEmpty(dashboard.Heatmap);
@@ -147,6 +147,39 @@ public sealed class SqliteIntelligenceServiceTests
 
             Assert.Empty(dashboard.QuotaBurnIntervals);
             Assert.All(dashboard.UsageHistory, bucket => Assert.Null(bucket.FiveHourQuotaDelta));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task NativeAndUsage_KeepMissingEventModelUnknownDespiteLaterAgentModel()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-model-attribution-");
+        var database = Path.Combine(directory.FullName, "telemetry.db");
+        var observed = DateTimeOffset.UtcNow.AddMinutes(-10);
+        try
+        {
+            var repository = new SqliteTelemetryRepository(database);
+            var store = new SqliteCodexObservatoryStore(database);
+            await repository.InitializeAsync(CancellationToken.None);
+            await store.InitializeAsync(CancellationToken.None);
+            await store.UpsertAgentAsync(new Agent("session-a", "session-a", "Agent", AgentRuntimeState.Running, observed.AddMinutes(1), "later-model"), CancellationToken.None);
+            await store.ApplyCumulativeTokenObservationAsync(
+                new CodexCumulativeTokenObservation("unknown-model", "session-a.jsonl", "session-a", "session-a", observed, null, "high", 100, 20, 0, 10, 2, 115),
+                CancellationToken.None);
+            var native = await new TajsTokens.Infrastructure.Providers.SqliteNativeCodexAccountingProvider(database).GetSnapshotAsync(CancellationToken.None);
+            var dashboard = await new SqliteIntelligenceService(database, repository).QueryAsync(
+                new IntelligenceQuery(observed.AddHours(-1), observed.AddHours(1), AnalyticsBucketSize.Hour, 24), CancellationToken.None);
+            Assert.Equal("(unknown)", Assert.Single(native.Usage).Model);
+            var model = Assert.Single(dashboard.Dimensions, item => item.Dimension == "Model");
+            Assert.Equal("(unknown)", model.Value);
+            Assert.Equal(115, model.NativeTokens);
+            Assert.Equal(5, model.IntegrityDelta);
+            Assert.False(model.IntegrityExact);
         }
         finally
         {

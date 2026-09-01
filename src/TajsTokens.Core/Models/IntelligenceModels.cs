@@ -22,7 +22,13 @@ public sealed record UsageHistoryBucket(
     int ActiveSessions,
     int Compactions,
     double? FiveHourQuotaDelta,
-    double? WeeklyQuotaDelta);
+    double? WeeklyQuotaDelta)
+{
+    public long DisjointTokens => checked(
+        UncachedInputTokens + CacheReadTokens + CacheWriteTokens + NonReasoningOutputTokens + ReasoningOutputTokens);
+    public long IntegrityDelta => checked(NativeTokens - DisjointTokens);
+    public bool IntegrityExact => IntegrityDelta == 0;
+}
 
 public sealed record UsageDimensionTotal(
     string Dimension,
@@ -30,8 +36,16 @@ public sealed record UsageDimensionTotal(
     long NativeTokens,
     long UncachedInputTokens,
     long CacheReadTokens,
+    long CacheWriteTokens,
+    long NonReasoningOutputTokens,
     long ReasoningOutputTokens,
-    int Sessions);
+    int Sessions)
+{
+    public long DisjointTokens => checked(
+        UncachedInputTokens + CacheReadTokens + CacheWriteTokens + NonReasoningOutputTokens + ReasoningOutputTokens);
+    public long IntegrityDelta => checked(NativeTokens - DisjointTokens);
+    public bool IntegrityExact => IntegrityDelta == 0;
+}
 
 public sealed record UsageHeatmapCell(
     DayOfWeek Day,

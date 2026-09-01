@@ -129,7 +129,7 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
         var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            SELECT COALESCE(NULLIF(e.model, ''), NULLIF(a.model, ''), '(unknown)') AS model,
+            SELECT COALESCE(NULLIF(e.model, ''), '(unknown)') AS model,
                    MAX(e.observed_at_utc) AS observed_at_utc,
                    SUM(e.uncached_input_tokens),
                    SUM(e.cache_read_tokens),
@@ -138,8 +138,7 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
                    SUM(e.reasoning_output_tokens),
                    SUM(e.reported_total_tokens)
             FROM codex_native_token_events e
-            LEFT JOIN agents a ON a.agent_id = e.agent_id
-            GROUP BY COALESCE(NULLIF(e.model, ''), NULLIF(a.model, ''), '(unknown)')
+            GROUP BY COALESCE(NULLIF(e.model, ''), '(unknown)')
             HAVING SUM(e.uncached_input_tokens) +
                    SUM(e.cache_read_tokens) +
                    SUM(e.cache_write_tokens) +
