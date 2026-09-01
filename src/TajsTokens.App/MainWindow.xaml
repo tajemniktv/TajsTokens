@@ -19,7 +19,7 @@
                 <NavigationViewItem Content="Usage" Tag="usage" Icon="AllApps" />
                 <NavigationViewItem Content="Codex Observatory" Tag="observatory" Icon="People" />
                 <NavigationViewItem Content="Forecasts" Tag="forecasts" Icon="Preview" />
-                <NavigationViewItem Content="Analytics" Tag="analytics" Icon="ReportDocument" />
+                <NavigationViewItem Content="Analytics" Tag="analytics" Icon="Document" />
                 <NavigationViewItem Content="Diagnostics" Tag="diagnostics" Icon="Repair" />
                 <NavigationViewItem Content="Settings" Tag="settings" Icon="Setting" />
             </NavigationView.MenuItems>
