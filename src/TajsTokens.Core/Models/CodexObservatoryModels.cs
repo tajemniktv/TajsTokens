@@ -5,6 +5,11 @@ public sealed record CodexIngestionResult(
     int RecordsNormalized,
     string? SessionId)
 {
+    public long LastCompleteRecordOffset { get; init; }
+    public long SourceLength { get; init; }
+
+    public bool ReachedCurrentEndOfFile => LastCompleteRecordOffset >= SourceLength;
+
     public static CodexIngestionResult Empty { get; } = new(0, 0, null);
 }
 
@@ -33,20 +38,28 @@ public sealed record CodexNativeTokenTotals(
 
 public sealed record CodexSessionOverview(
     string SessionId,
-    string? ParentSessionId,
-    string DisplayName,
+    string? ThreadId,
     string Repository,
     DateTimeOffset StartedAtUtc,
     DateTimeOffset? LastActivityAtUtc,
     string Status,
+    string AgentName,
+    string AgentState,
     string? Model,
-    CodexNativeTokenTotals NativeTokens,
-    int CompactionCount,
-    double? PeakContextPercent,
+    long NativeUncachedInput,
+    long NativeCacheRead,
+    long NativeCacheWrite,
+    long NativeNonReasoningOutput,
+    long NativeReasoningOutput,
+    long NativeReportedTotal,
+    long? LatestContextInput,
+    long? ContextWindowTokens,
+    int Compactions,
     long RolloutBytes,
-    int TimelineEventCount);
+    long RecordsSeen);
 
 public sealed record CodexRolloutStorageSummary(
+    string SourceIdentity,
     string FilePath,
     string? SessionId,
     long SizeBytes,
@@ -55,19 +68,20 @@ public sealed record CodexRolloutStorageSummary(
     DateTimeOffset LastSeenAtUtc);
 
 public sealed record CodexObservatorySummary(
-    long SessionCount,
+    int SessionCount,
+    int AgentCount,
+    int RelationshipCount,
+    int RolloutFileCount,
+    long RolloutBytes,
+    long RolloutRecords,
     CodexNativeTokenTotals NativeTokens,
-    long RolloutBytes);
-
-public sealed record CodexParserResumeState(
-    string SourceIdentity,
-    long ByteOffset,
-    string SessionId,
-    string? ParentSessionId,
-    string AgentName,
-    string Repository,
-    DateTimeOffset StartedAtUtc,
-    string? CurrentModel,
-    string? ReasoningEffort,
-    long? ContextWindowTokens,
-    DateTimeOffset UpdatedAtUtc);
+    int ContextObservationCount,
+    int CompactionCount,
+    long? PeakContextInput,
+    DateTimeOffset? LatestActivityAtUtc)
+{
+    public static CodexObservatorySummary Empty { get; } = new(
+        0, 0, 0, 0, 0, 0,
+        new CodexNativeTokenTotals(0, 0, 0, 0, 0, 0),
+        0, 0, null, null);
+}
