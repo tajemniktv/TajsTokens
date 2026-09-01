@@ -22,14 +22,12 @@ public static class CodexObservatoryRuntimeFactory
     {
         var store = new SqliteCodexObservatoryStore(databasePath);
         var rolloutProvider = new FileSystemCodexSessionEventProvider();
-        var rolloutRecordBatchWriter = new SqliteCodexRolloutRecordBatchWriter(databasePath, store);
-        var semanticBatchWriter = new SqliteCodexSemanticBatchWriter(databasePath, store);
+        var ingestionBatchWriter = new SqliteCodexIngestionBatchWriter(databasePath, store);
         var ingestion = new CodexSessionIngestionService(
             rolloutProvider,
             checkpointStore,
             store,
-            rolloutRecordBatchWriter,
-            semanticBatchWriter);
+            ingestionBatchWriter);
 
         var stateIndexStore = new SqliteCodexStateIndexStore(databasePath);
         var stateCatalog = new CodexStateCatalog(CodexObservatoryService.GetCodexHome());
