@@ -14,7 +14,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 /// </summary>
 public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObservatoryStore
 {
-    private const int ObservatorySchemaVersion = 2;
+    private const int ObservatorySchemaVersion = 3;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _initializeGate = new(1, 1);
     private volatile bool _initialized;
@@ -72,7 +72,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                         counter_epoch INTEGER NOT NULL,
                         uncached_input_tokens INTEGER NOT NULL,
                         cache_read_tokens INTEGER NOT NULL,
-                        cache_write_tokens INTEGER NOT NULL,
+                        cache_write_input_tokens INTEGER NOT NULL,
                         non_reasoning_output_tokens INTEGER NOT NULL,
                         reasoning_output_tokens INTEGER NOT NULL,
                         reported_total_tokens INTEGER NOT NULL
@@ -138,6 +138,8 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
 
                     CREATE INDEX IF NOT EXISTS idx_native_tokens_session_time
                         ON codex_native_token_events(session_id, observed_at_utc DESC);
+                    CREATE INDEX IF NOT EXISTS idx_native_tokens_observed_time
+                        ON codex_native_token_events(observed_at_utc DESC);
                     CREATE INDEX IF NOT EXISTS idx_context_session_time
                         ON context_observations(session_id, observed_at_utc DESC);
                     CREATE INDEX IF NOT EXISTS idx_rollout_records_identity
@@ -148,10 +150,10 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                         ON rollout_files(file_path);
 
                     INSERT INTO observatory_schema(component, version)
-                    VALUES('codex-observatory', 2)
+                    VALUES('codex-observatory', 3)
                     ON CONFLICT(component) DO UPDATE SET version = excluded.version;
                     """, cancellationToken);
-                version = 2;
+                version = 3;
             }
 
             if (version == 1)
@@ -245,6 +247,19 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
 
                     UPDATE observatory_schema
                     SET version = 2
+                    WHERE component = 'codex-observatory';
+                    """, cancellationToken);
+                version = 2;
+            }
+
+            if (version == 2)
+            {
+                await ExecuteMigrationAsync(connection, """
+                    CREATE INDEX IF NOT EXISTS idx_native_tokens_observed_time
+                        ON codex_native_token_events(observed_at_utc DESC);
+
+                    UPDATE observatory_schema
+                    SET version = 3
                     WHERE component = 'codex-observatory';
                     """, cancellationToken);
             }
@@ -964,7 +979,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         insert.CommandText = """
             INSERT INTO codex_native_token_events(
                 source_event_id, source_file, session_id, agent_id, observed_at_utc, model, reasoning_effort,
-                counter_epoch, uncached_input_tokens, cache_read_tokens, cache_write_tokens,
+                counter_epoch, uncached_input_tokens, cache_read_tokens, cache_write_input_tokens,
                 non_reasoning_output_tokens, reasoning_output_tokens, reported_total_tokens)
             VALUES($event, $file, $session, $agent, $observed, $model, $reasoning, $epoch,
                    $uncached, $cached, $cacheWrite, $output, $reasoningOutput, $total)
