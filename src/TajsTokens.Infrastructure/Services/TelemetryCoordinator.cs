@@ -86,9 +86,6 @@ public sealed class TelemetryCoordinator
                 events.Add(new TelemetryRefreshEvent(startedAt, "Persistence unavailable", detail));
             }
 
-            // Rollout parsing can be the heavier first-run operation. Start it after the base schema is
-            // ready, but let Tokscale/app-server I/O proceed concurrently so quota status is not delayed
-            // by a historical local corpus scan any more than necessary.
             Task<CodexObservatoryRefreshResult>? observatoryTask = null;
             if (persistenceAvailable && _observatoryService is not null)
             {
@@ -220,7 +217,7 @@ public sealed class TelemetryCoordinator
                     var state = observatory.Errors > 0 ? TelemetryHealthState.Stale : TelemetryHealthState.Live;
                     var detail = observatory.FilesDiscovered == 0
                         ? "No local Codex rollout JSONL sources were discovered."
-                        : $"{observatory.FilesDiscovered} rollout file(s), {observatory.RecordsNormalized} new normalized record(s), {observatory.SessionsTouched} touched session(s), {FormatByteCount(observatory.BytesObserved)} observed on disk." +
+                        : $"{observatory.FilesDiscovered} rollout file(s), {observatory.RecordsScanned} new complete record(s), {observatory.RecordsNormalized} normalized, {observatory.SessionsTouched} touched session(s), {FormatByteCount(observatory.BytesObserved)} observed on disk." +
                           (observatory.Errors > 0 ? $" {observatory.Errors} file(s) could not be refreshed and will retry." : string.Empty);
                     sources.Add(new ProviderHealthSnapshot("Codex rollouts", state, detail, startedAt));
                     events.Add(new TelemetryRefreshEvent(startedAt, "Codex observatory", detail));
