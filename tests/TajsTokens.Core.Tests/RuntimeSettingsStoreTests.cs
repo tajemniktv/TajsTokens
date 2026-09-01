@@ -88,7 +88,7 @@ public sealed class RuntimeSettingsStoreTests
     }
 
     [Fact]
-    public void Load_NewerSchemaReturnsDefaultsWithoutOverwritingFile()
+    public void Load_NewerSchemaReturnsDefaultsAndBlocksOrdinaryOverwrite()
     {
         var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -101,13 +101,19 @@ public sealed class RuntimeSettingsStoreTests
             }
             """;
         File.WriteAllText(path, original);
+        var store = new RuntimeSettingsStore(path);
 
         try
         {
-            var settings = new RuntimeSettingsStore(path).Load();
+            var settings = store.Load();
             Assert.Equal(RuntimeSettings.CurrentSchemaVersion, settings.SchemaVersion);
             Assert.True(settings.RunInBackground);
             Assert.Equal(60, settings.PollIntervalSeconds);
+            Assert.Equal(original, File.ReadAllText(path));
+
+            var exception = Assert.Throws<InvalidOperationException>(() =>
+                store.Save(settings with { NotificationsEnabled = false }));
+            Assert.Contains("refusing to overwrite", exception.Message, StringComparison.OrdinalIgnoreCase);
             Assert.Equal(original, File.ReadAllText(path));
         }
         finally
