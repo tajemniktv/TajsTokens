@@ -38,7 +38,15 @@ public sealed class TelemetryCoordinator
 
     public event Action<TelemetrySnapshot>? SnapshotUpdated;
 
-    public async Task<TelemetrySnapshot> RefreshAsync(RefreshTrigger trigger, CancellationToken cancellationToken)
+    /// <summary>
+    /// Refreshes telemetry without ever running provider/database work on a caller's UI
+    /// SynchronizationContext. Microsoft.Data.Sqlite executes much of its work synchronously, so an
+    /// ordinary async call from WinUI can otherwise block the dispatcher despite using await.
+    /// </summary>
+    public Task<TelemetrySnapshot> RefreshAsync(RefreshTrigger trigger, CancellationToken cancellationToken) =>
+        Task.Run(() => RefreshCoreAsync(trigger, cancellationToken), cancellationToken);
+
+    private async Task<TelemetrySnapshot> RefreshCoreAsync(RefreshTrigger trigger, CancellationToken cancellationToken)
     {
         if (trigger == RefreshTrigger.Manual)
         {
@@ -86,12 +94,9 @@ public sealed class TelemetryCoordinator
                 events.Add(new TelemetryRefreshEvent(startedAt, "Persistence unavailable", detail));
             }
 
-            Task<CodexObservatoryRefreshResult>? observatoryTask = null;
-            if (persistenceAvailable && _observatoryService is not null)
-            {
-                observatoryTask = _observatoryService.RefreshAsync(refreshToken);
-            }
-
+            // Provider data is deliberately collected before starting a potentially large historical
+            // rollout scan. A fresh install can have hundreds of MiB of JSONL history; quota and
+            // Tokscale data must become visible immediately instead of waiting for that import.
             var tokenUsages = previous.TokenUsages;
             var hourlyBuckets = previous.HourlyBuckets;
             var tokenFresh = false;
@@ -209,6 +214,35 @@ public sealed class TelemetryCoordinator
                 }
             }
 
+            Task<CodexObservatoryRefreshResult>? observatoryTask = null;
+            if (persistenceAvailable && _observatoryService is not null)
+            {
+                var scanSources = sources.ToList();
+                scanSources.Add(new ProviderHealthSnapshot(
+                    "Codex rollouts",
+                    TelemetryHealthState.Stale,
+                    "Scanning local Codex rollout history in the background; quota and Tokscale data are already usable.",
+                    PreviousSuccess(previous, "Codex rollouts")));
+                var scanEvents = events.ToList();
+                scanEvents.Add(new TelemetryRefreshEvent(
+                    DateTimeOffset.UtcNow,
+                    "Codex observatory scan",
+                    "Local rollout ingestion started in the background. Provider telemetry was published first."));
+
+                PublishSnapshot(
+                    trigger,
+                    tokenUsages,
+                    hourlyBuckets,
+                    quotaSnapshots,
+                    tokenFresh,
+                    quotaFresh,
+                    persistenceAvailable,
+                    scanSources,
+                    scanEvents);
+
+                observatoryTask = _observatoryService.RefreshAsync(refreshToken);
+            }
+
             if (observatoryTask is not null)
             {
                 try
@@ -241,8 +275,7 @@ public sealed class TelemetryCoordinator
                 "Refresh completed",
                 $"{trigger.ToString().ToLowerInvariant()} refresh finished in {stopwatch.Elapsed.TotalSeconds:0.0}s."));
 
-            var snapshotResult = new TelemetrySnapshot(
-                DateTimeOffset.UtcNow,
+            return PublishSnapshot(
                 trigger,
                 tokenUsages,
                 hourlyBuckets,
@@ -252,10 +285,6 @@ public sealed class TelemetryCoordinator
                 persistenceAvailable,
                 sources,
                 events);
-
-            Volatile.Write(ref _latest, snapshotResult);
-            SnapshotUpdated?.Invoke(snapshotResult);
-            return snapshotResult;
         }
         finally
         {
@@ -312,6 +341,34 @@ public sealed class TelemetryCoordinator
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
+    }
+
+    private TelemetrySnapshot PublishSnapshot(
+        RefreshTrigger trigger,
+        IReadOnlyList<TokenUsage> tokenUsages,
+        IReadOnlyList<TokenTimeBucket> hourlyBuckets,
+        IReadOnlyList<QuotaSnapshot> quotaSnapshots,
+        bool tokenFresh,
+        bool quotaFresh,
+        bool persistenceAvailable,
+        IEnumerable<ProviderHealthSnapshot> sources,
+        IEnumerable<TelemetryRefreshEvent> events)
+    {
+        var snapshot = new TelemetrySnapshot(
+            DateTimeOffset.UtcNow,
+            trigger,
+            tokenUsages,
+            hourlyBuckets,
+            quotaSnapshots,
+            tokenFresh,
+            quotaFresh,
+            persistenceAvailable,
+            sources.ToArray(),
+            events.ToArray());
+
+        Volatile.Write(ref _latest, snapshot);
+        SnapshotUpdated?.Invoke(snapshot);
+        return snapshot;
     }
 
     private static IReadOnlyList<QuotaSnapshot> MergeQuotaSnapshots(
