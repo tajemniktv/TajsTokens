@@ -42,7 +42,7 @@ Phase 2 intentionally does **not** require the dashboard to stay open for teleme
 - Stable-identity rollout storage diagnostics without raw payload or absolute-path persistence in the observatory surface
 - Runtime hotfix keeping historical rollout/SQLite work off the WinUI dispatcher while provider telemetry publishes progressively
 
-Phase 3 proves direct/native Codex observability but does **not** replace Tokscale as the default accounting source. Full reconciliation/cutover remains Phase 6.
+Phase 3 proves direct/native Codex observability but does **not** replace Tokscale as the default accounting source. Full reconciliation/cutover is now pulled forward into Phase 4.6 rather than waiting for the old Phase 6 slot.
 
 ## Phase 3.5 - Runtime, concurrency, UX, and forecast hardening ✅
 
@@ -57,7 +57,7 @@ Phase 3 proves direct/native Codex observability but does **not** replace Toksca
 - Record Windows profiling evidence, budgets and a repeatable re-profiling procedure
 - Consolidate repository agent/architecture guidance into root `AGENTS.md`
 
-The post-change representative Windows profile is complete. It confirmed the UI-thread/runtime fixes worked and exposed the next bottleneck as long-running discovery/semantic SQLite work, now owned by Phase 4.5 rather than keeping the Phase 3.5 umbrella permanently open.
+The post-change representative Windows profile is complete. It confirmed the UI-thread/runtime fixes worked and exposed the next bottleneck as long-running discovery/semantic SQLite work, which Phase 4.5 addressed.
 
 ## Phase 4 - Intelligence and historical analytics ✅
 
@@ -72,9 +72,9 @@ Merged in PR #57 and tracked by completed milestone #56. The detailed domain iss
 
 Phase 4 attribution remains interval-based and explicitly estimated. TajsTokens must never invent a universal local-token-to-subscription-quota conversion merely because two numbers happen to be available in the same database.
 
-## Phase 4.5 - State-indexed ingestion and persistence hardening 🚧
+## Phase 4.5 - State-indexed ingestion and persistence hardening ✅
 
-Tracked by #59, with #58 owning Codex state-indexed selection and #51/#52 owning throughput/execution semantics.
+Merged in PR #60 and tracked by #59/#58/#51/#52.
 
 - discover and read the current Codex state SQLite catalog safely without hard-coding a numbered private schema forever;
 - validate a recognized schema fingerprint and fail open to the existing filesystem discovery path when state is unavailable/unknown;
@@ -82,11 +82,39 @@ Tracked by #59, with #58 owning Codex state-indexed selection and #51/#52 owning
 - use cumulative `threads.tokens_used` only as reconciliation/change evidence, never as disjoint event accounting;
 - use verified `thread_spawn_edges` as primary ordinary topology evidence with rollout metadata as repair/fallback;
 - keep rollout JSONL authoritative for event-level token classes, exact timestamps, context/compaction, embedded quota and activity history;
-- batch semantic session/agent/activity/token/quota/context writes into bounded durable SQLite transactions with one intentional serialized writer;
+- batch semantic session/agent/activity/quota/context and rollout-metadata writes into bounded durable SQLite transactions with one intentional serialized writer;
 - preserve TajsTokens-owned exact byte checkpoints, counter epochs, replay/idempotence and inherited-history semantics;
-- benchmark cold import, warm idle, one root, root + subagents, archive movement, fallback and cancellation boundaries.
+- document and run representative Windows cold/warm profiling.
 
-Primary product target: **a warm idle Observatory refresh should be effectively invisible**.
+Representative real-corpus validation completed on 2026-09-01:
+- cold upgrade reconciliation reached 318 normalized sessions across about 1.98 GiB of observed rollout history while the UI remained usable;
+- warm idle settled at effectively 0 CPU / 0 disk;
+- a no-change warm refresh was negligible;
+- one changed Codex session produced 11 new complete records, 6 normalized records and 1 touched session, with the complete telemetry refresh finishing in about 3.1 s and low disk activity.
+
+The primary Phase 4.5 product target is therefore met: **warm idle Observatory refresh is effectively invisible**. Remaining cumulative-token commit amplification is a cold-import optimization rather than a steady-state architectural blocker.
+
+## Phase 4.6 - Product plumbing and native accounting cutover 🚧
+
+Tracked by #65, with #61 owning Settings and #62 owning the native-accounting cutover. #63 tracks remote/cloud-only Codex coverage separately.
+
+### Product plumbing / Observatory read performance
+- replace the Settings placeholder with a real WinUI surface;
+- materialize a normalized/versioned `settings.json` on first successful startup and preserve safe fallback for corrupt/inaccessible settings;
+- optimize Observatory session-list loading after profiling identified `SearchSessionsAsync` correlated SQLite aggregates as the dominant read-side hotspot;
+- keep session/search/filter semantics correct while avoiding repeated scans of the same token/context/storage/activity rows;
+- make refresh diagnostics distinguish catalog/discovered scope from actual changed/scanned work;
+- re-profile the representative 318-session history after the query change.
+
+### Native Codex accounting cutover
+- reconcile native vs Tokscale over identical local session/model/hour scopes instead of declaring parity by vibes;
+- compare uncached input, cache read/write, output, reasoning, reported totals, session totals, model attribution and time buckets;
+- port/adapt mature Tokscale Codex edge-case semantics where evidence shows TajsTokens is weaker, preserving MIT provenance/notice requirements;
+- make native Codex accounting sufficient to drive normal Overview/Usage data without launching Tokscale;
+- promote native accounting to the default Codex source after parity gates;
+- disable Tokscale by default for Codex steady-state collection while retaining it explicitly for reconciliation/fallback and future non-Codex breadth during the transition.
+
+Remote/cloud-only sessions are not a cutover blocker. Until #63 finds a supported source, local native aggregates must say they represent local/partial history rather than silently treating unseen remote activity as zero.
 
 ## Phase 5 - Power-user platform
 
@@ -96,12 +124,14 @@ Primary product target: **a warm idle Observatory refresh should be effectively 
 - Multi-account/profile groundwork
 - Full release/update/signing/WinGet work
 
-## Phase 6 - Native accounting
+## Phase 6 - Accounting expansion and hardening
 
-- Expand the Phase 3 native Codex accounting shadow into full supported accounting coverage
-- Native vs Tokscale reconciliation harness and user/developer comparison surface
-- Proven parity across counter resets, cache/reasoning semantics, inherited histories and time buckets
-- Native accounting becomes TajsTokens' default Codex accounting backend; Tokscale remains fallback/import/reference
+The old "first native cutover" role has moved forward to Phase 4.6 because the implementation matured faster than the roadmap.
+
+- expand reconciliation/coverage tooling beyond the initial Codex cutover;
+- improve remote-inclusive/account-global coverage when supported provider surfaces exist;
+- extend native accounting to additional clients only where deep support is worthwhile;
+- retain explicit provenance/coverage semantics across local, remote and imported histories.
 
 ## Phase 7 - Ecosystem / expansion
 
