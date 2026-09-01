@@ -44,7 +44,7 @@ Phase 2 intentionally does **not** require the dashboard to stay open for teleme
 
 Phase 3 proves direct/native Codex observability but does **not** replace Tokscale as the default accounting source. Full reconciliation/cutover remains Phase 6.
 
-## Phase 3.5 - Runtime, concurrency, UX, and forecast hardening 🚧
+## Phase 3.5 - Runtime, concurrency, UX, and forecast hardening ✅
 
 - Cache tray badge/icon state and skip unchanged shell updates so telemetry snapshots do not recreate fonts/icons repeatedly
 - Batch high-volume rollout-record metadata at durable checkpoint boundaries instead of one SQLite transaction per JSONL record
@@ -57,22 +57,36 @@ Phase 3 proves direct/native Codex observability but does **not** replace Toksca
 - Record Windows profiling evidence, budgets and a repeatable re-profiling procedure
 - Consolidate repository agent/architecture guidance into root `AGENTS.md`
 
-The Phase 3.5 code milestone is merged. The issue remains open only for its post-change representative Windows re-profile/steady-state measurement; Phase 4 is not blocked on pretending CI is dotTrace.
+The post-change representative Windows profile is complete. It confirmed the UI-thread/runtime fixes worked and exposed the next bottleneck as long-running discovery/semantic SQLite work, now owned by Phase 4.5 rather than keeping the Phase 3.5 umbrella permanently open.
 
-## Phase 4 - Intelligence and historical analytics 🚧
+## Phase 4 - Intelligence and historical analytics ✅
 
-Tracked by #56, with the detailed domain issues remaining authoritative for their full acceptance criteria.
+Merged in PR #57 and tracked by completed milestone #56. The detailed domain issues remain authoritative where their broader acceptance criteria extend beyond the first Phase 4 product slice.
 
-Current Phase 4 implementation direction:
-
-- persist reset-aware forecast snapshots during the shared telemetry refresh and expose forecast-history/baseline views (#9);
+- persist reset-aware forecast history and expose current pace/trend/confidence views (#9);
 - derive provider-observed quota-burn intervals without crossing reset/re-anchor boundaries and correlate them with native root/subagent activity (#11);
 - detect/deduplicate expected resets, rolling-window re-anchors and unusual/full-reset evidence while keeping provider `resetsAt` authoritative (#14);
-- query bounded minute/hour/day native history, token classes, root/subagent splits, repo/model dimensions and day/hour heatmap data in SQLite rather than materializing raw history in XAML (#17);
-- estimate dual-window workload scenarios from the user's own historical quota-drop/concurrency observations, with ranges/sample counts/confidence and honest insufficient-history states (#10);
-- ship real native Usage, Forecasts and Analytics surfaces over normalized intelligence contracts rather than placeholder pages.
+- query bounded minute/hour/day native history, token classes, root/subagent splits, repo/model dimensions and day/hour heatmap data in SQLite (#17);
+- estimate dual-window workload scenarios from the user's own historical quota-drop/concurrency observations with ranges/sample counts/confidence and honest insufficient-history states (#10);
+- ship native Usage, Forecasts and Analytics surfaces over normalized intelligence contracts.
 
 Phase 4 attribution remains interval-based and explicitly estimated. TajsTokens must never invent a universal local-token-to-subscription-quota conversion merely because two numbers happen to be available in the same database.
+
+## Phase 4.5 - State-indexed ingestion and persistence hardening 🚧
+
+Tracked by #59, with #58 owning Codex state-indexed selection and #51/#52 owning throughput/execution semantics.
+
+- discover and read the current Codex state SQLite catalog safely without hard-coding a numbered private schema forever;
+- validate a recognized schema fingerprint and fail open to the existing filesystem discovery path when state is unavailable/unknown;
+- query changed threads by indexed `updated_at_ms` with a bounded overlap/fingerprint rather than recursively touching every historical rollout on warm refresh;
+- use cumulative `threads.tokens_used` only as reconciliation/change evidence, never as disjoint event accounting;
+- use verified `thread_spawn_edges` as primary ordinary topology evidence with rollout metadata as repair/fallback;
+- keep rollout JSONL authoritative for event-level token classes, exact timestamps, context/compaction, embedded quota and activity history;
+- batch semantic session/agent/activity/token/quota/context writes into bounded durable SQLite transactions with one intentional serialized writer;
+- preserve TajsTokens-owned exact byte checkpoints, counter epochs, replay/idempotence and inherited-history semantics;
+- benchmark cold import, warm idle, one root, root + subagents, archive movement, fallback and cancellation boundaries.
+
+Primary product target: **a warm idle Observatory refresh should be effectively invisible**.
 
 ## Phase 5 - Power-user platform
 

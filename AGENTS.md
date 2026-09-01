@@ -12,14 +12,14 @@ The application currently has:
 - Tokscale-backed broad token accounting;
 - provider-authoritative Codex quota through the local `codex app-server`;
 - SQLite quota/history persistence;
-- a process-lifetime telemetry coordinator shared by Overview, tray, alerts, Observatory and Phase 4 intelligence refresh;
+- a process-lifetime telemetry coordinator shared by Overview, tray, alerts, Observatory and intelligence refresh;
 - background collection, close-to-tray lifecycle, notifications, runtime settings, Start with Windows, and a self-contained Windows x64 portable publish path;
 - direct incremental Codex rollout ingestion with privacy-safe session/root/subagent, token, quota, context/compaction, activity, and storage metadata;
 - native Codex accounting in shadow/reconciliation mode while Tokscale remains the displayed/default broad accounting source;
-- Phase 4 intelligence foundations for persisted forecast history, reset/re-anchor events, bounded historical aggregates, interval-based quota attribution and account-local scenario estimation;
+- merged Phase 4 intelligence for persisted forecast history, reset/re-anchor events, bounded historical aggregates, interval-based quota attribution and account-local scenario estimation;
 - real Usage, Forecasts and Analytics pages over normalized intelligence/query contracts.
 
-Phase 3.5's code hardening is merged; its empirical post-change Windows re-profile remains tracked separately. Phase 4 now builds the intelligence layer without weakening the Phase 6 native-accounting parity gate.
+Phase 3.5 and Phase 4 are merged. The empirical post-change Windows profile is complete: it confirmed the UI-thread hardening worked and identified the next bottleneck as warm rollout discovery plus serialized semantic SQLite persistence. Phase 4.5 now owns state-indexed Codex discovery and bounded semantic persistence without weakening the Phase 6 native-accounting parity gate.
 
 ## Solution layout and dependency direction
 
@@ -34,12 +34,13 @@ Owns provider-independent domain models, interfaces, accounting semantics, alert
 
 ### `TajsTokens.Infrastructure`
 
-Implements Core contracts for SQLite, local Codex files, provider processes/RPC, settings, ingestion, process-lifetime coordination and historical intelligence queries.
+Implements Core contracts for SQLite, local Codex files/state, provider processes/RPC, settings, ingestion, process-lifetime coordination and historical intelligence queries.
 
 - Depends on Core only.
-- UI must not parse provider JSON, rollout JSONL, invoke Tokscale/Codex directly, or query SQLite directly.
+- UI must not parse provider JSON, rollout JSONL, Codex-private SQLite, invoke Tokscale/Codex directly, or query SQLite directly.
 - Prefer provider-owned/local read paths over copied credentials or undocumented web scraping.
 - Large historical queries must be bounded/downsampled before crossing into App.
+- Codex-private SQLite schemas are optional acceleration inputs, never public contracts. Validate recognized fingerprints and fail open to the rollout filesystem path when unknown/unavailable.
 
 ### `TajsTokens.App`
 
@@ -60,12 +61,12 @@ Tokscale CLI --------------------------\
                                         \
 Codex local app-server quota ------------> TelemetryCoordinator -> immutable TelemetrySnapshot
                                           /       |                 |        |        |
-Codex local rollout JSONL -> ingestion --/        |                 |        |        +-> alerts
-                                                   |                 |        +----------> tray
-                                                   |                 +-------------------> Overview
-                                                   +-------------------------------------> Observatory refresh signal
+Codex state SQLite -> changed threads ---/        |                 |        |        +-> alerts
+                         |                         |                 |        +----------> tray
+                         v                         |                 +-------------------> Overview
+Codex rollout JSONL -> incremental ingestion -----+-------------------------------------> Observatory refresh signal
                                                    |
-                                                   +-> Phase 4 intelligence refresh
+                                                   +-> intelligence refresh
                                                         -> forecast history
                                                         -> reset/re-anchor events
 
@@ -74,7 +75,7 @@ normalized history -------------------------------> SQLite
                                                        +-> bounded Usage/Forecasts/Analytics queries
 ```
 
-Provider telemetry is published before a potentially long historical rollout scan. A first-run import must never keep quota/Tokscale blank merely because local history is large. Phase 4 intelligence is derived after normalized persistence and must fail independently of provider freshness.
+Codex state SQLite is used only as a read-only discovery/metadata/reconciliation index when its private schema is recognized. Rollout JSONL remains authoritative for event-level accounting, quota/context/activity observations, and TajsTokens-owned byte-checkpoint semantics. Provider telemetry is published before a potentially long historical rollout import. A first-run import must never keep quota/Tokscale blank merely because local history is large. Intelligence is derived after normalized persistence and must fail independently of provider freshness.
 
 ## Execution, threading, and concurrency contract
 
@@ -91,7 +92,7 @@ Allowed:
 Not allowed:
 
 - provider process/RPC calls;
-- rollout discovery/read/parse;
+- rollout/state discovery/read/parse;
 - SQLite reads/writes;
 - token/context aggregation;
 - attribution/reset scans/scenario fitting;
@@ -119,10 +120,11 @@ One process-lifetime coordinator is authoritative for startup, periodic, manual,
 
 The intended shape is bounded and backpressured:
 
-1. discover/read complete JSONL records;
-2. parse/normalize with limited concurrency only where semantic ordering permits;
-3. serialize/batch durable SQLite mutations and accounting/checkpoint state;
-4. publish aggregate progress.
+1. query a recognized Codex state catalog for changed/reconciliation-needed threads, or fall back to filesystem discovery;
+2. read only complete JSONL records from selected rollouts at TajsTokens-owned byte checkpoints;
+3. parse/normalize with limited concurrency only where semantic ordering permits;
+4. serialize/batch durable SQLite mutations and accounting/checkpoint state;
+5. publish aggregate progress.
 
 Do not create arbitrary parallel SQLite writers. One intentional writer path per database/profile is preferred. Parsing may become parallel, but durable mutations/checkpoints remain ordered where accounting semantics depend on observation order.
 
@@ -148,6 +150,8 @@ TajsTokens is itself an observability tool, so it should not become the workload
 
 ### SQLite / rollout history
 
+- A warm idle Observatory refresh with a recognized Codex state catalog should not recursively enumerate/open historical rollouts merely to rediscover EOF.
+- Use `threads.updated_at_ms` plus bounded overlap/fingerprints for changed-thread selection; cumulative `threads.tokens_used` is reconciliation evidence, not detailed accounting.
 - Prefer bounded transactions and prepared/reused operations over opening a connection/transaction for every normalized fragment when practical.
 - Keep correctness-critical cumulative accounting state ordered.
 - Advance checkpoints only after corresponding normalized writes have committed.
@@ -262,11 +266,18 @@ Quota is read through short-lived local `codex app-server` initialization + `acc
 - Missing lanes remain unavailable or explicit stale fallback, never borrowed from another window.
 - Rollout-embedded quota observations are useful high-frequency telemetry during active work and must retain source/event timestamp/window identity.
 
-### Codex rollouts
+### Codex local state and rollouts
 
-Direct rollout ingestion is content-minimal and incremental.
+Codex-private state SQLite is an optional acceleration/index layer; direct rollout ingestion remains content-minimal and authoritative for event telemetry.
 
-- Persist exact byte offsets only at complete successfully handled record/batch boundaries.
+- Discover current `state*.sqlite` candidates without assuming one numbered filename is permanent.
+- Open provider state read-only and use only recognized table/column fingerprints; unknown/unavailable state fails open to rollout filesystem discovery.
+- `threads.updated_at_ms` is the primary cheap change trigger with a bounded overlap/recheck window.
+- `threads.tokens_used` is a cumulative summary/reconciliation signal only. Never use it as a replacement for disjoint native accounting.
+- Verified `thread_spawn_edges` is preferred for ordinary persisted topology; rollout relationship metadata remains repair/compatibility evidence.
+- Absolute provider-owned rollout paths are ephemeral locators only. Persist privacy-safe hashes/labels, not the raw paths, in normal telemetry.
+- Persist exact TajsTokens byte offsets only at complete successfully handled record/batch boundaries.
+- Never substitute Codex thread-history/projection offsets for TajsTokens checkpoint ownership.
 - Never checkpoint `FileInfo.Length` just because it was observed.
 - Unterminated trailing JSONL is not a complete record.
 - Source replacement/truncation/rotation and stable session identity are distinct concepts.
@@ -277,11 +288,11 @@ Direct rollout ingestion is content-minimal and incremental.
 
 ## SQLite persistence
 
-Base telemetry currently uses `%LOCALAPPDATA%\TajsTokens\telemetry.db`. `SqliteTelemetryRepository` owns the base `PRAGMA user_version`; the Codex Observatory and Phase 4 intelligence each have independent component schema versions in the same database.
+Base telemetry currently uses `%LOCALAPPDATA%\TajsTokens\telemetry.db`. `SqliteTelemetryRepository` owns the base `PRAGMA user_version`; the Codex Observatory, Codex state index, and Phase 4 intelligence use independent component-owned schema state in the same database.
 
-Persist normalized telemetry and content-free identities, including quota/token history, session/agent relationships, normalized activity, context/compaction metadata, rollout storage metadata, parser/checkpoint state, forecast snapshots and reset/re-anchor events.
+Persist normalized telemetry and content-free identities, including quota/token history, session/agent relationships, normalized activity, context/compaction metadata, rollout storage metadata, parser/checkpoint state, privacy-safe Codex state change fingerprints, forecast snapshots and reset/re-anchor events.
 
-Phase 4 historical usage/attribution is primarily derived from normalized facts rather than duplicating raw activity into another analytics warehouse.
+Historical usage/attribution is primarily derived from normalized facts rather than duplicating raw activity into another analytics warehouse.
 
 Settings remain separate in `%LOCALAPPDATA%\TajsTokens\settings.json` and contain no auth material.
 
@@ -295,11 +306,13 @@ Normal telemetry must not persist ordinary:
 - shell commands/output;
 - tool result payloads;
 - credentials/auth material;
-- raw rollout JSON.
+- raw rollout JSON;
+- Codex state titles/previews/first messages;
+- absolute provider-owned rollout paths.
 
 Large content-bearing rollout records are transient parser input and are reduced to type/status/size/timing/identity metadata. Sanitized fixtures use hand-authored structure or deterministic filler, never copied personal rollout payloads.
 
-Phase 4 intelligence consumes this existing normalized store. Do not create a parallel content-bearing cache for attribution or scenario fitting.
+Intelligence and Phase 4.5 ingestion consume normalized/content-minimal state. Do not create a parallel content-bearing cache for attribution, scenario fitting, or faster discovery.
 
 ## Build and validation
 

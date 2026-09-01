@@ -5,6 +5,11 @@ public sealed record CodexIngestionResult(
     int RecordsNormalized,
     string? SessionId)
 {
+    public long LastCompleteRecordOffset { get; init; }
+    public long SourceLength { get; init; }
+
+    public bool ReachedCurrentEndOfFile => LastCompleteRecordOffset >= SourceLength;
+
     public static CodexIngestionResult Empty { get; } = new(0, 0, null);
 }
 
