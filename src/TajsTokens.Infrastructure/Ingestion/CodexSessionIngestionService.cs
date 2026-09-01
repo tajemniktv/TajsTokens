@@ -18,14 +18,13 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
     private readonly ICodexSessionEventProvider _sessionEventProvider;
     private readonly ISessionIngestionCheckpointStore _checkpointStore;
     private readonly ICodexObservatoryStore? _observatoryStore;
-    private readonly ICodexRolloutRecordBatchWriter? _rolloutRecordBatchWriter;
-    private readonly ICodexSemanticBatchWriter? _semanticBatchWriter;
+    private readonly ICodexIngestionBatchWriter? _ingestionBatchWriter;
     private readonly CodexRolloutParser _parser = new();
 
     public CodexSessionIngestionService(
         ICodexSessionEventProvider sessionEventProvider,
         ISessionIngestionCheckpointStore checkpointStore)
-        : this(sessionEventProvider, checkpointStore, null, null, null)
+        : this(sessionEventProvider, checkpointStore, null, null)
     {
     }
 
@@ -33,7 +32,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         ICodexSessionEventProvider sessionEventProvider,
         ISessionIngestionCheckpointStore checkpointStore,
         ICodexObservatoryStore? observatoryStore)
-        : this(sessionEventProvider, checkpointStore, observatoryStore, null, null)
+        : this(sessionEventProvider, checkpointStore, observatoryStore, null)
     {
     }
 
@@ -41,14 +40,12 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         ICodexSessionEventProvider sessionEventProvider,
         ISessionIngestionCheckpointStore checkpointStore,
         ICodexObservatoryStore? observatoryStore,
-        ICodexRolloutRecordBatchWriter? rolloutRecordBatchWriter,
-        ICodexSemanticBatchWriter? semanticBatchWriter = null)
+        ICodexIngestionBatchWriter? ingestionBatchWriter)
     {
         _sessionEventProvider = sessionEventProvider;
         _checkpointStore = checkpointStore;
         _observatoryStore = observatoryStore;
-        _rolloutRecordBatchWriter = rolloutRecordBatchWriter;
-        _semanticBatchWriter = semanticBatchWriter;
+        _ingestionBatchWriter = ingestionBatchWriter;
     }
 
     public async Task<CodexIngestionResult> IngestAsync(string filePath, CancellationToken cancellationToken)
@@ -99,10 +96,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         var recordsScanned = 0;
         var normalizedRecords = 0;
         var lastCompleteRecordOffset = fromOffset;
-        var pendingStorageRecords = _rolloutRecordBatchWriter is null
-            ? null
-            : new List<CodexRolloutRecordMetadata>(DurableBatchSize);
-        var pendingSemanticRecords = _semanticBatchWriter is null
+        var pendingRecords = _ingestionBatchWriter is null
             ? null
             : new List<ParsedRolloutRecord>(DurableBatchSize);
 
@@ -128,21 +122,14 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                         state.OwnSessionId);
                 }
 
-                if (pendingSemanticRecords is not null)
+                if (pendingRecords is not null)
                 {
-                    pendingSemanticRecords.Add(parsed);
+                    pendingRecords.Add(parsed);
                 }
                 else
                 {
                     await PersistParsedTelemetryAsync(parsed, sourceIdentity, filePath, cancellationToken);
                 }
-
-                pendingStorageRecords?.Add(new CodexRolloutRecordMetadata(
-                    parsed.SourceRecordId,
-                    parsed.SessionId,
-                    parsed.EventClass,
-                    parsed.RecordBytes,
-                    parsed.TimestampUtc));
 
                 if (parsed.HasNormalizedTelemetry)
                 {
@@ -150,19 +137,13 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                 }
             }
 
-            // This offset becomes durable only after the corresponding semantic + storage metadata
-            // batches have committed. If either fails, no checkpoint is advanced and replay remains
-            // safe/idempotent on the next run.
+            // This offset becomes durable only after the corresponding ingestion batch has committed.
+            // If persistence fails, no checkpoint is advanced and replay remains safe/idempotent.
             lastCompleteRecordOffset = record.EndByteOffset;
             if (recordsScanned % DurableBatchSize == 0)
             {
-                await FlushSemanticBatchAsync(
-                    pendingSemanticRecords,
-                    sourceIdentity,
-                    filePath,
-                    cancellationToken);
-                await FlushStorageBatchAsync(
-                    pendingStorageRecords,
+                await FlushIngestionBatchAsync(
+                    pendingRecords,
                     sourceIdentity,
                     filePath,
                     cancellationToken);
@@ -177,13 +158,8 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             }
         }
 
-        await FlushSemanticBatchAsync(
-            pendingSemanticRecords,
-            sourceIdentity,
-            filePath,
-            cancellationToken);
-        await FlushStorageBatchAsync(
-            pendingStorageRecords,
+        await FlushIngestionBatchAsync(
+            pendingRecords,
             sourceIdentity,
             filePath,
             cancellationToken);
@@ -204,39 +180,23 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         };
     }
 
-    private async Task FlushSemanticBatchAsync(
+    private async Task FlushIngestionBatchAsync(
         List<ParsedRolloutRecord>? pendingRecords,
         string sourceIdentity,
         string filePath,
         CancellationToken cancellationToken)
     {
-        if (_semanticBatchWriter is null || pendingRecords is null || pendingRecords.Count == 0)
+        if (_ingestionBatchWriter is null || pendingRecords is null || pendingRecords.Count == 0)
         {
             return;
         }
 
-        await _semanticBatchWriter.WriteBatchAsync(pendingRecords, cancellationToken);
-
-        if (_rolloutRecordBatchWriter is null && _observatoryStore is not null)
-        {
-            // Alternate/test compositions can opt into semantic batching without the production
-            // rollout metadata batch writer. Retain storage metadata correctness in that shape.
-            var fileSize = TryGetFileSize(filePath);
-            foreach (var parsed in pendingRecords)
-            {
-                await _observatoryStore.RecordRolloutRecordAsync(
-                    parsed.SourceRecordId,
-                    sourceIdentity,
-                    filePath,
-                    parsed.SessionId,
-                    parsed.EventClass,
-                    parsed.RecordBytes,
-                    fileSize,
-                    parsed.TimestampUtc,
-                    cancellationToken);
-            }
-        }
-
+        await _ingestionBatchWriter.WriteBatchAsync(
+            sourceIdentity,
+            filePath,
+            TryGetFileSize(filePath),
+            pendingRecords,
+            cancellationToken);
         pendingRecords.Clear();
     }
 
@@ -280,41 +240,18 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             await _observatoryStore.UpsertContextObservationAsync(parsed.ContextObservation, cancellationToken);
         }
 
-        if (_rolloutRecordBatchWriter is null)
-        {
-            // Compatibility path used by focused tests/alternate composition. Production composition
-            // supplies the batch writer and avoids one file-stat + transaction per JSONL record.
-            await _observatoryStore.RecordRolloutRecordAsync(
-                parsed.SourceRecordId,
-                sourceIdentity,
-                filePath,
-                parsed.SessionId,
-                parsed.EventClass,
-                parsed.RecordBytes,
-                TryGetFileSize(filePath),
-                parsed.TimestampUtc,
-                cancellationToken);
-        }
-    }
-
-    private async Task FlushStorageBatchAsync(
-        List<CodexRolloutRecordMetadata>? pendingRecords,
-        string sourceIdentity,
-        string filePath,
-        CancellationToken cancellationToken)
-    {
-        if (_rolloutRecordBatchWriter is null || pendingRecords is null || pendingRecords.Count == 0)
-        {
-            return;
-        }
-
-        await _rolloutRecordBatchWriter.WriteBatchAsync(
+        // Focused tests/alternate composition can omit the production batch writer. Preserve complete
+        // storage metadata semantics on that compatibility path even though it is intentionally slower.
+        await _observatoryStore.RecordRolloutRecordAsync(
+            parsed.SourceRecordId,
             sourceIdentity,
             filePath,
+            parsed.SessionId,
+            parsed.EventClass,
+            parsed.RecordBytes,
             TryGetFileSize(filePath),
-            pendingRecords,
+            parsed.TimestampUtc,
             cancellationToken);
-        pendingRecords.Clear();
     }
 
     private async Task SaveCheckpointAsync(
