@@ -13,15 +13,17 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
 {
     private const string BoundaryParserVersion = "boundary-v2";
     private const string TypedParserVersion = "typed-v3";
+    private const int DurableBatchSize = 128;
     private readonly ICodexSessionEventProvider _sessionEventProvider;
     private readonly ISessionIngestionCheckpointStore _checkpointStore;
     private readonly ICodexObservatoryStore? _observatoryStore;
+    private readonly ICodexRolloutRecordBatchWriter? _rolloutRecordBatchWriter;
     private readonly CodexRolloutParser _parser = new();
 
     public CodexSessionIngestionService(
         ICodexSessionEventProvider sessionEventProvider,
         ISessionIngestionCheckpointStore checkpointStore)
-        : this(sessionEventProvider, checkpointStore, null)
+        : this(sessionEventProvider, checkpointStore, null, null)
     {
     }
 
@@ -29,10 +31,20 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         ICodexSessionEventProvider sessionEventProvider,
         ISessionIngestionCheckpointStore checkpointStore,
         ICodexObservatoryStore? observatoryStore)
+        : this(sessionEventProvider, checkpointStore, observatoryStore, null)
+    {
+    }
+
+    internal CodexSessionIngestionService(
+        ICodexSessionEventProvider sessionEventProvider,
+        ISessionIngestionCheckpointStore checkpointStore,
+        ICodexObservatoryStore? observatoryStore,
+        ICodexRolloutRecordBatchWriter? rolloutRecordBatchWriter)
     {
         _sessionEventProvider = sessionEventProvider;
         _checkpointStore = checkpointStore;
         _observatoryStore = observatoryStore;
+        _rolloutRecordBatchWriter = rolloutRecordBatchWriter;
     }
 
     public async Task<CodexIngestionResult> IngestAsync(string filePath, CancellationToken cancellationToken)
@@ -83,6 +95,9 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         var recordsScanned = 0;
         var normalizedRecords = 0;
         var lastCompleteRecordOffset = fromOffset;
+        var pendingStorageRecords = _rolloutRecordBatchWriter is null
+            ? null
+            : new List<CodexRolloutRecordMetadata>(DurableBatchSize);
 
         await foreach (var record in _sessionEventProvider.ReadNewJsonLinesAsync(filePath, fromOffset, cancellationToken))
         {
@@ -106,17 +121,31 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                         state.OwnSessionId);
                 }
 
-                await PersistParsedRecordAsync(parsed, sourceIdentity, filePath, cancellationToken);
+                await PersistParsedTelemetryAsync(parsed, sourceIdentity, filePath, cancellationToken);
+                pendingStorageRecords?.Add(new CodexRolloutRecordMetadata(
+                    parsed.SourceRecordId,
+                    parsed.SessionId,
+                    parsed.EventClass,
+                    parsed.RecordBytes,
+                    parsed.TimestampUtc));
+
                 if (parsed.HasNormalizedTelemetry)
                 {
                     normalizedRecords++;
                 }
             }
 
-            // Checkpoint only after every normalized write for this complete record succeeded.
+            // This offset becomes durable only after the corresponding storage metadata batch and all
+            // semantic writes above have committed. If batching fails, no checkpoint is advanced and
+            // replay remains safe/idempotent on the next run.
             lastCompleteRecordOffset = record.EndByteOffset;
-            if (recordsScanned % 128 == 0)
+            if (recordsScanned % DurableBatchSize == 0)
             {
+                await FlushStorageBatchAsync(
+                    pendingStorageRecords,
+                    sourceIdentity,
+                    filePath,
+                    cancellationToken);
                 await SaveCheckpointAsync(
                     filePath,
                     lastCompleteRecordOffset,
@@ -128,6 +157,11 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             }
         }
 
+        await FlushStorageBatchAsync(
+            pendingStorageRecords,
+            sourceIdentity,
+            filePath,
+            cancellationToken);
         await SaveCheckpointAsync(
             filePath,
             lastCompleteRecordOffset,
@@ -141,7 +175,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         return new CodexIngestionResult(recordsScanned, normalized, state.OwnSessionId ?? existing?.LastSessionId);
     }
 
-    private async Task PersistParsedRecordAsync(
+    private async Task PersistParsedTelemetryAsync(
         ParsedRolloutRecord parsed,
         string sourceIdentity,
         string filePath,
@@ -181,26 +215,41 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             await _observatoryStore.UpsertContextObservationAsync(parsed.ContextObservation, cancellationToken);
         }
 
-        var fileSize = 0L;
-        try
+        if (_rolloutRecordBatchWriter is null)
         {
-            fileSize = new FileInfo(filePath).Length;
+            // Compatibility path used by focused tests/alternate composition. Production composition
+            // supplies the batch writer and avoids one file-stat + transaction per JSONL record.
+            await _observatoryStore.RecordRolloutRecordAsync(
+                parsed.SourceRecordId,
+                sourceIdentity,
+                filePath,
+                parsed.SessionId,
+                parsed.EventClass,
+                parsed.RecordBytes,
+                TryGetFileSize(filePath),
+                parsed.TimestampUtc,
+                cancellationToken);
         }
-        catch (IOException)
+    }
+
+    private async Task FlushStorageBatchAsync(
+        List<CodexRolloutRecordMetadata>? pendingRecords,
+        string sourceIdentity,
+        string filePath,
+        CancellationToken cancellationToken)
+    {
+        if (_rolloutRecordBatchWriter is null || pendingRecords is null || pendingRecords.Count == 0)
         {
-            // The record itself was already read successfully; size is diagnostic metadata only.
+            return;
         }
 
-        await _observatoryStore.RecordRolloutRecordAsync(
-            parsed.SourceRecordId,
+        await _rolloutRecordBatchWriter.WriteBatchAsync(
             sourceIdentity,
             filePath,
-            parsed.SessionId,
-            parsed.EventClass,
-            parsed.RecordBytes,
-            fileSize,
-            parsed.TimestampUtc,
+            TryGetFileSize(filePath),
+            pendingRecords,
             cancellationToken);
+        pendingRecords.Clear();
     }
 
     private async Task SaveCheckpointAsync(
@@ -232,6 +281,22 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                 parserVersion,
                 sourceIdentity),
             cancellationToken);
+    }
+
+    private static long TryGetFileSize(string filePath)
+    {
+        try
+        {
+            return Math.Max(0, new FileInfo(filePath).Length);
+        }
+        catch (IOException)
+        {
+            return 0;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return 0;
+        }
     }
 
     internal static string GetSourceIdentity(string filePath)
