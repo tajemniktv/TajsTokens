@@ -112,6 +112,28 @@ public sealed class NativeCodexAccountingProviderTests
     }
 
     [Fact]
+    public void Reconciliation_UsesCommonLabelsWhenReferenceHasNoUtcTimestamp()
+    {
+        var breakdown = new TokenBreakdown(100, 20, 0, 5, 1, 126);
+        var native = new CodexTokenAccountingSnapshot(
+            "Native Codex",
+            "test",
+            [new TokenUsage("codex-native", "codex", "model", DateTimeOffset.UnixEpoch, breakdown)],
+            [new TokenTimeBucket("codex-native", "2026-09-01 13:00", new DateTimeOffset(2026, 9, 1, 11, 0, 0, TimeSpan.Zero), breakdown)]);
+        var reference = new CodexTokenAccountingSnapshot(
+            "Tokscale",
+            "test",
+            [new TokenUsage("tokscale", "codex", "model", DateTimeOffset.UnixEpoch, breakdown)],
+            [new TokenTimeBucket("tokscale", "2026-09-01 13:00", null, breakdown)]);
+
+        var reconciliation = NativeFirstCodexAccountingProvider.Reconcile(native, reference);
+
+        Assert.True(reconciliation.Exact);
+        Assert.Equal(1, reconciliation.HourBucketsCompared);
+        Assert.Equal(0, reconciliation.HourBucketsDifferent);
+    }
+
+    [Fact]
     public async Task NativeFirst_FallbackIsExplicitAndMarkedAsFallback()
     {
         var native = new ThrowingProvider(new InvalidOperationException("native unavailable"));
