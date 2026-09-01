@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
@@ -25,7 +26,8 @@ public sealed class TelemetryCoordinatorConcurrencyTests
 
             var manual = coordinator.RefreshAsync(RefreshTrigger.Manual, CancellationToken.None);
 
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => interval);
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                () => interval.WaitAsync(TimeSpan.FromSeconds(5)));
             var manualSnapshot = await manual.WaitAsync(TimeSpan.FromSeconds(5));
 
             Assert.Equal(RefreshTrigger.Manual, manualSnapshot.Trigger);
@@ -35,6 +37,7 @@ public sealed class TelemetryCoordinatorConcurrencyTests
         {
             try
             {
+                SqliteConnection.ClearAllPools();
                 directory.Delete(recursive: true);
             }
             catch
