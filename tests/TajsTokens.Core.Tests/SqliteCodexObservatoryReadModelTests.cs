@@ -43,7 +43,7 @@ public sealed class SqliteCodexObservatoryReadModelTests
             Assert.Equal("child", Assert.Single(search).SessionId);
 
             var topology = await readModel.GetAgentTopologyAsync("child", CancellationToken.None);
-            Assert.Equal(["root", "child"], topology.Agents.Select(agent => agent.AgentId).ToArray());
+            Assert.Equal(new[] { "root", "child" }, topology.Agents.Select(agent => agent.AgentId).ToArray());
             Assert.Single(topology.Relationships);
             Assert.DoesNotContain(topology.Agents, agent => agent.AgentId == "unrelated");
 
