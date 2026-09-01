@@ -7,8 +7,8 @@ using TajsTokens.Core.Models;
 namespace TajsTokens.App.Services;
 
 /// <summary>
-/// Native notification-area surface for Phase 2. Shell_NotifyIcon owns the tray lifecycle while a
-/// small hidden Win32 window receives callbacks and Explorer's TaskbarCreated recovery broadcast.
+/// Native notification-area surface. Shell_NotifyIcon owns the tray lifecycle while a small hidden
+/// Win32 window receives callbacks and Explorer's TaskbarCreated recovery broadcast.
 /// </summary>
 public sealed class WindowsSystemTrayService : ISystemTrayService
 {
@@ -22,12 +22,16 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
 
     private readonly WindowProc _windowProc;
     private readonly string _windowClassName = $"TajsTokens.Tray.{Environment.ProcessId}.{Guid.NewGuid():N}";
+    private readonly Dictionary<StatusIconKey, Icon> _statusIconCache = [];
+    private readonly object _statusIconSync = new();
     private nint _windowHandle;
     private nint _instanceHandle;
     private nint _sharedFallbackIconHandle;
-    private Icon? _ownedStatusIcon;
+    private Icon? _currentStatusIcon;
+    private StatusIconKey? _currentIconKey;
     private uint _taskbarCreatedMessage;
     private string _currentTip = "TajsTokens · waiting for telemetry";
+    private string? _lastAppliedTip;
     private bool _notificationsEnabled;
     private bool _launchAtLogin;
     private bool _disposed;
@@ -105,23 +109,32 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
             return;
         }
 
-        var constrained = status.ConstrainedRemainingPercent is int percent ? $" · constrained {percent}%" : string.Empty;
-        _currentTip = Truncate(status.Tooltip + constrained, 127);
+        var normalizedPercent = status.ConstrainedRemainingPercent is int percent
+            ? Math.Clamp(percent, 0, 100)
+            : null;
+        var constrained = normalizedPercent is int value ? $" · constrained {value}%" : string.Empty;
+        var nextTip = Truncate(status.Tooltip + constrained, 127);
+        var nextKey = new StatusIconKey(normalizedPercent, status.IsFresh);
 
-        var replacement = BuildStatusIcon(status.ConstrainedRemainingPercent, status.IsFresh);
+        // Telemetry can publish an interim provider snapshot and a final Observatory snapshot for the
+        // same visible quota state. Avoid asking Explorer to modify an icon it already has and, more
+        // importantly, avoid recreating System.Drawing fonts/icons on every snapshot.
+        if (_currentIconKey == nextKey && string.Equals(_lastAppliedTip, nextTip, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        var replacement = GetOrCreateStatusIcon(nextKey);
         var data = CreateNotifyIconData(NifTip | NifIcon | NifShowTip);
-        data.Tip = _currentTip;
+        data.Tip = nextTip;
         data.Icon = replacement.Handle;
 
         if (Shell_NotifyIconW(NimModify, ref data))
         {
-            var previous = _ownedStatusIcon;
-            _ownedStatusIcon = replacement;
-            previous?.Dispose();
-        }
-        else
-        {
-            replacement.Dispose();
+            _currentTip = nextTip;
+            _lastAppliedTip = nextTip;
+            _currentIconKey = nextKey;
+            _currentStatusIcon = replacement;
         }
     }
 
@@ -159,8 +172,16 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
             _ = Shell_NotifyIconW(NimDelete, ref data);
         }
 
-        _ownedStatusIcon?.Dispose();
-        _ownedStatusIcon = null;
+        lock (_statusIconSync)
+        {
+            foreach (var icon in _statusIconCache.Values)
+            {
+                icon.Dispose();
+            }
+            _statusIconCache.Clear();
+            _currentStatusIcon = null;
+        }
+
         DestroyTrayHost();
     }
 
@@ -169,7 +190,7 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
         if (_taskbarCreatedMessage != 0 && message == _taskbarCreatedMessage)
         {
             // Explorer discarded all notification-area registrations. Re-add ours with the latest
-            // owned badge/tooltip; failure is non-fatal and a later status update can try again.
+            // cached badge/tooltip; failure is non-fatal and a later status update can try again.
             _ = TryAddTrayIcon();
             return 0;
         }
@@ -205,13 +226,14 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
 
         var data = CreateNotifyIconData(NifMessage | NifIcon | NifTip | NifShowTip);
         data.CallbackMessage = TrayCallbackMessage;
-        data.Icon = _ownedStatusIcon?.Handle ?? _sharedFallbackIconHandle;
+        data.Icon = _currentStatusIcon?.Handle ?? _sharedFallbackIconHandle;
         data.Tip = _currentTip;
         if (!Shell_NotifyIconW(NimAdd, ref data))
         {
             return false;
         }
 
+        _lastAppliedTip = _currentTip;
         var version = CreateNotifyIconData(0);
         version.TimeoutOrVersion = NotifyIconVersion4;
         _ = Shell_NotifyIconW(NimSetVersion, ref version);
@@ -310,6 +332,21 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
         _sharedFallbackIconHandle = 0; // LoadIcon returns a shared system icon; it must not be destroyed.
     }
 
+    private Icon GetOrCreateStatusIcon(StatusIconKey key)
+    {
+        lock (_statusIconSync)
+        {
+            if (_statusIconCache.TryGetValue(key, out var cached))
+            {
+                return cached;
+            }
+
+            var created = BuildStatusIcon(key.RemainingPercent, key.IsFresh);
+            _statusIconCache.Add(key, created);
+            return created;
+        }
+    }
+
     private static Icon BuildStatusIcon(int? remainingPercent, bool isFresh)
     {
         using var bitmap = new Bitmap(32, 32);
@@ -338,6 +375,8 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
 
     private static string Truncate(string value, int maxLength) =>
         value.Length <= maxLength ? value : value[..Math.Max(0, maxLength - 1)] + "…";
+
+    private readonly record struct StatusIconKey(int? RemainingPercent, bool IsFresh);
 
     private delegate nint WindowProc(nint window, uint message, nuint wParam, nint lParam);
 
