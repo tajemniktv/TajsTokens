@@ -97,16 +97,45 @@ internal sealed class SqliteCodexIngestionBatchWriter(
             .LastOrDefault(value => !string.IsNullOrWhiteSpace(value));
         var lastSeen = records.Max(record => record.TimestampUtc);
 
-        using (var removeAlias = BuildCommand(
+        // A logical rollout path can be replaced with a new filesystem identity. The token-event and
+        // counter tables predate source_identity columns, so the privacy-safe file label is their
+        // generation owner. Retire the old generation in the same transaction that activates the new
+        // rollout identity; otherwise a replacement replay leaves both generations in accounting.
+        using (var replaceGeneration = BuildCommand(
                    connection,
                    transaction,
-                   "DELETE FROM rollout_files WHERE file_path = $file AND source_identity <> $identity;",
+                   """
+                   DELETE FROM codex_native_token_events
+                   WHERE source_file = $file
+                     AND EXISTS (
+                         SELECT 1 FROM rollout_files
+                         WHERE file_path = $file AND source_identity <> $identity);
+
+                   DELETE FROM codex_counter_state
+                   WHERE source_file = $file
+                     AND EXISTS (
+                         SELECT 1 FROM rollout_files
+                         WHERE file_path = $file AND source_identity <> $identity);
+
+                   DELETE FROM codex_parser_state
+                   WHERE source_identity IN (
+                       SELECT source_identity FROM rollout_files
+                       WHERE file_path = $file AND source_identity <> $identity);
+
+                   DELETE FROM rollout_records
+                   WHERE source_identity IN (
+                       SELECT source_identity FROM rollout_files
+                       WHERE file_path = $file AND source_identity <> $identity);
+
+                   DELETE FROM rollout_files
+                   WHERE file_path = $file AND source_identity <> $identity;
+                   """,
                    "$file",
                    "$identity"))
         {
-            Set(removeAlias, "$file", safeFileLabel);
-            Set(removeAlias, "$identity", sourceIdentity);
-            await removeAlias.ExecuteNonQueryAsync(cancellationToken);
+            Set(replaceGeneration, "$file", safeFileLabel);
+            Set(replaceGeneration, "$identity", sourceIdentity);
+            await replaceGeneration.ExecuteNonQueryAsync(cancellationToken);
         }
 
         using (var rolloutFile = BuildCommand(
