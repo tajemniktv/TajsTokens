@@ -24,7 +24,7 @@ public sealed class SqliteTelemetryRepositoryTests
     ];
 
     [Fact]
-    public async Task InitializeAsync_CreatesCompleteVersion3FoundationSchema()
+    public async Task InitializeAsync_CreatesCompleteVersion4FoundationSchema()
     {
         var directory = CreateTempDirectory();
         var path = Path.Combine(directory, "telemetry.db");
@@ -38,7 +38,7 @@ public sealed class SqliteTelemetryRepositoryTests
             {
                 await connection.OpenAsync();
 
-                Assert.Equal(3, await ReadSchemaVersionAsync(connection));
+                Assert.Equal(4, await ReadSchemaVersionAsync(connection));
                 var tables = await ReadTableNamesAsync(connection);
                 foreach (var expected in FoundationTables)
                 {
@@ -89,7 +89,7 @@ public sealed class SqliteTelemetryRepositoryTests
             await using (var migrated = new SqliteConnection($"Data Source={path}"))
             {
                 await migrated.OpenAsync();
-                Assert.Equal(3, await ReadSchemaVersionAsync(migrated));
+                Assert.Equal(4, await ReadSchemaVersionAsync(migrated));
                 Assert.Contains("repositories", await ReadTableNamesAsync(migrated));
                 Assert.Contains("workspaces", await ReadTableNamesAsync(migrated));
                 Assert.Contains("forecast_snapshots", await ReadTableNamesAsync(migrated));
@@ -98,6 +98,58 @@ public sealed class SqliteTelemetryRepositoryTests
                 countCommand.CommandText = "SELECT COUNT(*) FROM quota_snapshots;";
                 Assert.Equal(1L, (long)(await countCommand.ExecuteScalarAsync())!);
             }
+        }
+        finally
+        {
+            DeleteTempDirectory(directory);
+        }
+    }
+
+    [Fact]
+    public async Task InitializeAsync_MigratesVersion3ForecastRowsWithSafeDefaults()
+    {
+        var directory = CreateTempDirectory();
+        var path = Path.Combine(directory, "telemetry.db");
+
+        try
+        {
+            await using (var connection = new SqliteConnection($"Data Source={path}"))
+            {
+                await connection.OpenAsync();
+                var command = connection.CreateCommand();
+                command.CommandText = """
+                    CREATE TABLE forecast_snapshots (
+                        provider TEXT NOT NULL,
+                        profile TEXT NOT NULL,
+                        kind TEXT NOT NULL,
+                        generated_at_utc TEXT NOT NULL,
+                        burn_rate_percent_per_hour REAL,
+                        estimated_exhaustion_at_utc TEXT,
+                        survives_until_reset INTEGER,
+                        sustainable_percent_per_hour REAL,
+                        confidence REAL NOT NULL,
+                        PRIMARY KEY(provider, profile, kind, generated_at_utc)
+                    );
+                    INSERT INTO forecast_snapshots(
+                        provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
+                        estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence)
+                    VALUES('codex', 'default', 'FiveHour', '2026-08-31T20:00:00.0000000+00:00', 12, NULL, 1, 20, 0.5);
+                    PRAGMA user_version = 3;
+                    """;
+                await command.ExecuteNonQueryAsync();
+            }
+
+            var repository = new SqliteTelemetryRepository(path);
+            await repository.InitializeAsync(CancellationToken.None);
+            var forecasts = await repository.GetRecentForecastSnapshotsAsync(
+                QuotaWindowKind.FiveHour, "codex", "default", 10, CancellationToken.None);
+
+            var forecast = Assert.Single(forecasts).Forecast;
+            Assert.Equal(ForecastState.Learning, forecast.State);
+            Assert.Null(forecast.BurnPressure);
+            Assert.Null(forecast.ProjectedRemainingAtResetPercent);
+            Assert.Null(forecast.Trend);
+            Assert.False(forecast.IsQuantizedFlat);
         }
         finally
         {
@@ -161,7 +213,12 @@ public sealed class SqliteTelemetryRepositoryTests
                     now.AddHours(3),
                     true,
                     8.25,
-                    0.8));
+                    0.8,
+                    ForecastState.NearSustainablePace,
+                    1.17,
+                    22.5,
+                    "accelerating",
+                    true));
             await repository.UpsertForecastSnapshotAsync(snapshot, CancellationToken.None);
 
             var forecasts = await repository.GetRecentForecastSnapshotsAsync(

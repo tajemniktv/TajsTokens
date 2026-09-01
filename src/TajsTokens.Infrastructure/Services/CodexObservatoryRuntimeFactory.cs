@@ -21,7 +21,12 @@ public static class CodexObservatoryRuntimeFactory
     {
         var store = new SqliteCodexObservatoryStore(databasePath);
         var rolloutProvider = new FileSystemCodexSessionEventProvider();
-        var ingestion = new CodexSessionIngestionService(rolloutProvider, checkpointStore, store);
+        var rolloutRecordBatchWriter = new SqliteCodexRolloutRecordBatchWriter(databasePath, store);
+        var ingestion = new CodexSessionIngestionService(
+            rolloutProvider,
+            checkpointStore,
+            store,
+            rolloutRecordBatchWriter);
         var service = new CodexObservatoryService(ingestion, store);
         return new CodexObservatoryRuntime(store, ingestion, service);
     }

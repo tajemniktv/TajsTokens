@@ -8,7 +8,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 
 public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryRepository, ISessionIngestionCheckpointStore
 {
-    private const int CurrentSchemaVersion = 3;
+    private const int CurrentSchemaVersion = 4;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
 
     public async Task InitializeAsync(CancellationToken cancellationToken)
@@ -154,6 +154,11 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                     survives_until_reset INTEGER,
                     sustainable_percent_per_hour REAL,
                     confidence REAL NOT NULL,
+                    state TEXT NOT NULL DEFAULT 'Learning',
+                    burn_pressure REAL,
+                    projected_remaining_at_reset_percent REAL,
+                    trend TEXT,
+                    is_quantized_flat INTEGER NOT NULL DEFAULT 0,
                     PRIMARY KEY(provider, profile, kind, generated_at_utc)
                 );
 
@@ -165,7 +170,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 CREATE INDEX IF NOT EXISTS idx_forecast_snapshots_lookup
                     ON forecast_snapshots(provider, profile, kind, generated_at_utc DESC);
 
-                PRAGMA user_version = 3;
+                PRAGMA user_version = 4;
                 """, cancellationToken);
             return;
         }
@@ -217,6 +222,22 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                     ON forecast_snapshots(provider, profile, kind, generated_at_utc DESC);
 
                 PRAGMA user_version = 3;
+                """, cancellationToken);
+            version = 3;
+        }
+
+        if (version == 3)
+        {
+            // Phase 3.5 added reset-aware forecast semantics. Defaults preserve the meaning of old
+            // persisted rows while new rows round-trip the full decision state instead of silently
+            // degrading back to Learning after a restart.
+            await ExecuteMigrationAsync(connection, """
+                ALTER TABLE forecast_snapshots ADD COLUMN state TEXT NOT NULL DEFAULT 'Learning';
+                ALTER TABLE forecast_snapshots ADD COLUMN burn_pressure REAL;
+                ALTER TABLE forecast_snapshots ADD COLUMN projected_remaining_at_reset_percent REAL;
+                ALTER TABLE forecast_snapshots ADD COLUMN trend TEXT;
+                ALTER TABLE forecast_snapshots ADD COLUMN is_quantized_flat INTEGER NOT NULL DEFAULT 0;
+                PRAGMA user_version = 4;
                 """, cancellationToken);
         }
     }
@@ -434,14 +455,21 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
             """
             INSERT INTO forecast_snapshots(
                 provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
-                estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence)
-            VALUES($provider, $profile, $kind, $generated, $burnRate, $exhaustion, $survives, $sustainable, $confidence)
+                estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence,
+                state, burn_pressure, projected_remaining_at_reset_percent, trend, is_quantized_flat)
+            VALUES($provider, $profile, $kind, $generated, $burnRate, $exhaustion, $survives, $sustainable, $confidence,
+                   $state, $pressure, $remainingAtReset, $trend, $quantizedFlat)
             ON CONFLICT(provider, profile, kind, generated_at_utc) DO UPDATE SET
               burn_rate_percent_per_hour = excluded.burn_rate_percent_per_hour,
               estimated_exhaustion_at_utc = excluded.estimated_exhaustion_at_utc,
               survives_until_reset = excluded.survives_until_reset,
               sustainable_percent_per_hour = excluded.sustainable_percent_per_hour,
-              confidence = excluded.confidence;
+              confidence = excluded.confidence,
+              state = excluded.state,
+              burn_pressure = excluded.burn_pressure,
+              projected_remaining_at_reset_percent = excluded.projected_remaining_at_reset_percent,
+              trend = excluded.trend,
+              is_quantized_flat = excluded.is_quantized_flat;
             """,
             cmd =>
             {
@@ -455,6 +483,11 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 cmd.Parameters.AddWithValue("$survives", DbValue(forecast.SurvivesUntilReset is bool survives ? (survives ? 1 : 0) : null));
                 cmd.Parameters.AddWithValue("$sustainable", DbValue(forecast.SustainablePercentPerHour));
                 cmd.Parameters.AddWithValue("$confidence", forecast.Confidence);
+                cmd.Parameters.AddWithValue("$state", forecast.State.ToString());
+                cmd.Parameters.AddWithValue("$pressure", DbValue(forecast.BurnPressure));
+                cmd.Parameters.AddWithValue("$remainingAtReset", DbValue(forecast.ProjectedRemainingAtResetPercent));
+                cmd.Parameters.AddWithValue("$trend", DbValue(forecast.Trend));
+                cmd.Parameters.AddWithValue("$quantizedFlat", forecast.IsQuantizedFlat ? 1 : 0);
             },
             cancellationToken);
 
@@ -512,7 +545,8 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
         var command = connection.CreateCommand();
         command.CommandText = """
             SELECT provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
-                   estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence
+                   estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence,
+                   state, burn_pressure, projected_remaining_at_reset_percent, trend, is_quantized_flat
             FROM forecast_snapshots
             WHERE kind = $kind AND provider = $provider AND profile = $profile
             ORDER BY generated_at_utc DESC
@@ -527,6 +561,10 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
+            var state = !reader.IsDBNull(9) && Enum.TryParse<ForecastState>(reader.GetString(9), out var parsedState)
+                ? parsedState
+                : ForecastState.Learning;
+
             results.Add(new ForecastSnapshot(
                 reader.GetString(0),
                 reader.GetString(1),
@@ -537,7 +575,12 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                     reader.IsDBNull(5) ? null : ParseUtc(reader.GetString(5)),
                     reader.IsDBNull(6) ? null : reader.GetInt32(6) != 0,
                     reader.IsDBNull(7) ? null : reader.GetDouble(7),
-                    reader.GetDouble(8))));
+                    reader.GetDouble(8),
+                    state,
+                    reader.IsDBNull(10) ? null : reader.GetDouble(10),
+                    reader.IsDBNull(11) ? null : reader.GetDouble(11),
+                    reader.IsDBNull(12) ? null : reader.GetString(12),
+                    !reader.IsDBNull(13) && reader.GetInt32(13) != 0)));
         }
 
         return results;

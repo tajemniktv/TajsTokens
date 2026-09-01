@@ -13,6 +13,8 @@ public sealed partial class ObservatoryPage : Page
     private bool _loading;
     private bool _reloadRequested;
     private long _selectionGeneration;
+    private long _detailGeneration;
+    private long _searchGeneration;
 
     public ObservatoryPage()
     {
@@ -48,6 +50,8 @@ public sealed partial class ObservatoryPage : Page
         _isLoaded = false;
         App.Services.Telemetry.SnapshotUpdated -= OnSnapshotUpdated;
         Interlocked.Increment(ref _selectionGeneration);
+        Interlocked.Increment(ref _detailGeneration);
+        Interlocked.Increment(ref _searchGeneration);
 
         var cancellation = Interlocked.Exchange(ref _pageCancellation, null);
         cancellation?.Cancel();
@@ -152,24 +156,24 @@ public sealed partial class ObservatoryPage : Page
             {
                 var store = App.Services.ObservatoryStore;
                 var repository = App.Services.Repository;
+                var readModel = App.Services.ObservatoryReadModel;
+                var search = SessionSearch.Text.Trim();
 
-                // Microsoft.Data.Sqlite's async API still performs SQLite calls synchronously. Keep
-                // aggregate/session/storage queries on the thread pool so a large telemetry database
-                // cannot stall WinUI while Observatory is rendering or a scan is committing records.
+                // Microsoft.Data.Sqlite still performs synchronous native work behind async-shaped
+                // calls. Keep aggregate/session reads away from the dispatcher and push filtering into
+                // SQLite before LIMIT so older matching sessions remain discoverable.
                 var data = await Task.Run(async () =>
                 {
                     await repository.InitializeAsync(cancellationToken);
                     await store.InitializeAsync(cancellationToken);
 
                     var summaryTask = store.GetSummaryAsync(cancellationToken);
-                    var sessionsTask = store.GetSessionOverviewsAsync(500, cancellationToken);
-                    var storageTask = store.GetRolloutStorageAsync(40, cancellationToken);
-                    await Task.WhenAll(summaryTask, sessionsTask, storageTask);
+                    var sessionsTask = readModel.SearchSessionsAsync(search, search.Length == 0 ? 750 : 250, cancellationToken);
+                    await Task.WhenAll(summaryTask, sessionsTask);
 
                     return (
                         Summary: await summaryTask,
-                        Sessions: await sessionsTask,
-                        Storage: await storageTask);
+                        Sessions: await sessionsTask);
                 }, cancellationToken);
 
                 cancellationToken.ThrowIfCancellationRequested();
@@ -178,44 +182,23 @@ public sealed partial class ObservatoryPage : Page
                     return;
                 }
 
-                var summary = data.Summary;
-                var sessions = data.Sessions;
-                var storage = data.Storage;
-                _sessionsById.Clear();
-                foreach (var session in sessions)
-                {
-                    _sessionsById[session.SessionId] = session;
-                }
-
                 var selectedId = (SessionList.SelectedItem as SessionRow)?.SessionId;
-                var rows = sessions.Select(ToSessionRow).ToArray();
-                SessionList.ItemsSource = rows;
-                SessionCountText.Text = summary.SessionCount.ToString("N0");
-                NativeTokensText.Text = FormatCount(summary.NativeTokens.ReportedTotal);
-                StorageText.Text = FormatBytes(summary.RolloutBytes);
-                StorageList.ItemsSource = storage.Select(item => new StorageRow(
-                    Path.GetFileName(item.FilePath),
-                    $"{FormatBytes(item.SizeBytes)} · {item.RecordsSeen:N0} records · max {FormatBytes(item.LargestRecordBytes)}")).ToArray();
+                ApplySessionRows(data.Sessions, selectedId, search);
+
+                SessionCountText.Text = data.Summary.SessionCount.ToString("N0");
+                NativeTokensText.Text = FormatCount(data.Summary.NativeTokens.ReportedTotal);
+                StorageText.Text = FormatBytes(data.Summary.RolloutBytes);
 
                 var rolloutSource = App.Services.Telemetry.Latest.Sources.FirstOrDefault(source =>
                     string.Equals(source.Provider, "Codex rollouts", StringComparison.OrdinalIgnoreCase));
                 var scanning = rolloutSource?.Detail.Contains("Scanning local Codex rollout history", StringComparison.OrdinalIgnoreCase) == true;
                 StatusText.Text = scanning
-                    ? summary.SessionCount == 0
-                        ? "Importing local Codex history in the background. Sessions will appear here as the scan commits them."
-                        : $"Importing local Codex history in the background · {summary.SessionCount:N0} session(s) available so far."
-                    : summary.SessionCount == 0
-                        ? "No normalized Codex sessions yet. The background collector will ingest discovered rollout JSONL sources without storing transcript content."
-                        : $"{summary.SessionCount:N0} normalized session(s). Last view refresh {DateTimeOffset.Now:t}.";
-
-                if (selectedId is not null)
-                {
-                    SessionList.SelectedItem = rows.FirstOrDefault(row => string.Equals(row.SessionId, selectedId, StringComparison.OrdinalIgnoreCase));
-                }
-                if (SessionList.SelectedItem is null && rows.Length > 0)
-                {
-                    SessionList.SelectedIndex = 0;
-                }
+                    ? data.Summary.SessionCount == 0
+                        ? "Importing local Codex history in the background. Sessions will appear as batches commit."
+                        : $"Importing local Codex history · {data.Summary.SessionCount:N0} session(s) available so far."
+                    : data.Summary.SessionCount == 0
+                        ? "No normalized Codex sessions yet. The background collector ingests discovered rollout JSONL without storing transcript content."
+                        : $"{data.Summary.SessionCount:N0} normalized session(s) · refreshed {DateTimeOffset.Now:t}.";
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -236,9 +219,98 @@ public sealed partial class ObservatoryPage : Page
         while (_reloadRequested && _isLoaded && !cancellationToken.IsCancellationRequested);
     }
 
+    private async void OnSessionSearchChanged(object sender, TextChangedEventArgs e)
+    {
+        var cancellation = _pageCancellation;
+        if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested)
+        {
+            return;
+        }
+
+        var generation = Interlocked.Increment(ref _searchGeneration);
+        var search = SessionSearch.Text.Trim();
+        var selectedId = (SessionList.SelectedItem as SessionRow)?.SessionId;
+
+        try
+        {
+            // TextChanged can fire for every keystroke. A small page-scoped debounce keeps the local
+            // query service cheap while generation checks prevent an older result from replacing a
+            // newer search after an out-of-order completion.
+            await Task.Delay(150, cancellation.Token);
+            if (generation != Volatile.Read(ref _searchGeneration))
+            {
+                return;
+            }
+
+            var sessions = await Task.Run(
+                () => App.Services.ObservatoryReadModel.SearchSessionsAsync(
+                    search,
+                    search.Length == 0 ? 750 : 250,
+                    cancellation.Token),
+                cancellation.Token);
+
+            if (!_isLoaded || cancellation.IsCancellationRequested ||
+                !ReferenceEquals(_pageCancellation, cancellation) ||
+                generation != Volatile.Read(ref _searchGeneration) ||
+                !string.Equals(SessionSearch.Text.Trim(), search, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            ApplySessionRows(sessions, selectedId, search);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            // Page lifecycle owns cancellation.
+        }
+        catch (Exception exception)
+        {
+            if (_isLoaded && generation == Volatile.Read(ref _searchGeneration))
+            {
+                StatusText.Text = $"Session search unavailable: {Summarize(exception.Message)}";
+            }
+        }
+    }
+
+    private void ApplySessionRows(
+        IReadOnlyList<CodexSessionOverview> sessions,
+        string? preferredSelectionId,
+        string search)
+    {
+        _sessionsById.Clear();
+        foreach (var session in sessions)
+        {
+            _sessionsById[session.SessionId] = session;
+        }
+
+        var rows = sessions.Select(ToSessionRow).ToArray();
+        SessionList.ItemsSource = rows;
+
+        if (preferredSelectionId is not null)
+        {
+            SessionList.SelectedItem = rows.FirstOrDefault(row =>
+                string.Equals(row.SessionId, preferredSelectionId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (SessionList.SelectedItem is null && rows.Length > 0)
+        {
+            SessionList.SelectedIndex = 0;
+        }
+
+        if (rows.Length == 0)
+        {
+            SelectedSessionTitle.Text = search.Length == 0 ? "No sessions" : "No matching sessions";
+            SelectedSessionSummary.Text = search.Length == 0
+                ? "No normalized session data is available yet."
+                : "Change or clear the search filter to show more sessions.";
+            ClearDetailSurfaces();
+        }
+    }
+
     private async void OnSessionSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         var generation = Interlocked.Increment(ref _selectionGeneration);
+        Interlocked.Increment(ref _detailGeneration);
         var cancellation = _pageCancellation;
         if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested ||
             SessionList.SelectedItem is not SessionRow row || !_sessionsById.TryGetValue(row.SessionId, out var session))
@@ -246,71 +318,210 @@ public sealed partial class ObservatoryPage : Page
             return;
         }
 
+        RenderSelectedSessionSummary(session);
+        ClearDetailSurfaces();
+
         try
         {
-            var store = App.Services.ObservatoryStore;
-            var data = await Task.Run(async () =>
-            {
-                var timelineTask = store.GetTimelineAsync(session.SessionId, 80, cancellation.Token);
-                var contextTask = store.GetContextObservationsAsync(session.SessionId, 80, cancellation.Token);
-                var agentsTask = store.GetAgentsAsync(null, cancellation.Token);
-                var relationshipsTask = store.GetAgentRelationshipsAsync(cancellation.Token);
-                await Task.WhenAll(timelineTask, contextTask, agentsTask, relationshipsTask);
-
-                return (
-                    Timeline: await timelineTask,
-                    Context: await contextTask,
-                    Agents: await agentsTask,
-                    Relationships: await relationshipsTask);
-            }, cancellation.Token);
-
-            if (!_isLoaded || cancellation.IsCancellationRequested || !ReferenceEquals(_pageCancellation, cancellation) ||
-                generation != Volatile.Read(ref _selectionGeneration) ||
-                SessionList.SelectedItem is not SessionRow current ||
-                !string.Equals(current.SessionId, row.SessionId, StringComparison.OrdinalIgnoreCase))
-            {
-                return;
-            }
-
-            var timeline = data.Timeline;
-            var context = data.Context;
-            var agents = data.Agents;
-            var relationships = data.Relationships;
-
-            SelectedSessionTitle.Text = session.DisplayName;
-            var peak = session.PeakContextPercent is double peakValue ? $" · peak context {peakValue:0.0}%" : string.Empty;
-            SelectedSessionSummary.Text =
-                $"{session.Status} · {session.Repository} · native shadow {FormatCount(session.NativeTokens.ReportedTotal)} tokens · " +
-                $"{session.CompactionCount:N0} compaction(s){peak} · {FormatBytes(session.RolloutBytes)} normalized source records";
-
-            AgentTreeList.ItemsSource = BuildAgentTree(session.SessionId, agents, relationships);
-            TimelineList.ItemsSource = timeline.Select(item => new TimelineRow(
-                $"{item.TimestampUtc.ToLocalTime():g} · {item.EventType}",
-                item.Summary)).ToArray();
-
-            if (context.Count > 0)
-            {
-                var latest = context[0];
-                var detail = latest.IsCompaction
-                    ? "latest context event is a compaction"
-                    : latest.UtilizationPercent is double utilization
-                        ? $"latest context utilization {utilization:0.0}%"
-                        : "latest context utilization unavailable";
-                SelectedSessionSummary.Text += $" · {detail}";
-            }
+            await LoadSelectedTabAsync(session, generation, cancellation);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
             // Navigation cancels detached session-detail queries.
         }
+    }
+
+    private async void OnDetailTabSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        var cancellation = _pageCancellation;
+        if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested ||
+            SessionList.SelectedItem is not SessionRow row || !_sessionsById.TryGetValue(row.SessionId, out var session))
+        {
+            return;
+        }
+
+        var generation = Volatile.Read(ref _selectionGeneration);
+        try
+        {
+            await LoadSelectedTabAsync(session, generation, cancellation);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            // Page lifecycle owns cancellation.
+        }
+    }
+
+    private async Task LoadSelectedTabAsync(
+        CodexSessionOverview session,
+        long selectionGeneration,
+        CancellationTokenSource cancellation)
+    {
+        var detailGeneration = Interlocked.Increment(ref _detailGeneration);
+        var selectedTab = DetailTabs.SelectedIndex;
+
+        if (selectedTab == 0)
+        {
+            RenderOverviewDetail(session);
+            return;
+        }
+
+        if (selectedTab == 4)
+        {
+            RenderTokenDetail(session);
+            return;
+        }
+
+        try
+        {
+            var store = App.Services.ObservatoryStore;
+            var readModel = App.Services.ObservatoryReadModel;
+            switch (selectedTab)
+            {
+                case 1:
+                {
+                    AgentTreeList.ItemsSource = new[] { new AgentTreeRow("Loading agent topology…") };
+                    var topology = await Task.Run(
+                        () => readModel.GetAgentTopologyAsync(session.SessionId, cancellation.Token),
+                        cancellation.Token);
+
+                    if (!CanApplyDetail(session.SessionId, selectionGeneration, detailGeneration, cancellation))
+                    {
+                        return;
+                    }
+                    AgentTreeList.ItemsSource = BuildAgentTree(session.SessionId, topology.Agents, topology.Relationships);
+                    break;
+                }
+                case 2:
+                {
+                    TimelineList.ItemsSource = new[] { new TimelineRow("Loading…", "Recent normalized events are being queried.") };
+                    var timeline = await Task.Run(
+                        () => store.GetTimelineAsync(session.SessionId, 200, cancellation.Token),
+                        cancellation.Token);
+                    if (!CanApplyDetail(session.SessionId, selectionGeneration, detailGeneration, cancellation))
+                    {
+                        return;
+                    }
+                    TimelineList.ItemsSource = timeline.Count == 0
+                        ? new[] { new TimelineRow("No timeline events", "No normalized content-free events are available for this session.") }
+                        : timeline.Select(item => new TimelineRow(
+                            $"{item.TimestampUtc.ToLocalTime():g} · {item.EventType}",
+                            item.Summary)).ToArray();
+                    break;
+                }
+                case 3:
+                {
+                    ContextList.ItemsSource = new[] { new ContextRow("Loading…", "Context observations are being queried.") };
+                    var context = await Task.Run(
+                        () => store.GetContextObservationsAsync(session.SessionId, 240, cancellation.Token),
+                        cancellation.Token);
+                    if (!CanApplyDetail(session.SessionId, selectionGeneration, detailGeneration, cancellation))
+                    {
+                        return;
+                    }
+                    ContextList.ItemsSource = context.Count == 0
+                        ? new[] { new ContextRow("No context observations", "No content-free context/compaction telemetry is available for this session.") }
+                        : context.Select(ToContextRow).ToArray();
+                    break;
+                }
+                case 5:
+                {
+                    StorageList.ItemsSource = new[] { new StorageRow("Loading…", "Querying rollout storage metadata") };
+                    var storage = await Task.Run(
+                        () => readModel.GetSessionStorageAsync(session.SessionId, 500, cancellation.Token),
+                        cancellation.Token);
+                    if (!CanApplyDetail(session.SessionId, selectionGeneration, detailGeneration, cancellation))
+                    {
+                        return;
+                    }
+                    var rows = storage
+                        .Select(item => new StorageRow(
+                            Path.GetFileName(item.FilePath),
+                            $"{FormatBytes(item.SizeBytes)} · {item.RecordsSeen:N0} records · max {FormatBytes(item.LargestRecordBytes)}"))
+                        .ToArray();
+                    StorageList.ItemsSource = rows.Length == 0
+                        ? new[] { new StorageRow("No rollout source", "No current storage row is associated with this session.") }
+                        : rows;
+                    break;
+                }
+            }
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception exception)
         {
-            if (_isLoaded && ReferenceEquals(_pageCancellation, cancellation) &&
-                generation == Volatile.Read(ref _selectionGeneration))
+            if (CanApplyDetail(session.SessionId, selectionGeneration, detailGeneration, cancellation))
             {
                 SelectedSessionSummary.Text = $"Session detail unavailable: {Summarize(exception.Message)}";
             }
         }
+    }
+
+    private bool CanApplyDetail(
+        string sessionId,
+        long selectionGeneration,
+        long detailGeneration,
+        CancellationTokenSource cancellation) =>
+        _isLoaded &&
+        !cancellation.IsCancellationRequested &&
+        ReferenceEquals(_pageCancellation, cancellation) &&
+        selectionGeneration == Volatile.Read(ref _selectionGeneration) &&
+        detailGeneration == Volatile.Read(ref _detailGeneration) &&
+        SessionList.SelectedItem is SessionRow current &&
+        string.Equals(current.SessionId, sessionId, StringComparison.OrdinalIgnoreCase);
+
+    private void RenderSelectedSessionSummary(CodexSessionOverview session)
+    {
+        SelectedSessionTitle.Text = session.DisplayName;
+        var role = session.ParentSessionId is null ? "root" : "subagent";
+        var peak = session.PeakContextPercent is double peakValue ? $" · peak ctx {peakValue:0.0}%" : string.Empty;
+        SelectedSessionSummary.Text =
+            $"{role} · {session.Status} · {session.Repository} · {FormatCount(session.NativeTokens.ReportedTotal)} native shadow tokens · " +
+            $"{session.CompactionCount:N0} compaction(s){peak} · {FormatBytes(session.RolloutBytes)} normalized rollout records";
+    }
+
+    private void RenderOverviewDetail(CodexSessionOverview session)
+    {
+        var lastActivity = session.LastActivityAtUtc?.ToLocalTime().ToString("g") ?? "unknown";
+        var model = string.IsNullOrWhiteSpace(session.Model) ? "unknown" : session.Model;
+        var context = session.PeakContextPercent is double peak ? $"{peak:0.0}% peak" : "unavailable";
+        OverviewDetailText.Text =
+            $"Role: {(session.ParentSessionId is null ? "root" : "subagent")}\n" +
+            $"State: {session.Status}\n" +
+            $"Repository/workspace: {session.Repository}\n" +
+            $"Model: {model}\n" +
+            $"Started: {session.StartedAtUtc.ToLocalTime():g}\n" +
+            $"Last activity: {lastActivity}\n" +
+            $"Native shadow total: {FormatCount(session.NativeTokens.ReportedTotal)}\n" +
+            $"Context: {context} · {session.CompactionCount:N0} compaction(s)\n" +
+            $"Timeline events: {session.TimelineEventCount:N0}\n" +
+            $"Normalized rollout bytes: {FormatBytes(session.RolloutBytes)}";
+    }
+
+    private void RenderTokenDetail(CodexSessionOverview session)
+    {
+        var tokens = session.NativeTokens;
+        TokenDetailText.Text =
+            "Native Codex accounting is shadow/reconciliation telemetry; Tokscale remains the broad default until parity is demonstrated.\n\n" +
+            $"Uncached input: {FormatCount(tokens.UncachedInput)}\n" +
+            $"Cache read: {FormatCount(tokens.CacheRead)}\n" +
+            $"Cache write: {FormatCount(tokens.CacheWrite)}\n" +
+            $"Non-reasoning output: {FormatCount(tokens.NonReasoningOutput)}\n" +
+            $"Reasoning output: {FormatCount(tokens.ReasoningOutput)}\n" +
+            $"Disjoint total: {FormatCount(tokens.DisjointTotal)}\n" +
+            $"Provider-reported/native cumulative total: {FormatCount(tokens.ReportedTotal)}";
+    }
+
+    private void ClearDetailSurfaces()
+    {
+        Interlocked.Increment(ref _detailGeneration);
+        OverviewDetailText.Text = "Select a session.";
+        TokenDetailText.Text = "Select a session.";
+        AgentTreeList.ItemsSource = null;
+        TimelineList.ItemsSource = null;
+        ContextList.ItemsSource = null;
+        StorageList.ItemsSource = null;
     }
 
     private static SessionRow ToSessionRow(CodexSessionOverview session)
@@ -323,6 +534,22 @@ public sealed partial class ObservatoryPage : Page
             session.DisplayName,
             $"{role} · {session.Status} · {model} · {Path.GetFileName(session.Repository.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))}",
             $"native {FormatCount(session.NativeTokens.ReportedTotal)} · {session.CompactionCount} compact · {FormatBytes(session.RolloutBytes)}{context}");
+    }
+
+    private static ContextRow ToContextRow(CodexContextObservation item)
+    {
+        var label = item.IsCompaction
+            ? "compaction"
+            : item.UtilizationPercent is double utilization
+                ? $"context {utilization:0.0}%"
+                : "context observation";
+        var input = item.InputTokens is long inputTokens ? FormatCount(inputTokens) : "?";
+        var window = item.ContextWindowTokens is long windowTokens ? FormatCount(windowTokens) : "?";
+        var model = string.IsNullOrWhiteSpace(item.Model) ? "model unknown" : item.Model;
+        return new ContextRow(
+            $"{item.ObservedAtUtc.ToLocalTime():g} · {label}",
+            $"{model} · input {input} / window {window}" +
+            (item.RecordBytes is long bytes ? $" · record {FormatBytes(bytes)}" : string.Empty));
     }
 
     private static IReadOnlyList<AgentTreeRow> BuildAgentTree(
@@ -413,6 +640,7 @@ public sealed partial class ObservatoryPage : Page
 
     private sealed record SessionRow(string SessionId, string Title, string Subtitle, string Metrics);
     private sealed record TimelineRow(string Header, string Detail);
+    private sealed record ContextRow(string Header, string Detail);
     private sealed record AgentTreeRow(string Text);
     private sealed record StorageRow(string FileName, string Detail);
 }

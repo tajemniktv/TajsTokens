@@ -7,13 +7,14 @@ using TajsTokens.Core.Models;
 namespace TajsTokens.App.Services;
 
 /// <summary>
-/// Native notification-area surface for Phase 2. Shell_NotifyIcon owns the tray lifecycle while a
-/// small hidden Win32 window receives callbacks and Explorer's TaskbarCreated recovery broadcast.
+/// Native notification-area surface. Shell_NotifyIcon owns the tray lifecycle while a small hidden
+/// Win32 window receives callbacks and Explorer's TaskbarCreated recovery broadcast.
 /// </summary>
 public sealed class WindowsSystemTrayService : ISystemTrayService
 {
     private const uint TrayIconId = 1;
     private const uint TrayCallbackMessage = WmApp + 1;
+    private const uint ApplyStatusMessage = WmApp + 2;
     private const uint CommandOpen = 1001;
     private const uint CommandRefresh = 1002;
     private const uint CommandNotifications = 1003;
@@ -22,12 +23,18 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
 
     private readonly WindowProc _windowProc;
     private readonly string _windowClassName = $"TajsTokens.Tray.{Environment.ProcessId}.{Guid.NewGuid():N}";
+    private readonly Dictionary<StatusIconKey, Icon> _statusIconCache = [];
+    private readonly HashSet<StatusIconKey> _pendingIconKeys = [];
+    private readonly object _statusIconSync = new();
     private nint _windowHandle;
     private nint _instanceHandle;
     private nint _sharedFallbackIconHandle;
-    private Icon? _ownedStatusIcon;
+    private Icon? _currentStatusIcon;
+    private StatusIconKey? _desiredIconKey;
+    private StatusIconKey? _currentIconKey;
     private uint _taskbarCreatedMessage;
     private string _currentTip = "TajsTokens · waiting for telemetry";
+    private string? _lastAppliedTip;
     private bool _notificationsEnabled;
     private bool _launchAtLogin;
     private bool _disposed;
@@ -100,28 +107,51 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
 
     public void UpdateStatus(SystemTrayStatus status)
     {
-        if (_windowHandle == 0 || _disposed)
+        int? normalizedPercent = status.ConstrainedRemainingPercent is int percent
+            ? Math.Clamp(percent, 0, 100)
+            : null;
+        var constrained = normalizedPercent is int value ? $" · constrained {value}%" : string.Empty;
+        var nextTip = Truncate(status.Tooltip + constrained, 127);
+        var nextKey = new StatusIconKey(normalizedPercent, status.IsFresh);
+
+        Icon? readyIcon = null;
+        var scheduleRender = false;
+        lock (_statusIconSync)
         {
-            return;
+            if (_windowHandle == 0 || _disposed)
+            {
+                return;
+            }
+
+            // Keep desired state independently of Shell_NotifyIcon success. If Explorer is between
+            // taskbars, TaskbarCreated must re-add the newest tooltip rather than the last one that
+            // happened to modify successfully.
+            _currentTip = nextTip;
+            _desiredIconKey = nextKey;
+
+            if (_currentIconKey == nextKey && string.Equals(_lastAppliedTip, nextTip, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (_statusIconCache.TryGetValue(nextKey, out readyIcon))
+            {
+                // Cache hits are cheap and can be applied immediately on the window thread.
+            }
+            else if (_pendingIconKeys.Add(nextKey))
+            {
+                scheduleRender = true;
+            }
         }
 
-        var constrained = status.ConstrainedRemainingPercent is int percent ? $" · constrained {percent}%" : string.Empty;
-        _currentTip = Truncate(status.Tooltip + constrained, 127);
-
-        var replacement = BuildStatusIcon(status.ConstrainedRemainingPercent, status.IsFresh);
-        var data = CreateNotifyIconData(NifTip | NifIcon | NifShowTip);
-        data.Tip = _currentTip;
-        data.Icon = replacement.Handle;
-
-        if (Shell_NotifyIconW(NimModify, ref data))
+        if (readyIcon is not null)
         {
-            var previous = _ownedStatusIcon;
-            _ownedStatusIcon = replacement;
-            previous?.Dispose();
+            ApplyStatusIcon(nextKey, nextTip, readyIcon);
         }
-        else
+
+        if (scheduleRender)
         {
-            replacement.Dispose();
+            QueueStatusIconRender(nextKey);
         }
     }
 
@@ -159,8 +189,19 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
             _ = Shell_NotifyIconW(NimDelete, ref data);
         }
 
-        _ownedStatusIcon?.Dispose();
-        _ownedStatusIcon = null;
+        lock (_statusIconSync)
+        {
+            foreach (var icon in _statusIconCache.Values)
+            {
+                icon.Dispose();
+            }
+            _statusIconCache.Clear();
+            _pendingIconKeys.Clear();
+            _currentStatusIcon = null;
+            _desiredIconKey = null;
+            _currentIconKey = null;
+        }
+
         DestroyTrayHost();
     }
 
@@ -168,9 +209,16 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
     {
         if (_taskbarCreatedMessage != 0 && message == _taskbarCreatedMessage)
         {
-            // Explorer discarded all notification-area registrations. Re-add ours with the latest
-            // owned badge/tooltip; failure is non-fatal and a later status update can try again.
+            // Explorer discarded all notification-area registrations. Re-add ours with the newest
+            // desired tooltip and a ready cached badge when available. A pending render will post the
+            // apply message when it completes.
             _ = TryAddTrayIcon();
+            return 0;
+        }
+
+        if (message == ApplyStatusMessage)
+        {
+            ApplyDesiredStatus();
             return 0;
         }
 
@@ -198,24 +246,150 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
 
     private bool TryAddTrayIcon()
     {
-        if (_windowHandle == 0)
+        if (_windowHandle == 0 || _disposed)
         {
             return false;
         }
 
+        Icon? desiredIcon = null;
+        StatusIconKey? desiredKey = null;
+        string desiredTip;
+        lock (_statusIconSync)
+        {
+            desiredTip = _currentTip;
+            if (_desiredIconKey is StatusIconKey key && _statusIconCache.TryGetValue(key, out var cached))
+            {
+                desiredKey = key;
+                desiredIcon = cached;
+            }
+        }
+
         var data = CreateNotifyIconData(NifMessage | NifIcon | NifTip | NifShowTip);
         data.CallbackMessage = TrayCallbackMessage;
-        data.Icon = _ownedStatusIcon?.Handle ?? _sharedFallbackIconHandle;
-        data.Tip = _currentTip;
+        data.Icon = desiredIcon?.Handle ?? _sharedFallbackIconHandle;
+        data.Tip = desiredTip;
         if (!Shell_NotifyIconW(NimAdd, ref data))
         {
             return false;
+        }
+
+        lock (_statusIconSync)
+        {
+            _lastAppliedTip = desiredTip;
+            _currentIconKey = desiredKey;
+            _currentStatusIcon = desiredIcon;
         }
 
         var version = CreateNotifyIconData(0);
         version.TimeoutOrVersion = NotifyIconVersion4;
         _ = Shell_NotifyIconW(NimSetVersion, ref version);
         return true;
+    }
+
+    private void QueueStatusIconRender(StatusIconKey key)
+    {
+        _ = Task.Run(() =>
+        {
+            Icon? created = null;
+            try
+            {
+                // System.Drawing font family discovery/icon rasterization was a measured dispatcher
+                // hotspot. Cache misses are intentionally rendered on the thread pool.
+                created = BuildStatusIcon(key.RemainingPercent, key.IsFresh);
+
+                nint window;
+                lock (_statusIconSync)
+                {
+                    _pendingIconKeys.Remove(key);
+                    if (_disposed)
+                    {
+                        window = 0;
+                    }
+                    else if (_statusIconCache.ContainsKey(key))
+                    {
+                        window = _windowHandle;
+                    }
+                    else
+                    {
+                        _statusIconCache.Add(key, created);
+                        created = null; // cache owns the icon until service disposal
+                        window = _windowHandle;
+                    }
+                }
+
+                if (window != 0)
+                {
+                    _ = PostMessageW(window, ApplyStatusMessage, 0, 0);
+                }
+            }
+            catch
+            {
+                lock (_statusIconSync)
+                {
+                    _pendingIconKeys.Remove(key);
+                }
+                // A cosmetic badge render must never terminate the background utility. The fallback
+                // shell icon remains registered and a later state can retry with another key.
+            }
+            finally
+            {
+                created?.Dispose();
+            }
+        });
+    }
+
+    private void ApplyDesiredStatus()
+    {
+        StatusIconKey key;
+        string tip;
+        Icon icon;
+        lock (_statusIconSync)
+        {
+            if (_disposed || _windowHandle == 0 ||
+                _desiredIconKey is not StatusIconKey desiredKey ||
+                !_statusIconCache.TryGetValue(desiredKey, out var cached))
+            {
+                return;
+            }
+
+            key = desiredKey;
+            tip = _currentTip;
+            icon = cached;
+            if (_currentIconKey == key && string.Equals(_lastAppliedTip, tip, StringComparison.Ordinal))
+            {
+                return;
+            }
+        }
+
+        ApplyStatusIcon(key, tip, icon);
+    }
+
+    private void ApplyStatusIcon(StatusIconKey key, string tip, Icon icon)
+    {
+        if (_windowHandle == 0 || _disposed)
+        {
+            return;
+        }
+
+        var data = CreateNotifyIconData(NifTip | NifIcon | NifShowTip);
+        data.Tip = tip;
+        data.Icon = icon.Handle;
+        if (!Shell_NotifyIconW(NimModify, ref data))
+        {
+            return;
+        }
+
+        lock (_statusIconSync)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _lastAppliedTip = tip;
+            _currentIconKey = key;
+            _currentStatusIcon = icon;
+        }
     }
 
     private void ShowContextMenu()
@@ -338,6 +512,8 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
 
     private static string Truncate(string value, int maxLength) =>
         value.Length <= maxLength ? value : value[..Math.Max(0, maxLength - 1)] + "…";
+
+    private readonly record struct StatusIconKey(int? RemainingPercent, bool IsFresh);
 
     private delegate nint WindowProc(nint window, uint message, nuint wParam, nint lParam);
 
