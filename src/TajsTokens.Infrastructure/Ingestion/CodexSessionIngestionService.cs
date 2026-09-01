@@ -12,7 +12,7 @@ namespace TajsTokens.Infrastructure.Ingestion;
 public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
 {
     private const string BoundaryParserVersion = "boundary-v2";
-    private const string TypedParserVersion = "typed-v1";
+    private const string TypedParserVersion = "typed-v2";
     private readonly ICodexSessionEventProvider _sessionEventProvider;
     private readonly ISessionIngestionCheckpointStore _checkpointStore;
     private readonly ICodexObservatoryStore? _observatoryStore;
@@ -35,11 +35,11 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         _observatoryStore = observatoryStore;
     }
 
-    public async Task<int> IngestAsync(string filePath, CancellationToken cancellationToken)
+    public async Task<CodexIngestionResult> IngestAsync(string filePath, CancellationToken cancellationToken)
     {
         if (!File.Exists(filePath))
         {
-            return 0;
+            return CodexIngestionResult.Empty;
         }
 
         if (_observatoryStore is not null)
@@ -62,7 +62,24 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             canResume = false;
         }
 
-        var state = new RolloutParseState(filePath, sourceIdentity, canResume ? existing?.LastSessionId : null);
+        CodexParserResumeState? resumeState = null;
+        if (canResume && _observatoryStore is not null && fromOffset > 0)
+        {
+            resumeState = await _observatoryStore.GetParserResumeStateAsync(sourceIdentity, cancellationToken);
+            if (resumeState is null ||
+                resumeState.ByteOffset != fromOffset ||
+                (existing?.LastSessionId is not null &&
+                 !string.Equals(existing.LastSessionId, resumeState.SessionId, StringComparison.OrdinalIgnoreCase)))
+            {
+                // A byte checkpoint without parser metadata cannot safely resume semantic parsing. A
+                // one-time replay from zero is cheaper than overwriting established agent/model state.
+                fromOffset = 0;
+                canResume = false;
+                resumeState = null;
+            }
+        }
+
+        var state = new RolloutParseState(filePath, sourceIdentity, resumeState);
         var recordsScanned = 0;
         var normalizedRecords = 0;
         var lastCompleteRecordOffset = fromOffset;
@@ -89,33 +106,44 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                         state.OwnSessionId);
                 }
 
-                await PersistParsedRecordAsync(parsed, filePath, cancellationToken);
+                await PersistParsedRecordAsync(parsed, sourceIdentity, filePath, cancellationToken);
                 if (parsed.HasNormalizedTelemetry)
                 {
                     normalizedRecords++;
                 }
             }
 
-            // Advance only after every normalized write for this complete record succeeded. If the
-            // process dies between records, replay is safe because source/event ids are idempotent.
+            // Checkpoint only after every normalized write for this complete record succeeded.
             lastCompleteRecordOffset = record.EndByteOffset;
             if (recordsScanned % 128 == 0)
             {
                 await SaveCheckpointAsync(
-                    filePath, lastCompleteRecordOffset, state.OwnSessionId ?? existing?.LastSessionId,
-                    parserVersion, sourceIdentity, cancellationToken);
+                    filePath,
+                    lastCompleteRecordOffset,
+                    state,
+                    existing?.LastSessionId,
+                    parserVersion,
+                    sourceIdentity,
+                    cancellationToken);
             }
         }
 
         await SaveCheckpointAsync(
-            filePath, lastCompleteRecordOffset, state.OwnSessionId ?? existing?.LastSessionId,
-            parserVersion, sourceIdentity, cancellationToken);
+            filePath,
+            lastCompleteRecordOffset,
+            state,
+            existing?.LastSessionId,
+            parserVersion,
+            sourceIdentity,
+            cancellationToken);
 
-        return _observatoryStore is null ? recordsScanned : normalizedRecords;
+        var normalized = _observatoryStore is null ? recordsScanned : normalizedRecords;
+        return new CodexIngestionResult(recordsScanned, normalized, state.OwnSessionId ?? existing?.LastSessionId);
     }
 
     private async Task PersistParsedRecordAsync(
         ParsedRolloutRecord parsed,
+        string sourceIdentity,
         string filePath,
         CancellationToken cancellationToken)
     {
@@ -160,11 +188,12 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         }
         catch (IOException)
         {
-            // The record itself was already read successfully; storage size is diagnostic metadata.
+            // The record itself was already read successfully; size is diagnostic metadata only.
         }
 
         await _observatoryStore.RecordRolloutRecordAsync(
             parsed.SourceRecordId,
+            sourceIdentity,
             filePath,
             parsed.SessionId,
             parsed.EventClass,
@@ -174,22 +203,36 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             cancellationToken);
     }
 
-    private Task SaveCheckpointAsync(
+    private async Task SaveCheckpointAsync(
         string filePath,
         long offset,
-        string? sessionId,
+        RolloutParseState state,
+        string? previousSessionId,
         string parserVersion,
         string sourceIdentity,
-        CancellationToken cancellationToken) =>
-        _checkpointStore.SaveCheckpointAsync(
+        CancellationToken cancellationToken)
+    {
+        if (_observatoryStore is not null)
+        {
+            var resumeState = state.BuildResumeState(offset);
+            if (resumeState is not null)
+            {
+                // Save semantic state first. If the following byte-checkpoint write fails, the offsets
+                // differ and the next run safely replays from zero rather than using mismatched state.
+                await _observatoryStore.UpsertParserResumeStateAsync(resumeState, cancellationToken);
+            }
+        }
+
+        await _checkpointStore.SaveCheckpointAsync(
             new FileIngestionCheckpoint(
                 filePath,
                 offset,
                 DateTimeOffset.UtcNow,
-                sessionId,
+                state.OwnSessionId ?? previousSessionId,
                 parserVersion,
                 sourceIdentity),
             cancellationToken);
+    }
 
     internal static string GetSourceIdentity(string filePath)
     {
