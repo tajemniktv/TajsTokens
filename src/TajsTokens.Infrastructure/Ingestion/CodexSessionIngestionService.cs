@@ -6,6 +6,7 @@ using System.Text.Json;
 using Microsoft.Win32.SafeHandles;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
+using TajsTokens.Infrastructure.Persistence;
 
 namespace TajsTokens.Infrastructure.Ingestion;
 
@@ -18,12 +19,13 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
     private readonly ISessionIngestionCheckpointStore _checkpointStore;
     private readonly ICodexObservatoryStore? _observatoryStore;
     private readonly ICodexRolloutRecordBatchWriter? _rolloutRecordBatchWriter;
+    private readonly ICodexSemanticBatchWriter? _semanticBatchWriter;
     private readonly CodexRolloutParser _parser = new();
 
     public CodexSessionIngestionService(
         ICodexSessionEventProvider sessionEventProvider,
         ISessionIngestionCheckpointStore checkpointStore)
-        : this(sessionEventProvider, checkpointStore, null, null)
+        : this(sessionEventProvider, checkpointStore, null, null, null)
     {
     }
 
@@ -31,7 +33,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         ICodexSessionEventProvider sessionEventProvider,
         ISessionIngestionCheckpointStore checkpointStore,
         ICodexObservatoryStore? observatoryStore)
-        : this(sessionEventProvider, checkpointStore, observatoryStore, null)
+        : this(sessionEventProvider, checkpointStore, observatoryStore, null, null)
     {
     }
 
@@ -39,12 +41,14 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         ICodexSessionEventProvider sessionEventProvider,
         ISessionIngestionCheckpointStore checkpointStore,
         ICodexObservatoryStore? observatoryStore,
-        ICodexRolloutRecordBatchWriter? rolloutRecordBatchWriter)
+        ICodexRolloutRecordBatchWriter? rolloutRecordBatchWriter,
+        ICodexSemanticBatchWriter? semanticBatchWriter = null)
     {
         _sessionEventProvider = sessionEventProvider;
         _checkpointStore = checkpointStore;
         _observatoryStore = observatoryStore;
         _rolloutRecordBatchWriter = rolloutRecordBatchWriter;
+        _semanticBatchWriter = semanticBatchWriter;
     }
 
     public async Task<CodexIngestionResult> IngestAsync(string filePath, CancellationToken cancellationToken)
@@ -98,6 +102,9 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         var pendingStorageRecords = _rolloutRecordBatchWriter is null
             ? null
             : new List<CodexRolloutRecordMetadata>(DurableBatchSize);
+        var pendingSemanticRecords = _semanticBatchWriter is null
+            ? null
+            : new List<ParsedRolloutRecord>(DurableBatchSize);
 
         await foreach (var record in _sessionEventProvider.ReadNewJsonLinesAsync(filePath, fromOffset, cancellationToken))
         {
@@ -121,7 +128,15 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                         state.OwnSessionId);
                 }
 
-                await PersistParsedTelemetryAsync(parsed, sourceIdentity, filePath, cancellationToken);
+                if (pendingSemanticRecords is not null)
+                {
+                    pendingSemanticRecords.Add(parsed);
+                }
+                else
+                {
+                    await PersistParsedTelemetryAsync(parsed, sourceIdentity, filePath, cancellationToken);
+                }
+
                 pendingStorageRecords?.Add(new CodexRolloutRecordMetadata(
                     parsed.SourceRecordId,
                     parsed.SessionId,
@@ -135,12 +150,17 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                 }
             }
 
-            // This offset becomes durable only after the corresponding storage metadata batch and all
-            // semantic writes above have committed. If batching fails, no checkpoint is advanced and
-            // replay remains safe/idempotent on the next run.
+            // This offset becomes durable only after the corresponding semantic + storage metadata
+            // batches have committed. If either fails, no checkpoint is advanced and replay remains
+            // safe/idempotent on the next run.
             lastCompleteRecordOffset = record.EndByteOffset;
             if (recordsScanned % DurableBatchSize == 0)
             {
+                await FlushSemanticBatchAsync(
+                    pendingSemanticRecords,
+                    sourceIdentity,
+                    filePath,
+                    cancellationToken);
                 await FlushStorageBatchAsync(
                     pendingStorageRecords,
                     sourceIdentity,
@@ -157,6 +177,11 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             }
         }
 
+        await FlushSemanticBatchAsync(
+            pendingSemanticRecords,
+            sourceIdentity,
+            filePath,
+            cancellationToken);
         await FlushStorageBatchAsync(
             pendingStorageRecords,
             sourceIdentity,
@@ -173,6 +198,42 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
 
         var normalized = _observatoryStore is null ? recordsScanned : normalizedRecords;
         return new CodexIngestionResult(recordsScanned, normalized, state.OwnSessionId ?? existing?.LastSessionId);
+    }
+
+    private async Task FlushSemanticBatchAsync(
+        List<ParsedRolloutRecord>? pendingRecords,
+        string sourceIdentity,
+        string filePath,
+        CancellationToken cancellationToken)
+    {
+        if (_semanticBatchWriter is null || pendingRecords is null || pendingRecords.Count == 0)
+        {
+            return;
+        }
+
+        await _semanticBatchWriter.WriteBatchAsync(pendingRecords, cancellationToken);
+
+        if (_rolloutRecordBatchWriter is null && _observatoryStore is not null)
+        {
+            // Alternate/test compositions can opt into semantic batching without the production
+            // rollout metadata batch writer. Retain storage metadata correctness in that shape.
+            var fileSize = TryGetFileSize(filePath);
+            foreach (var parsed in pendingRecords)
+            {
+                await _observatoryStore.RecordRolloutRecordAsync(
+                    parsed.SourceRecordId,
+                    sourceIdentity,
+                    filePath,
+                    parsed.SessionId,
+                    parsed.EventClass,
+                    parsed.RecordBytes,
+                    fileSize,
+                    parsed.TimestampUtc,
+                    cancellationToken);
+            }
+        }
+
+        pendingRecords.Clear();
     }
 
     private async Task PersistParsedTelemetryAsync(
