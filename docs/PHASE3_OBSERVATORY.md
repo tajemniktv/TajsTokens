@@ -39,7 +39,7 @@ Codex rollout filenames normally contain the owning session UUID. The parser wai
 
 A fresh rollout whose filename does **not** contain a corroborating UUID is storage-diagnostics-only in Phase 3. TajsTokens does not guess that the first `session_meta` is the owner because that record may belong to copied parent history. A future verified source contract can safely broaden ownership detection without contaminating existing accounting.
 
-Incremental resumes restore the content-free parser metadata that existed at the exact checkpoint byte offset: owning/parent session, agent nickname, repository, start time, model, reasoning effort and context-window size. If parser state and the byte checkpoint do not match, ingestion replays safely from byte zero instead of normalizing with placeholder metadata.
+Incremental resumes restore the content-free parser metadata that existed at the exact checkpoint byte offset: owning/parent session, agent nickname, repository label, start time, model, reasoning effort and context-window size. If parser state and the byte checkpoint do not match, ingestion replays safely from byte zero instead of normalizing with placeholder metadata.
 
 ## Native shadow accounting
 
@@ -75,13 +75,16 @@ Token-count records contribute content-free `last_token_usage.input_tokens` plus
 Every complete record can contribute only:
 
 - deterministic source-record id;
-- stable source-file identity plus its current path;
+- stable source-file identity;
+- a display-safe file label made from the basename plus a short non-reversible hash of the local path;
 - owning session id when known;
 - normalized event class;
 - byte length;
 - timestamp.
 
-Rollout files are keyed by stable source identity rather than path, so moving a physical file from the active sessions tree into an archive updates its path instead of doubling storage. Replacing a path with a different physical file retires the stale path alias.
+Rollout files are keyed by stable source identity rather than path, so moving a physical file from the active sessions tree into an archive updates its display label instead of doubling storage. Replacing a path with a different physical file retires the stale alias. Absolute rollout paths are used transiently for local file I/O and checkpointing, but observatory tables do not persist them.
+
+Repository/workspace values extracted from rollout metadata are reduced to a final repository label (for example `TajsTokens`) before observatory/session persistence. They are not retained as user-home or workspace absolute paths by the observatory store.
 
 The original JSON payload is discarded after parsing. This lets the UI identify giant records/files and event-class-heavy sessions without duplicating tool output into `telemetry.db`.
 
@@ -101,6 +104,8 @@ The component writes existing normalized `sessions`, `agents`, `agent_relationsh
 
 ## Privacy boundary
 
-Normal Phase 3 ingestion must not persist prompt/message text, reasoning text, source code, command arguments, shell/tool output, credentials, or raw JSONL records. Timeline summaries are intentionally generic (`Tool call`, `Task completed`, `Context compaction`, etc.). Parser-resume state contains only identifiers and telemetry metadata required for correct incremental normalization.
+Normal Phase 3 ingestion must not persist prompt/message text, reasoning text, source code, command arguments, shell/tool output, credentials, raw JSONL records, or absolute local paths in the observatory/session telemetry it owns. Timeline summaries are intentionally generic (`Tool call`, `Task completed`, `Context compaction`, etc.). Parser-resume state contains only identifiers and telemetry metadata required for correct incremental normalization.
+
+The base ingestion checkpoint store still uses the actual local file path as its private lookup key so the incremental reader can reopen the source. That implementation detail is outside the observatory/export surface and should not be described as an absolute-path-free database guarantee.
 
 The regression fixtures under `tests/TajsTokens.Core.Tests/Fixtures/CodexRollouts` are hand-authored synthetic structures. Real personal rollouts are not repository assets.
