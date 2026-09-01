@@ -74,6 +74,67 @@ public sealed class CodexStateIndexedIngestionTests
     }
 
     [Fact]
+    public async Task RefreshAsync_NewProcessReconcilesPathChangeWithoutTimestampAdvance()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-state-reconcile-");
+        var codexHome = Directory.CreateDirectory(Path.Combine(directory.FullName, ".codex"));
+        var sessions = Directory.CreateDirectory(Path.Combine(codexHome.FullName, "sessions"));
+        var archive = Directory.CreateDirectory(Path.Combine(codexHome.FullName, "archived_sessions"));
+        var telemetryPath = Path.Combine(directory.FullName, "telemetry.db");
+        var statePath = Path.Combine(codexHome.FullName, "state_5.sqlite");
+        var threadId = "thread-reconcile";
+        var activePath = Path.Combine(sessions.FullName, "active.jsonl");
+        var archivedPath = Path.Combine(archive.FullName, "archived.jsonl");
+        await File.WriteAllTextAsync(activePath, "{}\n");
+        await File.WriteAllTextAsync(archivedPath, "{}\n");
+
+        try
+        {
+            await CreateStateDatabaseAsync(
+                statePath,
+                [new StateThread(threadId, activePath, 10_000, 20_000, 100)]);
+
+            var repository = new SqliteTelemetryRepository(telemetryPath);
+            await repository.InitializeAsync(CancellationToken.None);
+            var store = new SqliteCodexObservatoryStore(telemetryPath);
+            await store.InitializeAsync(CancellationToken.None);
+            var indexStore = new SqliteCodexStateIndexStore(telemetryPath);
+
+            var firstIngestion = new RecordingIngestionService(threadId);
+            var firstProcess = new CodexObservatoryService(
+                firstIngestion,
+                store,
+                new CodexStateCatalog(codexHome.FullName),
+                indexStore,
+                [sessions.FullName, archive.FullName]);
+            await firstProcess.RefreshAsync(CancellationToken.None);
+            Assert.Single(firstIngestion.Paths);
+
+            // Simulate provider metadata changing while TajsTokens is not running. The deliberately
+            // unchanged updated_at_ms proves process-start full reconciliation is doing real work.
+            await UpdateRolloutPathOnlyAsync(statePath, threadId, archivedPath);
+
+            var secondIngestion = new RecordingIngestionService(threadId);
+            var secondProcess = new CodexObservatoryService(
+                secondIngestion,
+                store,
+                new CodexStateCatalog(codexHome.FullName),
+                indexStore,
+                [sessions.FullName, archive.FullName]);
+            var result = await secondProcess.RefreshAsync(CancellationToken.None);
+
+            var reopened = Assert.Single(secondIngestion.Paths);
+            Assert.Equal(Path.GetFullPath(archivedPath), reopened);
+            Assert.Equal(1, result.FilesScanned);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task RefreshAsync_UnknownStateSchemaFallsBackToFilesystemDiscovery()
     {
         var directory = Directory.CreateTempSubdirectory("tajstokens-state-fallback-");
@@ -145,9 +206,10 @@ public sealed class CodexStateIndexedIngestionTests
                 [(parentId, childId, "open")]);
 
             var catalog = new CodexStateCatalog(codexHome.FullName);
-            var result = Assert.NotNull(await catalog.TryReadSinceAsync(2_500, CancellationToken.None));
+            var result = await catalog.TryReadSinceAsync(2_500, CancellationToken.None);
+            Assert.NotNull(result);
 
-            Assert.Equal(2, result.TotalThreadCount);
+            Assert.Equal(2, result!.TotalThreadCount);
             var changed = Assert.Single(result.Threads);
             Assert.Equal(childId, changed.ThreadId);
             var edge = Assert.Single(result.Edges);
@@ -239,6 +301,17 @@ public sealed class CodexStateIndexedIngestionTests
         command.Parameters.AddWithValue("$seconds", updatedAtMs / 1000);
         command.Parameters.AddWithValue("$milliseconds", updatedAtMs);
         command.Parameters.AddWithValue("$tokens", tokensUsed);
+        command.Parameters.AddWithValue("$id", threadId);
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task UpdateRolloutPathOnlyAsync(string statePath, string threadId, string rolloutPath)
+    {
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = statePath }.ToString());
+        await connection.OpenAsync();
+        var command = connection.CreateCommand();
+        command.CommandText = "UPDATE threads SET rollout_path = $path WHERE id = $id;";
+        command.Parameters.AddWithValue("$path", rolloutPath);
         command.Parameters.AddWithValue("$id", threadId);
         await command.ExecuteNonQueryAsync();
     }
