@@ -22,8 +22,8 @@ public sealed partial class MainWindow : Window
         var pageType = page switch
         {
             "overview" => typeof(OverviewPage),
+            "agents" => typeof(ObservatoryPage),
             "usage" => typeof(PlaceholderPage),
-            "agents" => typeof(PlaceholderPage),
             "forecasts" => typeof(PlaceholderPage),
             "events" => typeof(PlaceholderPage),
             "settings" => typeof(PlaceholderPage),
@@ -33,7 +33,7 @@ public sealed partial class MainWindow : Window
         var parameter = page switch
         {
             "usage" => "Usage",
-            "agents" => "Agents",
+            "agents" => "Observatory",
             "forecasts" => "Forecasts",
             "events" => "Events",
             "settings" => "Settings",

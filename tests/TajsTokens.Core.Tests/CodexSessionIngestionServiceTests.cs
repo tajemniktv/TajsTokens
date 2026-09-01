@@ -18,11 +18,11 @@ public sealed class CodexSessionIngestionServiceTests
             var checkpoints = new InMemoryCheckpointStore();
             var service = new CodexSessionIngestionService(new FileSystemCodexSessionEventProvider(), checkpoints);
 
-            Assert.Equal(1, await service.IngestAsync(filePath, CancellationToken.None));
+            Assert.Equal(1, (await service.IngestAsync(filePath, CancellationToken.None)).RecordsScanned);
             var firstIdentity = checkpoints.Checkpoint!.SourceIdentity;
 
             await File.AppendAllTextAsync(filePath, "{\"n\":2}\n");
-            Assert.Equal(1, await service.IngestAsync(filePath, CancellationToken.None));
+            Assert.Equal(1, (await service.IngestAsync(filePath, CancellationToken.None)).RecordsScanned);
             Assert.Equal(firstIdentity, checkpoints.Checkpoint!.SourceIdentity);
         }
         finally
@@ -44,13 +44,13 @@ public sealed class CodexSessionIngestionServiceTests
             var checkpoints = new InMemoryCheckpointStore();
             var service = new CodexSessionIngestionService(new FileSystemCodexSessionEventProvider(), checkpoints);
 
-            Assert.Equal(1, await service.IngestAsync(filePath, CancellationToken.None));
+            Assert.Equal(1, (await service.IngestAsync(filePath, CancellationToken.None)).RecordsScanned);
             var originalIdentity = checkpoints.Checkpoint!.SourceIdentity;
 
             await File.WriteAllTextAsync(replacementPath, "{\"replacement\":true,\"padding\":\"xxxxxxxxxxxxxxxx\"}\n");
             File.Move(replacementPath, filePath, overwrite: true);
 
-            Assert.Equal(1, await service.IngestAsync(filePath, CancellationToken.None));
+            Assert.Equal(1, (await service.IngestAsync(filePath, CancellationToken.None)).RecordsScanned);
             Assert.NotEqual(originalIdentity, checkpoints.Checkpoint!.SourceIdentity);
         }
         finally

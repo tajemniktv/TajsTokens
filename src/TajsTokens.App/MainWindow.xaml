@@ -17,7 +17,7 @@
             <NavigationView.MenuItems>
                 <NavigationViewItem Content="Overview" Tag="overview" Icon="View" IsSelected="True" />
                 <NavigationViewItem Content="Usage" Tag="usage" Icon="AllApps" />
-                <NavigationViewItem Content="Agents" Tag="agents" Icon="People" />
+                <NavigationViewItem Content="Observatory" Tag="agents" Icon="People" />
                 <NavigationViewItem Content="Forecasts" Tag="forecasts" Icon="Preview" />
                 <NavigationViewItem Content="Events" Tag="events" Icon="Calendar" />
                 <NavigationViewItem Content="Settings" Tag="settings" Icon="Setting" />

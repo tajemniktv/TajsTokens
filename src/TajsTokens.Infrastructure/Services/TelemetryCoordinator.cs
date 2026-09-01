@@ -7,15 +7,15 @@ using TajsTokens.Infrastructure.Persistence;
 namespace TajsTokens.Infrastructure.Services;
 
 /// <summary>
-/// Owns provider refresh serialization for the whole process. Dashboard, tray and alerts consume the
-/// same normalized snapshot so opening another surface cannot accidentally create a second polling
-/// loop or erase last-known-good data after a transient provider failure.
+/// Owns provider refresh serialization for the whole process. Dashboard, tray, alerts, and the
+/// Phase 3 rollout observatory consume one refresh cadence rather than creating competing loops.
 /// </summary>
 public sealed class TelemetryCoordinator
 {
     private readonly ITokscaleProvider _tokscaleProvider;
     private readonly ICodexQuotaProvider _quotaProvider;
     private readonly SqliteTelemetryRepository _repository;
+    private readonly ICodexObservatoryService? _observatoryService;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly object _activeRefreshSync = new();
     private CancellationTokenSource? _activeRefreshCancellation;
@@ -25,11 +25,13 @@ public sealed class TelemetryCoordinator
     public TelemetryCoordinator(
         ITokscaleProvider tokscaleProvider,
         ICodexQuotaProvider quotaProvider,
-        SqliteTelemetryRepository repository)
+        SqliteTelemetryRepository repository,
+        ICodexObservatoryService? observatoryService = null)
     {
         _tokscaleProvider = tokscaleProvider;
         _quotaProvider = quotaProvider;
         _repository = repository;
+        _observatoryService = observatoryService;
     }
 
     public TelemetrySnapshot Latest => Volatile.Read(ref _latest);
@@ -38,9 +40,6 @@ public sealed class TelemetryCoordinator
 
     public async Task<TelemetrySnapshot> RefreshAsync(RefreshTrigger trigger, CancellationToken cancellationToken)
     {
-        // An explicit user refresh should not sit behind a 20-90 second provider call started by the
-        // background timer. Cancel only non-manual work; another manual refresh simply queues behind
-        // the one already requested rather than starting a competing provider scan.
         if (trigger == RefreshTrigger.Manual)
         {
             lock (_activeRefreshSync)
@@ -66,7 +65,7 @@ public sealed class TelemetryCoordinator
             var startedAt = DateTimeOffset.UtcNow;
             var stopwatch = Stopwatch.StartNew();
             var previous = Latest;
-            var sources = new List<ProviderHealthSnapshot>(3);
+            var sources = new List<ProviderHealthSnapshot>(4);
             var events = new List<TelemetryRefreshEvent>();
 
             var persistenceAvailable = false;
@@ -77,7 +76,7 @@ public sealed class TelemetryCoordinator
                 sources.Add(new ProviderHealthSnapshot(
                     "SQLite",
                     TelemetryHealthState.Live,
-                    "Local quota history is available.",
+                    "Local telemetry history is available.",
                     startedAt));
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -87,13 +86,17 @@ public sealed class TelemetryCoordinator
                 events.Add(new TelemetryRefreshEvent(startedAt, "Persistence unavailable", detail));
             }
 
+            Task<CodexObservatoryRefreshResult>? observatoryTask = null;
+            if (persistenceAvailable && _observatoryService is not null)
+            {
+                observatoryTask = _observatoryService.RefreshAsync(refreshToken);
+            }
+
             var tokenUsages = previous.TokenUsages;
             var hourlyBuckets = previous.HourlyBuckets;
             var tokenFresh = false;
             try
             {
-                // Treat Tokscale's model/hourly pair as one snapshot generation. Do not publish a
-                // newly fetched half beside last-known-good data if the second call fails.
                 var freshTokenUsages = await _tokscaleProvider.GetUsageObservationsAsync(refreshToken);
                 var freshHourlyBuckets = await _tokscaleProvider.GetHourlyUsageAsync(refreshToken);
                 tokenUsages = freshTokenUsages;
@@ -144,9 +147,6 @@ public sealed class TelemetryCoordinator
                 }
                 else if (quotaResponseHasSupportedWindow)
                 {
-                    // A valid but partial provider response must not erase an omitted quota lane.
-                    // Merge the observed lane into last-known-good state, but keep global freshness
-                    // false so callers cannot mistake the mixed set for one complete live snapshot.
                     quotaSnapshots = MergeQuotaSnapshots(previous.QuotaSnapshots, freshQuotaSnapshots);
                 }
 
@@ -191,8 +191,6 @@ public sealed class TelemetryCoordinator
             {
                 try
                 {
-                    // Persist only observations actually returned during this refresh. Never write a
-                    // retained stale lane as though the provider had just observed it again.
                     foreach (var snapshot in freshQuotaSnapshots.Where(snapshot =>
                                  snapshot.Kind is QuotaWindowKind.FiveHour or QuotaWindowKind.Weekly))
                     {
@@ -208,6 +206,31 @@ public sealed class TelemetryCoordinator
                         startedAt,
                         "Persistence error",
                         $"Live provider data is still available, but fresh quota observations were not stored: {detail}"));
+                }
+            }
+
+            if (observatoryTask is not null)
+            {
+                try
+                {
+                    var observatory = await observatoryTask;
+                    var state = observatory.Errors > 0 ? TelemetryHealthState.Stale : TelemetryHealthState.Live;
+                    var detail = observatory.FilesDiscovered == 0
+                        ? "No local Codex rollout JSONL sources were discovered."
+                        : $"{observatory.FilesDiscovered} rollout file(s), {observatory.RecordsScanned} new complete record(s), {observatory.RecordsNormalized} normalized, {observatory.SessionsTouched} touched session(s), {FormatByteCount(observatory.BytesObserved)} observed on disk." +
+                          (observatory.Errors > 0 ? $" {observatory.Errors} file(s) could not be refreshed and will retry." : string.Empty);
+                    sources.Add(new ProviderHealthSnapshot("Codex rollouts", state, detail, startedAt));
+                    events.Add(new TelemetryRefreshEvent(startedAt, "Codex observatory", detail));
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    var detail = SummarizeError(exception);
+                    sources.Add(new ProviderHealthSnapshot(
+                        "Codex rollouts",
+                        TelemetryHealthState.Stale,
+                        $"Rollout observatory refresh failed; previously normalized history remains available. {detail}",
+                        PreviousSuccess(previous, "Codex rollouts")));
+                    events.Add(new TelemetryRefreshEvent(startedAt, "Codex observatory unavailable", detail));
                 }
             }
 
@@ -266,8 +289,6 @@ public sealed class TelemetryCoordinator
         }
         catch
         {
-            // A manual refresh can preempt startup work, and unexpected coordinator failures must not
-            // kill the periodic chain. Provider failures themselves are normalized into snapshots.
         }
 
         using var timer = new PeriodicTimer(interval);
@@ -285,15 +306,11 @@ public sealed class TelemetryCoordinator
                 }
                 catch
                 {
-                    // Keep the next interval alive, including when a manual refresh preempted this tick.
-                    // The dashboard/tray retain the previous snapshot until a successful refresh lands.
                 }
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            // PeriodicTimer propagates cancellation from WaitForNextTickAsync. Reconfiguration and
-            // normal shutdown both intentionally end this loop without surfacing a faulted task.
         }
     }
 
@@ -342,6 +359,18 @@ public sealed class TelemetryCoordinator
             >= 1_000_000 => $"{value / 1_000_000d:0.0}M",
             >= 1_000 => $"{value / 1_000d:0.0}K",
             _ => value.ToString("N0")
+        };
+    }
+
+    private static string FormatByteCount(long value)
+    {
+        var absolute = Math.Abs((double)value);
+        return absolute switch
+        {
+            >= 1_073_741_824 => $"{value / 1_073_741_824d:0.00} GiB",
+            >= 1_048_576 => $"{value / 1_048_576d:0.0} MiB",
+            >= 1_024 => $"{value / 1_024d:0.0} KiB",
+            _ => $"{value:N0} B"
         };
     }
 

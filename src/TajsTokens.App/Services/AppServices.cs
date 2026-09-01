@@ -8,8 +8,8 @@ using TajsTokens.Infrastructure.Services;
 namespace TajsTokens.App.Services;
 
 /// <summary>
-/// Small process-lifetime composition root. Phase 2 keeps one telemetry coordinator alive for the
-/// dashboard, tray and alert engine rather than letting each surface create its own provider loop.
+/// Process-lifetime application composition root. Codex rollout reader/parser construction remains
+/// behind the Infrastructure observatory factory; UI surfaces consume only normalized interfaces.
 /// </summary>
 public sealed class AppServices
 {
@@ -17,7 +17,7 @@ public sealed class AppServices
     {
         var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         DataFolder = Path.Combine(appDataPath, "TajsTokens");
-        var databasePath = Path.Combine(DataFolder, "telemetry.db");
+        DatabasePath = Path.Combine(DataFolder, "telemetry.db");
         var settingsPath = Path.Combine(DataFolder, "settings.json");
 
         try
@@ -31,19 +31,29 @@ public sealed class AppServices
 
         SettingsStore = new RuntimeSettingsStore(settingsPath);
         Settings = SettingsStore.Load();
-        Repository = new SqliteTelemetryRepository(databasePath);
+        Repository = new SqliteTelemetryRepository(DatabasePath);
         TokscaleProvider = new TokscaleProvider();
         CodexQuotaProvider = new CodexAppServerQuotaProvider();
-        Telemetry = new TelemetryCoordinator(TokscaleProvider, CodexQuotaProvider, Repository);
+
+        var observatory = CodexObservatoryRuntimeFactory.Create(DatabasePath, Repository);
+        ObservatoryStore = observatory.Store;
+        CodexSessionIngestion = observatory.Ingestion;
+        CodexObservatory = observatory.Service;
+
+        Telemetry = new TelemetryCoordinator(TokscaleProvider, CodexQuotaProvider, Repository, CodexObservatory);
         AlertEngine = new QuotaAlertEngine(Settings.LowQuotaThresholds);
     }
 
     public string DataFolder { get; }
+    public string DatabasePath { get; }
     public RuntimeSettings Settings { get; private set; }
     public RuntimeSettingsStore SettingsStore { get; }
     public SqliteTelemetryRepository Repository { get; }
+    public ICodexObservatoryStore ObservatoryStore { get; }
     public ITokscaleProvider TokscaleProvider { get; }
     public ICodexQuotaProvider CodexQuotaProvider { get; }
+    public ICodexSessionIngestionService CodexSessionIngestion { get; }
+    public ICodexObservatoryService CodexObservatory { get; }
     public TelemetryCoordinator Telemetry { get; }
     public QuotaAlertEngine AlertEngine { get; }
     public Exception? StartupPersistenceError { get; }
