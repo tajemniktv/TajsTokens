@@ -13,6 +13,7 @@ public partial class App : Application
     private readonly WindowsSystemTrayService _trayService = new();
     private readonly WindowsStartupRegistrationService _startupService = new();
     private CancellationTokenSource? _periodicCancellation;
+    private Task? _periodicTask;
     private Window? _window;
     private DispatcherQueue? _dispatcher;
     private bool _exitRequested;
@@ -66,8 +67,14 @@ public partial class App : Application
         previous?.Dispose();
 
         var token = _periodicCancellation.Token;
-        _ = Services.Telemetry.RunPeriodicAsync(
-            TimeSpan.FromSeconds(Services.Settings.PollIntervalSeconds),
+        var interval = TimeSpan.FromSeconds(Services.Settings.PollIntervalSeconds);
+
+        // Microsoft.Data.Sqlite performs its SQLite work synchronously even behind many async APIs.
+        // Starting the collector directly from OnLaunched therefore lets its continuations inherit
+        // WinUI's DispatcherQueueSynchronizationContext and can freeze the window during a first-run
+        // rollout scan. Keep the entire process-lifetime collector on the thread pool instead.
+        _periodicTask = Task.Run(
+            () => Services.Telemetry.RunPeriodicAsync(interval, token),
             token);
     }
 
@@ -186,6 +193,7 @@ public partial class App : Application
         _periodicCancellation?.Cancel();
         _periodicCancellation?.Dispose();
         _periodicCancellation = null;
+        _periodicTask = null;
         Services.Telemetry.SnapshotUpdated -= OnSnapshotUpdated;
         Services.SettingsChanged -= OnSettingsChanged;
         _trayService.Dispose();
