@@ -1,0 +1,21 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="ARM64" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/src/">
+    <Project Path="src/TajsTokens.App/TajsTokens.App.csproj">
+      <Platform Solution="*|Any CPU" Project="x64" />
+      <Platform Solution="*|ARM64" Project="arm64" />
+      <Platform Solution="*|x64" Project="x64" />
+      <Platform Solution="*|x86" Project="x86" />
+    </Project>
+    <Project Path="src/TajsTokens.Core/TajsTokens.Core.csproj" />
+    <Project Path="src/TajsTokens.Infrastructure/TajsTokens.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/TajsTokens.Core.Tests/TajsTokens.Core.Tests.csproj" />
+  </Folder>
+</Solution>
