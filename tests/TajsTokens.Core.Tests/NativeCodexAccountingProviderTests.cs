@@ -69,6 +69,73 @@ public sealed class NativeCodexAccountingProviderTests
     }
 
     [Fact]
+    public async Task SqliteProjection_KeepsReportedTotalOnlyObservationsVisible()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-native-reported-only-");
+        var databasePath = Path.Combine(directory.FullName, "telemetry.db");
+        var observed = new DateTimeOffset(2026, 9, 1, 10, 5, 0, TimeSpan.Zero);
+
+        try
+        {
+            var repository = new SqliteTelemetryRepository(databasePath);
+            var store = new SqliteCodexObservatoryStore(databasePath);
+            await repository.InitializeAsync(CancellationToken.None);
+            await store.InitializeAsync(CancellationToken.None);
+            await store.ApplyCumulativeTokenObservationAsync(
+                Token("reported-only", "session-a", observed, "model-a", 0, 0, 0, 0, 0, 77),
+                CancellationToken.None);
+
+            var snapshot = await new SqliteNativeCodexAccountingProvider(databasePath)
+                .GetSnapshotAsync(CancellationToken.None);
+
+            Assert.Equal(77, Assert.Single(snapshot.Usage).Breakdown.Total);
+            Assert.Equal(77, Assert.Single(snapshot.Hourly).Breakdown.Total);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SqliteProjection_CacheInvalidatesWhenTokenTableChanges()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-native-cache-");
+        var databasePath = Path.Combine(directory.FullName, "telemetry.db");
+        var observed = new DateTimeOffset(2026, 9, 1, 10, 5, 0, TimeSpan.Zero);
+
+        try
+        {
+            var repository = new SqliteTelemetryRepository(databasePath);
+            var store = new SqliteCodexObservatoryStore(databasePath);
+            await repository.InitializeAsync(CancellationToken.None);
+            await store.InitializeAsync(CancellationToken.None);
+            await store.ApplyCumulativeTokenObservationAsync(
+                Token("a1", "session-a", observed, "model-a", 100, 20, 0, 10, 2, 110),
+                CancellationToken.None);
+
+            var provider = new SqliteNativeCodexAccountingProvider(databasePath);
+            var first = await provider.GetSnapshotAsync(CancellationToken.None);
+            var cached = await provider.GetSnapshotAsync(CancellationToken.None);
+            Assert.Same(first, cached);
+
+            await store.ApplyCumulativeTokenObservationAsync(
+                Token("a2", "session-a", observed.AddMinutes(1), "model-a", 150, 30, 0, 20, 4, 170),
+                CancellationToken.None);
+
+            var updated = await provider.GetSnapshotAsync(CancellationToken.None);
+            Assert.NotSame(first, updated);
+            Assert.Equal(170, Assert.Single(updated.Usage).Breakdown.Total);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task NativeFirst_DefaultPath_DoesNotInvokeTokscale()
     {
         var nativeSnapshot = Snapshot("Native Codex", "codex-native", 123);
@@ -109,6 +176,27 @@ public sealed class NativeCodexAccountingProviderTests
         Assert.Contains("total Δ", actual.Diagnostic, StringComparison.Ordinal);
         Assert.Equal(1, tokscale.UsageCalls);
         Assert.Equal(1, tokscale.HourlyCalls);
+    }
+
+    [Fact]
+    public async Task NativeFirst_ReconciliationFailureKeepsHealthyNativeGeneration()
+    {
+        var nativeSnapshot = Snapshot("Native Codex", "codex-native", 120);
+        var provider = new NativeFirstCodexAccountingProvider(
+            new StaticProvider(nativeSnapshot),
+            new ThrowingTokscaleProvider(new InvalidOperationException("oracle unavailable")),
+            reconciliationEnabled: () => true,
+            fallbackEnabled: () => false);
+
+        var actual = await provider.GetSnapshotAsync(CancellationToken.None);
+
+        Assert.Equal("Native Codex", actual.Source);
+        Assert.Equal(nativeSnapshot.Usage, actual.Usage);
+        Assert.Equal(nativeSnapshot.Hourly, actual.Hourly);
+        Assert.Null(actual.Reconciliation);
+        Assert.False(actual.IsFallback);
+        Assert.Contains("reconciliation unavailable", actual.Diagnostic, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("oracle unavailable", actual.Diagnostic, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
@@ -221,5 +309,14 @@ public sealed class NativeCodexAccountingProviderTests
             HourlyCalls++;
             return Task.FromResult(snapshot.Hourly);
         }
+    }
+
+    private sealed class ThrowingTokscaleProvider(Exception exception) : ITokscaleProvider
+    {
+        public Task<IReadOnlyList<TokenUsage>> GetUsageObservationsAsync(CancellationToken cancellationToken) =>
+            Task.FromException<IReadOnlyList<TokenUsage>>(exception);
+
+        public Task<IReadOnlyList<TokenTimeBucket>> GetHourlyUsageAsync(CancellationToken cancellationToken) =>
+            Task.FromException<IReadOnlyList<TokenTimeBucket>>(exception);
     }
 }
