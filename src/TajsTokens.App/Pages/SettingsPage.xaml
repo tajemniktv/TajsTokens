@@ -102,12 +102,18 @@
                                Opacity="0.75" />
                     <TextBlock Text="Native Codex state + rollouts"
                                FontWeight="SemiBold" />
-                    <TextBlock Text="Built-in incremental session, token, topology, context, and activity telemetry."
+                    <TextBlock Text="Default token/session source. TajsTokens incrementally normalizes local Codex state and rollouts; remote/cloud-only sessions are explicitly outside this coverage until that source exists."
                                Opacity="0.75"
                                TextWrapping="Wrap" />
-                    <TextBlock Text="Tokscale"
-                               FontWeight="SemiBold" />
-                    <TextBlock Text="Currently retained as the broad displayed accounting source while native parity/cutover is validated. Source selection will become configurable with the native-accounting cutover rather than exposing a switch that does not yet have correct semantics."
+                    <ToggleSwitch x:Name="TokscaleReconciliationToggle"
+                                  Header="Reconcile native accounting with Tokscale"
+                                  OffContent="Disabled · no Tokscale process"
+                                  OnContent="Run Tokscale as an optional comparison oracle" />
+                    <ToggleSwitch x:Name="TokscaleFallbackToggle"
+                                  Header="Allow Tokscale fallback"
+                                  OffContent="Native failure stays visible as unavailable/stale"
+                                  OnContent="Use Tokscale only if native accounting fails" />
+                    <TextBlock Text="Both Tokscale options are disabled by default. Enabling either can launch the Tokscale CLI (or its npx fallback); normal collection no longer requires Node.js, npm, or Tokscale."
                                Opacity="0.75"
                                TextWrapping="Wrap" />
                 </StackPanel>
