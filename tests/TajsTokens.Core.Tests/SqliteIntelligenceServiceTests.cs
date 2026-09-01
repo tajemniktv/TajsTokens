@@ -46,6 +46,9 @@ public sealed class SqliteIntelligenceServiceTests
                 Tokens("child-1", "child", start.AddMinutes(7), 600, 450, 80, 680),
                 CancellationToken.None);
             await observatory.ApplyCumulativeTokenObservationAsync(
+                Tokens("child-2", "child", start.AddMinutes(20), 1_400, 1_000, 160, 1_560),
+                CancellationToken.None);
+            await observatory.ApplyCumulativeTokenObservationAsync(
                 Tokens("root-2", "root", start.AddMinutes(25), 3_000, 2_300, 300, 3_300),
                 CancellationToken.None);
 
