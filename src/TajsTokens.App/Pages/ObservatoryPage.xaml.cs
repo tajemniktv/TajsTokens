@@ -8,13 +8,13 @@ namespace TajsTokens.App.Pages;
 public sealed partial class ObservatoryPage : Page
 {
     private readonly Dictionary<string, CodexSessionOverview> _sessionsById = new(StringComparer.OrdinalIgnoreCase);
-    private IReadOnlyList<CodexSessionOverview> _allSessions = [];
     private CancellationTokenSource? _pageCancellation;
     private bool _isLoaded;
     private bool _loading;
     private bool _reloadRequested;
     private long _selectionGeneration;
     private long _detailGeneration;
+    private long _searchGeneration;
 
     public ObservatoryPage()
     {
@@ -51,6 +51,7 @@ public sealed partial class ObservatoryPage : Page
         App.Services.Telemetry.SnapshotUpdated -= OnSnapshotUpdated;
         Interlocked.Increment(ref _selectionGeneration);
         Interlocked.Increment(ref _detailGeneration);
+        Interlocked.Increment(ref _searchGeneration);
 
         var cancellation = Interlocked.Exchange(ref _pageCancellation, null);
         cancellation?.Cancel();
@@ -155,17 +156,19 @@ public sealed partial class ObservatoryPage : Page
             {
                 var store = App.Services.ObservatoryStore;
                 var repository = App.Services.Repository;
+                var readModel = App.Services.ObservatoryReadModel;
+                var search = SessionSearch.Text.Trim();
 
                 // Microsoft.Data.Sqlite still performs synchronous native work behind async-shaped
-                // calls. Keep aggregate/session reads away from the dispatcher. Detail domains are no
-                // longer loaded here; the selected tab requests only the data it needs.
+                // calls. Keep aggregate/session reads away from the dispatcher and push filtering into
+                // SQLite before LIMIT so older matching sessions remain discoverable.
                 var data = await Task.Run(async () =>
                 {
                     await repository.InitializeAsync(cancellationToken);
                     await store.InitializeAsync(cancellationToken);
 
                     var summaryTask = store.GetSummaryAsync(cancellationToken);
-                    var sessionsTask = store.GetSessionOverviewsAsync(750, cancellationToken);
+                    var sessionsTask = readModel.SearchSessionsAsync(search, search.Length == 0 ? 750 : 250, cancellationToken);
                     await Task.WhenAll(summaryTask, sessionsTask);
 
                     return (
@@ -180,17 +183,11 @@ public sealed partial class ObservatoryPage : Page
                 }
 
                 var selectedId = (SessionList.SelectedItem as SessionRow)?.SessionId;
-                _allSessions = data.Sessions;
-                _sessionsById.Clear();
-                foreach (var session in _allSessions)
-                {
-                    _sessionsById[session.SessionId] = session;
-                }
+                ApplySessionRows(data.Sessions, selectedId, search);
 
                 SessionCountText.Text = data.Summary.SessionCount.ToString("N0");
                 NativeTokensText.Text = FormatCount(data.Summary.NativeTokens.ReportedTotal);
                 StorageText.Text = FormatBytes(data.Summary.RolloutBytes);
-                ApplySessionFilter(selectedId);
 
                 var rolloutSource = App.Services.Telemetry.Latest.Sources.FirstOrDefault(source =>
                     string.Equals(source.Provider, "Codex rollouts", StringComparison.OrdinalIgnoreCase));
@@ -222,32 +219,71 @@ public sealed partial class ObservatoryPage : Page
         while (_reloadRequested && _isLoaded && !cancellationToken.IsCancellationRequested);
     }
 
-    private void OnSessionSearchChanged(object sender, TextChangedEventArgs e)
+    private async void OnSessionSearchChanged(object sender, TextChangedEventArgs e)
     {
-        if (!_isLoaded)
+        var cancellation = _pageCancellation;
+        if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested)
         {
             return;
         }
 
+        var generation = Interlocked.Increment(ref _searchGeneration);
+        var search = SessionSearch.Text.Trim();
         var selectedId = (SessionList.SelectedItem as SessionRow)?.SessionId;
-        ApplySessionFilter(selectedId);
+
+        try
+        {
+            // TextChanged can fire for every keystroke. A small page-scoped debounce keeps the local
+            // query service cheap while generation checks prevent an older result from replacing a
+            // newer search after an out-of-order completion.
+            await Task.Delay(150, cancellation.Token);
+            if (generation != Volatile.Read(ref _searchGeneration))
+            {
+                return;
+            }
+
+            var sessions = await Task.Run(
+                () => App.Services.ObservatoryReadModel.SearchSessionsAsync(
+                    search,
+                    search.Length == 0 ? 750 : 250,
+                    cancellation.Token),
+                cancellation.Token);
+
+            if (!_isLoaded || cancellation.IsCancellationRequested ||
+                !ReferenceEquals(_pageCancellation, cancellation) ||
+                generation != Volatile.Read(ref _searchGeneration) ||
+                !string.Equals(SessionSearch.Text.Trim(), search, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            ApplySessionRows(sessions, selectedId, search);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            // Page lifecycle owns cancellation.
+        }
+        catch (Exception exception)
+        {
+            if (_isLoaded && generation == Volatile.Read(ref _searchGeneration))
+            {
+                StatusText.Text = $"Session search unavailable: {Summarize(exception.Message)}";
+            }
+        }
     }
 
-    private void ApplySessionFilter(string? preferredSelectionId)
+    private void ApplySessionRows(
+        IReadOnlyList<CodexSessionOverview> sessions,
+        string? preferredSelectionId,
+        string search)
     {
-        var search = SessionSearch.Text.Trim();
-        IEnumerable<CodexSessionOverview> filtered = _allSessions;
-        if (search.Length > 0)
+        _sessionsById.Clear();
+        foreach (var session in sessions)
         {
-            filtered = filtered.Where(session =>
-                Contains(session.DisplayName, search) ||
-                Contains(session.Repository, search) ||
-                Contains(session.Model, search) ||
-                Contains(session.Status, search) ||
-                Contains(session.SessionId, search));
+            _sessionsById[session.SessionId] = session;
         }
 
-        var rows = filtered.Select(ToSessionRow).ToArray();
+        var rows = sessions.Select(ToSessionRow).ToArray();
         SessionList.ItemsSource = rows;
 
         if (preferredSelectionId is not null)
@@ -338,24 +374,21 @@ public sealed partial class ObservatoryPage : Page
         try
         {
             var store = App.Services.ObservatoryStore;
+            var readModel = App.Services.ObservatoryReadModel;
             switch (selectedTab)
             {
                 case 1:
                 {
                     AgentTreeList.ItemsSource = new[] { new AgentTreeRow("Loading agent topology…") };
-                    var data = await Task.Run(async () =>
-                    {
-                        var agentsTask = store.GetAgentsAsync(null, cancellation.Token);
-                        var relationshipsTask = store.GetAgentRelationshipsAsync(cancellation.Token);
-                        await Task.WhenAll(agentsTask, relationshipsTask);
-                        return (Agents: await agentsTask, Relationships: await relationshipsTask);
-                    }, cancellation.Token);
+                    var topology = await Task.Run(
+                        () => readModel.GetAgentTopologyAsync(session.SessionId, cancellation.Token),
+                        cancellation.Token);
 
                     if (!CanApplyDetail(session.SessionId, selectionGeneration, detailGeneration, cancellation))
                     {
                         return;
                     }
-                    AgentTreeList.ItemsSource = BuildAgentTree(session.SessionId, data.Agents, data.Relationships);
+                    AgentTreeList.ItemsSource = BuildAgentTree(session.SessionId, topology.Agents, topology.Relationships);
                     break;
                 }
                 case 2:
@@ -394,21 +427,20 @@ public sealed partial class ObservatoryPage : Page
                 {
                     StorageList.ItemsSource = new[] { new StorageRow("Loading…", "Querying rollout storage metadata") };
                     var storage = await Task.Run(
-                        () => store.GetRolloutStorageAsync(500, cancellation.Token),
+                        () => readModel.GetSessionStorageAsync(session.SessionId, 500, cancellation.Token),
                         cancellation.Token);
                     if (!CanApplyDetail(session.SessionId, selectionGeneration, detailGeneration, cancellation))
                     {
                         return;
                     }
-                    var matching = storage
-                        .Where(item => string.Equals(item.SessionId, session.SessionId, StringComparison.OrdinalIgnoreCase))
+                    var rows = storage
                         .Select(item => new StorageRow(
                             Path.GetFileName(item.FilePath),
                             $"{FormatBytes(item.SizeBytes)} · {item.RecordsSeen:N0} records · max {FormatBytes(item.LargestRecordBytes)}"))
                         .ToArray();
-                    StorageList.ItemsSource = matching.Length == 0
+                    StorageList.ItemsSource = rows.Length == 0
                         ? new[] { new StorageRow("No rollout source", "No current storage row is associated with this session.") }
-                        : matching;
+                        : rows;
                     break;
                 }
             }
@@ -579,9 +611,6 @@ public sealed partial class ObservatoryPage : Page
             }
         }
     }
-
-    private static bool Contains(string? value, string search) =>
-        value?.Contains(search, StringComparison.OrdinalIgnoreCase) == true;
 
     private static string FormatCount(long value)
     {
