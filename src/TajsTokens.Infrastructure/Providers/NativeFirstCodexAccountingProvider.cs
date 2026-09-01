@@ -21,11 +21,11 @@ public sealed class NativeFirstCodexAccountingProvider(
         CodexTokenAccountingSnapshot native;
         try
         {
-            native = await nativeProvider.GetSnapshotAsync(cancellationToken);
+            native = await nativeProvider.GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
         }
         catch (Exception nativeException) when (nativeException is not OperationCanceledException && fallbackEnabled())
         {
-            var fallback = await _tokscaleAccounting.GetSnapshotAsync(cancellationToken);
+            var fallback = await _tokscaleAccounting.GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
             return fallback with
             {
                 Source = "Tokscale fallback",
@@ -41,7 +41,7 @@ public sealed class NativeFirstCodexAccountingProvider(
 
         try
         {
-            var reference = await _tokscaleAccounting.GetSnapshotAsync(cancellationToken);
+            var reference = await _tokscaleAccounting.GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
             var reconciliation = Reconcile(native, reference);
             return native with
             {
