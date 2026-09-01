@@ -1,30 +1,41 @@
 using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Infrastructure.Ingestion;
 
 namespace TajsTokens.Infrastructure.Persistence;
 
-internal interface ICodexSemanticBatchWriter
+internal interface ICodexIngestionBatchWriter
 {
-    Task WriteBatchAsync(IReadOnlyList<ParsedRolloutRecord> records, CancellationToken cancellationToken);
+    Task WriteBatchAsync(
+        string sourceIdentity,
+        string filePath,
+        long fileSizeBytes,
+        IReadOnlyList<ParsedRolloutRecord> records,
+        CancellationToken cancellationToken);
 }
 
 /// <summary>
-/// Persists the high-volume, straightforward Codex semantic projections in one SQLite transaction.
-/// Cumulative token observations retain the existing store's ordered counter-epoch logic and are
-/// applied sequentially after the projection transaction. If a later token write fails, the source
-/// checkpoint is not advanced; replay is safe because every projection upsert is idempotent.
+/// Single high-volume writer lane for one Codex rollout batch. Semantic projections and rollout
+/// file/record metadata share one serialization gate, connection and transaction. Correctness-critical
+/// cumulative token observations remain ordered and reuse the established counter-epoch implementation
+/// after the projection transaction; the gate remains held until those writes complete, and the source
+/// checkpoint is advanced only after the entire batch succeeds.
 /// </summary>
-internal sealed class SqliteCodexSemanticBatchWriter(
+internal sealed class SqliteCodexIngestionBatchWriter(
     string databasePath,
-    ICodexObservatoryStore observatoryStore) : ICodexSemanticBatchWriter
+    ICodexObservatoryStore observatoryStore) : ICodexIngestionBatchWriter
 {
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly ICodexObservatoryStore _observatoryStore = observatoryStore;
     private readonly SemaphoreSlim _writeGate = new(1, 1);
 
     public async Task WriteBatchAsync(
+        string sourceIdentity,
+        string filePath,
+        long fileSizeBytes,
         IReadOnlyList<ParsedRolloutRecord> records,
         CancellationToken cancellationToken)
     {
@@ -41,12 +52,20 @@ internal sealed class SqliteCodexSemanticBatchWriter(
             await connection.OpenAsync(cancellationToken);
             using var transaction = connection.BeginTransaction();
 
-            await WriteProjectionBatchAsync(connection, transaction, records, cancellationToken);
+            var safeFileLabel = BuildSafeFileLabel(filePath);
+            await WriteProjectionAndStorageBatchAsync(
+                connection,
+                transaction,
+                sourceIdentity,
+                safeFileLabel,
+                Math.Max(0, fileSizeBytes),
+                records,
+                cancellationToken);
             transaction.Commit();
 
             // Counter observations deliberately remain ordered and use the established replay/reset
-            // implementation. This still removes the much larger session/agent/activity/quota/context
-            // autocommit fan-out while keeping the riskiest accounting logic single-sourced.
+            // implementation. Replay is safe because every projection/storage mutation above is
+            // idempotent and the byte checkpoint is not advanced until these writes also succeed.
             foreach (var record in records)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -64,12 +83,55 @@ internal sealed class SqliteCodexSemanticBatchWriter(
         }
     }
 
-    private static async Task WriteProjectionBatchAsync(
+    private static async Task WriteProjectionAndStorageBatchAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
+        string sourceIdentity,
+        string safeFileLabel,
+        long fileSizeBytes,
         IReadOnlyList<ParsedRolloutRecord> records,
         CancellationToken cancellationToken)
     {
+        var sessionId = records
+            .Select(record => record.SessionId)
+            .LastOrDefault(value => !string.IsNullOrWhiteSpace(value));
+        var lastSeen = records.Max(record => record.TimestampUtc);
+
+        using (var removeAlias = BuildCommand(
+                   connection,
+                   transaction,
+                   "DELETE FROM rollout_files WHERE file_path = $file AND source_identity <> $identity;",
+                   "$file",
+                   "$identity"))
+        {
+            Set(removeAlias, "$file", safeFileLabel);
+            Set(removeAlias, "$identity", sourceIdentity);
+            await removeAlias.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        using (var rolloutFile = BuildCommand(
+                   connection,
+                   transaction,
+                   """
+                   INSERT INTO rollout_files(source_identity, file_path, session_id, size_bytes, last_seen_at_utc)
+                   VALUES($identity, $file, $session, $size, $seen)
+                   ON CONFLICT(source_identity) DO UPDATE SET
+                     file_path = excluded.file_path,
+                     session_id = COALESCE(excluded.session_id, rollout_files.session_id),
+                     size_bytes = excluded.size_bytes,
+                     last_seen_at_utc = MAX(rollout_files.last_seen_at_utc, excluded.last_seen_at_utc);
+                   """,
+                   "$identity", "$file", "$session", "$size", "$seen"))
+        {
+            Set(rolloutFile, "$identity", sourceIdentity);
+            Set(rolloutFile, "$file", safeFileLabel);
+            Set(rolloutFile, "$session", DbValue(sessionId));
+            Set(rolloutFile, "$size", fileSizeBytes);
+            Set(rolloutFile, "$seen", SerializeUtc(lastSeen));
+            await rolloutFile.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        using var rolloutRecord = BuildRolloutRecordCommand(connection, transaction);
         using var session = BuildSessionCommand(connection, transaction);
         using var agent = BuildAgentCommand(connection, transaction);
         using var relationship = BuildRelationshipCommand(connection, transaction);
@@ -80,6 +142,15 @@ internal sealed class SqliteCodexSemanticBatchWriter(
         foreach (var record in records)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            Set(rolloutRecord, "$id", record.SourceRecordId);
+            Set(rolloutRecord, "$identity", sourceIdentity);
+            Set(rolloutRecord, "$file", safeFileLabel);
+            Set(rolloutRecord, "$session", DbValue(record.SessionId));
+            Set(rolloutRecord, "$class", record.EventClass);
+            Set(rolloutRecord, "$bytes", Math.Max(0, record.RecordBytes));
+            Set(rolloutRecord, "$observed", SerializeUtc(record.TimestampUtc));
+            await rolloutRecord.ExecuteNonQueryAsync(cancellationToken);
 
             if (record.Session is not null)
             {
@@ -154,6 +225,14 @@ internal sealed class SqliteCodexSemanticBatchWriter(
             }
         }
     }
+
+    private static SqliteCommand BuildRolloutRecordCommand(SqliteConnection connection, SqliteTransaction transaction) =>
+        BuildCommand(connection, transaction, """
+            INSERT INTO rollout_records(
+                source_record_id, source_identity, file_path, session_id, event_class, record_bytes, observed_at_utc)
+            VALUES($id, $identity, $file, $session, $class, $bytes, $observed)
+            ON CONFLICT(source_record_id) DO NOTHING;
+            """, "$id", "$identity", "$file", "$session", "$class", "$bytes", "$observed");
 
     private static SqliteCommand BuildSessionCommand(SqliteConnection connection, SqliteTransaction transaction) =>
         BuildCommand(connection, transaction, """
@@ -242,6 +321,33 @@ internal sealed class SqliteCodexSemanticBatchWriter(
 
     private static void Set(SqliteCommand command, string parameterName, object value) =>
         command.Parameters[parameterName].Value = value;
+
+    private static string BuildSafeFileLabel(string filePath)
+    {
+        var fileName = Path.GetFileName(filePath);
+        if (string.IsNullOrWhiteSpace(fileName))
+        {
+            fileName = "rollout.jsonl";
+        }
+
+        string normalized;
+        try
+        {
+            normalized = Path.GetFullPath(filePath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        }
+        catch
+        {
+            normalized = filePath;
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            normalized = normalized.ToUpperInvariant();
+        }
+
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized))).ToLowerInvariant()[..12];
+        return $"{fileName} [{hash}]";
+    }
 
     private static string SafeRepositoryLabel(string? value)
     {
