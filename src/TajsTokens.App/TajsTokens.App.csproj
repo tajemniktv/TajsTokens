@@ -1,32 +1,36 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup Condition="'$(OS)' == 'Windows_NT'">
-  <OutputType>WinExe</OutputType>
-  <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
-  <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
-  <RootNamespace>TajsTokens.App</RootNamespace>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.19041.0</TargetPlatformMinVersion>
+    <RootNamespace>TajsTokens.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <Platforms>x64;x86;arm64</Platforms>
+    <RuntimeIdentifiers>win-x64;win-x86;win-arm64</RuntimeIdentifiers>
+    <UseWinUI>true</UseWinUI>
 
-  <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Unpackaged WinUI deployment -->
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
 
-  <Platforms>x64;x86;arm64</Platforms>
-  <RuntimeIdentifiers>win-x64;win-x86;win-arm64</RuntimeIdentifiers>
+    <!-- Keep WinUI publish conservative -->
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishSingleFile>false</PublishSingleFile>
+    <PublishReadyToRun>false</PublishReadyToRun>
 
-  <UseWinUI>true</UseWinUI>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
 
-  <!-- Unpackaged WinUI deployment -->
-  <WindowsPackageType>None</WindowsPackageType>
-  <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
-  <EnableMsixTooling>true</EnableMsixTooling>
-
-  <EnableWindowsTargeting>true</EnableWindowsTargeting>
-
-  <!-- Keep WinUI publish conservative -->
-  <PublishTrimmed>false</PublishTrimmed>
-  <PublishSingleFile>false</PublishSingleFile>
-  <PublishReadyToRun>false</PublishReadyToRun>
-
-  <Nullable>enable</Nullable>
-  <ImplicitUsings>enable</ImplicitUsings>
-</PropertyGroup>
+  <PropertyGroup Condition="'$(OS)' != 'Windows_NT'">
+    <TargetFramework>net10.0</TargetFramework>
+    <OutputType>Library</OutputType>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
 
   <ItemGroup Condition="'$(OS)' == 'Windows_NT'">
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
