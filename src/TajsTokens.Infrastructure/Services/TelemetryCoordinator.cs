@@ -285,7 +285,7 @@ public sealed class TelemetryCoordinator
                 "Refresh completed",
                 $"{trigger.ToString().ToLowerInvariant()} refresh finished in {stopwatch.Elapsed.TotalSeconds:0.0}s."));
 
-            var snapshot = PublishSnapshot(
+            var publishedSnapshot = PublishSnapshot(
                 trigger,
                 tokenUsages,
                 hourlyBuckets,
@@ -306,7 +306,7 @@ public sealed class TelemetryCoordinator
                 QueueIntelligenceRefresh(cancellationToken);
             }
 
-            return snapshot;
+            return publishedSnapshot;
         }
         finally
         {
