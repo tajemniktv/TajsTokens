@@ -249,6 +249,12 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
         if (version == 4)
         {
             await ExecuteMigrationAsync(connection, """
+                CREATE TABLE IF NOT EXISTS agent_relationships (
+                    parent_agent_id TEXT NOT NULL,
+                    child_agent_id TEXT NOT NULL,
+                    linked_at_utc TEXT NOT NULL,
+                    PRIMARY KEY(parent_agent_id, child_agent_id)
+                );
                 CREATE INDEX IF NOT EXISTS idx_agent_relationships_child ON agent_relationships(child_agent_id);
                 PRAGMA user_version = 5;
                 """, cancellationToken);
