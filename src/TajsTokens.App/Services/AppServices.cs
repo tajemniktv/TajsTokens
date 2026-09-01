@@ -9,7 +9,7 @@ namespace TajsTokens.App.Services;
 
 /// <summary>
 /// Process-lifetime application composition root. Codex rollout reader/parser construction remains
-/// behind the Infrastructure observatory factory; UI surfaces consume only normalized interfaces.
+/// behind the Infrastructure observatory factory; UI surfaces consume normalized/query boundaries.
 /// </summary>
 public sealed class AppServices
 {
@@ -32,6 +32,7 @@ public sealed class AppServices
         SettingsStore = new RuntimeSettingsStore(settingsPath);
         Settings = SettingsStore.Load();
         Repository = new SqliteTelemetryRepository(DatabasePath);
+        ObservatoryReadModel = new SqliteCodexObservatoryReadModel(DatabasePath);
         TokscaleProvider = new TokscaleProvider();
         CodexQuotaProvider = new CodexAppServerQuotaProvider();
 
@@ -50,6 +51,7 @@ public sealed class AppServices
     public RuntimeSettingsStore SettingsStore { get; }
     public SqliteTelemetryRepository Repository { get; }
     public ICodexObservatoryStore ObservatoryStore { get; }
+    public SqliteCodexObservatoryReadModel ObservatoryReadModel { get; }
     public ITokscaleProvider TokscaleProvider { get; }
     public ICodexQuotaProvider CodexQuotaProvider { get; }
     public ICodexSessionIngestionService CodexSessionIngestion { get; }
