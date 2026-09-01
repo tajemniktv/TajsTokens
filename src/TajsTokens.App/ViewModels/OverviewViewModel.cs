@@ -290,39 +290,71 @@ public sealed partial class OverviewViewModel : ObservableObject
         bool isFresh)
     {
         var remaining = snapshot.RemainingPercent;
-        var burn = isFresh ? forecast?.BurnRatePercentPerHour : null;
         var resetCountdown = snapshot.ResetsAtUtc is DateTimeOffset reset
             ? FormatTimeSpan(reset - DateTimeOffset.UtcNow)
             : "Unknown";
-        var exhaustion = isFresh && forecast?.EstimatedExhaustionAtUtc is DateTimeOffset exhaustionAt
-            ? exhaustionAt.ToLocalTime().ToString("ddd HH:mm")
-            : isFresh ? "Learning from history" : "Paused while quota is stale";
 
-        var survivalMessage = !isFresh
-            ? "Last-known-good quota is shown; forecasting is paused until the provider is fresh again."
-            : forecast?.SurvivesUntilReset switch
-            {
-                true => "Current burn is projected to survive until reset.",
-                false => "Current burn is projected to exhaust before reset.",
-                _ => "Quota is live; more history is needed for a burn forecast."
-            };
-        var severity = !isFresh
-            ? InfoBarSeverity.Warning
-            : forecast?.SurvivesUntilReset switch
-            {
-                false => InfoBarSeverity.Warning,
-                true => InfoBarSeverity.Success,
-                _ => InfoBarSeverity.Informational
-            };
+        if (!isFresh)
+        {
+            return new QuotaCardViewModel(
+                title,
+                remaining is double staleValue ? $"{staleValue:0.#}%" : "Unknown",
+                resetCountdown,
+                "Paused while stale",
+                "Forecast paused",
+                $"Last known good · {snapshot.Source}",
+                "Last-known-good quota is shown; forecasting is paused until the provider is fresh again.",
+                InfoBarSeverity.Warning);
+        }
 
-        var freshness = isFresh ? "live" : "stale";
+        var paceText = forecast?.State switch
+        {
+            ForecastState.IdleWithinMeterPrecision => "Flat within meter precision",
+            _ when forecast?.BurnRatePercentPerHour is double burn && forecast.SustainablePercentPerHour is double sustainable =>
+                $"{burn:0.0} pp/h · sustainable {sustainable:0.0} pp/h" +
+                (forecast.BurnPressure is double pressure ? $" · {pressure:0.00}× pace" : string.Empty),
+            _ when forecast?.SustainablePercentPerHour is double sustainable => $"Learning · sustainable {sustainable:0.0} pp/h",
+            _ => "Learning"
+        };
+
+        var windowForecast = forecast?.State switch
+        {
+            ForecastState.ExhaustionLikelyBeforeReset when forecast.EstimatedExhaustionAtUtc is DateTimeOffset exhaustion =>
+                $"Exhaustion likely {exhaustion.ToLocalTime():ddd HH:mm}",
+            ForecastState.SafeUntilReset or ForecastState.NearSustainablePace when forecast.ProjectedRemainingAtResetPercent is double margin =>
+                $"Survives reset · ~{margin:0.#}% remaining at reset",
+            ForecastState.IdleWithinMeterPrecision => "No meter movement visible yet",
+            _ => "Learning from this reset window"
+        };
+
+        var survivalMessage = forecast?.State switch
+        {
+            ForecastState.ExhaustionLikelyBeforeReset => "Current pace is projected to exhaust this quota window before its authoritative reset.",
+            ForecastState.NearSustainablePace => "Current pace is close to the sustainable pace for this reset window.",
+            ForecastState.SafeUntilReset => "Current pace is projected to survive the current reset window.",
+            ForecastState.IdleWithinMeterPrecision => "Quota has not moved at the provider meter's visible precision; burn is uncertain rather than assumed to be exactly zero.",
+            _ => "Quota is live; more observations from this reset window are needed before making a burn claim."
+        };
+
+        var severity = forecast?.State switch
+        {
+            ForecastState.ExhaustionLikelyBeforeReset => InfoBarSeverity.Warning,
+            ForecastState.SafeUntilReset => InfoBarSeverity.Success,
+            ForecastState.NearSustainablePace => InfoBarSeverity.Informational,
+            _ => InfoBarSeverity.Informational
+        };
+
+        var confidence = forecast is null ? string.Empty : $" · confidence {forecast.Confidence:P0}";
+        var trend = string.IsNullOrWhiteSpace(forecast?.Trend) ? string.Empty : $" · {forecast.Trend}";
+        var freshness = $"live · {snapshot.Source}";
+
         return new QuotaCardViewModel(
             title,
             remaining is double value ? $"{value:0.#}%" : "Unknown",
             resetCountdown,
-            burn is double rate ? $"{rate:0.0} pp/h" : isFresh ? "Learning" : "Stale",
-            exhaustion,
-            remaining is double gauge ? $"{gauge:0.#}% remaining · {freshness} · {snapshot.Source}" : $"{freshness} · {snapshot.Source}",
+            paceText,
+            windowForecast,
+            $"{freshness}{confidence}{trend}",
             survivalMessage,
             severity);
     }
