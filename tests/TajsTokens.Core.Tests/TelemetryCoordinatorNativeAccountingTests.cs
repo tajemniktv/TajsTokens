@@ -3,6 +3,7 @@ using TajsTokens.Core.Enums;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
 using TajsTokens.Infrastructure.Persistence;
+using TajsTokens.Infrastructure.Providers;
 using TajsTokens.Infrastructure.Services;
 
 namespace TajsTokens.Core.Tests;
@@ -10,25 +11,26 @@ namespace TajsTokens.Core.Tests;
 public sealed class TelemetryCoordinatorNativeAccountingTests
 {
     [Fact]
-    public async Task Refresh_ProjectsTokenGenerationAfterObservatoryCompletes()
+    public async Task Refresh_ProjectsTokenGenerationAfterObservatoryCommitsIt()
     {
         var directory = Directory.CreateTempSubdirectory("tajstokens-native-refresh-order-");
+        var databasePath = Path.Combine(directory.FullName, "telemetry.db");
         try
         {
-            var observatory = new MarkingObservatoryService();
-            var tokens = new OrderCheckingTokenProvider(() => observatory.Completed);
+            var store = new SqliteCodexObservatoryStore(databasePath);
+            var observatory = new WritingObservatoryService(store);
             var coordinator = new TelemetryCoordinator(
-                tokens,
+                new SqliteNativeCodexAccountingProvider(databasePath),
                 new EmptyQuotaProvider(),
-                new SqliteTelemetryRepository(Path.Combine(directory.FullName, "telemetry.db")),
+                new SqliteTelemetryRepository(databasePath),
                 observatory);
 
             var snapshot = await coordinator.RefreshAsync(RefreshTrigger.Manual, CancellationToken.None);
 
             Assert.True(observatory.Completed);
-            Assert.True(tokens.ObservedCompletedObservatory);
             Assert.True(snapshot.TokenDataFresh);
             Assert.Equal(42, Assert.Single(snapshot.TokenUsages).Breakdown.Total);
+            Assert.Equal(42, Assert.Single(snapshot.HourlyBuckets).Breakdown.Total);
             Assert.Contains(snapshot.Sources, source => source.Provider == "Native Codex" && source.State == TelemetryHealthState.Live);
         }
         finally
@@ -121,25 +123,31 @@ public sealed class TelemetryCoordinatorNativeAccountingTests
             [new TokenTimeBucket("codex-native", "1970-01-01 00:00", DateTimeOffset.UnixEpoch, breakdown)]);
     }
 
-    private sealed class MarkingObservatoryService : ICodexObservatoryService
+    private sealed class WritingObservatoryService(SqliteCodexObservatoryStore store) : ICodexObservatoryService
     {
         public bool Completed { get; private set; }
 
-        public Task<CodexObservatoryRefreshResult> RefreshAsync(CancellationToken cancellationToken)
+        public async Task<CodexObservatoryRefreshResult> RefreshAsync(CancellationToken cancellationToken)
         {
+            await store.InitializeAsync(cancellationToken);
+            await store.ApplyCumulativeTokenObservationAsync(
+                new CodexCumulativeTokenObservation(
+                    "committed-during-refresh",
+                    "rollout.jsonl",
+                    "session-a",
+                    "session-a",
+                    new DateTimeOffset(2026, 9, 1, 10, 5, 0, TimeSpan.Zero),
+                    "model-a",
+                    "high",
+                    42,
+                    0,
+                    0,
+                    0,
+                    0,
+                    42),
+                cancellationToken);
             Completed = true;
-            return Task.FromResult(Result(errors: 0));
-        }
-    }
-
-    private sealed class OrderCheckingTokenProvider(Func<bool> observatoryCompleted) : ICodexTokenAccountingProvider
-    {
-        public bool ObservedCompletedObservatory { get; private set; }
-
-        public Task<CodexTokenAccountingSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
-        {
-            ObservedCompletedObservatory = observatoryCompleted();
-            return Task.FromResult(TokenSnapshot(42));
+            return Result(errors: 0);
         }
     }
 
