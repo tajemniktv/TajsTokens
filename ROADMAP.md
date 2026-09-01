@@ -29,14 +29,18 @@ Every phase should end as a coherent working product rather than an architectura
 
 Phase 2 intentionally does **not** require the dashboard to stay open for telemetry to remain useful.
 
-## Phase 3 - Codex observatory
+## Phase 3 - Codex observatory 🚧
 
-- Sanitized real-world rollout fixture corpus
-- Incremental direct Codex JSONL ingestion
-- Root/subagent topology and lifecycle
-- Session browser/detail timeline
-- Context-window growth and compaction telemetry
-- Rollout/storage-bloat diagnostics
+- Sanitized/synthetic real-world rollout fixture corpus
+- Incremental direct Codex JSONL discovery and typed normalization
+- Replay-safe native Codex accounting primitives in **shadow** mode, including counter epochs/resets and inherited-prefix exclusion
+- Rollout-embedded quota snapshots fused into the same local quota history with explicit provenance
+- Root/subagent topology and content-free lifecycle/activity state
+- Session browser/detail timeline in the native Windows app
+- Context-window utilization and compaction telemetry
+- Rollout record/file-size diagnostics without raw payload persistence
+
+Phase 3 proves direct/native Codex observability but does **not** replace Tokscale as the default accounting source. Full reconciliation/cutover remains Phase 6.
 
 ## Phase 4 - Intelligence and historical analytics
 
@@ -56,8 +60,8 @@ Phase 2 intentionally does **not** require the dashboard to stay open for teleme
 
 ## Phase 6 - Native accounting
 
-- TajsTokens-native Codex token/session accounting in shadow mode
-- Native vs Tokscale reconciliation harness
+- Expand the Phase 3 native Codex accounting shadow into full supported accounting coverage
+- Native vs Tokscale reconciliation harness and user/developer comparison surface
 - Proven parity across counter resets, cache/reasoning semantics, inherited histories and time buckets
 - Native accounting becomes TajsTokens' default Codex accounting backend; Tokscale remains fallback/import/reference
 
