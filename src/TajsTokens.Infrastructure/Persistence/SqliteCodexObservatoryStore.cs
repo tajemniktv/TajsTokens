@@ -72,7 +72,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                         counter_epoch INTEGER NOT NULL,
                         uncached_input_tokens INTEGER NOT NULL,
                         cache_read_tokens INTEGER NOT NULL,
-                        cache_write_input_tokens INTEGER NOT NULL,
+                        cache_write_tokens INTEGER NOT NULL,
                         non_reasoning_output_tokens INTEGER NOT NULL,
                         reasoning_output_tokens INTEGER NOT NULL,
                         reported_total_tokens INTEGER NOT NULL
@@ -979,7 +979,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         insert.CommandText = """
             INSERT INTO codex_native_token_events(
                 source_event_id, source_file, session_id, agent_id, observed_at_utc, model, reasoning_effort,
-                counter_epoch, uncached_input_tokens, cache_read_tokens, cache_write_input_tokens,
+                counter_epoch, uncached_input_tokens, cache_read_tokens, cache_write_tokens,
                 non_reasoning_output_tokens, reasoning_output_tokens, reported_total_tokens)
             VALUES($event, $file, $session, $agent, $observed, $model, $reasoning, $epoch,
                    $uncached, $cached, $cacheWrite, $output, $reasoningOutput, $total)
