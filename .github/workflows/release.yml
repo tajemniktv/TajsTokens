@@ -76,6 +76,9 @@ jobs:
               }
           )
 
+          $recoveryTag = $null
+          $recoveryVersion = $null
+
           if ($stable.Count -gt 0) {
             $latest = $stable | Sort-Object Version -Descending | Select-Object -First 1
             $latestTag = $latest.Tag
@@ -83,11 +86,21 @@ jobs:
             $latestSha = (git rev-list -n 1 $latestTag).Trim()
 
             if ($latestSha -eq $env:GITHUB_SHA) {
-              throw "No commits exist after the latest stable release $latestTag."
+              # A previous attempt may have pushed the immutable tag and then failed while
+              # creating the GitHub Release. Reuse that exact tag so publication is retryable.
+              $recoveryTag = $latestTag
+              $recoveryVersion = $latestVersion
+              Write-Host "Reusing existing $latestTag on the current commit for release recovery."
             }
           } else {
             $latestTag = $null
             $latestVersion = [version]'0.0.0'
+          }
+
+          if ($recoveryTag) {
+            "version=$($recoveryVersion.ToString())" >> $env:GITHUB_OUTPUT
+            "tag=$recoveryTag" >> $env:GITHUB_OUTPUT
+            exit 0
           }
 
           $requested = $env:REQUESTED_VERSION.Trim()
@@ -228,15 +241,24 @@ jobs:
             exit 1
           fi
 
-          if git ls-remote --exit-code --tags origin "refs/tags/$TAG" >/dev/null 2>&1 || gh release view "$TAG" >/dev/null 2>&1; then
-            echo "$TAG already exists remotely; refusing to overwrite an immutable release." >&2
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "GitHub Release $TAG already exists; refusing to overwrite an immutable release." >&2
             exit 1
           fi
 
-          git config user.name github-actions[bot]
-          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git tag -a "$TAG" "$GITHUB_SHA" -m "TajsTokens $VERSION"
-          git push origin "$TAG"
+          if git show-ref --tags --verify --quiet "refs/tags/$TAG"; then
+            existing_tag_sha="$(git rev-list -n 1 "$TAG")"
+            if [[ "$existing_tag_sha" != "$GITHUB_SHA" ]]; then
+              echo "$TAG already exists on $existing_tag_sha instead of $GITHUB_SHA; refusing to move it." >&2
+              exit 1
+            fi
+            echo "Reusing existing immutable tag $TAG after a partial publication failure."
+          else
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git tag -a "$TAG" "$GITHUB_SHA" -m "TajsTokens $VERSION"
+            git push origin "$TAG"
+          fi
 
           gh release create "$TAG" \
             artifact/TajsTokens-win-x64-portable.zip \
