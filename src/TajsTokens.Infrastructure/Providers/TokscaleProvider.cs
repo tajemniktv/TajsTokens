@@ -13,9 +13,9 @@ namespace TajsTokens.Infrastructure.Providers;
 /// </summary>
 public sealed class TokscaleProvider : ITokscaleProvider
 {
-    private static readonly TimeSpan CommandTimeout = TimeSpan.FromSeconds(45);
-    private static readonly TimeSpan NpxCommandTimeout = TimeSpan.FromSeconds(90);
-    private static readonly string[] TokenPropertyNames = ["input", "cacheRead", "cacheWrite", "output", "reasoning", "total"];
+    private static readonly TimeSpan s_commandTimeout = TimeSpan.FromSeconds(45);
+    private static readonly TimeSpan s_npxCommandTimeout = TimeSpan.FromSeconds(90);
+    private static readonly string[] s_tokenPropertyNames = ["input", "cacheRead", "cacheWrite", "output", "reasoning", "total"];
 
     public async Task<IReadOnlyList<TokenUsage>> GetUsageObservationsAsync(CancellationToken cancellationToken)
     {
@@ -121,7 +121,7 @@ public sealed class TokscaleProvider : ITokscaleProvider
             var direct = await ExternalProcess.RunToCompletionAsync(
                 "tokscale",
                 arguments,
-                CommandTimeout,
+                s_commandTimeout,
                 cancellationToken);
 
             if (direct.ExitCode == 0 || !LooksLikeCommandNotFound(direct, "tokscale"))
@@ -142,7 +142,7 @@ public sealed class TokscaleProvider : ITokscaleProvider
             var fallback = await ExternalProcess.RunToCompletionAsync(
                 "npx",
                 npxArguments,
-                NpxCommandTimeout,
+                s_npxCommandTimeout,
                 cancellationToken);
 
             if (LooksLikeCommandNotFound(fallback, "npx"))
@@ -197,7 +197,7 @@ public sealed class TokscaleProvider : ITokscaleProvider
     private static void ValidateTokenFields(JsonElement entry, string rowKind)
     {
         var foundAny = false;
-        foreach (var propertyName in TokenPropertyNames)
+        foreach (var propertyName in s_tokenPropertyNames)
         {
             if (!entry.TryGetProperty(propertyName, out var property))
             {

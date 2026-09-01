@@ -12,12 +12,12 @@ namespace TajsTokens.Infrastructure.Providers;
 /// </summary>
 public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
 {
-    private static readonly TimeSpan RequestTimeout = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan s_requestTimeout = TimeSpan.FromSeconds(20);
 
     public async Task<IReadOnlyList<QuotaSnapshot>> GetQuotaSnapshotsAsync(CancellationToken cancellationToken)
     {
         using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutSource.CancelAfter(RequestTimeout);
+        timeoutSource.CancelAfter(s_requestTimeout);
         var token = timeoutSource.Token;
         var codexCommand = ResolveCodexCommand();
 

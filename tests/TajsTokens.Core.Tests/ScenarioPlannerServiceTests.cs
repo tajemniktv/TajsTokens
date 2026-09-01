@@ -6,17 +6,17 @@ namespace TajsTokens.Core.Tests;
 
 public sealed class ScenarioPlannerServiceTests
 {
-    private static readonly DateTimeOffset EvaluationTime = new(2026, 8, 24, 0, 0, 0, TimeSpan.Zero);
+    private static readonly DateTimeOffset s_evaluationTime = new(2026, 8, 24, 0, 0, 0, TimeSpan.Zero);
     private readonly ScenarioPlannerService _planner = new();
 
     [Fact]
     public void Estimate_WithSparseHistory_ReturnsHonestInsufficientState()
     {
         var history = Enumerable.Range(0, 3)
-            .Select(index => Sample(QuotaWindowKind.FiveHour, EvaluationTime.AddHours(-index - 2), 4 + index, 1, 0))
+            .Select(index => Sample(QuotaWindowKind.FiveHour, s_evaluationTime.AddHours(-index - 2), 4 + index, 1, 0))
             .ToArray();
 
-        var estimate = _planner.Estimate(new ScenarioRequest(2, 1, 0), history, EvaluationTime);
+        var estimate = _planner.Estimate(new ScenarioRequest(2, 1, 0), history, s_evaluationTime);
 
         Assert.False(estimate.FiveHour.HasEnoughHistory);
         Assert.False(estimate.Weekly.HasEnoughHistory);
@@ -32,7 +32,7 @@ public sealed class ScenarioPlannerServiceTests
         var estimate = _planner.Estimate(
             new ScenarioRequest(2, 1, 2, 1.0, "gpt-5.6-luna", "xhigh"),
             history,
-            EvaluationTime);
+            s_evaluationTime);
 
         Assert.True(estimate.FiveHour.HasEnoughHistory);
         Assert.True(estimate.Weekly.HasEnoughHistory);
@@ -49,8 +49,8 @@ public sealed class ScenarioPlannerServiceTests
     {
         var history = BuildSyntheticHistory();
 
-        var light = _planner.Estimate(new ScenarioRequest(1, 1, 0, 0.7), history, EvaluationTime);
-        var heavy = _planner.Estimate(new ScenarioRequest(3, 2, 4, 1.4), history, EvaluationTime);
+        var light = _planner.Estimate(new ScenarioRequest(1, 1, 0, 0.7), history, s_evaluationTime);
+        var heavy = _planner.Estimate(new ScenarioRequest(3, 2, 4, 1.4), history, s_evaluationTime);
 
         Assert.True(light.FiveHour.HasEnoughHistory);
         Assert.True(heavy.FiveHour.HasEnoughHistory);
@@ -63,11 +63,11 @@ public sealed class ScenarioPlannerServiceTests
     {
         var history = BuildSyntheticHistory();
 
-        var baseline = _planner.Estimate(new ScenarioRequest(2, 1, 1), history, EvaluationTime);
+        var baseline = _planner.Estimate(new ScenarioRequest(2, 1, 1), history, s_evaluationTime);
         var unknownModel = _planner.Estimate(
             new ScenarioRequest(2, 1, 1, 1, "never-seen-model", "ultra-never-seen"),
             history,
-            EvaluationTime);
+            s_evaluationTime);
 
         Assert.True(unknownModel.FiveHour.HasEnoughHistory);
         Assert.True(unknownModel.FiveHour.Confidence < baseline.FiveHour.Confidence);
@@ -82,7 +82,7 @@ public sealed class ScenarioPlannerServiceTests
         var estimate = _planner.Estimate(
             new ScenarioRequest(2, 1, 1, 1, "gpt-5.6-luna", "never-seen-reasoning"),
             history,
-            EvaluationTime);
+            s_evaluationTime);
 
         Assert.True(estimate.FiveHour.HasEnoughHistory);
         Assert.Contains("model gpt-5.6-luna cohort was retained", estimate.FiveHour.Explanation, StringComparison.OrdinalIgnoreCase);
@@ -93,7 +93,7 @@ public sealed class ScenarioPlannerServiceTests
     public void Estimate_WhenNewestHistoryIsStale_ReturnsUnavailableInsteadOfConfidentPrediction()
     {
         var history = BuildSyntheticHistory();
-        var evaluation = EvaluationTime.AddDays(40);
+        var evaluation = s_evaluationTime.AddDays(40);
 
         var estimate = _planner.Estimate(new ScenarioRequest(2, 1, 1), history, evaluation);
 

@@ -7,7 +7,7 @@ namespace TajsTokens.Core.Tests;
 
 public sealed class SqliteTelemetryRepositoryTests
 {
-    private static readonly string[] FoundationTables =
+    private static readonly string[] s_foundationTables =
     [
         "quota_snapshots",
         "token_usage",
@@ -40,7 +40,7 @@ public sealed class SqliteTelemetryRepositoryTests
 
                 Assert.Equal(5, await ReadSchemaVersionAsync(connection));
                 var tables = await ReadTableNamesAsync(connection);
-                foreach (var expected in FoundationTables)
+                foreach (var expected in s_foundationTables)
                 {
                     Assert.Contains(expected, tables);
                 }

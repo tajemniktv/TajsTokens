@@ -2,16 +2,16 @@ namespace TajsTokens.Core.Models;
 
 public sealed record RuntimeSettings
 {
-    private static readonly int[] DefaultThresholdValues = [30, 20, 10, 5];
+    private static readonly int[] s_defaultThresholdValues = [30, 20, 10, 5];
 
     public const int CurrentSchemaVersion = 2;
-    public static IReadOnlyList<int> DefaultLowQuotaThresholds { get; } = Array.AsReadOnly(DefaultThresholdValues);
+    public static IReadOnlyList<int> DefaultLowQuotaThresholds { get; } = Array.AsReadOnly(s_defaultThresholdValues);
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
     public bool RunInBackground { get; init; } = true;
     public int PollIntervalSeconds { get; init; } = 60;
     public bool NotificationsEnabled { get; init; } = true;
-    public int[] LowQuotaThresholds { get; init; } = DefaultThresholdValues.ToArray();
+    public int[] LowQuotaThresholds { get; init; } = s_defaultThresholdValues.ToArray();
     public bool LaunchAtLogin { get; init; }
 
     /// <summary>
@@ -34,6 +34,6 @@ public sealed record RuntimeSettings
             .OrderByDescending(value => value)
             .ToArray();
 
-        return normalized.Length == 0 ? DefaultThresholdValues.ToArray() : normalized;
+        return normalized.Length == 0 ? s_defaultThresholdValues.ToArray() : normalized;
     }
 }

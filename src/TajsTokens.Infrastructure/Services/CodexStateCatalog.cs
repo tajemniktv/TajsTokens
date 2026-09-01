@@ -37,7 +37,7 @@ internal sealed record CodexStateCatalogBatch(
 /// </summary>
 internal sealed class CodexStateCatalog
 {
-    private static readonly string[] RequiredThreadColumns =
+    private static readonly string[] s_requiredThreadColumns =
     [
         "id",
         "rollout_path",
@@ -262,7 +262,7 @@ internal sealed class CodexStateCatalog
             columns.Add(ReadRequiredString(reader.GetValue(1), "threads column name"));
         }
 
-        return RequiredThreadColumns.All(columns.Contains);
+        return s_requiredThreadColumns.All(columns.Contains);
     }
 
     private static async Task<IReadOnlyList<CodexStateEdge>> ReadSpawnEdgesAsync(

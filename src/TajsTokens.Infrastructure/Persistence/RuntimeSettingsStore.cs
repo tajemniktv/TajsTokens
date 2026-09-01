@@ -5,7 +5,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 
 public sealed class RuntimeSettingsStore
 {
-    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+    private static readonly JsonSerializerOptions s_jsonOptions = new() { WriteIndented = true };
     private readonly string _path;
 
     public RuntimeSettingsStore(string path)
@@ -53,7 +53,7 @@ public sealed class RuntimeSettingsStore
         }
 
         var temp = _path + ".tmp";
-        File.WriteAllText(temp, JsonSerializer.Serialize(normalized, JsonOptions));
+        File.WriteAllText(temp, JsonSerializer.Serialize(normalized, s_jsonOptions));
         File.Move(temp, _path, overwrite: true);
     }
 

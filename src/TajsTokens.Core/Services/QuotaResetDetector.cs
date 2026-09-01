@@ -11,7 +11,7 @@ namespace TajsTokens.Core.Services;
 /// </summary>
 public sealed class QuotaResetDetector
 {
-    private static readonly TimeSpan ExpectedBoundaryTolerance = TimeSpan.FromMinutes(30);
+    private static readonly TimeSpan s_expectedBoundaryTolerance = TimeSpan.FromMinutes(30);
 
     public IReadOnlyList<QuotaResetEvent> Detect(IReadOnlyList<QuotaSnapshot> snapshots)
     {
@@ -37,8 +37,8 @@ public sealed class QuotaResetDetector
                                            previous.ResetsAtUtc != current.ResetsAtUtc;
                 var previousBoundary = previous.ResetsAtUtc;
                 var nearExpectedBoundary = previousBoundary is DateTimeOffset expected &&
-                                           current.CapturedAtUtc >= expected - ExpectedBoundaryTolerance &&
-                                           current.CapturedAtUtc <= expected + ExpectedBoundaryTolerance;
+                                           current.CapturedAtUtc >= expected - s_expectedBoundaryTolerance &&
+                                           current.CapturedAtUtc <= expected + s_expectedBoundaryTolerance;
 
                 QuotaResetClassification? classification = null;
                 double confidence = 0;

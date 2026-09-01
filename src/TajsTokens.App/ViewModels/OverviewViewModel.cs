@@ -20,22 +20,22 @@ public sealed partial class OverviewViewModel : ObservableObject
     private long _newestRequestedSnapshotTicks = DateTimeOffset.MinValue.UtcDateTime.Ticks;
 
     [ObservableProperty]
-    private QuotaCardViewModel fiveHourQuota = UnavailableQuota("5-hour quota", "Waiting for first background refresh.");
+    private QuotaCardViewModel _fiveHourQuota = UnavailableQuota("5-hour quota", "Waiting for first background refresh.");
 
     [ObservableProperty]
-    private QuotaCardViewModel weeklyQuota = UnavailableQuota("Weekly quota", "Waiting for first background refresh.");
+    private QuotaCardViewModel _weeklyQuota = UnavailableQuota("Weekly quota", "Waiting for first background refresh.");
 
     [ObservableProperty]
-    private string statusText = "Waiting for background telemetry.";
+    private string _statusText = "Waiting for background telemetry.";
 
     [ObservableProperty]
-    private string lastUpdatedText = "Not refreshed yet";
+    private string _lastUpdatedText = "Not refreshed yet";
 
     [ObservableProperty]
-    private string historyCaption = "Native Codex hourly history will appear after the first successful local accounting refresh.";
+    private string _historyCaption = "Native Codex hourly history will appear after the first successful local accounting refresh.";
 
     [ObservableProperty]
-    private bool isRefreshing;
+    private bool _isRefreshing;
 
     public ObservableCollection<TokenSummaryCard> TokenSummaryCards { get; } = [];
     public ObservableCollection<ForecastPoint> HistoryPoints { get; } = [];
