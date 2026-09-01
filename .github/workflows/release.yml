@@ -1,33 +1,157 @@
-name: release-smoke
+name: release
 
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - 'src/TajsTokens.App/**'
-      - 'src/TajsTokens.Core/**'
-      - 'src/TajsTokens.Infrastructure/**'
-      - 'tests/**'
-      - 'TajsTokens.sln'
-      - '.github/workflows/release.yml'
-  push:
-    tags:
-      - 'v*'
+    inputs:
+      bump:
+        description: Semver bump; auto infers from commits since the latest stable tag
+        required: true
+        default: auto
+        type: choice
+        options:
+          - auto
+          - patch
+          - minor
+          - major
+      version:
+        description: Optional explicit version, for example 1.2.3
+        required: false
+        type: string
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-smoke-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: stable-release
+  cancel-in-progress: false
 
 jobs:
-  publish-windows-x64:
+  build:
+    name: Build Stable Portable
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
 
     steps:
       - name: Checkout
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Require main and tested rolling commit
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_NAME -ne 'main') {
+            throw "Stable releases must be dispatched from main, not $env:GITHUB_REF_NAME."
+          }
+
+          git fetch --force --tags origin
+
+          $rollingSha = git rev-list -n 1 rolling 2>$null
+          if (-not $rollingSha) {
+            throw "No rolling tag exists. Run the rolling-release workflow successfully first."
+          }
+
+          if ($rollingSha.Trim() -ne $env:GITHUB_SHA) {
+            throw "Current main ($env:GITHUB_SHA) is not the tested rolling commit ($($rollingSha.Trim()))."
+          }
+
+      - name: Determine release version
+        id: version
+        shell: pwsh
+        env:
+          BUMP: ${{ inputs.bump }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          $stable = @(
+            git tag --list 'v*' |
+              ForEach-Object {
+                if ($_ -match '^v(\d+)\.(\d+)\.(\d+)$') {
+                  [PSCustomObject]@{
+                    Tag = $_
+                    Version = [version]"$($Matches[1]).$($Matches[2]).$($Matches[3])"
+                  }
+                }
+              }
+          )
+
+          $recoveryTag = $null
+          $recoveryVersion = $null
+
+          if ($stable.Count -gt 0) {
+            $latest = $stable | Sort-Object Version -Descending | Select-Object -First 1
+            $latestTag = $latest.Tag
+            $latestVersion = $latest.Version
+            $latestSha = (git rev-list -n 1 $latestTag).Trim()
+
+            if ($latestSha -eq $env:GITHUB_SHA) {
+              # A previous attempt may have pushed the immutable tag and then failed while
+              # creating the GitHub Release. Reuse that exact tag so publication is retryable.
+              $recoveryTag = $latestTag
+              $recoveryVersion = $latestVersion
+              Write-Host "Reusing existing $latestTag on the current commit for release recovery."
+            }
+          } else {
+            $latestTag = $null
+            $latestVersion = [version]'0.0.0'
+          }
+
+          if ($recoveryTag) {
+            "version=$($recoveryVersion.ToString())" >> $env:GITHUB_OUTPUT
+            "tag=$recoveryTag" >> $env:GITHUB_OUTPUT
+            exit 0
+          }
+
+          $requested = $env:REQUESTED_VERSION.Trim()
+          if ($requested) {
+            if ($requested -notmatch '^v?(\d+)\.(\d+)\.(\d+)$') {
+              throw "version must be a stable semantic version such as 1.2.3"
+            }
+
+            $next = [version]"$($Matches[1]).$($Matches[2]).$($Matches[3])"
+            if ($next -le $latestVersion) {
+              throw "Explicit version $requested must be newer than latest stable v$latestVersion."
+            }
+          } else {
+            $bump = $env:BUMP
+
+            if ($bump -eq 'auto') {
+              if ($latestTag) {
+                $commitText = git log "$latestTag..HEAD" --format="%s%n%b"
+              } else {
+                $commitText = git log --format="%s%n%b"
+              }
+
+              $joined = $commitText -join "`n"
+              if ($joined -match '(?mi)BREAKING[ -]CHANGE:' -or $joined -match '(?m)^[A-Za-z]+(\([^)]+\))?!:') {
+                $bump = 'major'
+              } elseif ($joined -match '(?m)^feat(\([^)]+\))?:') {
+                $bump = 'minor'
+              } else {
+                $bump = 'patch'
+              }
+
+              Write-Host "Auto semver selected: $bump"
+            }
+
+            switch ($bump) {
+              'major' { $next = [version]::new($latestVersion.Major + 1, 0, 0) }
+              'minor' { $next = [version]::new($latestVersion.Major, $latestVersion.Minor + 1, 0) }
+              'patch' { $next = [version]::new($latestVersion.Major, $latestVersion.Minor, $latestVersion.Build + 1) }
+              default { throw "Unsupported bump: $bump" }
+            }
+          }
+
+          $version = $next.ToString()
+          $tag = "v$version"
+
+          if (git rev-parse -q --verify "refs/tags/$tag") {
+            throw "Tag $tag already exists."
+          }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
 
       - name: Setup .NET
         uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
@@ -43,30 +167,103 @@ jobs:
       - name: Test
         run: dotnet test tests/TajsTokens.Core.Tests/TajsTokens.Core.Tests.csproj --configuration Release --no-build
 
-      - name: Publish self-contained Windows x64
+      - name: Publish portable Windows x64
         shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           dotnet publish src/TajsTokens.App/TajsTokens.App.csproj `
             --configuration Release `
             --runtime win-x64 `
             --self-contained true `
             -p:WindowsAppSDKSelfContained=true `
+            -p:Version=$env:VERSION `
             --no-restore `
-            --output artifacts/TajsTokens-win-x64
+            --output artifacts/TajsTokens-win-x64-portable
 
-          if (-not (Test-Path artifacts/TajsTokens-win-x64/TajsTokens.App.exe)) {
+          if (-not (Test-Path artifacts/TajsTokens-win-x64-portable/TajsTokens.App.exe)) {
             throw "Published TajsTokens.App.exe was not produced."
           }
 
-          Compress-Archive -Path artifacts/TajsTokens-win-x64/* -DestinationPath artifacts/TajsTokens-win-x64.zip
-          $hash = (Get-FileHash artifacts/TajsTokens-win-x64.zip -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  TajsTokens-win-x64.zip" | Set-Content artifacts/TajsTokens-win-x64.sha256
+          Compress-Archive `
+            -Path artifacts/TajsTokens-win-x64-portable/* `
+            -DestinationPath artifacts/TajsTokens-win-x64-portable.zip
+
+          $hash = (Get-FileHash artifacts/TajsTokens-win-x64-portable.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  TajsTokens-win-x64-portable.zip" | Set-Content artifacts/TajsTokens-win-x64-portable.sha256
 
       - name: Upload portable artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: TajsTokens-win-x64
+          name: stable-portable
           path: |
-            artifacts/TajsTokens-win-x64.zip
-            artifacts/TajsTokens-win-x64.sha256
+            artifacts/TajsTokens-win-x64-portable.zip
+            artifacts/TajsTokens-win-x64-portable.sha256
           if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish Stable Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Retrieve artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: stable-portable
+          path: artifact
+
+      - name: Publish immutable stable release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.build.outputs.version }}
+          TAG: ${{ needs.build.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          git fetch --force --tags origin
+          git fetch --force origin main:refs/remotes/origin/main
+
+          current_main="$(git rev-parse refs/remotes/origin/main)"
+          rolling_sha="$(git ls-remote origin refs/tags/rolling | awk '{print $1}')"
+          if [[ "$current_main" != "$GITHUB_SHA" || "$rolling_sha" != "$GITHUB_SHA" ]]; then
+            echo "Release source is no longer current and tested; refusing to publish." >&2
+            echo "main=$current_main rolling=$rolling_sha workflow=$GITHUB_SHA" >&2
+            exit 1
+          fi
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "GitHub Release $TAG already exists; refusing to overwrite an immutable release." >&2
+            exit 1
+          fi
+
+          if git show-ref --tags --verify --quiet "refs/tags/$TAG"; then
+            existing_tag_sha="$(git rev-list -n 1 "$TAG")"
+            if [[ "$existing_tag_sha" != "$GITHUB_SHA" ]]; then
+              echo "$TAG already exists on $existing_tag_sha instead of $GITHUB_SHA; refusing to move it." >&2
+              exit 1
+            fi
+            echo "Reusing existing immutable tag $TAG after a partial publication failure."
+          else
+            git config user.name github-actions[bot]
+            git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+            git tag -a "$TAG" "$GITHUB_SHA" -m "TajsTokens $VERSION"
+            git push origin "$TAG"
+          fi
+
+          gh release create "$TAG" \
+            artifact/TajsTokens-win-x64-portable.zip \
+            artifact/TajsTokens-win-x64-portable.sha256 \
+            --verify-tag \
+            --latest \
+            --generate-notes \
+            --title "TajsTokens $VERSION"

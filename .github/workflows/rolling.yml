@@ -1,0 +1,189 @@
+name: rolling-release
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'tests/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rolling-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build Rolling Portable
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Require main for manual publication
+        if: github.event_name == 'workflow_dispatch'
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF_NAME -ne 'main') {
+            throw "Rolling releases must be dispatched from main, not $env:GITHUB_REF_NAME."
+          }
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Determine rolling version
+        id: version
+        shell: pwsh
+        run: |
+          $stable = @(
+            git tag --list 'v*' |
+              ForEach-Object {
+                if ($_ -match '^v(\d+)\.(\d+)\.(\d+)$') {
+                  [PSCustomObject]@{
+                    Tag = $_
+                    Version = [version]"$($Matches[1]).$($Matches[2]).$($Matches[3])"
+                  }
+                }
+              }
+          )
+
+          if ($stable.Count -gt 0) {
+            $latest = $stable | Sort-Object Version -Descending | Select-Object -First 1
+            $next = [version]::new($latest.Version.Major, $latest.Version.Minor, $latest.Version.Build + 1)
+          } else {
+            $next = [version]'0.0.1'
+          }
+
+          $shortSha = $env:GITHUB_SHA.Substring(0, 7)
+          $version = "$next-rolling.$env:GITHUB_RUN_NUMBER+$shortSha"
+          "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Restore
+        run: dotnet restore TajsTokens.sln
+
+      - name: Build
+        run: dotnet build TajsTokens.sln --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test tests/TajsTokens.Core.Tests/TajsTokens.Core.Tests.csproj --configuration Release --no-build
+
+      - name: Publish portable Windows x64
+        shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          dotnet publish src/TajsTokens.App/TajsTokens.App.csproj `
+            --configuration Release `
+            --runtime win-x64 `
+            --self-contained true `
+            -p:WindowsAppSDKSelfContained=true `
+            -p:Version=$env:VERSION `
+            --no-restore `
+            --output artifacts/TajsTokens-win-x64-portable
+
+          if (-not (Test-Path artifacts/TajsTokens-win-x64-portable/TajsTokens.App.exe)) {
+            throw "Published TajsTokens.App.exe was not produced."
+          }
+
+          Compress-Archive `
+            -Path artifacts/TajsTokens-win-x64-portable/* `
+            -DestinationPath artifacts/TajsTokens-win-x64-portable.zip
+
+          $hash = (Get-FileHash artifacts/TajsTokens-win-x64-portable.zip -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  TajsTokens-win-x64-portable.zip" | Set-Content artifacts/TajsTokens-win-x64-portable.sha256
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: rolling-portable
+          path: |
+            artifacts/TajsTokens-win-x64-portable.zip
+            artifacts/TajsTokens-win-x64-portable.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Publish Rolling Release
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Retrieve artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rolling-portable
+          path: artifact
+
+      - name: Publish moving rolling prerelease
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.build.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          revalidate_main() {
+            git fetch --force origin main:refs/remotes/origin/main
+            current_main="$(git rev-parse refs/remotes/origin/main)"
+            if [[ "$current_main" != "$GITHUB_SHA" ]]; then
+              echo "Skipping stale rolling publication: main=$current_main workflow=$GITHUB_SHA"
+              exit 0
+            fi
+          }
+
+          # The workflow-level concurrency group is intentionally non-cancelling so publication
+          # cannot be interrupted halfway through and then finish out of order with a newer run.
+          revalidate_main
+
+          git tag -f rolling "$GITHUB_SHA"
+          git push --force origin refs/tags/rolling
+
+          # Main may have advanced while the tag was being updated. Do not mutate the public
+          # prerelease assets/notes unless this commit is still the current main commit.
+          revalidate_main
+
+          notes="$(cat <<EOF
+          Automated portable build from \`main\`.
+
+          **Version:** \`$VERSION\`
+          **Commit:** \`$GITHUB_SHA\`
+
+          This release is a moving prerelease. Use stable \`vX.Y.Z\` releases for immutable builds.
+          EOF
+          )"
+
+          if gh release view rolling >/dev/null 2>&1; then
+            gh release upload rolling \
+              artifact/TajsTokens-win-x64-portable.zip \
+              artifact/TajsTokens-win-x64-portable.sha256 \
+              --clobber
+            gh release edit rolling \
+              --prerelease \
+              --title "TajsTokens Rolling $VERSION" \
+              --notes "$notes"
+          else
+            gh release create rolling \
+              artifact/TajsTokens-win-x64-portable.zip \
+              artifact/TajsTokens-win-x64-portable.sha256 \
+              --verify-tag \
+              --prerelease \
+              --title "TajsTokens Rolling $VERSION" \
+              --notes "$notes"
+          fi
