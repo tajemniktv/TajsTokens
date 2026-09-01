@@ -34,11 +34,12 @@ Phase 2 intentionally does **not** require the dashboard to stay open for teleme
 - Sanitized/synthetic real-world rollout fixture corpus
 - Incremental direct Codex JSONL discovery and typed normalization
 - Replay-safe native Codex accounting primitives in **shadow** mode, including counter epochs/resets and inherited-prefix exclusion
-- Rollout-embedded quota snapshots fused into the same local quota history with explicit provenance
+- Content-free parser resume state matched to exact byte checkpoints
+- Rollout-embedded five-hour/weekly quota snapshots fused into the same local quota history with explicit provenance
 - Root/subagent topology and content-free lifecycle/activity state
 - Session browser/detail timeline in the native Windows app
 - Context-window utilization and compaction telemetry
-- Rollout record/file-size diagnostics without raw payload persistence
+- Stable-identity rollout storage diagnostics without raw payload or absolute-path persistence in the observatory surface
 
 Phase 3 proves direct/native Codex observability but does **not** replace Tokscale as the default accounting source. Full reconciliation/cutover remains Phase 6.
 
