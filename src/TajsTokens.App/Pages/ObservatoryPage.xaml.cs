@@ -363,7 +363,7 @@ public sealed partial class ObservatoryPage : Page
                     TimelineList.ItemsSource = new[] { new TimelineRow("Loading…", "Recent normalized events are being queried.") };
                     var timeline = await Task.Run(
                         () => store.GetTimelineAsync(session.SessionId, 200, cancellation.Token),
-                        cancellation.Token).Unwrap();
+                        cancellation.Token);
                     if (!CanApplyDetail(session.SessionId, selectionGeneration, detailGeneration, cancellation))
                     {
                         return;
@@ -380,7 +380,7 @@ public sealed partial class ObservatoryPage : Page
                     ContextList.ItemsSource = new[] { new ContextRow("Loading…", "Context observations are being queried.") };
                     var context = await Task.Run(
                         () => store.GetContextObservationsAsync(session.SessionId, 240, cancellation.Token),
-                        cancellation.Token).Unwrap();
+                        cancellation.Token);
                     if (!CanApplyDetail(session.SessionId, selectionGeneration, detailGeneration, cancellation))
                     {
                         return;
@@ -395,7 +395,7 @@ public sealed partial class ObservatoryPage : Page
                     StorageList.ItemsSource = new[] { new StorageRow("Loading…", "Querying rollout storage metadata") };
                     var storage = await Task.Run(
                         () => store.GetRolloutStorageAsync(500, cancellation.Token),
-                        cancellation.Token).Unwrap();
+                        cancellation.Token);
                     if (!CanApplyDetail(session.SessionId, selectionGeneration, detailGeneration, cancellation))
                     {
                         return;
