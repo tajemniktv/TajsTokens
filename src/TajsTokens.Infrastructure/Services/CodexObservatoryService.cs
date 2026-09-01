@@ -29,7 +29,8 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
         await _store.InitializeAsync(cancellationToken);
 
         var files = DiscoverFiles();
-        var scanned = 0;
+        var filesScanned = 0;
+        var recordsScanned = 0;
         var normalized = 0;
         var errors = 0;
         long bytes = 0;
@@ -38,45 +39,79 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
         foreach (var file in files)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            scanned++;
+            filesScanned++;
             try
             {
                 var info = new FileInfo(file);
-                if (info.Exists)
+                if (!info.Exists)
                 {
-                    bytes = checked(bytes + info.Length);
+                    continue;
                 }
 
-                var count = await _ingestionService.IngestAsync(file, cancellationToken);
-                normalized += count;
-                if (count > 0)
+                bytes = checked(bytes + info.Length);
+                var sourceIdentity = CodexSessionIngestionService.GetSourceIdentity(file);
+                var filenameSessionId = CodexRolloutParser.ExtractSessionIdFromFileName(file);
+
+                // Refresh file identity even at EOF. This lets an archive move update the current path
+                // without requiring a new JSONL record to appear first.
+                await _store.UpsertRolloutFileAsync(
+                    sourceIdentity,
+                    file,
+                    filenameSessionId,
+                    info.Length,
+                    DateTimeOffset.UtcNow,
+                    cancellationToken);
+
+                var result = await _ingestionService.IngestAsync(file, cancellationToken);
+                recordsScanned += result.RecordsScanned;
+                normalized += result.RecordsNormalized;
+
+                var touchedSessionId = result.SessionId ?? filenameSessionId;
+                if (result.RecordsScanned > 0 && !string.IsNullOrWhiteSpace(touchedSessionId))
                 {
-                    var sessionId = CodexRolloutParser.ExtractSessionIdFromFileName(file);
-                    if (!string.IsNullOrWhiteSpace(sessionId))
-                    {
-                        sessionsTouched.Add(sessionId);
-                    }
+                    sessionsTouched.Add(touchedSessionId);
                 }
+
+                await _store.UpsertRolloutFileAsync(
+                    sourceIdentity,
+                    file,
+                    touchedSessionId,
+                    info.Exists ? info.Length : 0,
+                    DateTimeOffset.UtcNow,
+                    cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
-            catch (Exception)
+            catch (Exception) when (File.Exists(file))
             {
-                // A rollout can be locked, replaced, archived, or deleted after discovery. One file
-                // racing with Codex lifecycle changes must not discard successful observations from the
-                // rest of the corpus. The next normal refresh rediscovers the current source set.
+                // One malformed/locked/replaced rollout must not stop the remaining local corpus.
                 errors++;
             }
         }
 
-        return new CodexObservatoryRefreshResult(files.Count, scanned, normalized, sessionsTouched.Count, errors, bytes);
+        return new CodexObservatoryRefreshResult(
+            files.Count,
+            filesScanned,
+            recordsScanned,
+            normalized,
+            sessionsTouched.Count,
+            errors,
+            bytes);
     }
 
     private IReadOnlyList<string> DiscoverFiles()
     {
         var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var options = new EnumerationOptions
+        {
+            RecurseSubdirectories = true,
+            IgnoreInaccessible = true,
+            ReturnSpecialDirectories = false,
+            AttributesToSkip = FileAttributes.ReparsePoint
+        };
+
         foreach (var root in _roots)
         {
             if (!Directory.Exists(root))
@@ -86,18 +121,18 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
 
             try
             {
-                foreach (var file in Directory.EnumerateFiles(root, "*.jsonl", SearchOption.AllDirectories))
+                foreach (var file in Directory.EnumerateFiles(root, "*.jsonl", options))
                 {
                     files.Add(Path.GetFullPath(file));
                 }
             }
             catch (UnauthorizedAccessException)
             {
-                // A single inaccessible subtree should not make the whole Codex home unavailable.
+                // Root itself may become inaccessible between the existence check and enumeration.
             }
             catch (DirectoryNotFoundException)
             {
-                // Directory can disappear while Codex rotates/archives state.
+                // Directory can disappear while Codex rotates or archives state.
             }
             catch (IOException)
             {
