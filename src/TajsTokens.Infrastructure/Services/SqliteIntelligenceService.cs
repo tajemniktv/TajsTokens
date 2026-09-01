@@ -16,19 +16,20 @@ namespace TajsTokens.Infrastructure.Services;
 /// </summary>
 public sealed class SqliteIntelligenceService : IIntelligenceService
 {
-    private const int IntelligenceSchemaVersion = 1;
     private const int MaxBurnIntervals = 80;
     private readonly string _connectionString;
     private readonly SqliteTelemetryRepository _telemetryRepository;
     private readonly ForecastingService _forecasting = new();
     private readonly QuotaResetDetector _resetDetector = new();
     private readonly ScenarioPlannerService _scenarioPlanner = new();
-    private readonly SemaphoreSlim _initializeGate = new(1, 1);
-    private volatile bool _initialized;
 
     public SqliteIntelligenceService(string databasePath, SqliteTelemetryRepository telemetryRepository)
     {
-        _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
+        _connectionString = new SqliteConnectionStringBuilder
+        {
+            DataSource = databasePath,
+            Mode = SqliteOpenMode.ReadOnly
+        }.ToString();
         _telemetryRepository = telemetryRepository;
     }
 
@@ -52,7 +53,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
 
             foreach (var resetEvent in _resetDetector.Detect(ordered))
             {
-                resetEventsDetected += await UpsertResetEventAsync(resetEvent, cancellationToken);
+                resetEventsDetected += await _telemetryRepository.UpsertQuotaResetEventAsync(resetEvent, cancellationToken);
             }
 
             var latest = ordered[^1];
@@ -301,77 +302,8 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         return _scenarioPlanner.Estimate(request, samples, now);
     }
 
-    private async Task EnsureInitializedAsync(CancellationToken cancellationToken)
-    {
-        // Intelligence reads depend on base telemetry tables even when invoked before the shared
-        // coordinator has performed its first refresh (for example, a fresh database + Usage page).
-        await _telemetryRepository.InitializeAsync(cancellationToken);
-
-        if (_initialized)
-        {
-            return;
-        }
-
-        await _initializeGate.WaitAsync(cancellationToken);
-        try
-        {
-            if (_initialized)
-            {
-                return;
-            }
-
-            await using var connection = new SqliteConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
-            var command = connection.CreateCommand();
-            command.CommandText = """
-                CREATE TABLE IF NOT EXISTS intelligence_schema (
-                    component TEXT PRIMARY KEY,
-                    version INTEGER NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS quota_reset_events (
-                    event_id TEXT PRIMARY KEY,
-                    kind TEXT NOT NULL,
-                    provider TEXT NOT NULL,
-                    profile TEXT NOT NULL,
-                    detected_at_utc TEXT NOT NULL,
-                    effective_at_utc TEXT NOT NULL,
-                    before_used_percent REAL,
-                    after_used_percent REAL,
-                    previous_reset_at_utc TEXT,
-                    current_reset_at_utc TEXT,
-                    classification TEXT NOT NULL,
-                    confidence REAL NOT NULL,
-                    source TEXT NOT NULL,
-                    explanation TEXT NOT NULL
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_quota_reset_events_time
-                    ON quota_reset_events(detected_at_utc DESC);
-                CREATE INDEX IF NOT EXISTS idx_quota_reset_events_window
-                    ON quota_reset_events(provider, profile, kind, detected_at_utc DESC);
-
-                INSERT INTO intelligence_schema(component, version)
-                VALUES('phase4-intelligence', 1)
-                ON CONFLICT(component) DO UPDATE SET version = MAX(version, excluded.version);
-                """;
-            await command.ExecuteNonQueryAsync(cancellationToken);
-
-            var versionCommand = connection.CreateCommand();
-            versionCommand.CommandText = "SELECT version FROM intelligence_schema WHERE component = 'phase4-intelligence';";
-            var version = Convert.ToInt32(await versionCommand.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
-            if (version > IntelligenceSchemaVersion)
-            {
-                throw new InvalidOperationException($"Intelligence schema {version} is newer than supported version {IntelligenceSchemaVersion}.");
-            }
-
-            _initialized = true;
-        }
-        finally
-        {
-            _initializeGate.Release();
-        }
-    }
+    private Task EnsureInitializedAsync(CancellationToken cancellationToken) =>
+        _telemetryRepository.InitializeIntelligenceAsync(cancellationToken);
 
     private async Task<IReadOnlyList<IReadOnlyList<QuotaSnapshot>>> LoadRecentQuotaGroupsAsync(
         int perGroup,
@@ -407,53 +339,6 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             .GroupBy(row => (row.Provider, row.Profile, row.Kind))
             .Select(group => (IReadOnlyList<QuotaSnapshot>)group.ToArray())
             .ToArray();
-    }
-
-    private async Task<int> UpsertResetEventAsync(
-        QuotaResetEvent resetEvent,
-        CancellationToken cancellationToken)
-    {
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
-        var command = connection.CreateCommand();
-        command.CommandText = """
-            INSERT INTO quota_reset_events(
-                event_id, kind, provider, profile, detected_at_utc, effective_at_utc,
-                before_used_percent, after_used_percent, previous_reset_at_utc, current_reset_at_utc,
-                classification, confidence, source, explanation)
-            VALUES($id, $kind, $provider, $profile, $detected, $effective,
-                   $before, $after, $previousReset, $currentReset,
-                   $classification, $confidence, $source, $explanation)
-            ON CONFLICT(event_id) DO UPDATE SET
-                kind = excluded.kind,
-                provider = excluded.provider,
-                profile = excluded.profile,
-                detected_at_utc = excluded.detected_at_utc,
-                effective_at_utc = excluded.effective_at_utc,
-                before_used_percent = excluded.before_used_percent,
-                after_used_percent = excluded.after_used_percent,
-                previous_reset_at_utc = excluded.previous_reset_at_utc,
-                current_reset_at_utc = excluded.current_reset_at_utc,
-                classification = excluded.classification,
-                confidence = excluded.confidence,
-                source = excluded.source,
-                explanation = excluded.explanation;
-            """;
-        command.Parameters.AddWithValue("$id", resetEvent.EventId);
-        command.Parameters.AddWithValue("$kind", resetEvent.Kind.ToString());
-        command.Parameters.AddWithValue("$provider", resetEvent.Provider);
-        command.Parameters.AddWithValue("$profile", resetEvent.Profile);
-        command.Parameters.AddWithValue("$detected", SerializeUtc(resetEvent.DetectedAtUtc));
-        command.Parameters.AddWithValue("$effective", SerializeUtc(resetEvent.EffectiveAtUtc));
-        command.Parameters.AddWithValue("$before", DbValue(resetEvent.BeforeUsedPercent));
-        command.Parameters.AddWithValue("$after", DbValue(resetEvent.AfterUsedPercent));
-        command.Parameters.AddWithValue("$previousReset", resetEvent.PreviousResetAtUtc is null ? DBNull.Value : SerializeUtc(resetEvent.PreviousResetAtUtc.Value));
-        command.Parameters.AddWithValue("$currentReset", resetEvent.CurrentResetAtUtc is null ? DBNull.Value : SerializeUtc(resetEvent.CurrentResetAtUtc.Value));
-        command.Parameters.AddWithValue("$classification", resetEvent.Classification.ToString());
-        command.Parameters.AddWithValue("$confidence", resetEvent.Confidence);
-        command.Parameters.AddWithValue("$source", resetEvent.Source);
-        command.Parameters.AddWithValue("$explanation", resetEvent.Explanation);
-        return await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static IntelligenceQuery NormalizeQuery(IntelligenceQuery query)
@@ -1050,8 +935,6 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material))).ToLowerInvariant();
         return $"quota-burn-{hash[..24]}";
     }
-
-    private static object DbValue(object? value) => value ?? DBNull.Value;
 
     private static string SerializeUtc(DateTimeOffset value) =>
         value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
