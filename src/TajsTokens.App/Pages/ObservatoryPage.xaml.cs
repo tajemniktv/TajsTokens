@@ -9,26 +9,47 @@ public sealed partial class ObservatoryPage : Page
 {
     private readonly Dictionary<string, CodexSessionOverview> _sessionsById = new(StringComparer.OrdinalIgnoreCase);
     private bool _loading;
+    private bool _reloadRequested;
     private long _selectionGeneration;
 
     public ObservatoryPage()
     {
         InitializeComponent();
         Loaded += OnLoaded;
+        Unloaded += OnUnloaded;
     }
 
     private App App => (App)Application.Current;
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        Loaded -= OnLoaded;
+        App.Services.Telemetry.SnapshotUpdated -= OnSnapshotUpdated;
+        App.Services.Telemetry.SnapshotUpdated += OnSnapshotUpdated;
         await LoadAsync();
+    }
+
+    private void OnUnloaded(object sender, RoutedEventArgs e)
+    {
+        App.Services.Telemetry.SnapshotUpdated -= OnSnapshotUpdated;
+        Interlocked.Increment(ref _selectionGeneration);
+    }
+
+    private void OnSnapshotUpdated(TelemetrySnapshot snapshot)
+    {
+        if (!snapshot.Sources.Any(source =>
+                string.Equals(source.Provider, "Codex rollouts", StringComparison.OrdinalIgnoreCase)))
+        {
+            return;
+        }
+
+        DispatcherQueue.TryEnqueue(async () => await LoadAsync());
     }
 
     private async void OnRefreshClicked(object sender, RoutedEventArgs e)
     {
         if (_loading)
         {
+            _reloadRequested = true;
             return;
         }
 
@@ -53,61 +74,87 @@ public sealed partial class ObservatoryPage : Page
     {
         if (_loading)
         {
+            _reloadRequested = true;
             return;
         }
 
-        _loading = true;
-        try
+        do
         {
-            var store = App.Services.ObservatoryStore;
-            await App.Services.Repository.InitializeAsync(CancellationToken.None);
-            await store.InitializeAsync(CancellationToken.None);
-
-            var summaryTask = store.GetSummaryAsync(CancellationToken.None);
-            var sessionsTask = store.GetSessionOverviewsAsync(500, CancellationToken.None);
-            var storageTask = store.GetRolloutStorageAsync(40, CancellationToken.None);
-            await Task.WhenAll(summaryTask, sessionsTask, storageTask);
-
-            var summary = await summaryTask;
-            var sessions = await sessionsTask;
-            var storage = await storageTask;
-            _sessionsById.Clear();
-            foreach (var session in sessions)
+            _reloadRequested = false;
+            _loading = true;
+            try
             {
-                _sessionsById[session.SessionId] = session;
+                var store = App.Services.ObservatoryStore;
+                var repository = App.Services.Repository;
+
+                // Microsoft.Data.Sqlite's async API still performs SQLite calls synchronously. Keep
+                // aggregate/session/storage queries on the thread pool so a large telemetry database
+                // cannot stall WinUI while Observatory is rendering or a scan is committing records.
+                var data = await Task.Run(async () =>
+                {
+                    await repository.InitializeAsync(CancellationToken.None);
+                    await store.InitializeAsync(CancellationToken.None);
+
+                    var summaryTask = store.GetSummaryAsync(CancellationToken.None);
+                    var sessionsTask = store.GetSessionOverviewsAsync(500, CancellationToken.None);
+                    var storageTask = store.GetRolloutStorageAsync(40, CancellationToken.None);
+                    await Task.WhenAll(summaryTask, sessionsTask, storageTask);
+
+                    return (
+                        Summary: await summaryTask,
+                        Sessions: await sessionsTask,
+                        Storage: await storageTask);
+                });
+
+                var summary = data.Summary;
+                var sessions = data.Sessions;
+                var storage = data.Storage;
+                _sessionsById.Clear();
+                foreach (var session in sessions)
+                {
+                    _sessionsById[session.SessionId] = session;
+                }
+
+                var selectedId = (SessionList.SelectedItem as SessionRow)?.SessionId;
+                var rows = sessions.Select(ToSessionRow).ToArray();
+                SessionList.ItemsSource = rows;
+                SessionCountText.Text = summary.SessionCount.ToString("N0");
+                NativeTokensText.Text = FormatCount(summary.NativeTokens.ReportedTotal);
+                StorageText.Text = FormatBytes(summary.RolloutBytes);
+                StorageList.ItemsSource = storage.Select(item => new StorageRow(
+                    Path.GetFileName(item.FilePath),
+                    $"{FormatBytes(item.SizeBytes)} · {item.RecordsSeen:N0} records · max {FormatBytes(item.LargestRecordBytes)}")).ToArray();
+
+                var rolloutSource = App.Services.Telemetry.Latest.Sources.FirstOrDefault(source =>
+                    string.Equals(source.Provider, "Codex rollouts", StringComparison.OrdinalIgnoreCase));
+                var scanning = rolloutSource?.Detail.Contains("Scanning local Codex rollout history", StringComparison.OrdinalIgnoreCase) == true;
+                StatusText.Text = scanning
+                    ? summary.SessionCount == 0
+                        ? "Importing local Codex history in the background. Sessions will appear here as the scan commits them."
+                        : $"Importing local Codex history in the background · {summary.SessionCount:N0} session(s) available so far."
+                    : summary.SessionCount == 0
+                        ? "No normalized Codex sessions yet. The background collector will ingest discovered rollout JSONL sources without storing transcript content."
+                        : $"{summary.SessionCount:N0} normalized session(s). Last view refresh {DateTimeOffset.Now:t}.";
+
+                if (selectedId is not null)
+                {
+                    SessionList.SelectedItem = rows.FirstOrDefault(row => string.Equals(row.SessionId, selectedId, StringComparison.OrdinalIgnoreCase));
+                }
+                if (SessionList.SelectedItem is null && rows.Length > 0)
+                {
+                    SessionList.SelectedIndex = 0;
+                }
             }
-
-            var selectedId = (SessionList.SelectedItem as SessionRow)?.SessionId;
-            var rows = sessions.Select(ToSessionRow).ToArray();
-            SessionList.ItemsSource = rows;
-            SessionCountText.Text = summary.SessionCount.ToString("N0");
-            NativeTokensText.Text = FormatCount(summary.NativeTokens.ReportedTotal);
-            StorageText.Text = FormatBytes(summary.RolloutBytes);
-            StorageList.ItemsSource = storage.Select(item => new StorageRow(
-                Path.GetFileName(item.FilePath),
-                $"{FormatBytes(item.SizeBytes)} · {item.RecordsSeen:N0} records · max {FormatBytes(item.LargestRecordBytes)}")).ToArray();
-
-            StatusText.Text = summary.SessionCount == 0
-                ? "No normalized Codex sessions yet. The background collector will ingest discovered rollout JSONL sources without storing transcript content."
-                : $"{summary.SessionCount:N0} normalized session(s). Last view refresh {DateTimeOffset.Now:t}.";
-
-            if (selectedId is not null)
+            catch (Exception exception)
             {
-                SessionList.SelectedItem = rows.FirstOrDefault(row => string.Equals(row.SessionId, selectedId, StringComparison.OrdinalIgnoreCase));
+                StatusText.Text = $"Observatory data unavailable: {Summarize(exception.Message)}";
             }
-            if (SessionList.SelectedItem is null && rows.Length > 0)
+            finally
             {
-                SessionList.SelectedIndex = 0;
+                _loading = false;
             }
         }
-        catch (Exception exception)
-        {
-            StatusText.Text = $"Observatory data unavailable: {Summarize(exception.Message)}";
-        }
-        finally
-        {
-            _loading = false;
-        }
+        while (_reloadRequested);
     }
 
     private async void OnSessionSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -121,11 +168,20 @@ public sealed partial class ObservatoryPage : Page
         try
         {
             var store = App.Services.ObservatoryStore;
-            var timelineTask = store.GetTimelineAsync(session.SessionId, 80, CancellationToken.None);
-            var contextTask = store.GetContextObservationsAsync(session.SessionId, 80, CancellationToken.None);
-            var agentsTask = store.GetAgentsAsync(null, CancellationToken.None);
-            var relationshipsTask = store.GetAgentRelationshipsAsync(CancellationToken.None);
-            await Task.WhenAll(timelineTask, contextTask, agentsTask, relationshipsTask);
+            var data = await Task.Run(async () =>
+            {
+                var timelineTask = store.GetTimelineAsync(session.SessionId, 80, CancellationToken.None);
+                var contextTask = store.GetContextObservationsAsync(session.SessionId, 80, CancellationToken.None);
+                var agentsTask = store.GetAgentsAsync(null, CancellationToken.None);
+                var relationshipsTask = store.GetAgentRelationshipsAsync(CancellationToken.None);
+                await Task.WhenAll(timelineTask, contextTask, agentsTask, relationshipsTask);
+
+                return (
+                    Timeline: await timelineTask,
+                    Context: await contextTask,
+                    Agents: await agentsTask,
+                    Relationships: await relationshipsTask);
+            });
 
             if (generation != Volatile.Read(ref _selectionGeneration) ||
                 SessionList.SelectedItem is not SessionRow current ||
@@ -134,10 +190,10 @@ public sealed partial class ObservatoryPage : Page
                 return;
             }
 
-            var timeline = await timelineTask;
-            var context = await contextTask;
-            var agents = await agentsTask;
-            var relationships = await relationshipsTask;
+            var timeline = data.Timeline;
+            var context = data.Context;
+            var agents = data.Agents;
+            var relationships = data.Relationships;
 
             SelectedSessionTitle.Text = session.DisplayName;
             var peak = session.PeakContextPercent is double peakValue ? $" · peak context {peakValue:0.0}%" : string.Empty;
