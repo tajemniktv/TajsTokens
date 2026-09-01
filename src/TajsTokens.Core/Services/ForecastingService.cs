@@ -131,21 +131,13 @@ public sealed class ForecastingService : IForecastingService
                 true);
         }
 
-        var positiveRates = observedRates.Where(rate => rate > 0).ToArray();
-        if (positiveRates.Length == 0)
-        {
-            return UnknownForecast(latest, nowUtc) with
-            {
-                SustainablePercentPerHour = sustainable,
-                State = ForecastState.IdleWithinMeterPrecision,
-                ProjectedRemainingAtResetPercent = resetAt is null ? null : projectedRemainingNow,
-                Trend = "flat within meter precision",
-                IsQuantizedFlat = true
-            };
-        }
-
+        // Mixed histories must retain valid zero-rate intervals. Dropping flat samples would model
+        // only active-burn periods and systematically overstate burn, pressure and exhaustion risk.
+        // The all-flat quantized-meter case is handled above, so a mixed series is safe to feed to the
+        // chronological EWMA exactly as observed.
+        var ratesForForecast = observedRates.ToArray();
         var alpha = latest.Kind == QuotaWindowKind.Weekly ? 0.25 : 0.45;
-        var burnRate = ComputeEwma(positiveRates, alpha);
+        var burnRate = ComputeEwma(ratesForForecast, alpha);
         var elapsedSinceLatestHours = Math.Max(0, (nowUtc - latest.CapturedAtUtc).TotalHours);
         projectedRemainingNow = Math.Max(0, latest.RemainingPercent.Value - (burnRate * elapsedSinceLatestHours));
 
@@ -189,11 +181,11 @@ public sealed class ForecastingService : IForecastingService
             exhaustionBeforeReset,
             survives,
             sustainable,
-            ComputeConfidence(positiveRates, latest, nowUtc, quantized: false),
+            ComputeConfidence(ratesForForecast, latest, nowUtc, quantized: false),
             state,
             burnPressure,
             projectedRemainingAtReset,
-            ComputeTrend(positiveRates),
+            ComputeTrend(ratesForForecast),
             false);
     }
 
