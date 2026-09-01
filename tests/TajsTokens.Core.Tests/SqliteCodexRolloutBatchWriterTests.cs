@@ -1,3 +1,4 @@
+using Microsoft.Data.Sqlite;
 using TajsTokens.Infrastructure.Ingestion;
 using TajsTokens.Infrastructure.Persistence;
 
@@ -18,7 +19,7 @@ public sealed class SqliteCodexRolloutBatchWriterTests
             await repository.InitializeAsync(CancellationToken.None);
             var observatory = new SqliteCodexObservatoryStore(database);
             await observatory.InitializeAsync(CancellationToken.None);
-            var writer = new SqliteCodexRolloutRecordBatchWriter(database);
+            var writer = new SqliteCodexRolloutRecordBatchWriter(database, observatory);
             var now = DateTimeOffset.UtcNow;
 
             await writer.WriteBatchAsync(
@@ -41,6 +42,7 @@ public sealed class SqliteCodexRolloutBatchWriterTests
         }
         finally
         {
+            SqliteConnection.ClearAllPools();
             directory.Delete(recursive: true);
         }
     }
