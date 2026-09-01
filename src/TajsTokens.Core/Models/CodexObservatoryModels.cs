@@ -38,28 +38,20 @@ public sealed record CodexNativeTokenTotals(
 
 public sealed record CodexSessionOverview(
     string SessionId,
-    string? ThreadId,
+    string? ParentSessionId,
+    string DisplayName,
     string Repository,
     DateTimeOffset StartedAtUtc,
     DateTimeOffset? LastActivityAtUtc,
     string Status,
-    string AgentName,
-    string AgentState,
     string? Model,
-    long NativeUncachedInput,
-    long NativeCacheRead,
-    long NativeCacheWrite,
-    long NativeNonReasoningOutput,
-    long NativeReasoningOutput,
-    long NativeReportedTotal,
-    long? LatestContextInput,
-    long? ContextWindowTokens,
-    int Compactions,
+    CodexNativeTokenTotals NativeTokens,
+    int CompactionCount,
+    double? PeakContextPercent,
     long RolloutBytes,
-    long RecordsSeen);
+    int TimelineEventCount);
 
 public sealed record CodexRolloutStorageSummary(
-    string SourceIdentity,
     string FilePath,
     string? SessionId,
     long SizeBytes,
@@ -68,20 +60,19 @@ public sealed record CodexRolloutStorageSummary(
     DateTimeOffset LastSeenAtUtc);
 
 public sealed record CodexObservatorySummary(
-    int SessionCount,
-    int AgentCount,
-    int RelationshipCount,
-    int RolloutFileCount,
-    long RolloutBytes,
-    long RolloutRecords,
+    long SessionCount,
     CodexNativeTokenTotals NativeTokens,
-    int ContextObservationCount,
-    int CompactionCount,
-    long? PeakContextInput,
-    DateTimeOffset? LatestActivityAtUtc)
-{
-    public static CodexObservatorySummary Empty { get; } = new(
-        0, 0, 0, 0, 0, 0,
-        new CodexNativeTokenTotals(0, 0, 0, 0, 0, 0),
-        0, 0, null, null);
-}
+    long RolloutBytes);
+
+public sealed record CodexParserResumeState(
+    string SourceIdentity,
+    long ByteOffset,
+    string SessionId,
+    string? ParentSessionId,
+    string AgentName,
+    string Repository,
+    DateTimeOffset StartedAtUtc,
+    string? CurrentModel,
+    string? ReasoningEffort,
+    long? ContextWindowTokens,
+    DateTimeOffset UpdatedAtUtc);
