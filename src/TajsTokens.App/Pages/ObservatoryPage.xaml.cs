@@ -8,6 +8,8 @@ namespace TajsTokens.App.Pages;
 public sealed partial class ObservatoryPage : Page
 {
     private readonly Dictionary<string, CodexSessionOverview> _sessionsById = new(StringComparer.OrdinalIgnoreCase);
+    private CancellationTokenSource? _pageCancellation;
+    private bool _isLoaded;
     private bool _loading;
     private bool _reloadRequested;
     private long _selectionGeneration;
@@ -23,30 +25,75 @@ public sealed partial class ObservatoryPage : Page
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        _isLoaded = true;
+        var previous = Interlocked.Exchange(ref _pageCancellation, new CancellationTokenSource());
+        previous?.Cancel();
+        previous?.Dispose();
+
         App.Services.Telemetry.SnapshotUpdated -= OnSnapshotUpdated;
         App.Services.Telemetry.SnapshotUpdated += OnSnapshotUpdated;
-        await LoadAsync();
+
+        try
+        {
+            await LoadAsync(_pageCancellation.Token);
+        }
+        catch (OperationCanceledException) when (_pageCancellation?.IsCancellationRequested != false)
+        {
+            // Navigation can cancel a page-scoped load after it leaves the visual tree.
+        }
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
+        _isLoaded = false;
         App.Services.Telemetry.SnapshotUpdated -= OnSnapshotUpdated;
         Interlocked.Increment(ref _selectionGeneration);
+
+        var cancellation = Interlocked.Exchange(ref _pageCancellation, null);
+        cancellation?.Cancel();
+        cancellation?.Dispose();
     }
 
     private void OnSnapshotUpdated(TelemetrySnapshot snapshot)
     {
-        if (!snapshot.Sources.Any(source =>
+        if (!_isLoaded || !snapshot.Sources.Any(source =>
                 string.Equals(source.Provider, "Codex rollouts", StringComparison.OrdinalIgnoreCase)))
         {
             return;
         }
 
-        DispatcherQueue.TryEnqueue(async () => await LoadAsync());
+        var cancellation = _pageCancellation;
+        if (cancellation is null || cancellation.IsCancellationRequested)
+        {
+            return;
+        }
+
+        DispatcherQueue.TryEnqueue(async () =>
+        {
+            if (!_isLoaded || cancellation.IsCancellationRequested || !ReferenceEquals(_pageCancellation, cancellation))
+            {
+                return;
+            }
+
+            try
+            {
+                await LoadAsync(cancellation.Token);
+            }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+            {
+                // A queued snapshot callback may outlive navigation; detached pages do no work.
+            }
+        });
     }
 
     private async void OnRefreshClicked(object sender, RoutedEventArgs e)
     {
+        var cancellation = _pageCancellation;
+        if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested)
+        {
+            return;
+        }
+
         if (_loading)
         {
             _reloadRequested = true;
@@ -56,7 +103,11 @@ public sealed partial class ObservatoryPage : Page
         try
         {
             StatusText.Text = "Refreshing providers and local rollouts…";
-            await App.Services.Telemetry.RefreshAsync(RefreshTrigger.Manual, CancellationToken.None);
+            await App.Services.Telemetry.RefreshAsync(RefreshTrigger.Manual, cancellation.Token);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            return;
         }
         catch (OperationCanceledException)
         {
@@ -67,11 +118,20 @@ public sealed partial class ObservatoryPage : Page
             StatusText.Text = $"Refresh failed: {Summarize(exception.Message)}";
         }
 
-        await LoadAsync();
+        if (_isLoaded && !cancellation.IsCancellationRequested && ReferenceEquals(_pageCancellation, cancellation))
+        {
+            await LoadAsync(cancellation.Token);
+        }
     }
 
-    private async Task LoadAsync()
+    private async Task LoadAsync(CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!_isLoaded)
+        {
+            return;
+        }
+
         if (_loading)
         {
             _reloadRequested = true;
@@ -80,6 +140,12 @@ public sealed partial class ObservatoryPage : Page
 
         do
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (!_isLoaded)
+            {
+                return;
+            }
+
             _reloadRequested = false;
             _loading = true;
             try
@@ -92,19 +158,25 @@ public sealed partial class ObservatoryPage : Page
                 // cannot stall WinUI while Observatory is rendering or a scan is committing records.
                 var data = await Task.Run(async () =>
                 {
-                    await repository.InitializeAsync(CancellationToken.None);
-                    await store.InitializeAsync(CancellationToken.None);
+                    await repository.InitializeAsync(cancellationToken);
+                    await store.InitializeAsync(cancellationToken);
 
-                    var summaryTask = store.GetSummaryAsync(CancellationToken.None);
-                    var sessionsTask = store.GetSessionOverviewsAsync(500, CancellationToken.None);
-                    var storageTask = store.GetRolloutStorageAsync(40, CancellationToken.None);
+                    var summaryTask = store.GetSummaryAsync(cancellationToken);
+                    var sessionsTask = store.GetSessionOverviewsAsync(500, cancellationToken);
+                    var storageTask = store.GetRolloutStorageAsync(40, cancellationToken);
                     await Task.WhenAll(summaryTask, sessionsTask, storageTask);
 
                     return (
                         Summary: await summaryTask,
                         Sessions: await sessionsTask,
                         Storage: await storageTask);
-                });
+                }, cancellationToken);
+
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!_isLoaded)
+                {
+                    return;
+                }
 
                 var summary = data.Summary;
                 var sessions = data.Sessions;
@@ -145,22 +217,31 @@ public sealed partial class ObservatoryPage : Page
                     SessionList.SelectedIndex = 0;
                 }
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                return;
+            }
             catch (Exception exception)
             {
-                StatusText.Text = $"Observatory data unavailable: {Summarize(exception.Message)}";
+                if (_isLoaded)
+                {
+                    StatusText.Text = $"Observatory data unavailable: {Summarize(exception.Message)}";
+                }
             }
             finally
             {
                 _loading = false;
             }
         }
-        while (_reloadRequested);
+        while (_reloadRequested && _isLoaded && !cancellationToken.IsCancellationRequested);
     }
 
     private async void OnSessionSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         var generation = Interlocked.Increment(ref _selectionGeneration);
-        if (SessionList.SelectedItem is not SessionRow row || !_sessionsById.TryGetValue(row.SessionId, out var session))
+        var cancellation = _pageCancellation;
+        if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested ||
+            SessionList.SelectedItem is not SessionRow row || !_sessionsById.TryGetValue(row.SessionId, out var session))
         {
             return;
         }
@@ -170,10 +251,10 @@ public sealed partial class ObservatoryPage : Page
             var store = App.Services.ObservatoryStore;
             var data = await Task.Run(async () =>
             {
-                var timelineTask = store.GetTimelineAsync(session.SessionId, 80, CancellationToken.None);
-                var contextTask = store.GetContextObservationsAsync(session.SessionId, 80, CancellationToken.None);
-                var agentsTask = store.GetAgentsAsync(null, CancellationToken.None);
-                var relationshipsTask = store.GetAgentRelationshipsAsync(CancellationToken.None);
+                var timelineTask = store.GetTimelineAsync(session.SessionId, 80, cancellation.Token);
+                var contextTask = store.GetContextObservationsAsync(session.SessionId, 80, cancellation.Token);
+                var agentsTask = store.GetAgentsAsync(null, cancellation.Token);
+                var relationshipsTask = store.GetAgentRelationshipsAsync(cancellation.Token);
                 await Task.WhenAll(timelineTask, contextTask, agentsTask, relationshipsTask);
 
                 return (
@@ -181,9 +262,10 @@ public sealed partial class ObservatoryPage : Page
                     Context: await contextTask,
                     Agents: await agentsTask,
                     Relationships: await relationshipsTask);
-            });
+            }, cancellation.Token);
 
-            if (generation != Volatile.Read(ref _selectionGeneration) ||
+            if (!_isLoaded || cancellation.IsCancellationRequested || !ReferenceEquals(_pageCancellation, cancellation) ||
+                generation != Volatile.Read(ref _selectionGeneration) ||
                 SessionList.SelectedItem is not SessionRow current ||
                 !string.Equals(current.SessionId, row.SessionId, StringComparison.OrdinalIgnoreCase))
             {
@@ -217,9 +299,14 @@ public sealed partial class ObservatoryPage : Page
                 SelectedSessionSummary.Text += $" · {detail}";
             }
         }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            // Navigation cancels detached session-detail queries.
+        }
         catch (Exception exception)
         {
-            if (generation == Volatile.Read(ref _selectionGeneration))
+            if (_isLoaded && ReferenceEquals(_pageCancellation, cancellation) &&
+                generation == Volatile.Read(ref _selectionGeneration))
             {
                 SelectedSessionSummary.Text = $"Session detail unavailable: {Summarize(exception.Message)}";
             }
