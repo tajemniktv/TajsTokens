@@ -17,9 +17,9 @@
             <NavigationView.MenuItems>
                 <NavigationViewItem Content="Overview" Tag="overview" Icon="View" IsSelected="True" />
                 <NavigationViewItem Content="Usage" Tag="usage" Icon="AllApps" />
-                <NavigationViewItem Content="Observatory" Tag="agents" Icon="People" />
+                <NavigationViewItem Content="Codex Observatory" Tag="observatory" Icon="People" />
                 <NavigationViewItem Content="Forecasts" Tag="forecasts" Icon="Preview" />
-                <NavigationViewItem Content="Events" Tag="events" Icon="Calendar" />
+                <NavigationViewItem Content="Diagnostics" Tag="diagnostics" Icon="Repair" />
                 <NavigationViewItem Content="Settings" Tag="settings" Icon="Setting" />
             </NavigationView.MenuItems>
             <Frame x:Name="ContentFrame" />
