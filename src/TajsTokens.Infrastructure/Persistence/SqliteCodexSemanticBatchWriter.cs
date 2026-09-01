@@ -39,10 +39,10 @@ internal sealed class SqliteCodexSemanticBatchWriter(
         {
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
-            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            using var transaction = connection.BeginTransaction();
 
             await WriteProjectionBatchAsync(connection, transaction, records, cancellationToken);
-            await transaction.CommitAsync(cancellationToken);
+            transaction.Commit();
 
             // Counter observations deliberately remain ordered and use the established replay/reset
             // implementation. This still removes the much larger session/agent/activity/quota/context
