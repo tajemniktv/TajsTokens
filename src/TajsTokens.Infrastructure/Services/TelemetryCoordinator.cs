@@ -204,7 +204,7 @@ public sealed class TelemetryCoordinator
                 scanSources.Add(new ProviderHealthSnapshot(
                     "Codex rollouts",
                     TelemetryHealthState.Stale,
-                    "Checking changed local Codex rollouts in the background; provider quota is already usable and the last complete token generation remains visible.",
+                    "Scanning local Codex rollout history (changed sources) in the background; provider quota is already usable and the last complete token generation remains visible.",
                     PreviousSuccess(previous, "Codex rollouts")));
                 var scanEvents = events.ToList();
                 scanEvents.Add(new TelemetryRefreshEvent(
