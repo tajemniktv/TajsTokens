@@ -9,8 +9,7 @@ public interface IIntelligenceService
     Task<IReadOnlyList<CurrentQuotaForecast>> BuildAndPersistCurrentForecastsAsync(
         IReadOnlyList<QuotaLaneState> quotaLanes,
         DateTimeOffset nowUtc,
-        CancellationToken cancellationToken) =>
-        Task.FromResult<IReadOnlyList<CurrentQuotaForecast>>([]);
+        CancellationToken cancellationToken);
 
     Task<IntelligenceDashboard> QueryAsync(
         IntelligenceQuery query,

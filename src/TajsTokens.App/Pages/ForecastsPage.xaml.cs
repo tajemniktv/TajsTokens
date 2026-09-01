@@ -114,7 +114,9 @@ public sealed partial class ForecastsPage : Page
                     : "pace uncertain";
                 var pressure = forecast.BurnPressure is double value ? $" · {value:0.00}× sustainable" : string.Empty;
                 var anchor = snapshot.QuotaCapturedAtUtc is DateTimeOffset captured
-                    ? $" · anchor {snapshot.QuotaAuthority} @ {captured.ToLocalTime():g} · {snapshot.QuotaSource ?? "unknown source"}"
+                    ? $" · anchor {snapshot.QuotaAuthority} @ {captured.ToLocalTime():g} · {snapshot.QuotaSource ?? "unknown source"}" +
+                      $" · window {(snapshot.QuotaWindowMinutes is int window ? $"{window}m" : "unknown window")}" +
+                      $" · reset {(snapshot.QuotaResetsAtUtc is DateTimeOffset reset ? reset.ToLocalTime().ToString("g") : "unknown reset")}"
                     : " · legacy forecast without quota-anchor metadata";
                 return new ForecastRow(
                     $"{forecast.GeneratedAtUtc.ToLocalTime():g} · {FormatKind(forecast.Kind)} · {forecast.State}",

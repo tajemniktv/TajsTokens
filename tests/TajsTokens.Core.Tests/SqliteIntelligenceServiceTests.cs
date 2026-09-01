@@ -324,7 +324,181 @@ public sealed class SqliteIntelligenceServiceTests
             Assert.Equal(current.Source, saved.QuotaSource);
             Assert.Equal(QuotaObservationAuthority.ProviderAuthoritative, saved.QuotaAuthority);
             Assert.Equal(current.CapturedAtUtc, saved.QuotaCapturedAtUtc);
+            Assert.Equal(current.WindowMinutes, saved.QuotaWindowMinutes);
+            Assert.Equal(current.ResetsAtUtc, saved.QuotaResetsAtUtc);
             Assert.Equal(generation.Forecast, saved.Forecast);
+
+            var dashboard = await intelligence.QueryAsync(
+                new IntelligenceQuery(start.AddHours(-1), newerEmbedded.CapturedAtUtc.AddHours(1), AnalyticsBucketSize.Hour, 24),
+                CancellationToken.None);
+            var savedThroughDashboard = Assert.Single(dashboard.FiveHourForecasts);
+            Assert.Equal(saved, savedThroughDashboard);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task CurrentForecast_PreservesEqualTimestampAuthoritiesRegardlessWriteOrder(bool providerFirst)
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-current-forecast-authority-");
+        var database = Path.Combine(directory.FullName, "telemetry.db");
+        var captured = DateTimeOffset.Parse("2026-08-31T10:00:00Z");
+        var reset = captured.AddHours(5);
+        try
+        {
+            var repository = new SqliteTelemetryRepository(database);
+            var intelligence = new SqliteIntelligenceService(database, repository);
+            await repository.InitializeAsync(CancellationToken.None);
+
+            var previous = Quota(QuotaWindowKind.FiveHour, captured.AddHours(-1), 10, reset, "codex-app-server:codex");
+            var current = Quota(QuotaWindowKind.FiveHour, captured, 20, reset, "codex-app-server:codex");
+            var rollout = Quota(QuotaWindowKind.FiveHour, captured, 99, reset, "codex-rollout:primary");
+            await repository.UpsertQuotaSnapshotAsync(previous, CancellationToken.None);
+            if (providerFirst)
+            {
+                await repository.UpsertQuotaSnapshotAsync(current, CancellationToken.None);
+                await repository.UpsertQuotaSnapshotAsync(rollout, CancellationToken.None);
+            }
+            else
+            {
+                await repository.UpsertQuotaSnapshotAsync(rollout, CancellationToken.None);
+                await repository.UpsertQuotaSnapshotAsync(current, CancellationToken.None);
+            }
+
+            var snapshots = await repository.GetRecentQuotaSnapshotsAsync(
+                QuotaWindowKind.FiveHour, "codex", "default", 10, CancellationToken.None);
+            Assert.Equal(3, snapshots.Count);
+
+            var results = await intelligence.BuildAndPersistCurrentForecastsAsync(
+                [new QuotaLaneState(QuotaWindowKind.FiveHour, "codex", "default", current, TelemetryHealthState.Live, current.CapturedAtUtc)],
+                captured.AddHours(1),
+                CancellationToken.None);
+            var generation = Assert.Single(results);
+            Assert.NotNull(generation.Forecast);
+            Assert.Equal(10d, generation.Forecast!.BurnRatePercentPerHour);
+
+            var persisted = Assert.Single(await repository.GetRecentForecastSnapshotsAsync(
+                QuotaWindowKind.FiveHour, "codex", "default", 10, CancellationToken.None));
+            Assert.Equal(QuotaObservationAuthority.ProviderAuthoritative, persisted.QuotaAuthority);
+            Assert.Equal(current.Source, persisted.QuotaSource);
+            Assert.Equal(current.WindowMinutes, persisted.QuotaWindowMinutes);
+            Assert.Equal(current.ResetsAtUtc, persisted.QuotaResetsAtUtc);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CurrentForecast_BoundsQuotaHistoryBeforeSqlLimit()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-current-forecast-history-bound-");
+        var database = Path.Combine(directory.FullName, "telemetry.db");
+        var anchor = DateTimeOffset.Parse("2026-08-01T00:00:00Z");
+        var reset = anchor.AddDays(2);
+        try
+        {
+            var repository = new SqliteTelemetryRepository(database);
+            var intelligence = new SqliteIntelligenceService(database, repository);
+            await repository.InitializeAsync(CancellationToken.None);
+            await repository.UpsertQuotaSnapshotAsync(
+                Quota(QuotaWindowKind.FiveHour, anchor.AddHours(-1), 10, reset, "codex-app-server:codex"),
+                CancellationToken.None);
+            var current = Quota(QuotaWindowKind.FiveHour, anchor, 20, reset, "codex-app-server:codex");
+            await repository.UpsertQuotaSnapshotAsync(current, CancellationToken.None);
+
+            for (var index = 1; index <= 520; index++)
+            {
+                await repository.UpsertQuotaSnapshotAsync(
+                    Quota(
+                        QuotaWindowKind.FiveHour,
+                        anchor.AddMinutes(index),
+                        20 + index * 0.01,
+                        reset,
+                        $"codex-rollout:{index}"),
+                    CancellationToken.None);
+            }
+
+            var results = await intelligence.BuildAndPersistCurrentForecastsAsync(
+                [new QuotaLaneState(QuotaWindowKind.FiveHour, "codex", "default", current, TelemetryHealthState.Live, current.CapturedAtUtc)],
+                anchor.AddHours(10),
+                CancellationToken.None);
+            var generation = Assert.Single(results);
+            Assert.NotNull(generation.Forecast);
+            Assert.Equal(10d, generation.Forecast!.BurnRatePercentPerHour);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CurrentForecast_FutureAnchorWithOlderHistoryReturnsNoForecastAndDoesNotPersist()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-current-forecast-future-history-");
+        var database = Path.Combine(directory.FullName, "telemetry.db");
+        var now = DateTimeOffset.Parse("2026-08-31T12:00:00Z");
+        try
+        {
+            var repository = new SqliteTelemetryRepository(database);
+            var intelligence = new SqliteIntelligenceService(database, repository);
+            await repository.InitializeAsync(CancellationToken.None);
+            var current = Quota(QuotaWindowKind.FiveHour, now.AddMinutes(10), 20, now.AddHours(5), "codex-app-server:codex");
+            await repository.UpsertQuotaSnapshotAsync(
+                Quota(QuotaWindowKind.FiveHour, now.AddHours(-1), 10, now.AddHours(5), "codex-app-server:codex"),
+                CancellationToken.None);
+
+            var results = await intelligence.BuildAndPersistCurrentForecastsAsync(
+                [new QuotaLaneState(QuotaWindowKind.FiveHour, "codex", "default", current, TelemetryHealthState.Live, current.CapturedAtUtc)],
+                now,
+                CancellationToken.None);
+            var generation = Assert.Single(results);
+            Assert.Null(generation.Forecast);
+            Assert.Equal(TelemetryHealthState.Live, generation.State);
+            Assert.Contains("newer", generation.Diagnostic, StringComparison.OrdinalIgnoreCase);
+            Assert.Empty(await repository.GetRecentForecastSnapshotsAsync(
+                QuotaWindowKind.FiveHour, "codex", "default", 10, CancellationToken.None));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CurrentForecast_FutureAnchorWithoutHistoryReturnsNoForecastAndDoesNotPersist()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-current-forecast-future-empty-");
+        var database = Path.Combine(directory.FullName, "telemetry.db");
+        var now = DateTimeOffset.Parse("2026-08-31T12:00:00Z");
+        try
+        {
+            var repository = new SqliteTelemetryRepository(database);
+            var intelligence = new SqliteIntelligenceService(database, repository);
+            await repository.InitializeAsync(CancellationToken.None);
+            var current = Quota(QuotaWindowKind.FiveHour, now.AddMinutes(10), 20, now.AddHours(5), "codex-app-server:codex");
+
+            var results = await intelligence.BuildAndPersistCurrentForecastsAsync(
+                [new QuotaLaneState(QuotaWindowKind.FiveHour, "codex", "default", current, TelemetryHealthState.Live, current.CapturedAtUtc)],
+                now,
+                CancellationToken.None);
+            var generation = Assert.Single(results);
+            Assert.Null(generation.Forecast);
+            Assert.Equal(TelemetryHealthState.Live, generation.State);
+            Assert.Contains("newer", generation.Diagnostic, StringComparison.OrdinalIgnoreCase);
+            Assert.Empty(await repository.GetRecentForecastSnapshotsAsync(
+                QuotaWindowKind.FiveHour, "codex", "default", 10, CancellationToken.None));
         }
         finally
         {

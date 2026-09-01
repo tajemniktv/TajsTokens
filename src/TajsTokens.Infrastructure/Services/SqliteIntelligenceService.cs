@@ -94,8 +94,24 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 continue;
             }
 
+            if (current.CapturedAtUtc > nowUtc)
+            {
+                results.Add(new CurrentQuotaForecast(
+                    current,
+                    TelemetryHealthState.Live,
+                    null,
+                    "Forecasting is paused for a future-dated quota anchor.",
+                    "The provider-authoritative anchor is newer than the forecast evaluation time."));
+                continue;
+            }
+
             var history = await _telemetryRepository.GetRecentQuotaSnapshotsAsync(
-                current.Kind, current.Provider, current.Profile, 512, cancellationToken);
+                current.Kind,
+                current.Provider,
+                current.Profile,
+                512,
+                cancellationToken,
+                current.CapturedAtUtc);
             var anchored = history
                 .Where(item => item.CapturedAtUtc <= current.CapturedAtUtc)
                 .GroupBy(item => item.CapturedAtUtc)
@@ -112,7 +128,11 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 var forecast = _forecasting.BuildForecast(anchored, nowUtc);
                 var persisted = new ForecastSnapshot(
                     current.Provider, current.Profile, forecast,
-                    current.Source, current.Authority, current.CapturedAtUtc);
+                    current.Source,
+                    current.Authority,
+                    current.CapturedAtUtc,
+                    current.WindowMinutes,
+                    current.ResetsAtUtc);
                 await _telemetryRepository.UpsertForecastSnapshotAsync(persisted, cancellationToken);
                 results.Add(new CurrentQuotaForecast(
                     current, TelemetryHealthState.Live, forecast,
@@ -404,7 +424,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
 
         return rows
             .GroupBy(row => (row.Provider, row.Profile, row.Kind))
-            .Select(group => (IReadOnlyList<QuotaSnapshot>)group.ToArray())
+            .Select(group => (IReadOnlyList<QuotaSnapshot>)CanonicalizeQuotaSnapshots(group).ToArray())
             .ToArray();
     }
 
@@ -885,7 +905,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             SELECT provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
                    estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence,
                    state, burn_pressure, projected_remaining_at_reset_percent, trend, is_quantized_flat,
-                   quota_source, quota_authority, quota_captured_at_utc
+                   quota_source, quota_authority, quota_captured_at_utc, quota_window_minutes, quota_resets_at_utc
             FROM forecast_snapshots
             WHERE kind = $kind AND generated_at_utc >= $from AND generated_at_utc <= $to
             ORDER BY generated_at_utc DESC
@@ -920,7 +940,9 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                     !reader.IsDBNull(13) && reader.GetInt32(13) != 0),
                 reader.IsDBNull(14) ? null : reader.GetString(14),
                 reader.IsDBNull(15) || !Enum.TryParse<QuotaObservationAuthority>(reader.GetString(15), out var authority) ? QuotaObservationAuthority.Unknown : authority,
-                reader.IsDBNull(16) ? null : ParseUtc(reader.GetString(16))));
+                reader.IsDBNull(16) ? null : ParseUtc(reader.GetString(16)),
+                reader.IsDBNull(17) ? null : reader.GetInt32(17),
+                reader.IsDBNull(18) ? null : ParseUtc(reader.GetString(18))));
         }
         return results;
     }
@@ -948,8 +970,23 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         {
             results.Add(ReadQuotaSnapshot(reader));
         }
-        return results;
+        return CanonicalizeQuotaSnapshots(results);
     }
+
+    private static IReadOnlyList<QuotaSnapshot> CanonicalizeQuotaSnapshots(
+        IEnumerable<QuotaSnapshot> snapshots) =>
+        snapshots
+            .GroupBy(snapshot => (
+                snapshot.Provider,
+                snapshot.Profile,
+                snapshot.Kind,
+                snapshot.CapturedAtUtc))
+            .Select(group => group
+                .OrderByDescending(snapshot => snapshot.Authority)
+                .ThenByDescending(snapshot => snapshot.Source, StringComparer.Ordinal)
+                .First())
+            .OrderBy(snapshot => snapshot.CapturedAtUtc)
+            .ToArray();
 
     private static QuotaSnapshot ReadQuotaSnapshot(SqliteDataReader reader) =>
         new(

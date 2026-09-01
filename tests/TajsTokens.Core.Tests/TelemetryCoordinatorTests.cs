@@ -203,6 +203,12 @@ public sealed class TelemetryCoordinatorTests : IDisposable
             return new IntelligenceRefreshResult(0, 0);
         }
 
+        public Task<IReadOnlyList<CurrentQuotaForecast>> BuildAndPersistCurrentForecastsAsync(
+            IReadOnlyList<QuotaLaneState> quotaLanes,
+            DateTimeOffset nowUtc,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
         public Task<IntelligenceDashboard> QueryAsync(IntelligenceQuery query, CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 

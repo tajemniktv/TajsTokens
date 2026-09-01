@@ -344,11 +344,10 @@ internal sealed class SqliteCodexIngestionBatchWriter(
         BuildCommand(connection, transaction, """
             INSERT INTO quota_snapshots(provider, profile, kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, source)
             VALUES($provider, $profile, $kind, $captured, $used, $window, $resets, $source)
-            ON CONFLICT(provider, profile, kind, captured_at_utc) DO UPDATE SET
+            ON CONFLICT(provider, profile, kind, captured_at_utc, source) DO UPDATE SET
               used_percent = excluded.used_percent,
               window_minutes = excluded.window_minutes,
-              resets_at_utc = excluded.resets_at_utc,
-              source = excluded.source;
+              resets_at_utc = excluded.resets_at_utc;
             """, "$provider", "$profile", "$kind", "$captured", "$used", "$window", "$resets", "$source");
 
     private static SqliteCommand BuildContextCommand(SqliteConnection connection, SqliteTransaction transaction) =>

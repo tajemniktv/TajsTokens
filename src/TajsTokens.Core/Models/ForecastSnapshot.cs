@@ -9,4 +9,6 @@ public sealed record ForecastSnapshot(
     Forecast Forecast,
     string? QuotaSource = null,
     QuotaObservationAuthority QuotaAuthority = QuotaObservationAuthority.Unknown,
-    DateTimeOffset? QuotaCapturedAtUtc = null);
+    DateTimeOffset? QuotaCapturedAtUtc = null,
+    int? QuotaWindowMinutes = null,
+    DateTimeOffset? QuotaResetsAtUtc = null);

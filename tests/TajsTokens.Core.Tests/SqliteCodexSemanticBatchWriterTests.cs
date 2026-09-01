@@ -79,6 +79,78 @@ public sealed class SqliteCodexIngestionBatchWriterTests
         }
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task WriteBatchAsync_PreservesProviderQuotaWhenSourcesShareTimestamp(bool providerFirst)
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-ingestion-batch-authority-");
+        var database = Path.Combine(directory.FullName, "telemetry.db");
+        var sourcePath = Path.Combine(directory.FullName, "private", "rollout.jsonl");
+        var captured = DateTimeOffset.Parse("2026-08-31T10:00:00Z");
+        try
+        {
+            var repository = new SqliteTelemetryRepository(database);
+            await repository.InitializeAsync(CancellationToken.None);
+            var observatory = new SqliteCodexObservatoryStore(database);
+            await observatory.InitializeAsync(CancellationToken.None);
+            var writer = new SqliteCodexIngestionBatchWriter(database, observatory);
+            var previous = new QuotaSnapshot(
+                QuotaWindowKind.FiveHour,
+                captured.AddHours(-1),
+                10,
+                300,
+                captured.AddHours(5),
+                "codex",
+                "codex",
+                "codex-app-server:codex");
+            var current = new QuotaSnapshot(
+                QuotaWindowKind.FiveHour,
+                captured,
+                20,
+                300,
+                captured.AddHours(5),
+                "codex",
+                "codex",
+                "codex-app-server:codex");
+            await repository.UpsertQuotaSnapshotAsync(previous, CancellationToken.None);
+            if (providerFirst)
+            {
+                await repository.UpsertQuotaSnapshotAsync(current, CancellationToken.None);
+                await writer.WriteBatchAsync(
+                    "source-1", sourcePath, 128,
+                    [BuildRecord("rollout-1", sourcePath, captured, 100, 40, 20, 5, 99)],
+                    CancellationToken.None);
+            }
+            else
+            {
+                await writer.WriteBatchAsync(
+                    "source-1", sourcePath, 128,
+                    [BuildRecord("rollout-1", sourcePath, captured, 100, 40, 20, 5, 99)],
+                    CancellationToken.None);
+                await repository.UpsertQuotaSnapshotAsync(current, CancellationToken.None);
+            }
+
+            var snapshots = await repository.GetRecentQuotaSnapshotsAsync(
+                QuotaWindowKind.FiveHour, "codex", "codex", 10, CancellationToken.None);
+            Assert.Equal(3, snapshots.Count);
+
+            var intelligence = new TajsTokens.Infrastructure.Services.SqliteIntelligenceService(database, repository);
+            var results = await intelligence.BuildAndPersistCurrentForecastsAsync(
+                [new QuotaLaneState(QuotaWindowKind.FiveHour, "codex", "codex", current, TelemetryHealthState.Live, current.CapturedAtUtc)],
+                captured.AddHours(1),
+                CancellationToken.None);
+            var generation = Assert.Single(results);
+            Assert.NotNull(generation.Forecast);
+            Assert.Equal(10d, generation.Forecast!.BurnRatePercentPerHour);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
     [Fact]
     public async Task WriteBatchAsync_ReplacedPathRetiresOldTokenGenerationAndCounterState()
     {
