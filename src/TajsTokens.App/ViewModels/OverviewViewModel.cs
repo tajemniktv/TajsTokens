@@ -32,7 +32,7 @@ public sealed partial class OverviewViewModel : ObservableObject
     private string lastUpdatedText = "Not refreshed yet";
 
     [ObservableProperty]
-    private string historyCaption = "Tokscale hourly history will appear after the first successful refresh.";
+    private string historyCaption = "Native Codex hourly history will appear after the first successful local accounting refresh.";
 
     [ObservableProperty]
     private bool isRefreshing;
@@ -83,9 +83,6 @@ public sealed partial class OverviewViewModel : ObservableObject
         await _applyGate.WaitAsync(cancellationToken);
         try
         {
-            // Event dispatch, initial page load and manual refresh can all request renders. Reject an
-            // older snapshot if a newer coordinator snapshot was already requested before this one
-            // acquired the render gate, so an awaited SQLite history read cannot restore stale UI.
             if (IsSuperseded(snapshotTicks))
             {
                 return;
@@ -205,7 +202,6 @@ public sealed partial class OverviewViewModel : ObservableObject
                 }
                 catch (ArgumentException)
                 {
-                    // Current quota remains useful while forecasting learns from more history.
                 }
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
@@ -238,7 +234,8 @@ public sealed partial class OverviewViewModel : ObservableObject
         var output = usages.Sum(item => item.Breakdown.NonReasoningOutput);
         var reasoning = usages.Sum(item => item.Breakdown.ReasoningOutput);
         var total = usages.Sum(item => item.Breakdown.Total);
-        var provenance = isFresh ? "Tokscale · live" : "Tokscale · last known good";
+        var source = TokenSourceLabel(usages.Select(item => item.Provider));
+        var provenance = isFresh ? $"{source} · live" : $"{source} · last known good";
 
         TokenSummaryCards.Add(new TokenSummaryCard("Uncached input", FormatTokenCount(uncached), $"{provenance} · disjoint input"));
         TokenSummaryCards.Add(new TokenSummaryCard("Cache read", FormatTokenCount(cacheRead), $"{provenance} · cached input"));
@@ -248,24 +245,25 @@ public sealed partial class OverviewViewModel : ObservableObject
         }
         TokenSummaryCards.Add(new TokenSummaryCard("Output", FormatTokenCount(output), "Excludes reasoning"));
         TokenSummaryCards.Add(new TokenSummaryCard("Reasoning", FormatTokenCount(reasoning), "Separate reasoning output"));
-        TokenSummaryCards.Add(new TokenSummaryCard("Total", FormatTokenCount(total), $"{usages.Count} Codex model row(s)"));
+        TokenSummaryCards.Add(new TokenSummaryCard("Total", FormatTokenCount(total), $"{source} · {usages.Count} Codex model row(s)"));
     }
 
     private void RenderTokenUnavailable()
     {
         TokenSummaryCards.Clear();
-        TokenSummaryCards.Add(new TokenSummaryCard("Token accounting", "Unavailable", "Tokscale has not produced a successful snapshot yet."));
+        TokenSummaryCards.Add(new TokenSummaryCard("Token accounting", "Unavailable", "No successful Codex token-accounting snapshot is available yet."));
         HistoryPoints.Clear();
-        HistoryCaption = "Hourly history is unavailable until Tokscale can be read.";
+        HistoryCaption = "Hourly history is unavailable until a Codex token-accounting source can be read.";
     }
 
     private void RenderHourlyHistory(IReadOnlyList<TokenTimeBucket> buckets, bool isFresh)
     {
         HistoryPoints.Clear();
+        var source = TokenSourceLabel(buckets.Select(item => item.Provider));
         var visible = buckets.TakeLast(12).ToArray();
         if (visible.Length == 0)
         {
-            HistoryCaption = "Tokscale returned no hourly Codex buckets for the current report range.";
+            HistoryCaption = $"{source} returned no hourly Codex buckets for the current local-history range.";
             return;
         }
 
@@ -280,7 +278,7 @@ public sealed partial class OverviewViewModel : ObservableObject
         }
 
         var freshness = isFresh ? "live" : "stale";
-        HistoryCaption = $"Tokscale hourly usage · {freshness} · last {visible.Length} bucket(s) · bars normalized to the busiest visible hour.";
+        HistoryCaption = $"{source} hourly usage · {freshness} · last {visible.Length} bucket(s) · bars normalized to the busiest visible hour.";
     }
 
     private static QuotaCardViewModel BuildQuotaCard(
@@ -373,6 +371,28 @@ public sealed partial class OverviewViewModel : ObservableObject
         TelemetryHealthState.Error => "Error",
         _ => state.ToString()
     };
+
+    private static string TokenSourceLabel(IEnumerable<string> providers)
+    {
+        var normalized = providers
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Select(value => value.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(value => value.ToLowerInvariant() switch
+            {
+                "codex-native" => "Native Codex",
+                "tokscale" => "Tokscale",
+                _ => value
+            })
+            .ToArray();
+
+        return normalized.Length switch
+        {
+            0 => "Token accounting",
+            1 => normalized[0],
+            _ => string.Join(" + ", normalized)
+        };
+    }
 
     private static string CompactBucketLabel(string label)
     {
