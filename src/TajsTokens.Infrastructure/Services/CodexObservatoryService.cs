@@ -15,6 +15,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
     private readonly CodexStateCatalog? _stateCatalog;
     private readonly SqliteCodexStateIndexStore? _stateIndexStore;
     private readonly IReadOnlyList<string> _roots;
+    private bool _stateCatalogReconciledThisProcess;
 
     public CodexObservatoryService(
         ICodexSessionIngestionService ingestionService,
@@ -61,7 +62,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
                 throw;
             }
             catch (Exception exception) when (
-                exception is SqliteException or IOException or UnauthorizedAccessException or InvalidOperationException)
+                exception is SqliteException or IOException or UnauthorizedAccessException or InvalidOperationException or InvalidDataException)
             {
                 // Codex's state database is a private optional acceleration source. Any state/index
                 // incompatibility fails open to the existing rollout filesystem discovery path.
@@ -81,7 +82,14 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
 
         await _stateIndexStore.InitializeAsync(cancellationToken);
         var watermark = await _stateIndexStore.GetWatermarkAsync(cancellationToken);
-        var minimumUpdatedAtMs = Math.Max(0, watermark - StateOverlapMs);
+
+        // A full catalog read once per process catches path/archive/model metadata changes that a
+        // private provider build might persist without advancing updated_at_ms. Subsequent warm
+        // refreshes use the indexed timestamp window. Reading a few hundred compact SQLite rows once
+        // is intentionally cheaper than trusting an undocumented timestamp as an infallible journal.
+        var minimumUpdatedAtMs = _stateCatalogReconciledThisProcess
+            ? Math.Max(0, watermark - StateOverlapMs)
+            : 0;
         var catalog = await _stateCatalog.TryReadSinceAsync(minimumUpdatedAtMs, cancellationToken);
         if (catalog is null)
         {
@@ -175,6 +183,13 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
         if (appliedThreads.Count > 0 || nextWatermark != watermark)
         {
             await _stateIndexStore.CommitAsync(appliedThreads, nextWatermark, cancellationToken);
+        }
+
+        // Reconciliation is considered complete only after the full catalog path reached its normal
+        // return. A failed/cancelled first pass retries the full comparison on the next refresh.
+        if (minimumUpdatedAtMs == 0 && earliestFailedUpdatedAtMs is null)
+        {
+            _stateCatalogReconciledThisProcess = true;
         }
 
         return new CodexObservatoryRefreshResult(
