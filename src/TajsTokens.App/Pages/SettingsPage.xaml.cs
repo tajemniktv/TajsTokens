@@ -46,7 +46,9 @@ public sealed partial class SettingsPage : Page
             LaunchAtLogin = LaunchAtLoginToggle.IsOn,
             PollIntervalSeconds = (int)Math.Round(PollIntervalBox.Value, MidpointRounding.AwayFromZero),
             NotificationsEnabled = NotificationsToggle.IsOn,
-            LowQuotaThresholds = thresholds
+            LowQuotaThresholds = thresholds,
+            TokscaleReconciliationEnabled = TokscaleReconciliationToggle.IsOn,
+            TokscaleFallbackEnabled = TokscaleFallbackToggle.IsOn
         };
 
         SaveButton.IsEnabled = false;
@@ -78,6 +80,8 @@ public sealed partial class SettingsPage : Page
         PollIntervalBox.Value = settings.PollIntervalSeconds;
         NotificationsToggle.IsOn = settings.NotificationsEnabled;
         ThresholdsTextBox.Text = string.Join(", ", settings.LowQuotaThresholds);
+        TokscaleReconciliationToggle.IsOn = settings.TokscaleReconciliationEnabled;
+        TokscaleFallbackToggle.IsOn = settings.TokscaleFallbackEnabled;
         DataFolderText.Text = App.Services.DataFolder;
         DatabasePathText.Text = App.Services.DatabasePath;
         SettingsSchemaText.Text = $"Settings schema v{settings.SchemaVersion} · poll range 15–3600 s";
