@@ -55,39 +55,51 @@ public partial class App : Application
 
     private async Task ReconcileStartupRegistrationAsync()
     {
-        (bool Success, string? Error, bool Enabled) result;
-        await _settingsApplyGate.WaitAsync();
         try
         {
-            // Read the desired value only after entering the same gate used by interactive settings
-            // changes. Otherwise a slow launch-time registry write could race a newer user choice and
-            // apply the stale startup value last.
-            var enabled = Services.Settings.LaunchAtLogin;
-            var applied = await Task.Run(() =>
+            (bool Success, string? Error, bool Enabled) result;
+            await _settingsApplyGate.WaitAsync();
+            try
             {
-                try
+                // Read the desired value only after entering the same gate used by interactive
+                // settings changes. A slow launch-time registry write therefore cannot apply an old
+                // preference after a newer user choice.
+                var enabled = Services.Settings.LaunchAtLogin;
+                var applied = await Task.Run(() =>
                 {
-                    var success = _startupService.TrySetEnabled(enabled, out var error);
-                    return (Success: success, Error: error);
-                }
-                catch (Exception exception)
-                {
-                    return (Success: false, Error: exception.Message.ReplaceLineEndings(" "));
-                }
-            });
-            result = (applied.Success, applied.Error, enabled);
-        }
-        finally
-        {
-            _settingsApplyGate.Release();
-        }
+                    try
+                    {
+                        var success = _startupService.TrySetEnabled(enabled, out var error);
+                        return (Success: success, Error: error);
+                    }
+                    catch (Exception exception)
+                    {
+                        return (Success: false, Error: exception.Message.ReplaceLineEndings(" "));
+                    }
+                });
+                result = (applied.Success, applied.Error, enabled);
+            }
+            finally
+            {
+                _settingsApplyGate.Release();
+            }
 
-        if (!result.Success && result.Enabled)
+            if (!result.Success && result.Enabled)
+            {
+                RunOnDispatcher(() =>
+                    _trayService.ShowNotification(
+                        "TajsTokens startup registration failed",
+                        result.Error ?? "Unknown startup registration error."));
+            }
+        }
+        catch (Exception exception)
         {
+            // This operation is intentionally detached from launch. Observe every failure here so a
+            // registry or runtime surprise cannot become an unobserved fire-and-forget exception.
             RunOnDispatcher(() =>
                 _trayService.ShowNotification(
                     "TajsTokens startup registration failed",
-                    result.Error ?? "Unknown startup registration error."));
+                    exception.Message.ReplaceLineEndings(" ")));
         }
     }
 
@@ -154,7 +166,7 @@ public partial class App : Application
 
     private async void OnNotificationsEnabledChanged(bool enabled)
     {
-        if (!await TrySaveSettingsAsync(Services.Settings with { NotificationsEnabled = enabled }))
+        if (!await TrySaveSettingsUpdateAsync(current => current with { NotificationsEnabled = enabled }))
         {
             UpdateTrayPreferences(Services.Settings);
         }
@@ -162,24 +174,42 @@ public partial class App : Application
 
     private async void OnLaunchAtLoginChanged(bool enabled)
     {
-        if (!await TrySaveSettingsAsync(Services.Settings with { LaunchAtLogin = enabled }))
+        if (!await TrySaveSettingsUpdateAsync(current => current with { LaunchAtLogin = enabled }))
         {
             UpdateTrayPreferences(Services.Settings);
         }
     }
 
     /// <summary>
-    /// Applies user-facing runtime settings through one application-owned boundary so persisted
-    /// values, Start-with-Windows registration, tray preferences and live scheduler updates cannot
-    /// drift depending on which UI surface changed a setting. Registry and settings-file I/O run on
-    /// the thread pool; only the resulting tray/UI state is marshalled back to WinUI.
+    /// Applies the complete Settings-page form only if it is still based on the current runtime
+    /// settings generation. If another surface changed settings since the page rendered, the save is
+    /// rejected instead of silently reverting that newer change.
     /// </summary>
-    public async Task<(bool Success, string? Error)> TryApplySettingsAsync(RuntimeSettings settings)
+    public Task<(bool Success, string? Error)> TryApplySettingsAsync(
+        RuntimeSettings expectedBase,
+        RuntimeSettings settings) =>
+        ApplySettingsAsync(_ => settings, expectedBase);
+
+    private Task<(bool Success, string? Error)> TryUpdateSettingsAsync(
+        Func<RuntimeSettings, RuntimeSettings> update) =>
+        ApplySettingsAsync(update, expectedBase: null);
+
+    private async Task<(bool Success, string? Error)> ApplySettingsAsync(
+        Func<RuntimeSettings, RuntimeSettings> update,
+        RuntimeSettings? expectedBase)
     {
         await _settingsApplyGate.WaitAsync();
         try
         {
             var previous = Services.Settings;
+            if (expectedBase is not null && !ReferenceEquals(previous, expectedBase))
+            {
+                return (false, "Settings changed from another surface while this page was open. Reload the current values and apply your changes again.");
+            }
+
+            // Build field-specific tray updates only after entering the gate. That prevents a queued
+            // toggle from carrying a stale full settings snapshot that reverts unrelated fields.
+            var settings = update(previous);
             var result = await Task.Run(() => ApplySettingsCore(previous, settings));
             UpdateTrayPreferences(result.Success ? Services.Settings : previous);
             return result;
@@ -223,9 +253,9 @@ public partial class App : Application
         }
     }
 
-    private async Task<bool> TrySaveSettingsAsync(RuntimeSettings settings)
+    private async Task<bool> TrySaveSettingsUpdateAsync(Func<RuntimeSettings, RuntimeSettings> update)
     {
-        var result = await TryApplySettingsAsync(settings);
+        var result = await TryUpdateSettingsAsync(update);
         if (result.Success)
         {
             return true;
