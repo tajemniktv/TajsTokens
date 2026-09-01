@@ -31,6 +31,7 @@ internal sealed class SqliteCodexIngestionBatchWriter(
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly ICodexObservatoryStore _observatoryStore = observatoryStore;
     private readonly SemaphoreSlim _writeGate = new(1, 1);
+    private bool _revisionStoreInitialized;
 
     public async Task WriteBatchAsync(
         string sourceIdentity,
@@ -50,6 +51,7 @@ internal sealed class SqliteCodexIngestionBatchWriter(
         {
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
+            await EnsureRevisionStoreAsync(connection, cancellationToken);
             using var transaction = connection.BeginTransaction();
 
             var safeFileLabel = BuildSafeFileLabel(filePath);
@@ -61,6 +63,11 @@ internal sealed class SqliteCodexIngestionBatchWriter(
                 Math.Max(0, fileSizeBytes),
                 records,
                 cancellationToken);
+
+            var bumpRevision = connection.CreateCommand();
+            bumpRevision.Transaction = transaction;
+            bumpRevision.CommandText = "UPDATE codex_native_accounting_revision SET revision = revision + 1 WHERE id = 1;";
+            await bumpRevision.ExecuteNonQueryAsync(cancellationToken);
             transaction.Commit();
 
             // Counter observations deliberately remain ordered and use the established replay/reset
@@ -81,6 +88,27 @@ internal sealed class SqliteCodexIngestionBatchWriter(
         {
             _writeGate.Release();
         }
+    }
+
+    private async Task EnsureRevisionStoreAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        if (_revisionStoreInitialized)
+        {
+            return;
+        }
+
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            CREATE TABLE IF NOT EXISTS codex_native_accounting_revision (
+                id INTEGER PRIMARY KEY CHECK(id = 1),
+                revision INTEGER NOT NULL
+            );
+            INSERT INTO codex_native_accounting_revision(id, revision)
+            VALUES(1, 0)
+            ON CONFLICT(id) DO NOTHING;
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        _revisionStoreInitialized = true;
     }
 
     private static async Task WriteProjectionAndStorageBatchAsync(
