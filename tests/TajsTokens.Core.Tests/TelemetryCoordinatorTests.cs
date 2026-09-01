@@ -84,13 +84,40 @@ public sealed class TelemetryCoordinatorTests : IDisposable
         Assert.Equal(TelemetryHealthState.Stale, second.Sources.Single(source => source.Provider == "Codex app-server").State);
     }
 
-    private TelemetryCoordinator CreateCoordinator(ITokscaleProvider tokens, ICodexQuotaProvider quota)
+    [Fact]
+    public async Task SlowIntelligenceRefresh_DoesNotHoldSharedTelemetryRefreshCompletion()
+    {
+        var tokens = new SequencedTokscaleProvider(
+            usageResponses: [_ => Task.FromResult<IReadOnlyList<TokenUsage>>([])],
+            hourlyResponses: [_ => Task.FromResult<IReadOnlyList<TokenTimeBucket>>([])]);
+        var quota = new SequencedQuotaProvider(
+        [
+            _ => Task.FromResult<IReadOnlyList<QuotaSnapshot>>([])
+        ]);
+        var intelligence = new BlockingIntelligenceService();
+        var coordinator = CreateCoordinator(tokens, quota, intelligence);
+
+        var refreshTask = coordinator.RefreshAsync(RefreshTrigger.Startup, CancellationToken.None);
+        await intelligence.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var completed = await Task.WhenAny(refreshTask, Task.Delay(TimeSpan.FromSeconds(2)));
+        intelligence.Release.TrySetResult(true);
+
+        Assert.Same(refreshTask, completed);
+        await refreshTask;
+    }
+
+    private TelemetryCoordinator CreateCoordinator(
+        ITokscaleProvider tokens,
+        ICodexQuotaProvider quota,
+        IIntelligenceService? intelligenceService = null)
     {
         Directory.CreateDirectory(_directory);
         return new TelemetryCoordinator(
             tokens,
             quota,
-            new SqliteTelemetryRepository(Path.Combine(_directory, "telemetry.db")));
+            new SqliteTelemetryRepository(Path.Combine(_directory, "telemetry.db")),
+            intelligenceService: intelligenceService);
     }
 
     private static TokenUsage Usage(string model, long tokens) => new(
@@ -156,5 +183,33 @@ public sealed class TelemetryCoordinatorTests : IDisposable
 
         public Task<IReadOnlyList<QuotaSnapshot>> GetQuotaSnapshotsAsync(CancellationToken cancellationToken) =>
             _responses.Dequeue()(cancellationToken);
+    }
+
+    private sealed class BlockingIntelligenceService : IIntelligenceService
+    {
+        public TaskCompletionSource<bool> Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<bool> Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<IntelligenceRefreshResult> RefreshAsync(CancellationToken cancellationToken)
+        {
+            Started.TrySetResult(true);
+            await Release.Task.WaitAsync(cancellationToken);
+            return new IntelligenceRefreshResult(0, 0);
+        }
+
+        public Task<IntelligenceDashboard> QueryAsync(IntelligenceQuery query, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<QuotaBurnDetail> GetQuotaBurnDetailAsync(
+            QuotaBurnInterval interval,
+            int take,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
+        public Task<ScenarioEstimate> EstimateScenarioAsync(
+            ScenarioRequest request,
+            DateTimeOffset historyFromUtc,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
     }
 }
