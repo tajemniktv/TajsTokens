@@ -7,13 +7,12 @@ using TajsTokens.Core.Models;
 namespace TajsTokens.Infrastructure.Persistence;
 
 /// <summary>
-/// Phase 3 observatory persistence layered into the existing telemetry database. The base telemetry
-/// repository remains the owner of PRAGMA user_version; this component versions only its additive
-/// observatory tables so it can evolve without making the Phase 1/2 provider path depend on rollout parsing.
+/// Privacy-safe Phase 3 persistence layered into the existing telemetry database. The base telemetry
+/// repository owns PRAGMA user_version; observatory tables use an independent component version.
 /// </summary>
 public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObservatoryStore
 {
-    private const int ObservatorySchemaVersion = 1;
+    private const int ObservatorySchemaVersion = 2;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _initializeGate = new(1, 1);
     private volatile bool _initialized;
@@ -35,96 +34,219 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
 
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
-            using var transaction = connection.BeginTransaction();
-            var command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText = """
+
+            var bootstrap = connection.CreateCommand();
+            bootstrap.CommandText = """
                 CREATE TABLE IF NOT EXISTS observatory_schema (
                     component TEXT PRIMARY KEY,
                     version INTEGER NOT NULL
                 );
-
-                CREATE TABLE IF NOT EXISTS codex_native_token_events (
-                    source_event_id TEXT PRIMARY KEY,
-                    source_file TEXT NOT NULL,
-                    session_id TEXT NOT NULL,
-                    agent_id TEXT,
-                    observed_at_utc TEXT NOT NULL,
-                    model TEXT,
-                    reasoning_effort TEXT,
-                    counter_epoch INTEGER NOT NULL,
-                    uncached_input_tokens INTEGER NOT NULL,
-                    cache_read_tokens INTEGER NOT NULL,
-                    cache_write_tokens INTEGER NOT NULL,
-                    non_reasoning_output_tokens INTEGER NOT NULL,
-                    reasoning_output_tokens INTEGER NOT NULL,
-                    reported_total_tokens INTEGER NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS codex_counter_state (
-                    source_file TEXT NOT NULL,
-                    session_id TEXT NOT NULL,
-                    counter_epoch INTEGER NOT NULL,
-                    input_tokens INTEGER NOT NULL,
-                    cached_input_tokens INTEGER NOT NULL,
-                    cache_write_input_tokens INTEGER NOT NULL,
-                    output_tokens INTEGER NOT NULL,
-                    reasoning_output_tokens INTEGER NOT NULL,
-                    total_tokens INTEGER NOT NULL,
-                    last_source_event_id TEXT NOT NULL,
-                    PRIMARY KEY(source_file, session_id)
-                );
-
-                CREATE TABLE IF NOT EXISTS context_observations (
-                    event_id TEXT PRIMARY KEY,
-                    session_id TEXT NOT NULL,
-                    agent_id TEXT,
-                    observed_at_utc TEXT NOT NULL,
-                    model TEXT,
-                    input_tokens INTEGER,
-                    context_window_tokens INTEGER,
-                    is_compaction INTEGER NOT NULL,
-                    record_bytes INTEGER
-                );
-
-                CREATE TABLE IF NOT EXISTS rollout_records (
-                    source_record_id TEXT PRIMARY KEY,
-                    file_path TEXT NOT NULL,
-                    session_id TEXT,
-                    event_class TEXT NOT NULL,
-                    record_bytes INTEGER NOT NULL,
-                    observed_at_utc TEXT NOT NULL
-                );
-
-                CREATE TABLE IF NOT EXISTS rollout_files (
-                    file_path TEXT PRIMARY KEY,
-                    session_id TEXT,
-                    size_bytes INTEGER NOT NULL,
-                    last_seen_at_utc TEXT NOT NULL
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_native_tokens_session_time
-                    ON codex_native_token_events(session_id, observed_at_utc DESC);
-                CREATE INDEX IF NOT EXISTS idx_context_session_time
-                    ON context_observations(session_id, observed_at_utc DESC);
-                CREATE INDEX IF NOT EXISTS idx_rollout_records_file
-                    ON rollout_records(file_path);
-                CREATE INDEX IF NOT EXISTS idx_rollout_records_session
-                    ON rollout_records(session_id, observed_at_utc DESC);
-
-                INSERT INTO observatory_schema(component, version)
-                VALUES('codex-observatory', 1)
-                ON CONFLICT(component) DO UPDATE SET version = MAX(version, excluded.version);
                 """;
-            await command.ExecuteNonQueryAsync(cancellationToken);
-            transaction.Commit();
+            await bootstrap.ExecuteNonQueryAsync(cancellationToken);
 
             var versionCommand = connection.CreateCommand();
             versionCommand.CommandText = "SELECT version FROM observatory_schema WHERE component = 'codex-observatory';";
-            var version = Convert.ToInt32(await versionCommand.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+            var rawVersion = await versionCommand.ExecuteScalarAsync(cancellationToken);
+            var version = rawVersion is null || rawVersion is DBNull
+                ? 0
+                : Convert.ToInt32(rawVersion, CultureInfo.InvariantCulture);
+
             if (version > ObservatorySchemaVersion)
             {
                 throw new InvalidOperationException($"Codex observatory schema {version} is newer than supported version {ObservatorySchemaVersion}.");
+            }
+
+            if (version == 0)
+            {
+                await ExecuteMigrationAsync(connection, """
+                    CREATE TABLE IF NOT EXISTS codex_native_token_events (
+                        source_event_id TEXT PRIMARY KEY,
+                        source_file TEXT NOT NULL,
+                        session_id TEXT NOT NULL,
+                        agent_id TEXT,
+                        observed_at_utc TEXT NOT NULL,
+                        model TEXT,
+                        reasoning_effort TEXT,
+                        counter_epoch INTEGER NOT NULL,
+                        uncached_input_tokens INTEGER NOT NULL,
+                        cache_read_tokens INTEGER NOT NULL,
+                        cache_write_tokens INTEGER NOT NULL,
+                        non_reasoning_output_tokens INTEGER NOT NULL,
+                        reasoning_output_tokens INTEGER NOT NULL,
+                        reported_total_tokens INTEGER NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS codex_counter_state (
+                        session_id TEXT PRIMARY KEY,
+                        source_file TEXT NOT NULL,
+                        counter_epoch INTEGER NOT NULL,
+                        input_tokens INTEGER NOT NULL,
+                        cached_input_tokens INTEGER NOT NULL,
+                        cache_write_input_tokens INTEGER NOT NULL,
+                        output_tokens INTEGER NOT NULL,
+                        reasoning_output_tokens INTEGER NOT NULL,
+                        total_tokens INTEGER NOT NULL,
+                        last_source_event_id TEXT NOT NULL,
+                        last_observed_at_utc TEXT NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS context_observations (
+                        event_id TEXT PRIMARY KEY,
+                        session_id TEXT NOT NULL,
+                        agent_id TEXT,
+                        observed_at_utc TEXT NOT NULL,
+                        model TEXT,
+                        input_tokens INTEGER,
+                        context_window_tokens INTEGER,
+                        is_compaction INTEGER NOT NULL,
+                        record_bytes INTEGER
+                    );
+
+                    CREATE TABLE IF NOT EXISTS rollout_records (
+                        source_record_id TEXT PRIMARY KEY,
+                        source_identity TEXT NOT NULL,
+                        file_path TEXT NOT NULL,
+                        session_id TEXT,
+                        event_class TEXT NOT NULL,
+                        record_bytes INTEGER NOT NULL,
+                        observed_at_utc TEXT NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS rollout_files (
+                        source_identity TEXT PRIMARY KEY,
+                        file_path TEXT NOT NULL,
+                        session_id TEXT,
+                        size_bytes INTEGER NOT NULL,
+                        last_seen_at_utc TEXT NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS codex_parser_state (
+                        source_identity TEXT PRIMARY KEY,
+                        byte_offset INTEGER NOT NULL,
+                        session_id TEXT NOT NULL,
+                        parent_session_id TEXT,
+                        agent_name TEXT NOT NULL,
+                        repository TEXT NOT NULL,
+                        started_at_utc TEXT NOT NULL,
+                        current_model TEXT,
+                        reasoning_effort TEXT,
+                        context_window_tokens INTEGER,
+                        updated_at_utc TEXT NOT NULL
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_native_tokens_session_time
+                        ON codex_native_token_events(session_id, observed_at_utc DESC);
+                    CREATE INDEX IF NOT EXISTS idx_context_session_time
+                        ON context_observations(session_id, observed_at_utc DESC);
+                    CREATE INDEX IF NOT EXISTS idx_rollout_records_identity
+                        ON rollout_records(source_identity);
+                    CREATE INDEX IF NOT EXISTS idx_rollout_records_session
+                        ON rollout_records(session_id, observed_at_utc DESC);
+                    CREATE INDEX IF NOT EXISTS idx_rollout_files_path
+                        ON rollout_files(file_path);
+
+                    INSERT INTO observatory_schema(component, version)
+                    VALUES('codex-observatory', 2)
+                    ON CONFLICT(component) DO UPDATE SET version = excluded.version;
+                    """, cancellationToken);
+                version = 2;
+            }
+
+            if (version == 1)
+            {
+                // Preserve the most recent raw cumulative counter state per session, but rebuild
+                // storage diagnostics on the typed-v2 replay because v1 keyed files only by path.
+                await ExecuteMigrationAsync(connection, """
+                    CREATE TABLE codex_counter_state_v2 (
+                        session_id TEXT PRIMARY KEY,
+                        source_file TEXT NOT NULL,
+                        counter_epoch INTEGER NOT NULL,
+                        input_tokens INTEGER NOT NULL,
+                        cached_input_tokens INTEGER NOT NULL,
+                        cache_write_input_tokens INTEGER NOT NULL,
+                        output_tokens INTEGER NOT NULL,
+                        reasoning_output_tokens INTEGER NOT NULL,
+                        total_tokens INTEGER NOT NULL,
+                        last_source_event_id TEXT NOT NULL,
+                        last_observed_at_utc TEXT NOT NULL
+                    );
+
+                    INSERT INTO codex_counter_state_v2(
+                        session_id, source_file, counter_epoch, input_tokens, cached_input_tokens,
+                        cache_write_input_tokens, output_tokens, reasoning_output_tokens, total_tokens,
+                        last_source_event_id, last_observed_at_utc)
+                    SELECT c.session_id, c.source_file, c.counter_epoch, c.input_tokens, c.cached_input_tokens,
+                           c.cache_write_input_tokens, c.output_tokens, c.reasoning_output_tokens, c.total_tokens,
+                           c.last_source_event_id,
+                           COALESCE(
+                               (SELECT e.observed_at_utc
+                                FROM codex_native_token_events e
+                                WHERE e.source_event_id = c.last_source_event_id
+                                LIMIT 1),
+                               '0001-01-01T00:00:00.0000000+00:00')
+                    FROM codex_counter_state c
+                    WHERE c.rowid = (
+                        SELECT c2.rowid
+                        FROM codex_counter_state c2
+                        LEFT JOIN codex_native_token_events e2 ON e2.source_event_id = c2.last_source_event_id
+                        WHERE c2.session_id = c.session_id
+                        ORDER BY e2.observed_at_utc DESC, c2.rowid DESC
+                        LIMIT 1
+                    );
+
+                    DROP TABLE codex_counter_state;
+                    ALTER TABLE codex_counter_state_v2 RENAME TO codex_counter_state;
+
+                    DROP TABLE IF EXISTS rollout_records;
+                    DROP TABLE IF EXISTS rollout_files;
+
+                    CREATE TABLE rollout_records (
+                        source_record_id TEXT PRIMARY KEY,
+                        source_identity TEXT NOT NULL,
+                        file_path TEXT NOT NULL,
+                        session_id TEXT,
+                        event_class TEXT NOT NULL,
+                        record_bytes INTEGER NOT NULL,
+                        observed_at_utc TEXT NOT NULL
+                    );
+
+                    CREATE TABLE rollout_files (
+                        source_identity TEXT PRIMARY KEY,
+                        file_path TEXT NOT NULL,
+                        session_id TEXT,
+                        size_bytes INTEGER NOT NULL,
+                        last_seen_at_utc TEXT NOT NULL
+                    );
+
+                    CREATE TABLE IF NOT EXISTS codex_parser_state (
+                        source_identity TEXT PRIMARY KEY,
+                        byte_offset INTEGER NOT NULL,
+                        session_id TEXT NOT NULL,
+                        parent_session_id TEXT,
+                        agent_name TEXT NOT NULL,
+                        repository TEXT NOT NULL,
+                        started_at_utc TEXT NOT NULL,
+                        current_model TEXT,
+                        reasoning_effort TEXT,
+                        context_window_tokens INTEGER,
+                        updated_at_utc TEXT NOT NULL
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_native_tokens_session_time
+                        ON codex_native_token_events(session_id, observed_at_utc DESC);
+                    CREATE INDEX IF NOT EXISTS idx_context_session_time
+                        ON context_observations(session_id, observed_at_utc DESC);
+                    CREATE INDEX IF NOT EXISTS idx_rollout_records_identity
+                        ON rollout_records(source_identity);
+                    CREATE INDEX IF NOT EXISTS idx_rollout_records_session
+                        ON rollout_records(session_id, observed_at_utc DESC);
+                    CREATE INDEX IF NOT EXISTS idx_rollout_files_path
+                        ON rollout_files(file_path);
+
+                    UPDATE observatory_schema
+                    SET version = 2
+                    WHERE component = 'codex-observatory';
+                    """, cancellationToken);
             }
 
             _initialized = true;
@@ -174,7 +296,12 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             VALUES($id, $session, $name, $state, $lastSeen, $model)
             ON CONFLICT(agent_id) DO UPDATE SET
               session_id = excluded.session_id,
-              name = CASE WHEN excluded.name = '' THEN agents.name ELSE excluded.name END,
+              name = CASE
+                  WHEN excluded.name IN ('', 'Codex session', 'Root agent', 'Subagent')
+                       AND agents.name NOT IN ('', 'Codex session', 'Root agent', 'Subagent')
+                  THEN agents.name
+                  ELSE excluded.name
+              END,
               state = excluded.state,
               last_seen_utc = MAX(agents.last_seen_utc, excluded.last_seen_utc),
               model = COALESCE(excluded.model, agents.model);
@@ -265,15 +392,24 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         await connection.OpenAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
 
+        var duplicate = connection.CreateCommand();
+        duplicate.Transaction = transaction;
+        duplicate.CommandText = "SELECT 1 FROM codex_native_token_events WHERE source_event_id = $event LIMIT 1;";
+        duplicate.Parameters.AddWithValue("$event", observation.SourceEventId);
+        if (await duplicate.ExecuteScalarAsync(cancellationToken) is not null)
+        {
+            transaction.Commit();
+            return;
+        }
+
         var read = connection.CreateCommand();
         read.Transaction = transaction;
         read.CommandText = """
-            SELECT counter_epoch, input_tokens, cached_input_tokens, cache_write_input_tokens,
-                   output_tokens, reasoning_output_tokens, total_tokens, last_source_event_id
+            SELECT source_file, counter_epoch, input_tokens, cached_input_tokens, cache_write_input_tokens,
+                   output_tokens, reasoning_output_tokens, total_tokens, last_source_event_id, last_observed_at_utc
             FROM codex_counter_state
-            WHERE source_file = $file AND session_id = $session;
+            WHERE session_id = $session;
             """;
-        read.Parameters.AddWithValue("$file", observation.SourceFile);
         read.Parameters.AddWithValue("$session", observation.SessionId);
 
         CounterState? previous = null;
@@ -282,9 +418,32 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             if (await reader.ReadAsync(cancellationToken))
             {
                 previous = new CounterState(
-                    reader.GetInt32(0), reader.GetInt64(1), reader.GetInt64(2), reader.GetInt64(3),
-                    reader.GetInt64(4), reader.GetInt64(5), reader.GetInt64(6), reader.GetString(7));
+                    reader.GetString(0),
+                    reader.GetInt32(1),
+                    reader.GetInt64(2),
+                    reader.GetInt64(3),
+                    reader.GetInt64(4),
+                    reader.GetInt64(5),
+                    reader.GetInt64(6),
+                    reader.GetInt64(7),
+                    reader.GetString(8),
+                    ParseUtc(reader.GetString(9)));
             }
+        }
+
+        if (previous is not null && observation.ObservedAtUtc < previous.LastObservedAtUtc)
+        {
+            // A copied/rotated historical file can surface after a newer observation. Remember the
+            // source event idempotently, but do not move the live cumulative state backwards.
+            await InsertNativeTokenEventAsync(
+                connection,
+                transaction,
+                observation,
+                previous.Epoch,
+                0, 0, 0, 0, 0, 0,
+                cancellationToken);
+            transaction.Commit();
+            return;
         }
 
         var reset = previous is not null &&
@@ -306,43 +465,37 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         var uncachedDelta = Math.Max(0, inputDelta - cachedDelta - cacheWriteDelta);
         var nonReasoningOutputDelta = Math.Max(0, outputDelta - reasoningDelta);
 
-        var insert = connection.CreateCommand();
-        insert.Transaction = transaction;
-        insert.CommandText = """
-            INSERT INTO codex_native_token_events(
-                source_event_id, source_file, session_id, agent_id, observed_at_utc, model, reasoning_effort,
-                counter_epoch, uncached_input_tokens, cache_read_tokens, cache_write_tokens,
-                non_reasoning_output_tokens, reasoning_output_tokens, reported_total_tokens)
-            VALUES($event, $file, $session, $agent, $observed, $model, $reasoning, $epoch,
-                   $uncached, $cached, $cacheWrite, $output, $reasoningOutput, $total)
-            ON CONFLICT(source_event_id) DO NOTHING;
-            """;
-        insert.Parameters.AddWithValue("$event", observation.SourceEventId);
-        insert.Parameters.AddWithValue("$file", observation.SourceFile);
-        insert.Parameters.AddWithValue("$session", observation.SessionId);
-        insert.Parameters.AddWithValue("$agent", DbValue(observation.AgentId));
-        insert.Parameters.AddWithValue("$observed", SerializeUtc(observation.ObservedAtUtc));
-        insert.Parameters.AddWithValue("$model", DbValue(observation.Model));
-        insert.Parameters.AddWithValue("$reasoning", DbValue(observation.ReasoningEffort));
-        insert.Parameters.AddWithValue("$epoch", epoch);
-        insert.Parameters.AddWithValue("$uncached", uncachedDelta);
-        insert.Parameters.AddWithValue("$cached", cachedDelta);
-        insert.Parameters.AddWithValue("$cacheWrite", cacheWriteDelta);
-        insert.Parameters.AddWithValue("$output", nonReasoningOutputDelta);
-        insert.Parameters.AddWithValue("$reasoningOutput", reasoningDelta);
-        insert.Parameters.AddWithValue("$total", totalDelta);
-        await insert.ExecuteNonQueryAsync(cancellationToken);
+        var inserted = await InsertNativeTokenEventAsync(
+            connection,
+            transaction,
+            observation,
+            epoch,
+            uncachedDelta,
+            cachedDelta,
+            cacheWriteDelta,
+            nonReasoningOutputDelta,
+            reasoningDelta,
+            totalDelta,
+            cancellationToken);
 
-        // Advance the cumulative state even for a zero-delta/repeated snapshot. The event id keeps the
-        // persisted delta idempotent, while the latest raw counter state is what detects future epochs.
+        if (inserted == 0)
+        {
+            // Another writer committed the same source event. Never regress cumulative state after
+            // an ON CONFLICT no-op.
+            transaction.Commit();
+            return;
+        }
+
         var upsertState = connection.CreateCommand();
         upsertState.Transaction = transaction;
         upsertState.CommandText = """
             INSERT INTO codex_counter_state(
-                source_file, session_id, counter_epoch, input_tokens, cached_input_tokens,
-                cache_write_input_tokens, output_tokens, reasoning_output_tokens, total_tokens, last_source_event_id)
-            VALUES($file, $session, $epoch, $input, $cached, $cacheWrite, $output, $reasoning, $total, $event)
-            ON CONFLICT(source_file, session_id) DO UPDATE SET
+                session_id, source_file, counter_epoch, input_tokens, cached_input_tokens,
+                cache_write_input_tokens, output_tokens, reasoning_output_tokens, total_tokens,
+                last_source_event_id, last_observed_at_utc)
+            VALUES($session, $file, $epoch, $input, $cached, $cacheWrite, $output, $reasoning, $total, $event, $observed)
+            ON CONFLICT(session_id) DO UPDATE SET
+              source_file = excluded.source_file,
               counter_epoch = excluded.counter_epoch,
               input_tokens = excluded.input_tokens,
               cached_input_tokens = excluded.cached_input_tokens,
@@ -350,10 +503,11 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
               output_tokens = excluded.output_tokens,
               reasoning_output_tokens = excluded.reasoning_output_tokens,
               total_tokens = excluded.total_tokens,
-              last_source_event_id = excluded.last_source_event_id;
+              last_source_event_id = excluded.last_source_event_id,
+              last_observed_at_utc = excluded.last_observed_at_utc;
             """;
-        upsertState.Parameters.AddWithValue("$file", observation.SourceFile);
         upsertState.Parameters.AddWithValue("$session", observation.SessionId);
+        upsertState.Parameters.AddWithValue("$file", observation.SourceFile);
         upsertState.Parameters.AddWithValue("$epoch", epoch);
         upsertState.Parameters.AddWithValue("$input", observation.InputTokens);
         upsertState.Parameters.AddWithValue("$cached", observation.CachedInputTokens);
@@ -362,6 +516,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         upsertState.Parameters.AddWithValue("$reasoning", observation.ReasoningOutputTokens);
         upsertState.Parameters.AddWithValue("$total", observation.TotalTokens);
         upsertState.Parameters.AddWithValue("$event", observation.SourceEventId);
+        upsertState.Parameters.AddWithValue("$observed", SerializeUtc(observation.ObservedAtUtc));
         await upsertState.ExecuteNonQueryAsync(cancellationToken);
 
         transaction.Commit();
@@ -393,8 +548,122 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             cancellationToken);
     }
 
+    public async Task<CodexParserResumeState?> GetParserResumeStateAsync(string sourceIdentity, CancellationToken cancellationToken)
+    {
+        await EnsureInitializedAsync(cancellationToken);
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT source_identity, byte_offset, session_id, parent_session_id, agent_name, repository,
+                   started_at_utc, current_model, reasoning_effort, context_window_tokens, updated_at_utc
+            FROM codex_parser_state
+            WHERE source_identity = $identity;
+            """;
+        command.Parameters.AddWithValue("$identity", sourceIdentity);
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+        {
+            return null;
+        }
+
+        return new CodexParserResumeState(
+            reader.GetString(0),
+            reader.GetInt64(1),
+            reader.GetString(2),
+            reader.IsDBNull(3) ? null : reader.GetString(3),
+            reader.GetString(4),
+            reader.GetString(5),
+            ParseUtc(reader.GetString(6)),
+            reader.IsDBNull(7) ? null : reader.GetString(7),
+            reader.IsDBNull(8) ? null : reader.GetString(8),
+            reader.IsDBNull(9) ? null : reader.GetInt64(9),
+            ParseUtc(reader.GetString(10)));
+    }
+
+    public async Task UpsertParserResumeStateAsync(CodexParserResumeState state, CancellationToken cancellationToken)
+    {
+        await EnsureInitializedAsync(cancellationToken);
+        await ExecuteAsync(
+            """
+            INSERT INTO codex_parser_state(
+                source_identity, byte_offset, session_id, parent_session_id, agent_name, repository,
+                started_at_utc, current_model, reasoning_effort, context_window_tokens, updated_at_utc)
+            VALUES($identity, $offset, $session, $parent, $name, $repository, $started, $model, $reasoning, $window, $updated)
+            ON CONFLICT(source_identity) DO UPDATE SET
+              byte_offset = excluded.byte_offset,
+              session_id = excluded.session_id,
+              parent_session_id = excluded.parent_session_id,
+              agent_name = excluded.agent_name,
+              repository = excluded.repository,
+              started_at_utc = excluded.started_at_utc,
+              current_model = excluded.current_model,
+              reasoning_effort = excluded.reasoning_effort,
+              context_window_tokens = excluded.context_window_tokens,
+              updated_at_utc = excluded.updated_at_utc;
+            """,
+            command =>
+            {
+                command.Parameters.AddWithValue("$identity", state.SourceIdentity);
+                command.Parameters.AddWithValue("$offset", state.ByteOffset);
+                command.Parameters.AddWithValue("$session", state.SessionId);
+                command.Parameters.AddWithValue("$parent", DbValue(state.ParentSessionId));
+                command.Parameters.AddWithValue("$name", state.AgentName);
+                command.Parameters.AddWithValue("$repository", state.Repository);
+                command.Parameters.AddWithValue("$started", SerializeUtc(state.StartedAtUtc));
+                command.Parameters.AddWithValue("$model", DbValue(state.CurrentModel));
+                command.Parameters.AddWithValue("$reasoning", DbValue(state.ReasoningEffort));
+                command.Parameters.AddWithValue("$window", DbValue(state.ContextWindowTokens));
+                command.Parameters.AddWithValue("$updated", SerializeUtc(state.UpdatedAtUtc));
+            },
+            cancellationToken);
+    }
+
+    public async Task UpsertRolloutFileAsync(
+        string sourceIdentity,
+        string filePath,
+        string? sessionId,
+        long fileSizeBytes,
+        DateTimeOffset observedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        await EnsureInitializedAsync(cancellationToken);
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        using var transaction = connection.BeginTransaction();
+
+        var removePathAlias = connection.CreateCommand();
+        removePathAlias.Transaction = transaction;
+        removePathAlias.CommandText = "DELETE FROM rollout_files WHERE file_path = $file AND source_identity <> $identity;";
+        removePathAlias.Parameters.AddWithValue("$file", filePath);
+        removePathAlias.Parameters.AddWithValue("$identity", sourceIdentity);
+        await removePathAlias.ExecuteNonQueryAsync(cancellationToken);
+
+        var upsert = connection.CreateCommand();
+        upsert.Transaction = transaction;
+        upsert.CommandText = """
+            INSERT INTO rollout_files(source_identity, file_path, session_id, size_bytes, last_seen_at_utc)
+            VALUES($identity, $file, $session, $size, $seen)
+            ON CONFLICT(source_identity) DO UPDATE SET
+              file_path = excluded.file_path,
+              session_id = COALESCE(excluded.session_id, rollout_files.session_id),
+              size_bytes = excluded.size_bytes,
+              last_seen_at_utc = MAX(rollout_files.last_seen_at_utc, excluded.last_seen_at_utc);
+            """;
+        upsert.Parameters.AddWithValue("$identity", sourceIdentity);
+        upsert.Parameters.AddWithValue("$file", filePath);
+        upsert.Parameters.AddWithValue("$session", DbValue(sessionId));
+        upsert.Parameters.AddWithValue("$size", Math.Max(0, fileSizeBytes));
+        upsert.Parameters.AddWithValue("$seen", SerializeUtc(observedAtUtc));
+        await upsert.ExecuteNonQueryAsync(cancellationToken);
+
+        transaction.Commit();
+    }
+
     public async Task RecordRolloutRecordAsync(
         string sourceRecordId,
+        string sourceIdentity,
         string filePath,
         string? sessionId,
         string eventClass,
@@ -411,11 +680,12 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         var record = connection.CreateCommand();
         record.Transaction = transaction;
         record.CommandText = """
-            INSERT INTO rollout_records(source_record_id, file_path, session_id, event_class, record_bytes, observed_at_utc)
-            VALUES($id, $file, $session, $class, $bytes, $observed)
+            INSERT INTO rollout_records(source_record_id, source_identity, file_path, session_id, event_class, record_bytes, observed_at_utc)
+            VALUES($id, $identity, $file, $session, $class, $bytes, $observed)
             ON CONFLICT(source_record_id) DO NOTHING;
             """;
         record.Parameters.AddWithValue("$id", sourceRecordId);
+        record.Parameters.AddWithValue("$identity", sourceIdentity);
         record.Parameters.AddWithValue("$file", filePath);
         record.Parameters.AddWithValue("$session", DbValue(sessionId));
         record.Parameters.AddWithValue("$class", eventClass);
@@ -423,16 +693,25 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         record.Parameters.AddWithValue("$observed", SerializeUtc(observedAtUtc));
         await record.ExecuteNonQueryAsync(cancellationToken);
 
+        var removePathAlias = connection.CreateCommand();
+        removePathAlias.Transaction = transaction;
+        removePathAlias.CommandText = "DELETE FROM rollout_files WHERE file_path = $file AND source_identity <> $identity;";
+        removePathAlias.Parameters.AddWithValue("$file", filePath);
+        removePathAlias.Parameters.AddWithValue("$identity", sourceIdentity);
+        await removePathAlias.ExecuteNonQueryAsync(cancellationToken);
+
         var file = connection.CreateCommand();
         file.Transaction = transaction;
         file.CommandText = """
-            INSERT INTO rollout_files(file_path, session_id, size_bytes, last_seen_at_utc)
-            VALUES($file, $session, $size, $seen)
-            ON CONFLICT(file_path) DO UPDATE SET
+            INSERT INTO rollout_files(source_identity, file_path, session_id, size_bytes, last_seen_at_utc)
+            VALUES($identity, $file, $session, $size, $seen)
+            ON CONFLICT(source_identity) DO UPDATE SET
+              file_path = excluded.file_path,
               session_id = COALESCE(excluded.session_id, rollout_files.session_id),
               size_bytes = excluded.size_bytes,
               last_seen_at_utc = MAX(rollout_files.last_seen_at_utc, excluded.last_seen_at_utc);
             """;
+        file.Parameters.AddWithValue("$identity", sourceIdentity);
         file.Parameters.AddWithValue("$file", filePath);
         file.Parameters.AddWithValue("$session", DbValue(sessionId));
         file.Parameters.AddWithValue("$size", Math.Max(0, fileSizeBytes));
@@ -440,6 +719,34 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         await file.ExecuteNonQueryAsync(cancellationToken);
 
         transaction.Commit();
+    }
+
+    public async Task<CodexObservatorySummary> GetSummaryAsync(CancellationToken cancellationToken)
+    {
+        await EnsureInitializedAsync(cancellationToken);
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT
+                (SELECT COUNT(*) FROM sessions s WHERE EXISTS(SELECT 1 FROM rollout_files f WHERE f.session_id = s.session_id)),
+                COALESCE((SELECT SUM(t.uncached_input_tokens) FROM codex_native_token_events t), 0),
+                COALESCE((SELECT SUM(t.cache_read_tokens) FROM codex_native_token_events t), 0),
+                COALESCE((SELECT SUM(t.cache_write_tokens) FROM codex_native_token_events t), 0),
+                COALESCE((SELECT SUM(t.non_reasoning_output_tokens) FROM codex_native_token_events t), 0),
+                COALESCE((SELECT SUM(t.reasoning_output_tokens) FROM codex_native_token_events t), 0),
+                COALESCE((SELECT SUM(t.reported_total_tokens) FROM codex_native_token_events t), 0),
+                COALESCE((SELECT SUM(f.size_bytes) FROM rollout_files f), 0);
+            """;
+
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await reader.ReadAsync(cancellationToken);
+        return new CodexObservatorySummary(
+            reader.GetInt64(0),
+            new CodexNativeTokenTotals(
+                reader.GetInt64(1), reader.GetInt64(2), reader.GetInt64(3),
+                reader.GetInt64(4), reader.GetInt64(5), reader.GetInt64(6)),
+            reader.GetInt64(7));
     }
 
     public async Task<IReadOnlyList<CodexSessionOverview>> GetSessionOverviewsAsync(int take, CancellationToken cancellationToken)
@@ -464,7 +771,10 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                    (SELECT MAX(CASE WHEN c.context_window_tokens > 0 AND c.input_tokens IS NOT NULL
                                     THEN c.input_tokens * 100.0 / c.context_window_tokens END)
                     FROM context_observations c WHERE c.session_id = s.session_id),
-                   COALESCE((SELECT SUM(r.record_bytes) FROM rollout_records r WHERE r.session_id = s.session_id), 0),
+                   COALESCE((SELECT SUM(r.record_bytes)
+                             FROM rollout_records r
+                             WHERE r.session_id = s.session_id
+                               AND EXISTS(SELECT 1 FROM rollout_files f WHERE f.source_identity = r.source_identity)), 0),
                    COALESCE((SELECT COUNT(*) FROM usage_events e WHERE e.session_id = s.session_id), 0)
             FROM sessions s
             WHERE EXISTS(SELECT 1 FROM rollout_files f WHERE f.session_id = s.session_id)
@@ -597,8 +907,8 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         var command = connection.CreateCommand();
         command.CommandText = """
             SELECT f.file_path, f.session_id, f.size_bytes,
-                   COALESCE((SELECT COUNT(*) FROM rollout_records r WHERE r.file_path = f.file_path), 0),
-                   COALESCE((SELECT MAX(r.record_bytes) FROM rollout_records r WHERE r.file_path = f.file_path), 0),
+                   COALESCE((SELECT COUNT(*) FROM rollout_records r WHERE r.source_identity = f.source_identity), 0),
+                   COALESCE((SELECT MAX(r.record_bytes) FROM rollout_records r WHERE r.source_identity = f.source_identity), 0),
                    f.last_seen_at_utc
             FROM rollout_files f ORDER BY f.size_bytes DESC LIMIT $take;
             """;
@@ -614,6 +924,47 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         return results;
     }
 
+    private static async Task<int> InsertNativeTokenEventAsync(
+        SqliteConnection connection,
+        SqliteTransaction transaction,
+        CodexCumulativeTokenObservation observation,
+        int epoch,
+        long uncachedInput,
+        long cacheRead,
+        long cacheWrite,
+        long nonReasoningOutput,
+        long reasoningOutput,
+        long reportedTotal,
+        CancellationToken cancellationToken)
+    {
+        var insert = connection.CreateCommand();
+        insert.Transaction = transaction;
+        insert.CommandText = """
+            INSERT INTO codex_native_token_events(
+                source_event_id, source_file, session_id, agent_id, observed_at_utc, model, reasoning_effort,
+                counter_epoch, uncached_input_tokens, cache_read_tokens, cache_write_tokens,
+                non_reasoning_output_tokens, reasoning_output_tokens, reported_total_tokens)
+            VALUES($event, $file, $session, $agent, $observed, $model, $reasoning, $epoch,
+                   $uncached, $cached, $cacheWrite, $output, $reasoningOutput, $total)
+            ON CONFLICT(source_event_id) DO NOTHING;
+            """;
+        insert.Parameters.AddWithValue("$event", observation.SourceEventId);
+        insert.Parameters.AddWithValue("$file", observation.SourceFile);
+        insert.Parameters.AddWithValue("$session", observation.SessionId);
+        insert.Parameters.AddWithValue("$agent", DbValue(observation.AgentId));
+        insert.Parameters.AddWithValue("$observed", SerializeUtc(observation.ObservedAtUtc));
+        insert.Parameters.AddWithValue("$model", DbValue(observation.Model));
+        insert.Parameters.AddWithValue("$reasoning", DbValue(observation.ReasoningEffort));
+        insert.Parameters.AddWithValue("$epoch", epoch);
+        insert.Parameters.AddWithValue("$uncached", uncachedInput);
+        insert.Parameters.AddWithValue("$cached", cacheRead);
+        insert.Parameters.AddWithValue("$cacheWrite", cacheWrite);
+        insert.Parameters.AddWithValue("$output", nonReasoningOutput);
+        insert.Parameters.AddWithValue("$reasoningOutput", reasoningOutput);
+        insert.Parameters.AddWithValue("$total", reportedTotal);
+        return await insert.ExecuteNonQueryAsync(cancellationToken);
+    }
+
     private async Task EnsureInitializedAsync(CancellationToken cancellationToken)
     {
         if (!_initialized)
@@ -622,12 +973,30 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         }
     }
 
+    private static async Task ExecuteMigrationAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken)
+    {
+        using var transaction = connection.BeginTransaction();
+        try
+        {
+            var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = sql; // nosemgrep: migration SQL is compile-time-only.
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            transaction.Commit();
+        }
+        catch
+        {
+            transaction.Rollback();
+            throw;
+        }
+    }
+
     private async Task ExecuteAsync(string sql, Action<SqliteCommand> configure, CancellationToken cancellationToken)
     {
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
         var command = connection.CreateCommand();
-        command.CommandText = sql; // nosemgrep: private callers supply compile-time SQL; values are parameters.
+        command.CommandText = sql; // nosemgrep: private callers provide compile-time SQL and bind every runtime value.
         configure(command);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -637,6 +1006,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
     private static DateTimeOffset ParseUtc(string value) => DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
 
     private sealed record CounterState(
+        string SourceFile,
         int Epoch,
         long Input,
         long Cached,
@@ -644,5 +1014,6 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         long Output,
         long Reasoning,
         long Total,
-        string LastSourceEventId);
+        string LastSourceEventId,
+        DateTimeOffset LastObservedAtUtc);
 }
