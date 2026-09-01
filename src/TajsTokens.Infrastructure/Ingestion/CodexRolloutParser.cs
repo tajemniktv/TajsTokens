@@ -45,6 +45,8 @@ internal sealed partial class CodexRolloutParser
                     session, agent, relationship, null, null, [], null);
             }
 
+            // A filename without an owning UUID is intentionally storage-only. Choosing the first
+            // session_meta is unsafe because child rollouts can start with copied parent history.
             return ParsedRolloutRecord.StorageOnly(sourceRecordId, eventClass, recordBytes, timestamp, state.OwnSessionId);
         }
 
@@ -179,14 +181,23 @@ internal sealed partial class CodexRolloutParser
                 continue;
             }
 
-            var kind = window.Value switch
+            QuotaWindowKind? kind = window.Value switch
             {
                 300 => QuotaWindowKind.FiveHour,
                 10_080 => QuotaWindowKind.Weekly,
-                _ => QuotaWindowKind.Unknown
+                _ => null
             };
+
+            // The shared quota table currently has one identity per known kind/timestamp. Persisting
+            // multiple arbitrary lanes as Unknown would silently collide, so keep them out until the
+            // canonical quota model gains lane-aware identity.
+            if (kind is null)
+            {
+                continue;
+            }
+
             results.Add(new QuotaSnapshot(
-                kind,
+                kind.Value,
                 timestamp,
                 used,
                 window,
@@ -361,12 +372,23 @@ internal sealed partial class CodexRolloutParser
 
 internal sealed class RolloutParseState
 {
-    public RolloutParseState(string filePath, string sourceIdentity, string? resumedSessionId = null)
+    public RolloutParseState(string filePath, string sourceIdentity, CodexParserResumeState? resumeState = null)
     {
         FilePath = filePath;
         SourceIdentity = sourceIdentity;
         ExpectedSessionId = CodexRolloutParser.ExtractSessionIdFromFileName(filePath);
-        OwnSessionId = resumedSessionId;
+
+        if (resumeState is not null && string.Equals(resumeState.SourceIdentity, sourceIdentity, StringComparison.Ordinal))
+        {
+            OwnSessionId = resumeState.SessionId;
+            ParentSessionId = resumeState.ParentSessionId;
+            AgentName = resumeState.AgentName;
+            Repository = resumeState.Repository;
+            StartedAtUtc = resumeState.StartedAtUtc;
+            CurrentModel = resumeState.CurrentModel;
+            ReasoningEffort = resumeState.ReasoningEffort;
+            ContextWindowTokens = resumeState.ContextWindowTokens;
+        }
     }
 
     public string FilePath { get; }
@@ -382,20 +404,48 @@ internal sealed class RolloutParseState
     public long? ContextWindowTokens { get; set; }
     public bool OwnershipEstablished => OwnSessionId is not null;
 
-    public bool IsOwnSessionMeta(string sessionId) =>
-        ExpectedSessionId is null
-            ? OwnSessionId is null || string.Equals(OwnSessionId, sessionId, StringComparison.OrdinalIgnoreCase)
-            : string.Equals(sessionId, ExpectedSessionId, StringComparison.OrdinalIgnoreCase);
+    public bool IsOwnSessionMeta(string sessionId)
+    {
+        if (ExpectedSessionId is not null)
+        {
+            return string.Equals(sessionId, ExpectedSessionId, StringComparison.OrdinalIgnoreCase);
+        }
+
+        // A no-UUID source may only continue an already corroborated restored owner. Never claim the
+        // first session_meta in a fresh scan because it may belong to an inherited parent prefix.
+        return OwnSessionId is not null && string.Equals(OwnSessionId, sessionId, StringComparison.OrdinalIgnoreCase);
+    }
 
     public void EstablishOwnership(string sessionId, JsonElement payload, DateTimeOffset timestamp)
     {
         OwnSessionId = sessionId;
-        ParentSessionId = FindString(payload, "parent_thread_id") ?? FindString(payload, "parent_session_id");
+        ParentSessionId = FindString(payload, "parent_thread_id") ?? FindString(payload, "parent_session_id") ?? ParentSessionId;
         AgentName = FindString(payload, "agent_nickname") ??
                     (string.IsNullOrWhiteSpace(ParentSessionId) ? "Root agent" : "Subagent");
         Repository = FindString(payload, "cwd") ?? FindString(payload, "repository") ?? Repository;
-        StartedAtUtc = CodexRolloutParser.ReadTimestamp(payload, "timestamp") ?? timestamp;
+        StartedAtUtc = CodexRolloutParser.ReadTimestamp(payload, "timestamp") ?? (StartedAtUtc == default ? timestamp : StartedAtUtc);
         CurrentModel = FindString(payload, "model") ?? CurrentModel;
+    }
+
+    public CodexParserResumeState? BuildResumeState(long byteOffset)
+    {
+        if (OwnSessionId is null)
+        {
+            return null;
+        }
+
+        return new CodexParserResumeState(
+            SourceIdentity,
+            byteOffset,
+            OwnSessionId,
+            ParentSessionId,
+            AgentName,
+            Repository,
+            StartedAtUtc,
+            CurrentModel,
+            ReasoningEffort,
+            ContextWindowTokens,
+            DateTimeOffset.UtcNow);
     }
 
     public CodexSession BuildSession(DateTimeOffset activityAtUtc, string status) =>
@@ -404,12 +454,17 @@ internal sealed class RolloutParseState
     public Agent BuildAgent(DateTimeOffset activityAtUtc, AgentRuntimeState state) =>
         new(OwnSessionId!, OwnSessionId!, AgentName, state, activityAtUtc, CurrentModel);
 
-    private static string? FindString(JsonElement element, string propertyName)
+    private static string? FindString(JsonElement element, string propertyName, int depth = 0)
     {
         var direct = CodexRolloutParser.ReadString(element, propertyName);
         if (!string.IsNullOrWhiteSpace(direct))
         {
             return direct;
+        }
+
+        if (depth >= 4)
+        {
+            return null;
         }
 
         foreach (var property in element.EnumerateObject())
@@ -418,7 +473,8 @@ internal sealed class RolloutParseState
             {
                 continue;
             }
-            var nested = CodexRolloutParser.ReadString(property.Value, propertyName);
+
+            var nested = FindString(property.Value, propertyName, depth + 1);
             if (!string.IsNullOrWhiteSpace(nested))
             {
                 return nested;
