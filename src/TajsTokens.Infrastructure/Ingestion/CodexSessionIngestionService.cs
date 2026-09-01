@@ -197,7 +197,11 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             cancellationToken);
 
         var normalized = _observatoryStore is null ? recordsScanned : normalizedRecords;
-        return new CodexIngestionResult(recordsScanned, normalized, state.OwnSessionId ?? existing?.LastSessionId);
+        return new CodexIngestionResult(recordsScanned, normalized, state.OwnSessionId ?? existing?.LastSessionId)
+        {
+            LastCompleteRecordOffset = lastCompleteRecordOffset,
+            SourceLength = TryGetFileSize(filePath)
+        };
     }
 
     private async Task FlushSemanticBatchAsync(
