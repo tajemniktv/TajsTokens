@@ -246,7 +246,7 @@ public static class CodexTokenCounterReducer
         }
 
         var increment = Counters.FromComplete(last);
-        // Tokscale's stale-regression evidence is intentionally expressed on
+        // Adapted Tokscale's stale-regression evidence is intentionally expressed on
         // positive aggregate totals: current >= 98% of previous, or the
         // current watermark plus twice the observed turn covers the previous
         // watermark. This avoids an arbitrary reset ratio while retaining a
