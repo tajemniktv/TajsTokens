@@ -1,14 +1,23 @@
 namespace TajsTokens.Core.Models;
 
+public sealed record CodexIngestionResult(
+    int RecordsScanned,
+    int RecordsNormalized,
+    string? SessionId)
+{
+    public static CodexIngestionResult Empty { get; } = new(0, 0, null);
+}
+
 public sealed record CodexObservatoryRefreshResult(
     int FilesDiscovered,
     int FilesScanned,
+    int RecordsScanned,
     int RecordsNormalized,
     int SessionsTouched,
     int Errors,
     long BytesObserved)
 {
-    public static CodexObservatoryRefreshResult Empty { get; } = new(0, 0, 0, 0, 0, 0);
+    public static CodexObservatoryRefreshResult Empty { get; } = new(0, 0, 0, 0, 0, 0, 0);
 }
 
 public sealed record CodexNativeTokenTotals(
@@ -44,3 +53,21 @@ public sealed record CodexRolloutStorageSummary(
     long RecordsSeen,
     long LargestRecordBytes,
     DateTimeOffset LastSeenAtUtc);
+
+public sealed record CodexObservatorySummary(
+    long SessionCount,
+    CodexNativeTokenTotals NativeTokens,
+    long RolloutBytes);
+
+public sealed record CodexParserResumeState(
+    string SourceIdentity,
+    long ByteOffset,
+    string SessionId,
+    string? ParentSessionId,
+    string AgentName,
+    string Repository,
+    DateTimeOffset StartedAtUtc,
+    string? CurrentModel,
+    string? ReasoningEffort,
+    long? ContextWindowTokens,
+    DateTimeOffset UpdatedAtUtc);
