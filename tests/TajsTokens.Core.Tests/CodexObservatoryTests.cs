@@ -210,7 +210,7 @@ public sealed class CodexObservatoryTests
             {
                 lines.Add($"{{\"timestamp\":\"2026-08-31T00:00:{Math.Min(59, i + 2):00}Z\",\"type\":\"world_state\",\"payload\":{{\"n\":{i}}}}}");
             }
-            await File.WriteAllTextAsync(rollout, string.Join('\n', lines) + "\n");
+            await File.WriteAllTextAsync(rollout, string.Join("\n", lines) + "\n");
 
             var baseRepository = await InitializeBaseAsync(database);
             var store = new SqliteCodexObservatoryStore(database);
@@ -256,7 +256,8 @@ public sealed class CodexObservatoryTests
 
             var files = await store.GetRolloutStorageAsync(10, CancellationToken.None);
             var file = Assert.Single(files);
-            Assert.Equal("C:/archive/a.jsonl", file.FilePath);
+            Assert.StartsWith("a.jsonl [", file.FilePath);
+            Assert.DoesNotContain("C:/archive", file.FilePath, StringComparison.OrdinalIgnoreCase);
             Assert.Equal(100, (await store.GetSummaryAsync(CancellationToken.None)).RolloutBytes);
         }
         finally
@@ -315,6 +316,56 @@ public sealed class CodexObservatoryTests
             var summary = await store.GetSummaryAsync(CancellationToken.None);
             Assert.Equal(2, summary.SessionCount);
             Assert.Equal(200, summary.RolloutBytes);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(directory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ObservatoryTables_DoNotPersistAbsoluteRolloutOrRepositoryPaths()
+    {
+        var directory = CreateTempDirectory();
+        try
+        {
+            var marker = "PRIVATE_USER_PATH_" + Guid.NewGuid().ToString("N");
+            var privateDirectory = Path.Combine(directory, marker);
+            Directory.CreateDirectory(privateDirectory);
+            var database = Path.Combine(directory, "telemetry.db");
+            var rollout = Path.Combine(privateDirectory, $"rollout-2026-08-31T00-00-00-{RootId}.jsonl");
+            var privateRepository = $"C:/Users/{marker}/source/TajsTokens";
+            await File.WriteAllTextAsync(rollout,
+                $"{{\"timestamp\":\"2026-08-31T00:00:00Z\",\"type\":\"session_meta\",\"payload\":{{\"id\":\"{RootId}\",\"agent_nickname\":\"Root\",\"cwd\":\"{privateRepository}\"}}}}\n" +
+                "{\"timestamp\":\"2026-08-31T00:00:01Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"token_count\",\"info\":{\"total_token_usage\":{\"input_tokens\":100,\"cached_input_tokens\":80,\"cache_write_input_tokens\":0,\"output_tokens\":10,\"reasoning_output_tokens\":4,\"total_tokens\":110}}}}\n");
+
+            var baseRepository = await InitializeBaseAsync(database);
+            var store = new SqliteCodexObservatoryStore(database);
+            var ingestion = new CodexSessionIngestionService(new FileSystemCodexSessionEventProvider(), baseRepository, store);
+            await ingestion.IngestAsync(rollout, CancellationToken.None);
+
+            await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = database }.ToString());
+            await connection.OpenAsync();
+            var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT repository FROM sessions
+                UNION ALL SELECT repository FROM codex_parser_state
+                UNION ALL SELECT file_path FROM rollout_files
+                UNION ALL SELECT file_path FROM rollout_records
+                UNION ALL SELECT source_file FROM codex_native_token_events
+                UNION ALL SELECT source_file FROM codex_counter_state;
+                """;
+            await using var reader = await command.ExecuteReaderAsync();
+            while (await reader.ReadAsync())
+            {
+                Assert.DoesNotContain(marker, reader.GetString(0), StringComparison.OrdinalIgnoreCase);
+            }
+
+            var session = Assert.Single(await store.GetSessionOverviewsAsync(10, CancellationToken.None));
+            Assert.Equal("TajsTokens", session.Repository);
+            var storage = Assert.Single(await store.GetRolloutStorageAsync(10, CancellationToken.None));
+            Assert.StartsWith(Path.GetFileName(rollout) + " [", storage.FilePath);
         }
         finally
         {
