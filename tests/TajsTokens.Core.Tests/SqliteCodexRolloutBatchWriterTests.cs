@@ -7,7 +7,7 @@ namespace TajsTokens.Core.Tests;
 public sealed class SqliteCodexRolloutBatchWriterTests
 {
     [Fact]
-    public async Task WriteBatchAsync_CommitsRecordsAndFileStateOncePerBatch()
+    public async Task WriteBatchAsync_CommitsStorageOnlyRecordsAndFileStateOncePerBatch()
     {
         var directory = Directory.CreateTempSubdirectory("tajstokens-rollout-batch-");
         var database = Path.Combine(directory.FullName, "telemetry.db");
@@ -19,7 +19,7 @@ public sealed class SqliteCodexRolloutBatchWriterTests
             await repository.InitializeAsync(CancellationToken.None);
             var observatory = new SqliteCodexObservatoryStore(database);
             await observatory.InitializeAsync(CancellationToken.None);
-            var writer = new SqliteCodexRolloutRecordBatchWriter(database, observatory);
+            var writer = new SqliteCodexIngestionBatchWriter(database, observatory);
             var now = DateTimeOffset.UtcNow;
 
             await writer.WriteBatchAsync(
@@ -27,9 +27,9 @@ public sealed class SqliteCodexRolloutBatchWriterTests
                 sourcePath,
                 1_234,
                 [
-                    new CodexRolloutRecordMetadata("r1", "session-a", "token_count", 111, now),
-                    new CodexRolloutRecordMetadata("r2", "session-a", "item_completed", 222, now.AddSeconds(1)),
-                    new CodexRolloutRecordMetadata("r2", "session-a", "item_completed", 222, now.AddSeconds(1))
+                    ParsedRolloutRecord.StorageOnly("r1", "token_count", 111, now, "session-a"),
+                    ParsedRolloutRecord.StorageOnly("r2", "item_completed", 222, now.AddSeconds(1), "session-a"),
+                    ParsedRolloutRecord.StorageOnly("r2", "item_completed", 222, now.AddSeconds(1), "session-a")
                 ],
                 CancellationToken.None);
 
