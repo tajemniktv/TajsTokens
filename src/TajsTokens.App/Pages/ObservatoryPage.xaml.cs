@@ -9,6 +9,7 @@ public sealed partial class ObservatoryPage : Page
 {
     private readonly Dictionary<string, CodexSessionOverview> _sessionsById = new(StringComparer.OrdinalIgnoreCase);
     private bool _loading;
+    private long _selectionGeneration;
 
     public ObservatoryPage()
     {
@@ -62,8 +63,14 @@ public sealed partial class ObservatoryPage : Page
             await App.Services.Repository.InitializeAsync(CancellationToken.None);
             await store.InitializeAsync(CancellationToken.None);
 
-            var sessions = await store.GetSessionOverviewsAsync(500, CancellationToken.None);
-            var storage = await store.GetRolloutStorageAsync(40, CancellationToken.None);
+            var summaryTask = store.GetSummaryAsync(CancellationToken.None);
+            var sessionsTask = store.GetSessionOverviewsAsync(500, CancellationToken.None);
+            var storageTask = store.GetRolloutStorageAsync(40, CancellationToken.None);
+            await Task.WhenAll(summaryTask, sessionsTask, storageTask);
+
+            var summary = await summaryTask;
+            var sessions = await sessionsTask;
+            var storage = await storageTask;
             _sessionsById.Clear();
             foreach (var session in sessions)
             {
@@ -73,16 +80,16 @@ public sealed partial class ObservatoryPage : Page
             var selectedId = (SessionList.SelectedItem as SessionRow)?.SessionId;
             var rows = sessions.Select(ToSessionRow).ToArray();
             SessionList.ItemsSource = rows;
-            SessionCountText.Text = sessions.Count.ToString("N0");
-            NativeTokensText.Text = FormatCount(sessions.Sum(session => session.NativeTokens.ReportedTotal));
-            StorageText.Text = FormatBytes(storage.Sum(item => item.SizeBytes));
+            SessionCountText.Text = summary.SessionCount.ToString("N0");
+            NativeTokensText.Text = FormatCount(summary.NativeTokens.ReportedTotal);
+            StorageText.Text = FormatBytes(summary.RolloutBytes);
             StorageList.ItemsSource = storage.Select(item => new StorageRow(
                 Path.GetFileName(item.FilePath),
                 $"{FormatBytes(item.SizeBytes)} · {item.RecordsSeen:N0} records · max {FormatBytes(item.LargestRecordBytes)}")).ToArray();
 
-            StatusText.Text = sessions.Count == 0
+            StatusText.Text = summary.SessionCount == 0
                 ? "No normalized Codex sessions yet. The background collector will ingest discovered rollout JSONL sources without storing transcript content."
-                : $"{sessions.Count:N0} normalized session(s). Last view refresh {DateTimeOffset.Now:t}.";
+                : $"{summary.SessionCount:N0} normalized session(s). Last view refresh {DateTimeOffset.Now:t}.";
 
             if (selectedId is not null)
             {
@@ -105,6 +112,7 @@ public sealed partial class ObservatoryPage : Page
 
     private async void OnSessionSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        var generation = Interlocked.Increment(ref _selectionGeneration);
         if (SessionList.SelectedItem is not SessionRow row || !_sessionsById.TryGetValue(row.SessionId, out var session))
         {
             return;
@@ -118,6 +126,13 @@ public sealed partial class ObservatoryPage : Page
             var agentsTask = store.GetAgentsAsync(null, CancellationToken.None);
             var relationshipsTask = store.GetAgentRelationshipsAsync(CancellationToken.None);
             await Task.WhenAll(timelineTask, contextTask, agentsTask, relationshipsTask);
+
+            if (generation != Volatile.Read(ref _selectionGeneration) ||
+                SessionList.SelectedItem is not SessionRow current ||
+                !string.Equals(current.SessionId, row.SessionId, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
 
             var timeline = await timelineTask;
             var context = await contextTask;
@@ -148,7 +163,10 @@ public sealed partial class ObservatoryPage : Page
         }
         catch (Exception exception)
         {
-            SelectedSessionSummary.Text = $"Session detail unavailable: {Summarize(exception.Message)}";
+            if (generation == Volatile.Read(ref _selectionGeneration))
+            {
+                SelectedSessionSummary.Text = $"Session detail unavailable: {Summarize(exception.Message)}";
+            }
         }
     }
 
@@ -172,13 +190,19 @@ public sealed partial class ObservatoryPage : Page
         var byId = agents.ToDictionary(agent => agent.AgentId, StringComparer.OrdinalIgnoreCase);
         var children = relationships
             .GroupBy(relation => relation.ParentAgentId, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.Select(item => item.ChildAgentId).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(), StringComparer.OrdinalIgnoreCase);
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(item => item.ChildAgentId).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
+                StringComparer.OrdinalIgnoreCase);
+        var parentByChild = relationships
+            .GroupBy(relation => relation.ChildAgentId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First().ParentAgentId, StringComparer.OrdinalIgnoreCase);
 
         var root = selectedSessionId;
-        var parent = relationships.FirstOrDefault(relation => string.Equals(relation.ChildAgentId, selectedSessionId, StringComparison.OrdinalIgnoreCase));
-        if (parent is not null)
+        var ancestorVisited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        while (ancestorVisited.Add(root) && parentByChild.TryGetValue(root, out var parentId))
         {
-            root = parent.ParentAgentId;
+            root = parentId;
         }
 
         var rows = new List<AgentTreeRow>();
@@ -192,7 +216,7 @@ public sealed partial class ObservatoryPage : Page
 
         void Append(string id, int depth)
         {
-            if (depth > 16 || !visited.Add(id))
+            if (depth > 32 || !visited.Add(id))
             {
                 return;
             }
