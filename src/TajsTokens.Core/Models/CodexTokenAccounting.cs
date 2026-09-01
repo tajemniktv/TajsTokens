@@ -190,9 +190,12 @@ public static class CodexTokenCounterReducer
                 true);
         }
 
-        // The cumulative total is the watermark.  Repeated totals are not new
-        // observed turns, even if Codex repeats a non-zero last_token_usage
-        // payload alongside a rate-limit/context snapshot.
+        // The reported total is the provider's aggregate watermark. Repeating
+        // it is deliberately authoritative even when component fields contain
+        // reshuffling/noise: component movement with no aggregate movement
+        // must not mint a local token event. This is an intentional divergence
+        // from tuple-only Tokscale equality, and is covered by the reducer
+        // regression test below.
         if (current.TotalTokens == previous.TotalTokens)
         {
             return new(
@@ -243,16 +246,18 @@ public static class CodexTokenCounterReducer
         }
 
         var increment = Counters.FromComplete(last);
-        // Total tokens are Codex's aggregate watermark. If the observed turn
-        // can cover the aggregate drop, the lower snapshot is plausibly a
-        // short/out-of-order watermark rather than a new epoch. Component
-        // counters remain useful corroboration when the aggregate itself did
-        // not regress.
+        // Tokscale's stale-regression evidence is intentionally expressed on
+        // positive aggregate totals: current >= 98% of previous, or the
+        // current watermark plus twice the observed turn covers the previous
+        // watermark. This avoids an arbitrary reset ratio while retaining a
+        // short/out-of-order guard.
         if (current.TotalTokens < previous.TotalTokens)
         {
-            return RegressionCovered(current.TotalTokens, previous.TotalTokens, increment.TotalTokens);
+            return IsTokscaleStaleRegression(current.TotalTokens, previous.TotalTokens, increment.TotalTokens);
         }
 
+        // If only a component regresses while the aggregate remains monotonic,
+        // require the corresponding observed turn to cover each drop.
         return RegressionCovered(current.InputTokens, previous.InputTokens, increment.InputTokens) &&
                RegressionCovered(current.CachedInputTokens, previous.CachedInputTokens, increment.CachedInputTokens) &&
                RegressionCovered(current.CacheWriteInputTokens, previous.CacheWriteInputTokens, increment.CacheWriteInputTokens) &&
@@ -262,6 +267,31 @@ public static class CodexTokenCounterReducer
 
     private static bool RegressionCovered(long current, long previous, long increment) =>
         current >= previous || previous - current <= increment;
+
+    private static bool IsTokscaleStaleRegression(long current, long previous, long last)
+    {
+        if (current <= 0 || previous <= 0)
+        {
+            return false;
+        }
+
+        // Decimal products stay within their wider fixed-point range for every
+        // long value, avoiding the false positives that independently
+        // saturating current*100 and previous*98 would create near MaxValue.
+        var withinTwoPercent = (decimal)current * 100m >= (decimal)previous * 98m;
+        var doubledLast = SaturatingMultiply(last, 2);
+        return withinTwoPercent || SaturatingAdd(current, doubledLast) >= previous;
+    }
+
+    private static long SaturatingMultiply(long value, long factor) =>
+        value <= 0 || factor <= 0
+            ? 0
+            : value > long.MaxValue / factor
+                ? long.MaxValue
+                : value * factor;
+
+    private static long SaturatingAdd(long left, long right) =>
+        left > long.MaxValue - right ? long.MaxValue : left + right;
 
     private static CodexTokenCounterState WithObservationMetadata(
         CodexTokenCounterState previous,

@@ -72,10 +72,14 @@ public sealed class CodexTokenCounterReducerTests
         var unchanged = CodexTokenCounterReducer.Reduce(
             Observation("unchanged", 99, 39, 9, 3, 110, Last(1, 1, 0, 1, 1, 2)),
             first.NextState);
+        var recovered = CodexTokenCounterReducer.Reduce(
+            Observation("recovered", 110, 45, 15, 5, 120),
+            unchanged.NextState);
 
         Assert.Equal(CodexTokenAccountingDecisionKind.NoIncrement, unchanged.Kind);
         Assert.Equal(CodexTokenAccountingDelta.Zero, unchanged.Delta);
         Assert.Equal(first.NextState!.InputTokens, unchanged.NextState!.InputTokens);
+        Assert.Equal(new CodexTokenAccountingDelta(5, 5, 0, 4, 1, 10), recovered.Delta);
     }
 
     [Fact]
@@ -94,6 +98,56 @@ public sealed class CodexTokenCounterReducerTests
         Assert.Equal(CodexTokenAccountingDecisionKind.MonotonicIncrement, recovered.Kind);
         Assert.Equal(new CodexTokenAccountingDelta(5, 5, 0, 1, 1, 11), recovered.Delta);
         Assert.Equal(first.NextState, stale.NextState);
+    }
+
+    [Fact]
+    public void TokscaleStaleRegression_98PercentCase_RetainsBaselineAndRecovers()
+    {
+        var first = Reduce(Observation("first", 100, 0, 0, 0, 100));
+        var stale = CodexTokenCounterReducer.Reduce(
+            Observation("stale", 98, 0, 0, 0, 98, Last(1, 0, 0, 0, 0, 1)),
+            first.NextState);
+        var recovered = CodexTokenCounterReducer.Reduce(
+            Observation("recovered", 110, 0, 0, 0, 110, Last(10, 0, 0, 0, 0, 10)),
+            stale.NextState);
+
+        Assert.Equal(CodexTokenAccountingDecisionKind.StaleCumulativeRegression, stale.Kind);
+        Assert.Equal(100, stale.NextState!.TotalTokens);
+        Assert.Equal(new CodexTokenAccountingDelta(10, 0, 0, 0, 0, 10), recovered.Delta);
+    }
+
+    [Fact]
+    public void TokscaleStaleRegression_DoubledLastCase_RetainsBaselineAndRecovers()
+    {
+        var first = Reduce(Observation("first", 100, 0, 0, 0, 100));
+        var stale = CodexTokenCounterReducer.Reduce(
+            Observation("stale", 85, 0, 0, 0, 85, Last(8, 0, 0, 0, 0, 8)),
+            first.NextState);
+        var recovered = CodexTokenCounterReducer.Reduce(
+            Observation("recovered", 110, 0, 0, 0, 110, Last(10, 0, 0, 0, 0, 10)),
+            stale.NextState);
+
+        Assert.Equal(CodexTokenAccountingDecisionKind.StaleCumulativeRegression, stale.Kind);
+        Assert.Equal(100, stale.NextState!.TotalTokens);
+        Assert.Equal(new CodexTokenAccountingDelta(10, 0, 0, 0, 0, 10), recovered.Delta);
+    }
+
+    [Fact]
+    public void TokscaleMeaningfulRegression_60WithLast12_StartsNewEpochAndRecovers()
+    {
+        var first = Reduce(Observation("first", 100, 0, 0, 0, 100));
+        var reset = CodexTokenCounterReducer.Reduce(
+            Observation("reset", 60, 0, 0, 0, 60, Last(12, 0, 0, 0, 0, 12)),
+            first.NextState);
+        var recovered = CodexTokenCounterReducer.Reduce(
+            Observation("recovered", 70, 0, 0, 0, 70, Last(10, 0, 0, 0, 0, 10)),
+            reset.NextState);
+
+        Assert.Equal(CodexTokenAccountingDecisionKind.CounterReset, reset.Kind);
+        Assert.Equal(new CodexTokenAccountingDelta(12, 0, 0, 0, 0, 12), reset.Delta);
+        Assert.Equal(1, reset.NextState!.Epoch);
+        Assert.Equal(new CodexTokenAccountingDelta(10, 0, 0, 0, 0, 10), recovered.Delta);
+        Assert.Equal(1, recovered.NextState!.Epoch);
     }
 
     [Fact]

@@ -12,12 +12,14 @@ namespace TajsTokens.Infrastructure.Persistence;
 /// Privacy-safe Phase 3 persistence layered into the existing telemetry database. The base telemetry
 /// repository owns PRAGMA user_version; observatory tables use an independent component version.
 /// </summary>
-public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObservatoryStore
+public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObservatoryStore, IDisposable
 {
-    private const int ObservatorySchemaVersion = 3;
+    private const int ObservatorySchemaVersion = 4;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _initializeGate = new(1, 1);
     private volatile bool _initialized;
+
+    public void Dispose() => _initializeGate.Dispose();
 
     public async Task InitializeAsync(CancellationToken cancellationToken)
     {

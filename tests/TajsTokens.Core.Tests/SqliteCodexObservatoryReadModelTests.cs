@@ -152,4 +152,36 @@ public sealed class SqliteCodexObservatoryReadModelTests
             directory.Delete(recursive: true);
         }
     }
+
+    [Fact]
+    public async Task Initialize_FreshDatabaseReopensWithSchemaVersion4()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-observatory-reopen-");
+        var databasePath = Path.Combine(directory.FullName, "telemetry.db");
+
+        try
+        {
+            var repository = new SqliteTelemetryRepository(databasePath);
+            await repository.InitializeAsync(CancellationToken.None);
+
+            var firstStore = new SqliteCodexObservatoryStore(databasePath);
+            await firstStore.InitializeAsync(CancellationToken.None);
+            firstStore.Dispose();
+
+            var secondStore = new SqliteCodexObservatoryStore(databasePath);
+            await secondStore.InitializeAsync(CancellationToken.None);
+            secondStore.Dispose();
+
+            await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString());
+            await connection.OpenAsync(CancellationToken.None);
+            var version = connection.CreateCommand();
+            version.CommandText = "SELECT version FROM observatory_schema WHERE component = 'codex-observatory';";
+            Assert.Equal(4L, (long)(await version.ExecuteScalarAsync(CancellationToken.None))!);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
 }
