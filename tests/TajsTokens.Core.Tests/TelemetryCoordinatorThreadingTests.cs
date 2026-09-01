@@ -131,6 +131,6 @@ public sealed class TelemetryCoordinatorThreadingTests
         public Task<CodexObservatoryRefreshResult> RefreshAsync(CancellationToken cancellationToken) =>
             _completion.Task.WaitAsync(cancellationToken);
 
-        public void Complete() => _completion.TrySetResult(CodexObservatoryRefreshResult.Empty);
+        public void Complete() => _completion.TrySetResult(new CodexObservatoryRefreshResult(1, 0, 0, 0, 0, 0, 0));
     }
 }

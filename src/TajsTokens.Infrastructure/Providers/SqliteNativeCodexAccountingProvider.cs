@@ -55,11 +55,17 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
             var hourly = await LoadHourlyUsageAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
             transaction.Commit();
 
+            var asOfUtc = usage.Select(item => (DateTimeOffset?)item.ObservedAtUtc)
+                .Concat(hourly.Select(item => item.StartUtc))
+                .Where(item => item is not null)
+                .Max();
             var snapshot = new CodexTokenAccountingSnapshot(
                 "Native Codex",
                 "Local normalized Codex rollout history only; remote/cloud-only sessions are not assumed to be zero.",
                 usage,
-                hourly);
+                hourly,
+                AsOfUtc: asOfUtc,
+                Revision: stamp.Revision);
             _cachedStamp = stamp;
             _cachedSnapshot = snapshot;
             return snapshot;

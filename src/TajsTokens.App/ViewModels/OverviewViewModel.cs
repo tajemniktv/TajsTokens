@@ -107,8 +107,8 @@ public sealed partial class OverviewViewModel : ObservableObject
 
             if (snapshot.TokenDataFresh || snapshot.TokenUsages.Count > 0 || snapshot.HourlyBuckets.Count > 0)
             {
-                RenderTokenSummary(snapshot.TokenUsages, snapshot.TokenDataFresh);
-                RenderHourlyHistory(snapshot.HourlyBuckets, snapshot.TokenDataFresh);
+                RenderTokenSummary(snapshot.TokenUsages, snapshot.TokenDataFresh, snapshot.TokenGeneration);
+                RenderHourlyHistory(snapshot.HourlyBuckets, snapshot.TokenDataFresh, snapshot.TokenGeneration);
             }
             else
             {
@@ -183,8 +183,9 @@ public sealed partial class OverviewViewModel : ObservableObject
             return;
         }
 
+        var laneFresh = snapshot.IsQuotaSnapshotFresh(current);
         Forecast? forecast = null;
-        if (snapshot.PersistenceAvailable && snapshot.QuotaDataFresh)
+        if (snapshot.PersistenceAvailable && laneFresh)
         {
             try
             {
@@ -209,7 +210,7 @@ public sealed partial class OverviewViewModel : ObservableObject
             }
         }
 
-        SetQuotaCard(kind, BuildQuotaCard(title, current, forecast, snapshot.QuotaDataFresh));
+        SetQuotaCard(kind, BuildQuotaCard(title, current, forecast, laneFresh));
     }
 
     private void SetQuotaCard(QuotaWindowKind kind, QuotaCardViewModel card)
@@ -224,7 +225,10 @@ public sealed partial class OverviewViewModel : ObservableObject
         }
     }
 
-    private void RenderTokenSummary(IReadOnlyList<TokenUsage> usages, bool isFresh)
+    private void RenderTokenSummary(
+        IReadOnlyList<TokenUsage> usages,
+        bool isFresh,
+        TokenAccountingGenerationState? generation)
     {
         TokenSummaryCards.Clear();
         var uncached = usages.Sum(item => item.Breakdown.UncachedInput);
@@ -233,8 +237,9 @@ public sealed partial class OverviewViewModel : ObservableObject
         var output = usages.Sum(item => item.Breakdown.NonReasoningOutput);
         var reasoning = usages.Sum(item => item.Breakdown.ReasoningOutput);
         var total = usages.Sum(item => item.Breakdown.Total);
-        var source = TokenSourceLabel(usages.Select(item => item.Provider));
-        var provenance = isFresh ? $"{source} · live" : $"{source} · last known good";
+        var source = generation?.Source ?? TokenSourceLabel(usages.Select(item => item.Provider));
+        var quality = generation?.IsFallback == true ? " · fallback" : string.Empty;
+        var provenance = isFresh ? $"{source} · live{quality}" : $"{source} · last known good{quality}";
 
         TokenSummaryCards.Add(new TokenSummaryCard("Uncached input", FormatTokenCount(uncached), $"{provenance} · disjoint input"));
         TokenSummaryCards.Add(new TokenSummaryCard("Cache read", FormatTokenCount(cacheRead), $"{provenance} · cached input"));
@@ -255,10 +260,13 @@ public sealed partial class OverviewViewModel : ObservableObject
         HistoryCaption = "Hourly history is unavailable until a Codex token-accounting source can be read.";
     }
 
-    private void RenderHourlyHistory(IReadOnlyList<TokenTimeBucket> buckets, bool isFresh)
+    private void RenderHourlyHistory(
+        IReadOnlyList<TokenTimeBucket> buckets,
+        bool isFresh,
+        TokenAccountingGenerationState? generation)
     {
         HistoryPoints.Clear();
-        var source = TokenSourceLabel(buckets.Select(item => item.Provider));
+        var source = generation?.Source ?? TokenSourceLabel(buckets.Select(item => item.Provider));
         var visible = buckets.TakeLast(12).ToArray();
         if (visible.Length == 0)
         {
@@ -277,7 +285,8 @@ public sealed partial class OverviewViewModel : ObservableObject
         }
 
         var freshness = isFresh ? "live" : "stale";
-        HistoryCaption = $"{source} hourly usage · {freshness} · last {visible.Length} bucket(s) · bars normalized to the busiest visible hour.";
+        var quality = generation?.IsFallback == true ? " · fallback" : string.Empty;
+        HistoryCaption = $"{source} hourly usage · {freshness}{quality} · last {visible.Length} bucket(s) · bars normalized to the busiest visible hour.";
     }
 
     private static QuotaCardViewModel BuildQuotaCard(

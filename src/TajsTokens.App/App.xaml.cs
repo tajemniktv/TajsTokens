@@ -338,14 +338,22 @@ public partial class App : Application
             ? null
             : (int)Math.Round(remainingValues.Min(), MidpointRounding.AwayFromZero);
 
-        var health = snapshot.QuotaDataFresh
+        var anyFreshLane = snapshot.QuotaLanes.Count == 0
+            ? snapshot.QuotaDataFresh
+            : snapshot.QuotaLanes.Any(lane => lane.IsFresh);
+        var allFreshLanes = snapshot.QuotaLanes.Count == 0
+            ? snapshot.QuotaDataFresh
+            : snapshot.QuotaLanes.Count > 0 && snapshot.QuotaLanes.All(lane => lane.IsFresh);
+        var health = allFreshLanes
             ? "live"
-            : snapshot.QuotaSnapshots.Count > 0
-                ? "stale"
-                : "quota unavailable";
+            : anyFreshLane
+                ? "partial"
+                : snapshot.QuotaSnapshots.Count > 0
+                    ? "stale"
+                    : "quota unavailable";
 
         var tooltip = $"TajsTokens · 5h {FormatQuota(fiveHour)} · week {FormatQuota(weekly)} · {health}";
-        return new SystemTrayStatus(tooltip, constrained, snapshot.QuotaDataFresh, health);
+        return new SystemTrayStatus(tooltip, constrained, allFreshLanes, health);
     }
 
     private static QuotaSnapshot? LatestQuota(TelemetrySnapshot snapshot, QuotaWindowKind kind) =>

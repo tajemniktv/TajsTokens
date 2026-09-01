@@ -77,6 +77,38 @@ public sealed class QuotaAlertEngineTests
     }
 
     [Fact]
+    public void PartialQuotaGeneration_AlertsFreshLaneAndIgnoresStaleLane()
+    {
+        var engine = new QuotaAlertEngine([10]);
+        var captured = DateTimeOffset.UnixEpoch.AddMinutes(1);
+        var fiveHour = new QuotaSnapshot(
+            QuotaWindowKind.FiveHour, captured, 95, 300, captured.AddHours(5), "codex", "default", "test");
+        var weekly = new QuotaSnapshot(
+            QuotaWindowKind.Weekly, captured, 95, 10_080, captured.AddDays(7), "codex", "default", "test");
+        var snapshot = new TelemetrySnapshot(
+            captured,
+            RefreshTrigger.Interval,
+            [],
+            [],
+            [fiveHour, weekly],
+            false,
+            false,
+            true,
+            [new ProviderHealthSnapshot("Codex app-server", TelemetryHealthState.Stale, "partial", captured)],
+            [])
+        {
+            QuotaLanes =
+            [
+                new QuotaLaneState(QuotaWindowKind.FiveHour, "codex", "default", fiveHour, TelemetryHealthState.Live, captured),
+                new QuotaLaneState(QuotaWindowKind.Weekly, "codex", "default", weekly, TelemetryHealthState.Stale, captured)
+            ]
+        };
+
+        var alert = Assert.Single(engine.Evaluate(snapshot));
+        Assert.Contains(nameof(QuotaWindowKind.FiveHour), alert.Key, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void WindowAdvanceWithRecoveredQuota_EmitsResetAlertOnce()
     {
         var engine = new QuotaAlertEngine([10, 5]);

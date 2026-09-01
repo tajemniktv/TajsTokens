@@ -22,6 +22,7 @@ public interface ITokscaleProvider : ICodexTokenAccountingProvider
             "Tokscale",
             "Local Codex rollout history discovered by Tokscale; remote/cloud-only sessions may be absent.",
             usage,
-            hourly);
+            hourly,
+            AsOfUtc: DateTimeOffset.UtcNow);
     }
 }

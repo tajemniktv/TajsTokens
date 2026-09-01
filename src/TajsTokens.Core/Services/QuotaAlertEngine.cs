@@ -24,11 +24,7 @@ public sealed class QuotaAlertEngine
     {
         var alerts = new List<AlertNotification>();
 
-        if (current.QuotaDataFresh)
-        {
-            EvaluateQuotaAlerts(current, alerts);
-        }
-
+        EvaluateQuotaAlerts(current, alerts);
         EvaluateProviderHealthAlerts(current, alerts);
         _previous = current;
         return alerts;
@@ -37,8 +33,9 @@ public sealed class QuotaAlertEngine
     private void EvaluateQuotaAlerts(TelemetrySnapshot current, ICollection<AlertNotification> alerts)
     {
         foreach (var quota in current.QuotaSnapshots.Where(snapshot =>
-                     snapshot.Kind is QuotaWindowKind.FiveHour or QuotaWindowKind.Weekly &&
-                     snapshot.RemainingPercent is not null))
+                     (snapshot.Kind is QuotaWindowKind.FiveHour or QuotaWindowKind.Weekly) &&
+                     snapshot.RemainingPercent is not null &&
+                     current.IsQuotaSnapshotFresh(snapshot)))
         {
             var remaining = quota.RemainingPercent!.Value;
             var previousQuota = FindPreviousQuota(quota);
