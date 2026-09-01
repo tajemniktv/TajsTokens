@@ -56,42 +56,15 @@ internal sealed class SqliteCodexStateIndexStore
 
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
-            var command = connection.CreateCommand();
-            command.CommandText = """
+
+            var bootstrap = connection.CreateCommand();
+            bootstrap.CommandText = """
                 CREATE TABLE IF NOT EXISTS codex_state_index_schema (
                     component TEXT PRIMARY KEY,
                     version INTEGER NOT NULL
                 );
-
-                CREATE TABLE IF NOT EXISTS codex_state_thread_fingerprints (
-                    thread_id TEXT PRIMARY KEY,
-                    updated_at_ms INTEGER NOT NULL,
-                    tokens_used INTEGER NOT NULL,
-                    model TEXT,
-                    reasoning_effort TEXT,
-                    archived INTEGER NOT NULL,
-                    rollout_path_hash TEXT NOT NULL,
-                    applied_at_utc TEXT NOT NULL
-                );
-
-                CREATE INDEX IF NOT EXISTS idx_codex_state_fingerprints_updated
-                    ON codex_state_thread_fingerprints(updated_at_ms, thread_id);
-
-                CREATE TABLE IF NOT EXISTS codex_state_sync (
-                    component TEXT PRIMARY KEY,
-                    watermark_updated_at_ms INTEGER NOT NULL,
-                    updated_at_utc TEXT NOT NULL
-                );
-
-                INSERT INTO codex_state_index_schema(component, version)
-                VALUES('codex-state-index', 1)
-                ON CONFLICT(component) DO UPDATE SET version = excluded.version;
-
-                INSERT INTO codex_state_sync(component, watermark_updated_at_ms, updated_at_utc)
-                VALUES('codex-state-index', 0, '0001-01-01T00:00:00.0000000+00:00')
-                ON CONFLICT(component) DO NOTHING;
                 """;
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            await bootstrap.ExecuteNonQueryAsync(cancellationToken);
 
             var versionCommand = connection.CreateCommand();
             versionCommand.CommandText = "SELECT version FROM codex_state_index_schema WHERE component = $component;";
@@ -100,6 +73,48 @@ internal sealed class SqliteCodexStateIndexStore
             var version = rawVersion is null || rawVersion is DBNull
                 ? 0
                 : Convert.ToInt32(rawVersion, CultureInfo.InvariantCulture);
+
+            if (version > SchemaVersion)
+            {
+                throw new InvalidOperationException(
+                    $"Codex state index schema {version} is newer than supported version {SchemaVersion}.");
+            }
+
+            if (version == 0)
+            {
+                var migration = connection.CreateCommand();
+                migration.CommandText = """
+                    CREATE TABLE IF NOT EXISTS codex_state_thread_fingerprints (
+                        thread_id TEXT PRIMARY KEY,
+                        updated_at_ms INTEGER NOT NULL,
+                        tokens_used INTEGER NOT NULL,
+                        model TEXT,
+                        reasoning_effort TEXT,
+                        archived INTEGER NOT NULL,
+                        rollout_path_hash TEXT NOT NULL,
+                        applied_at_utc TEXT NOT NULL
+                    );
+
+                    CREATE INDEX IF NOT EXISTS idx_codex_state_fingerprints_updated
+                        ON codex_state_thread_fingerprints(updated_at_ms, thread_id);
+
+                    CREATE TABLE IF NOT EXISTS codex_state_sync (
+                        component TEXT PRIMARY KEY,
+                        watermark_updated_at_ms INTEGER NOT NULL,
+                        updated_at_utc TEXT NOT NULL
+                    );
+
+                    INSERT INTO codex_state_sync(component, watermark_updated_at_ms, updated_at_utc)
+                    VALUES('codex-state-index', 0, '0001-01-01T00:00:00.0000000+00:00')
+                    ON CONFLICT(component) DO NOTHING;
+
+                    INSERT INTO codex_state_index_schema(component, version)
+                    VALUES('codex-state-index', 1);
+                    """;
+                await migration.ExecuteNonQueryAsync(cancellationToken);
+                version = 1;
+            }
+
             if (version != SchemaVersion)
             {
                 throw new InvalidOperationException(
