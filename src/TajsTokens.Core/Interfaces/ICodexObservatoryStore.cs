@@ -12,8 +12,18 @@ public interface ICodexObservatoryStore
     Task UpsertQuotaSnapshotAsync(QuotaSnapshot snapshot, CancellationToken cancellationToken);
     Task ApplyCumulativeTokenObservationAsync(CodexCumulativeTokenObservation observation, CancellationToken cancellationToken);
     Task UpsertContextObservationAsync(CodexContextObservation observation, CancellationToken cancellationToken);
+    Task<CodexParserResumeState?> GetParserResumeStateAsync(string sourceIdentity, CancellationToken cancellationToken);
+    Task UpsertParserResumeStateAsync(CodexParserResumeState state, CancellationToken cancellationToken);
+    Task UpsertRolloutFileAsync(
+        string sourceIdentity,
+        string filePath,
+        string? sessionId,
+        long fileSizeBytes,
+        DateTimeOffset observedAtUtc,
+        CancellationToken cancellationToken);
     Task RecordRolloutRecordAsync(
         string sourceRecordId,
+        string sourceIdentity,
         string filePath,
         string? sessionId,
         string eventClass,
@@ -22,6 +32,7 @@ public interface ICodexObservatoryStore
         DateTimeOffset observedAtUtc,
         CancellationToken cancellationToken);
 
+    Task<CodexObservatorySummary> GetSummaryAsync(CancellationToken cancellationToken);
     Task<IReadOnlyList<CodexSessionOverview>> GetSessionOverviewsAsync(int take, CancellationToken cancellationToken);
     Task<IReadOnlyList<Agent>> GetAgentsAsync(string? sessionId, CancellationToken cancellationToken);
     Task<IReadOnlyList<AgentRelationship>> GetAgentRelationshipsAsync(CancellationToken cancellationToken);
