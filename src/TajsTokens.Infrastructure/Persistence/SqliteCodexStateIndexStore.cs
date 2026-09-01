@@ -166,7 +166,7 @@ internal sealed class SqliteCodexStateIndexStore
         await InitializeAsync(cancellationToken);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+        using var transaction = connection.BeginTransaction();
 
         var appliedAt = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
         var upsert = connection.CreateCommand();
@@ -221,6 +221,6 @@ internal sealed class SqliteCodexStateIndexStore
         watermark.Parameters.AddWithValue("$component", Component);
         await watermark.ExecuteNonQueryAsync(cancellationToken);
 
-        await transaction.CommitAsync(cancellationToken);
+        transaction.Commit();
     }
 }
