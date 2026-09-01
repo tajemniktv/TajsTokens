@@ -34,7 +34,6 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
 
     public async Task<IntelligenceRefreshResult> RefreshAsync(CancellationToken cancellationToken)
     {
-        await _telemetryRepository.InitializeAsync(cancellationToken);
         await EnsureInitializedAsync(cancellationToken);
 
         var groups = await LoadRecentQuotaGroupsAsync(512, cancellationToken);
@@ -147,9 +146,33 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
 
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
+
+        var currentIntervals = await LoadQuotaBurnIntervalsAsync(
+            connection,
+            interval.StartUtc.AddSeconds(-1),
+            interval.EndUtc.AddSeconds(1),
+            400,
+            false,
+            false,
+            cancellationToken,
+            interval.Kind);
+        var currentInterval = currentIntervals.FirstOrDefault(candidate =>
+            string.Equals(candidate.IntervalId, interval.IntervalId, StringComparison.Ordinal) &&
+            string.Equals(candidate.Provider, interval.Provider, StringComparison.Ordinal) &&
+            string.Equals(candidate.Profile, interval.Profile, StringComparison.Ordinal) &&
+            candidate.StartUtc == interval.StartUtc &&
+            candidate.EndUtc == interval.EndUtc);
+        if (currentInterval is null)
+        {
+            return new QuotaBurnDetail(
+                interval,
+                [],
+                "This quota-burn interval is no longer present in the current provider history. Refresh analytics before requesting contributor attribution.");
+        }
+
         if (!await TableExistsAsync(connection, "codex_native_token_events", cancellationToken))
         {
-            return new QuotaBurnDetail(interval, [], "No native Codex token events are available for this interval yet.");
+            return new QuotaBurnDetail(currentInterval, [], "No native Codex token events are available for this interval yet.");
         }
 
         var command = connection.CreateCommand();
@@ -177,8 +200,8 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             ORDER BY SUM(e.reported_total_tokens) DESC
             LIMIT $take;
             """;
-        command.Parameters.AddWithValue("$from", SerializeUtc(interval.StartUtc));
-        command.Parameters.AddWithValue("$to", SerializeUtc(interval.EndUtc));
+        command.Parameters.AddWithValue("$from", SerializeUtc(currentInterval.StartUtc));
+        command.Parameters.AddWithValue("$to", SerializeUtc(currentInterval.EndUtc));
         command.Parameters.AddWithValue("$take", take);
 
         var raw = new List<(string SessionId, string Name, string Repository, string? Model, string? Reasoning, bool IsSubagent, long Tokens, long Uncached, long CacheRead, int Compactions)>();
@@ -227,7 +250,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         }).ToArray();
 
         return new QuotaBurnDetail(
-            interval,
+            currentInterval,
             contributors,
             "Estimated attribution only. Score = 55% native token share + 25% uncached-input share + 15% cache-read share + 5% compaction share inside the provider-observed quota-change interval. The quota meter can be rounded/delayed, so no single event is claimed to have directly caused the change.");
     }
@@ -248,15 +271,25 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         await connection.OpenAsync(cancellationToken);
         var hasNativeEvents = await TableExistsAsync(connection, "codex_native_token_events", cancellationToken);
         var hasContext = await TableExistsAsync(connection, "context_observations", cancellationToken);
-        var intervals = await LoadQuotaBurnIntervalsAsync(
+        var fiveHourIntervals = await LoadQuotaBurnIntervalsAsync(
             connection,
             historyFromUtc,
             now,
             400,
             hasNativeEvents,
             hasContext,
-            cancellationToken);
-        var samples = intervals.Select(interval => new ScenarioHistorySample(
+            cancellationToken,
+            QuotaWindowKind.FiveHour);
+        var weeklyIntervals = await LoadQuotaBurnIntervalsAsync(
+            connection,
+            historyFromUtc,
+            now,
+            400,
+            hasNativeEvents,
+            hasContext,
+            cancellationToken,
+            QuotaWindowKind.Weekly);
+        var samples = fiveHourIntervals.Concat(weeklyIntervals).Select(interval => new ScenarioHistorySample(
             interval.Kind,
             interval.StartUtc,
             interval.EndUtc,
@@ -265,11 +298,15 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             interval.SubagentSessions,
             interval.DominantModel,
             interval.DominantReasoningEffort)).ToArray();
-        return _scenarioPlanner.Estimate(request, samples);
+        return _scenarioPlanner.Estimate(request, samples, now);
     }
 
     private async Task EnsureInitializedAsync(CancellationToken cancellationToken)
     {
+        // Intelligence reads depend on base telemetry tables even when invoked before the shared
+        // coordinator has performed its first refresh (for example, a fresh database + Usage page).
+        await _telemetryRepository.InitializeAsync(cancellationToken);
+
         if (_initialized)
         {
             return;
@@ -387,7 +424,20 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             VALUES($id, $kind, $provider, $profile, $detected, $effective,
                    $before, $after, $previousReset, $currentReset,
                    $classification, $confidence, $source, $explanation)
-            ON CONFLICT(event_id) DO NOTHING;
+            ON CONFLICT(event_id) DO UPDATE SET
+                kind = excluded.kind,
+                provider = excluded.provider,
+                profile = excluded.profile,
+                detected_at_utc = excluded.detected_at_utc,
+                effective_at_utc = excluded.effective_at_utc,
+                before_used_percent = excluded.before_used_percent,
+                after_used_percent = excluded.after_used_percent,
+                previous_reset_at_utc = excluded.previous_reset_at_utc,
+                current_reset_at_utc = excluded.current_reset_at_utc,
+                classification = excluded.classification,
+                confidence = excluded.confidence,
+                source = excluded.source,
+                explanation = excluded.explanation;
             """;
         command.Parameters.AddWithValue("$id", resetEvent.EventId);
         command.Parameters.AddWithValue("$kind", resetEvent.Kind.ToString());
@@ -458,7 +508,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             FROM codex_native_token_events e
             WHERE e.observed_at_utc >= $from AND e.observed_at_utc < $to
             GROUP BY bucket
-            ORDER BY bucket
+            ORDER BY bucket DESC
             LIMIT $take;
             """;
         command.Parameters.AddWithValue("$from", SerializeUtc(query.FromUtc));
@@ -520,7 +570,9 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 var current = ordered[index];
                 if (current.CapturedAtUtc < query.FromUtc || current.CapturedAtUtc >= query.ToUtc ||
                     previous.UsedPercent is null || current.UsedPercent is null ||
-                    previous.WindowMinutes != current.WindowMinutes || previous.ResetsAtUtc != current.ResetsAtUtc)
+                    previous.WindowMinutes != current.WindowMinutes ||
+                    previous.ResetsAtUtc is null || current.ResetsAtUtc is null ||
+                    previous.ResetsAtUtc != current.ResetsAtUtc)
                 {
                     continue;
                 }
@@ -550,8 +602,9 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
 
         return buckets
             .Where(pair => pair.Key >= query.FromUtc && pair.Key < query.ToUtc)
-            .OrderBy(pair => pair.Key)
+            .OrderByDescending(pair => pair.Key)
             .Take(query.MaxBuckets)
+            .OrderBy(pair => pair.Key)
             .Select(pair => pair.Value.ToModel(pair.Key, BucketEnd(pair.Key, query.BucketSize)))
             .ToArray();
     }
@@ -668,12 +721,18 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         int take,
         bool hasNativeEvents,
         bool hasContext,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        QuotaWindowKind? kindFilter = null)
     {
         var snapshots = await LoadQuotaSnapshotsAsync(connection, fromUtc.AddDays(-7), toUtc, cancellationToken);
         var candidates = new List<QuotaBurnIntervalSeed>();
         foreach (var group in snapshots.GroupBy(snapshot => (snapshot.Provider, snapshot.Profile, snapshot.Kind)))
         {
+            if (kindFilter is QuotaWindowKind requestedKind && group.Key.Kind != requestedKind)
+            {
+                continue;
+            }
+
             var ordered = group.OrderBy(snapshot => snapshot.CapturedAtUtc).ToArray();
             for (var index = 1; index < ordered.Length; index++)
             {
@@ -681,7 +740,9 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 var current = ordered[index];
                 if (current.CapturedAtUtc < fromUtc || current.CapturedAtUtc > toUtc ||
                     previous.UsedPercent is null || current.UsedPercent is null ||
-                    previous.WindowMinutes != current.WindowMinutes || previous.ResetsAtUtc != current.ResetsAtUtc)
+                    previous.WindowMinutes != current.WindowMinutes ||
+                    previous.ResetsAtUtc is null || current.ResetsAtUtc is null ||
+                    previous.ResetsAtUtc != current.ResetsAtUtc)
                 {
                     continue;
                 }
@@ -899,7 +960,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                     reader.IsDBNull(10) ? null : reader.GetDouble(10),
                     reader.IsDBNull(11) ? null : reader.GetDouble(11),
                     reader.IsDBNull(12) ? null : reader.GetString(12),
-                    !reader.IsDBNull(13) && reader.GetInt32(13) != 0))));
+                    !reader.IsDBNull(13) && reader.GetInt32(13) != 0)));
         }
         return results;
     }
