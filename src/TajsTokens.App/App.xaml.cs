@@ -128,33 +128,56 @@ public partial class App : Application
 
     private void OnLaunchAtLoginChanged(bool enabled)
     {
-        if (!_startupService.TrySetEnabled(enabled, out var error))
-        {
-            _trayService.UpdatePreferences(Services.Settings.NotificationsEnabled, Services.Settings.LaunchAtLogin);
-            _trayService.ShowNotification("Could not update Start with Windows", error ?? "Unknown startup registration error.");
-            return;
-        }
-
         if (!TrySaveSettings(Services.Settings with { LaunchAtLogin = enabled }))
         {
-            _ = _startupService.TrySetEnabled(Services.Settings.LaunchAtLogin, out _);
             _trayService.UpdatePreferences(Services.Settings.NotificationsEnabled, Services.Settings.LaunchAtLogin);
+        }
+    }
+
+    /// <summary>
+    /// Applies user-facing runtime settings through one application-owned boundary so persisted
+    /// values, Start-with-Windows registration, tray preferences and live scheduler updates cannot
+    /// drift depending on which UI surface changed a setting.
+    /// </summary>
+    public bool TryApplySettings(RuntimeSettings settings, out string? error)
+    {
+        var previous = Services.Settings;
+        var startupChanged = previous.LaunchAtLogin != settings.LaunchAtLogin;
+
+        if (startupChanged && !_startupService.TrySetEnabled(settings.LaunchAtLogin, out error))
+        {
+            return false;
+        }
+
+        try
+        {
+            Services.SaveSettings(settings);
+            _trayService.UpdatePreferences(Services.Settings.NotificationsEnabled, Services.Settings.LaunchAtLogin);
+            error = null;
+            return true;
+        }
+        catch (Exception exception)
+        {
+            if (startupChanged)
+            {
+                _ = _startupService.TrySetEnabled(previous.LaunchAtLogin, out _);
+            }
+
+            _trayService.UpdatePreferences(previous.NotificationsEnabled, previous.LaunchAtLogin);
+            error = exception.Message.ReplaceLineEndings(" ");
+            return false;
         }
     }
 
     private bool TrySaveSettings(RuntimeSettings settings)
     {
-        try
+        if (TryApplySettings(settings, out var error))
         {
-            Services.SaveSettings(settings);
-            _trayService.UpdatePreferences(Services.Settings.NotificationsEnabled, Services.Settings.LaunchAtLogin);
             return true;
         }
-        catch (Exception exception)
-        {
-            _trayService.ShowNotification("TajsTokens settings could not be saved", exception.Message.ReplaceLineEndings(" "));
-            return false;
-        }
+
+        _trayService.ShowNotification("TajsTokens settings could not be saved", error ?? "Unknown settings error.");
+        return false;
     }
 
     private void OnWindowClosing(AppWindow sender, AppWindowClosingEventArgs args)
