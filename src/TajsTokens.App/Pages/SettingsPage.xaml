@@ -49,7 +49,7 @@
                     BorderThickness="1"
                     CornerRadius="14"
                     Padding="20">
-                <StackPanel Spacing="14">
+                <StackPanel Spacing="10">
                     <TextBlock Text="Collection"
                                FontSize="20"
                                FontWeight="SemiBold" />
@@ -58,9 +58,8 @@
                                Minimum="15"
                                Maximum="3600"
                                SmallChange="15"
-                               SpinButtonPlacementMode="Compact"
-                               Description="The process-lifetime collector restarts with the new cadence immediately after saving." />
-                    <TextBlock Text="Native Codex state/rollout collection is incremental. Warm idle refreshes should perform effectively no historical rollout work."
+                               SpinButtonPlacementMode="Compact" />
+                    <TextBlock Text="The process-lifetime collector restarts with the new cadence immediately after saving. Native Codex state/rollout collection is incremental, so warm idle refreshes should perform effectively no historical rollout work."
                                Opacity="0.75"
                                TextWrapping="Wrap" />
                 </StackPanel>
@@ -71,7 +70,7 @@
                     BorderThickness="1"
                     CornerRadius="14"
                     Padding="20">
-                <StackPanel Spacing="14">
+                <StackPanel Spacing="10">
                     <TextBlock Text="Notifications"
                                FontSize="20"
                                FontWeight="SemiBold" />
@@ -81,8 +80,10 @@
                                   OnContent="Enabled" />
                     <TextBox x:Name="ThresholdsTextBox"
                              Header="Low-quota thresholds (%)"
-                             PlaceholderText="30, 20, 10, 5"
-                             Description="Comma, semicolon, or space separated. Values must be between 1 and 99; duplicates are removed." />
+                             PlaceholderText="30, 20, 10, 5" />
+                    <TextBlock Text="Comma, semicolon, or space separated. Values must be between 1 and 99; duplicates are removed."
+                               Opacity="0.75"
+                               TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
 
