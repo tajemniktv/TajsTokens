@@ -71,7 +71,7 @@ At each bounded 128-record durability boundary it serializes:
 
 through one gate, connection, transaction and prepared command set.
 
-Cumulative token observations remain ordered and reuse the established counter-epoch/reset implementation while the same ingestion writer still owns the batch lane. If any counter write fails, the source byte checkpoint is not advanced; replay repeats idempotent projection/storage writes before retrying the ordered counter mutation.
+Cumulative token observations remain ordered through the Core counter reducer while the same ingestion writer still owns the batch lane. If any counter write fails, the source byte checkpoint is not advanced; replay repeats idempotent projection/storage writes before retrying the ordered counter mutation.
 
 ## Privacy
 

@@ -20,9 +20,9 @@ internal interface ICodexIngestionBatchWriter
 /// <summary>
 /// Single high-volume writer lane for one Codex rollout batch. Semantic projections and rollout
 /// file/record metadata share one serialization gate, connection and transaction. Correctness-critical
-/// cumulative token observations remain ordered and reuse the established counter-epoch implementation
-/// after the projection transaction; the gate remains held until those writes complete, and the source
-/// checkpoint is advanced only after the entire batch succeeds.
+/// cumulative token observations remain ordered and are reduced by the dedicated Core accounting
+/// state machine after the projection transaction; the gate remains held until those writes complete,
+/// and the source checkpoint is advanced only after the entire batch succeeds.
 /// </summary>
 internal sealed class SqliteCodexIngestionBatchWriter(
     string databasePath,
@@ -70,9 +70,10 @@ internal sealed class SqliteCodexIngestionBatchWriter(
             await bumpRevision.ExecuteNonQueryAsync(cancellationToken);
             transaction.Commit();
 
-            // Counter observations deliberately remain ordered and use the established replay/reset
-            // implementation. Replay is safe because every projection/storage mutation above is
-            // idempotent and the byte checkpoint is not advanced until these writes also succeed.
+            // Counter observations deliberately remain ordered through the SQLite store, which
+            // persists each reducer decision and next state atomically. Replay is safe because every
+            // projection/storage mutation above is idempotent and the byte checkpoint is not advanced
+            // until these writes also succeed.
             foreach (var record in records)
             {
                 cancellationToken.ThrowIfCancellationRequested();

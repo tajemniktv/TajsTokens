@@ -434,11 +434,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         duplicate.Transaction = transaction;
         duplicate.CommandText = "SELECT 1 FROM codex_native_token_events WHERE source_event_id = $event LIMIT 1;";
         duplicate.Parameters.AddWithValue("$event", observation.SourceEventId);
-        if (await duplicate.ExecuteScalarAsync(cancellationToken) is not null)
-        {
-            transaction.Commit();
-            return;
-        }
+        var sourceEventAlreadyPersisted = await duplicate.ExecuteScalarAsync(cancellationToken) is not null;
 
         var read = connection.CreateCommand();
         read.Transaction = transaction;
@@ -450,12 +446,12 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             """;
         read.Parameters.AddWithValue("$session", observation.SessionId);
 
-        CounterState? previous = null;
+        CodexTokenCounterState? previous = null;
         await using (var reader = await read.ExecuteReaderAsync(cancellationToken))
         {
             if (await reader.ReadAsync(cancellationToken))
             {
-                previous = new CounterState(
+                previous = new CodexTokenCounterState(
                     reader.GetString(0),
                     reader.GetInt32(1),
                     reader.GetInt64(2),
@@ -469,49 +465,25 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             }
         }
 
-        if (previous is not null && observation.ObservedAtUtc < previous.LastObservedAtUtc)
+        var decision = CodexTokenCounterReducer.Reduce(observation, previous, sourceEventAlreadyPersisted);
+        if (decision.Kind == CodexTokenAccountingDecisionKind.Duplicate)
         {
-            await InsertNativeTokenEventAsync(
-                connection,
-                transaction,
-                observation,
-                previous.Epoch,
-                0, 0, 0, 0, 0, 0,
-                cancellationToken);
             transaction.Commit();
             return;
         }
-
-        var reset = previous is not null &&
-                    (observation.TotalTokens < previous.Total ||
-                     observation.InputTokens < previous.Input ||
-                     observation.CachedInputTokens < previous.Cached ||
-                     observation.CacheWriteInputTokens < previous.CacheWrite ||
-                     observation.OutputTokens < previous.Output ||
-                     observation.ReasoningOutputTokens < previous.Reasoning);
-        var epoch = previous is null ? 0 : previous.Epoch + (reset ? 1 : 0);
-
-        long Delta(long current, long prior) => previous is null || reset ? current : Math.Max(0, current - prior);
-        var inputDelta = Delta(observation.InputTokens, previous?.Input ?? 0);
-        var cachedDelta = Delta(observation.CachedInputTokens, previous?.Cached ?? 0);
-        var cacheWriteDelta = Delta(observation.CacheWriteInputTokens, previous?.CacheWrite ?? 0);
-        var outputDelta = Delta(observation.OutputTokens, previous?.Output ?? 0);
-        var reasoningDelta = Delta(observation.ReasoningOutputTokens, previous?.Reasoning ?? 0);
-        var totalDelta = Delta(observation.TotalTokens, previous?.Total ?? 0);
-        var uncachedDelta = Math.Max(0, inputDelta - cachedDelta - cacheWriteDelta);
-        var nonReasoningOutputDelta = Math.Max(0, outputDelta - reasoningDelta);
+        var epoch = decision.NextState?.Epoch ?? previous?.Epoch ?? 0;
 
         var inserted = await InsertNativeTokenEventAsync(
             connection,
             transaction,
             observation,
             epoch,
-            uncachedDelta,
-            cachedDelta,
-            cacheWriteDelta,
-            nonReasoningOutputDelta,
-            reasoningDelta,
-            totalDelta,
+            decision.Delta.UncachedInputTokens,
+            decision.Delta.CacheReadTokens,
+            decision.Delta.CacheWriteTokens,
+            decision.Delta.NonReasoningOutputTokens,
+            decision.Delta.ReasoningOutputTokens,
+            decision.Delta.ReportedTotalTokens,
             cancellationToken);
 
         if (inserted == 0)
@@ -520,6 +492,13 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             return;
         }
 
+        if (!decision.AdvanceState || decision.NextState is null)
+        {
+            transaction.Commit();
+            return;
+        }
+
+        var nextState = decision.NextState;
         var upsertState = connection.CreateCommand();
         upsertState.Transaction = transaction;
         upsertState.CommandText = """
@@ -541,16 +520,16 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
               last_observed_at_utc = excluded.last_observed_at_utc;
             """;
         upsertState.Parameters.AddWithValue("$session", observation.SessionId);
-        upsertState.Parameters.AddWithValue("$file", BuildSafeFileLabel(observation.SourceFile));
-        upsertState.Parameters.AddWithValue("$epoch", epoch);
-        upsertState.Parameters.AddWithValue("$input", observation.InputTokens);
-        upsertState.Parameters.AddWithValue("$cached", observation.CachedInputTokens);
-        upsertState.Parameters.AddWithValue("$cacheWrite", observation.CacheWriteInputTokens);
-        upsertState.Parameters.AddWithValue("$output", observation.OutputTokens);
-        upsertState.Parameters.AddWithValue("$reasoning", observation.ReasoningOutputTokens);
-        upsertState.Parameters.AddWithValue("$total", observation.TotalTokens);
-        upsertState.Parameters.AddWithValue("$event", observation.SourceEventId);
-        upsertState.Parameters.AddWithValue("$observed", SerializeUtc(observation.ObservedAtUtc));
+        upsertState.Parameters.AddWithValue("$file", BuildSafeFileLabel(nextState.SourceFile));
+        upsertState.Parameters.AddWithValue("$epoch", nextState.Epoch);
+        upsertState.Parameters.AddWithValue("$input", nextState.InputTokens);
+        upsertState.Parameters.AddWithValue("$cached", nextState.CachedInputTokens);
+        upsertState.Parameters.AddWithValue("$cacheWrite", nextState.CacheWriteInputTokens);
+        upsertState.Parameters.AddWithValue("$output", nextState.OutputTokens);
+        upsertState.Parameters.AddWithValue("$reasoning", nextState.ReasoningOutputTokens);
+        upsertState.Parameters.AddWithValue("$total", nextState.TotalTokens);
+        upsertState.Parameters.AddWithValue("$event", nextState.LastSourceEventId);
+        upsertState.Parameters.AddWithValue("$observed", SerializeUtc(nextState.LastObservedAtUtc));
         await upsertState.ExecuteNonQueryAsync(cancellationToken);
 
         transaction.Commit();
@@ -1090,15 +1069,4 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
     private static string SerializeUtc(DateTimeOffset value) => value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
     private static DateTimeOffset ParseUtc(string value) => DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
 
-    private sealed record CounterState(
-        string SourceFile,
-        int Epoch,
-        long Input,
-        long Cached,
-        long CacheWrite,
-        long Output,
-        long Reasoning,
-        long Total,
-        string LastSourceEventId,
-        DateTimeOffset LastObservedAtUtc);
 }

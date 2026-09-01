@@ -79,6 +79,9 @@ internal sealed partial class CodexRolloutParser
             CodexCumulativeTokenObservation? tokenObservation = null;
             if (totalUsage.ValueKind == JsonValueKind.Object)
             {
+                var lastUsage = info.TryGetProperty("last_token_usage", out var lastElement) && lastElement.ValueKind == JsonValueKind.Object
+                    ? ParseTokenUsageSnapshot(lastElement)
+                    : null;
                 tokenObservation = new CodexCumulativeTokenObservation(
                     sourceRecordId,
                     state.FilePath,
@@ -92,7 +95,8 @@ internal sealed partial class CodexRolloutParser
                     ReadLong(totalUsage, "cache_write_input_tokens") ?? 0,
                     ReadLong(totalUsage, "output_tokens") ?? 0,
                     ReadLong(totalUsage, "reasoning_output_tokens") ?? 0,
-                    ReadLong(totalUsage, "total_tokens") ?? 0);
+                    ReadLong(totalUsage, "total_tokens") ?? 0,
+                    lastUsage);
             }
 
             var contextWindow = ReadLong(info, "model_context_window") ?? state.ContextWindowTokens;
@@ -101,11 +105,7 @@ internal sealed partial class CodexRolloutParser
                 state.ContextWindowTokens = contextWindow;
             }
 
-            long? lastInput = null;
-            if (info.TryGetProperty("last_token_usage", out var lastUsage) && lastUsage.ValueKind == JsonValueKind.Object)
-            {
-                lastInput = ReadLong(lastUsage, "input_tokens");
-            }
+            var lastInput = tokenObservation?.LastTokenUsage?.InputTokens;
 
             var context = lastInput is null && contextWindow is null
                 ? null
@@ -209,6 +209,15 @@ internal sealed partial class CodexRolloutParser
 
         return results;
     }
+
+    private static CodexTokenUsageSnapshot ParseTokenUsageSnapshot(JsonElement usage) =>
+        new(
+            ReadLong(usage, "input_tokens"),
+            ReadLong(usage, "cached_input_tokens"),
+            ReadLong(usage, "cache_write_input_tokens"),
+            ReadLong(usage, "output_tokens"),
+            ReadLong(usage, "reasoning_output_tokens"),
+            ReadLong(usage, "total_tokens"));
 
     private static bool IsTokenCount(string topType, string? nestedType, JsonElement payload) =>
         string.Equals(nestedType, "token_count", StringComparison.OrdinalIgnoreCase) ||
