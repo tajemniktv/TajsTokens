@@ -62,11 +62,11 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
             {
                 throw;
             }
-            catch (Exception) when (File.Exists(file))
+            catch (Exception)
             {
-                // One malformed/locked/replaced rollout must not stop the remaining local corpus.
-                // Detailed provider diagnostics are intentionally content-free and surface only the
-                // aggregate error count at this layer; the parser never logs payload text.
+                // A rollout can be locked, replaced, archived, or deleted after discovery. One file
+                // racing with Codex lifecycle changes must not discard successful observations from the
+                // rest of the corpus. The next normal refresh rediscovers the current source set.
                 errors++;
             }
         }
