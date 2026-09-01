@@ -9,4 +9,9 @@ public sealed record Forecast(
     DateTimeOffset? EstimatedExhaustionAtUtc,
     bool? SurvivesUntilReset,
     double? SustainablePercentPerHour,
-    double Confidence);
+    double Confidence,
+    ForecastState State = ForecastState.Learning,
+    double? BurnPressure = null,
+    double? ProjectedRemainingAtResetPercent = null,
+    string? Trend = null,
+    bool IsQuantizedFlat = false);
