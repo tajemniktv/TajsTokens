@@ -53,7 +53,7 @@
             </Border>
         </Grid>
 
-        <Grid Grid.Row="2" ColumnSpacing="14" MinHeight="420">
+        <Grid Grid.Row="2" ColumnSpacing="14">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="360" MinWidth="300" />
                 <ColumnDefinition Width="*" MinWidth="420" />
