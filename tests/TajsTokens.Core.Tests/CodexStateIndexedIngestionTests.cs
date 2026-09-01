@@ -331,7 +331,12 @@ public sealed class CodexStateIndexedIngestionTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Paths.Add(Path.GetFullPath(filePath));
-            return Task.FromResult(new CodexIngestionResult(1, 1, sessionId));
+            var length = new FileInfo(filePath).Length;
+            return Task.FromResult(new CodexIngestionResult(1, 1, sessionId)
+            {
+                LastCompleteRecordOffset = length,
+                SourceLength = length
+            });
         }
     }
 }
