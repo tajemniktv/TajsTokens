@@ -23,7 +23,7 @@ public sealed partial class SettingsPage : Page
         ShowStatus(InfoBarSeverity.Informational, "Reloaded", "Restored the currently persisted runtime settings.");
     }
 
-    private void OnSaveClicked(object sender, RoutedEventArgs e)
+    private async void OnSaveClicked(object sender, RoutedEventArgs e)
     {
         if (double.IsNaN(PollIntervalBox.Value))
         {
@@ -46,15 +46,24 @@ public sealed partial class SettingsPage : Page
             LowQuotaThresholds = thresholds
         };
 
-        if (!App.TryApplySettings(candidate, out var error))
+        SaveButton.IsEnabled = false;
+        try
         {
-            RenderSettings();
-            ShowStatus(InfoBarSeverity.Error, "Settings were not saved", error ?? "Unknown settings error.");
-            return;
-        }
+            var result = await App.TryApplySettingsAsync(candidate);
+            if (!result.Success)
+            {
+                RenderSettings();
+                ShowStatus(InfoBarSeverity.Error, "Settings were not applied", result.Error ?? "Unknown settings error.");
+                return;
+            }
 
-        RenderSettings();
-        ShowStatus(InfoBarSeverity.Success, "Settings saved", "Runtime settings were persisted and live services were updated where applicable.");
+            RenderSettings();
+            ShowStatus(InfoBarSeverity.Success, "Settings saved", "Runtime settings were persisted and live services were updated where applicable.");
+        }
+        finally
+        {
+            SaveButton.IsEnabled = true;
+        }
     }
 
     private void RenderSettings()
