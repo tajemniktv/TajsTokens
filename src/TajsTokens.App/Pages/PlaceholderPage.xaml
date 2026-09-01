@@ -10,13 +10,23 @@
                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                 BorderThickness="1"
                 CornerRadius="14"
-                Padding="20">
-            <StackPanel Spacing="8">
+                Padding="20"
+                MaxWidth="760"
+                HorizontalAlignment="Left"
+                VerticalAlignment="Top">
+            <StackPanel Spacing="10">
                 <TextBlock x:Name="TitleBlock"
-                           FontSize="22"
+                           FontSize="24"
                            FontWeight="SemiBold"
-                           Text="Coming soon" />
-                <TextBlock Text="This area is scaffolded for future telemetry features." Opacity="0.85" TextWrapping="Wrap" />
+                           Text="Planned section" />
+                <TextBlock x:Name="DescriptionBlock"
+                           Text="This section has an intentional product role, but its dedicated surface is not implemented yet."
+                           Opacity="0.85"
+                           TextWrapping="Wrap" />
+                <InfoBar IsOpen="True"
+                         IsClosable="False"
+                         Severity="Informational"
+                         Message="Overview remains the at-a-glance surface; deeper telemetry belongs here as these sections are implemented." />
             </StackPanel>
         </Border>
     </Grid>
