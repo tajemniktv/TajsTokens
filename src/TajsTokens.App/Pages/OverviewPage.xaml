@@ -46,8 +46,8 @@
                         <TextBlock Text="{Binding FiveHourQuota.Title}" FontWeight="SemiBold" FontSize="18" />
                         <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Remaining:" FontSize="16" /><TextBlock Text="{Binding FiveHourQuota.RemainingPercent}" FontSize="16" FontWeight="SemiBold" /></StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Reset in:" /><TextBlock Text="{Binding FiveHourQuota.ResetCountdown}" /></StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Burn rate:" /><TextBlock Text="{Binding FiveHourQuota.BurnRate}" /></StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Predicted exhaustion:" /><TextBlock Text="{Binding FiveHourQuota.PredictedExhaustion}" /></StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Pace:" /><TextBlock Text="{Binding FiveHourQuota.BurnRate}" TextWrapping="Wrap" /></StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Window forecast:" /><TextBlock Text="{Binding FiveHourQuota.PredictedExhaustion}" TextWrapping="Wrap" /></StackPanel>
                         <TextBlock Text="{Binding FiveHourQuota.GaugeText}" Opacity="0.75" TextWrapping="Wrap" />
                         <InfoBar IsOpen="True" IsClosable="False" Severity="{Binding FiveHourQuota.Severity}" Message="{Binding FiveHourQuota.SurvivalMessage}" />
                     </StackPanel>
@@ -58,8 +58,8 @@
                         <TextBlock Text="{Binding WeeklyQuota.Title}" FontWeight="SemiBold" FontSize="18" />
                         <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Remaining:" FontSize="16" /><TextBlock Text="{Binding WeeklyQuota.RemainingPercent}" FontSize="16" FontWeight="SemiBold" /></StackPanel>
                         <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Reset in:" /><TextBlock Text="{Binding WeeklyQuota.ResetCountdown}" /></StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Burn rate:" /><TextBlock Text="{Binding WeeklyQuota.BurnRate}" /></StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Predicted exhaustion:" /><TextBlock Text="{Binding WeeklyQuota.PredictedExhaustion}" /></StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Pace:" /><TextBlock Text="{Binding WeeklyQuota.BurnRate}" TextWrapping="Wrap" /></StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Window forecast:" /><TextBlock Text="{Binding WeeklyQuota.PredictedExhaustion}" TextWrapping="Wrap" /></StackPanel>
                         <TextBlock Text="{Binding WeeklyQuota.GaugeText}" Opacity="0.75" TextWrapping="Wrap" />
                         <InfoBar IsOpen="True" IsClosable="False" Severity="{Binding WeeklyQuota.Severity}" Message="{Binding WeeklyQuota.SurvivalMessage}" />
                     </StackPanel>
