@@ -81,8 +81,14 @@ public sealed class NativeFirstCodexAccountingProvider(
         var modelDifferences = modelKeys.Count(key =>
             !BreakdownsEqual(nativeModels.GetValueOrDefault(key), referenceModels.GetValueOrDefault(key)));
 
-        var nativeHours = BuildHourMap(native.Hourly);
-        var referenceHours = BuildHourMap(reference.Hourly);
+        // Tokscale hourly JSON can expose only date/hour labels, while the native projection always
+        // has an offset-aware timestamp. Comparing one side in UTC and the other by label makes every
+        // bucket look different. Use UTC only when both generations can do so; otherwise compare the
+        // two providers on their common display-label representation.
+        var useUtcHourKeys = native.Hourly.All(item => item.StartUtc is not null) &&
+                             reference.Hourly.All(item => item.StartUtc is not null);
+        var nativeHours = BuildHourMap(native.Hourly, useUtcHourKeys);
+        var referenceHours = BuildHourMap(reference.Hourly, useUtcHourKeys);
         var hourKeys = nativeHours.Keys.Union(referenceHours.Keys, StringComparer.OrdinalIgnoreCase).ToArray();
         var hourDifferences = hourKeys.Count(key =>
             !BreakdownsEqual(nativeHours.GetValueOrDefault(key), referenceHours.GetValueOrDefault(key)));
@@ -110,14 +116,16 @@ public sealed class NativeFirstCodexAccountingProvider(
                $"{value.HourBucketsDifferent}/{value.HourBucketsCompared} hourly bucket(s) differ.";
     }
 
-    private static Dictionary<string, TokenBreakdown> BuildHourMap(IReadOnlyList<TokenTimeBucket> buckets) =>
+    private static Dictionary<string, TokenBreakdown> BuildHourMap(
+        IReadOnlyList<TokenTimeBucket> buckets,
+        bool useUtc) =>
         buckets
-            .GroupBy(HourKey, StringComparer.OrdinalIgnoreCase)
+            .GroupBy(bucket => HourKey(bucket, useUtc), StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => Sum(group.Select(item => item.Breakdown)), StringComparer.OrdinalIgnoreCase);
 
-    private static string HourKey(TokenTimeBucket bucket)
+    private static string HourKey(TokenTimeBucket bucket, bool useUtc)
     {
-        if (bucket.StartUtc is DateTimeOffset start)
+        if (useUtc && bucket.StartUtc is DateTimeOffset start)
         {
             return start.ToUniversalTime().ToString("yyyy-MM-ddTHH");
         }
