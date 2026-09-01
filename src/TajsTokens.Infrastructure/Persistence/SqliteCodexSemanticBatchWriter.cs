@@ -20,9 +20,9 @@ internal interface ICodexIngestionBatchWriter
 /// <summary>
 /// Single high-volume writer lane for one Codex rollout batch. Semantic projections and rollout
 /// file/record metadata share one serialization gate, connection and transaction. Correctness-critical
-/// cumulative token observations remain ordered and reuse the established counter-epoch implementation
-/// after the projection transaction; the gate remains held until those writes complete, and the source
-/// checkpoint is advanced only after the entire batch succeeds.
+/// token-count observations remain ordered and are reduced by the dedicated Core accounting
+/// state machine after the projection transaction; the gate remains held until those writes complete,
+/// and the source checkpoint is advanced only after the entire batch succeeds.
 /// </summary>
 internal sealed class SqliteCodexIngestionBatchWriter(
     string databasePath,
@@ -70,9 +70,10 @@ internal sealed class SqliteCodexIngestionBatchWriter(
             await bumpRevision.ExecuteNonQueryAsync(cancellationToken);
             transaction.Commit();
 
-            // Counter observations deliberately remain ordered and use the established replay/reset
-            // implementation. Replay is safe because every projection/storage mutation above is
-            // idempotent and the byte checkpoint is not advanced until these writes also succeed.
+            // Counter observations deliberately remain ordered through the SQLite store, which
+            // persists each reducer decision and next state atomically. Replay is safe because every
+            // projection/storage mutation above is idempotent and the byte checkpoint is not advanced
+            // until these writes also succeed.
             foreach (var record in records)
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -343,11 +344,10 @@ internal sealed class SqliteCodexIngestionBatchWriter(
         BuildCommand(connection, transaction, """
             INSERT INTO quota_snapshots(provider, profile, kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, source)
             VALUES($provider, $profile, $kind, $captured, $used, $window, $resets, $source)
-            ON CONFLICT(provider, profile, kind, captured_at_utc) DO UPDATE SET
+            ON CONFLICT(provider, profile, kind, captured_at_utc, source) DO UPDATE SET
               used_percent = excluded.used_percent,
               window_minutes = excluded.window_minutes,
-              resets_at_utc = excluded.resets_at_utc,
-              source = excluded.source;
+              resets_at_utc = excluded.resets_at_utc;
             """, "$provider", "$profile", "$kind", "$captured", "$used", "$window", "$resets", "$source");
 
     private static SqliteCommand BuildContextCommand(SqliteConnection connection, SqliteTransaction transaction) =>

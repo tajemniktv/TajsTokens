@@ -47,7 +47,7 @@ Codex state SQLite (read-only)
     -> parser/checkpoint state after durable persistence
 ```
 
-The state database is an acceleration/index source only. Rollout JSONL remains authoritative for event-level token classes, exact timestamps, counter epochs, inherited-prefix exclusion, context/compaction, embedded quota observations and exact complete-record boundaries.
+The state database is an acceleration/index source only. Rollout JSONL remains authoritative for event-level token classes, exact timestamps, counter epochs, inherited-prefix exclusion, context/compaction, embedded quota observations and exact complete-record boundaries. A raw token-count row may carry an optional cumulative watermark and/or a last-turn usage snapshot; the Core reducer keeps those roles distinct.
 
 A state fingerprint is not accepted merely because a rollout read returned successfully. TajsTokens reconciles the state-reported cumulative token evidence with its persisted counter where available, and otherwise requires a fully consumed rollout whose file timestamp has caught up to the state timestamp. This prevents a state-ahead-of-rollout race from permanently suppressing a trailing record.
 
@@ -71,7 +71,7 @@ At each bounded 128-record durability boundary it serializes:
 
 through one gate, connection, transaction and prepared command set.
 
-Cumulative token observations remain ordered and reuse the established counter-epoch/reset implementation while the same ingestion writer still owns the batch lane. If any counter write fails, the source byte checkpoint is not advanced; replay repeats idempotent projection/storage writes before retrying the ordered counter mutation.
+Cumulative token observations remain ordered through the Core counter reducer while the same ingestion writer still owns the batch lane. If any counter write fails, the source byte checkpoint is not advanced; replay repeats idempotent projection/storage writes before retrying the ordered counter mutation.
 
 ## Privacy
 

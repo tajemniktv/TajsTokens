@@ -6,6 +6,11 @@ public interface IIntelligenceService
 {
     Task<IntelligenceRefreshResult> RefreshAsync(CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<CurrentQuotaForecast>> BuildAndPersistCurrentForecastsAsync(
+        IReadOnlyList<QuotaLaneState> quotaLanes,
+        DateTimeOffset nowUtc,
+        CancellationToken cancellationToken);
+
     Task<IntelligenceDashboard> QueryAsync(
         IntelligenceQuery query,
         CancellationToken cancellationToken);

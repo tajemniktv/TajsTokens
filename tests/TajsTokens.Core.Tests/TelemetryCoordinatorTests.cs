@@ -79,8 +79,14 @@ public sealed class TelemetryCoordinatorTests : IDisposable
         Assert.True(first.QuotaDataFresh);
         Assert.False(second.QuotaDataFresh);
         Assert.Equal(2, second.QuotaSnapshots.Count);
-        Assert.Equal(secondCaptured, second.QuotaSnapshots.Single(item => item.Kind == QuotaWindowKind.FiveHour).CapturedAtUtc);
-        Assert.Equal(firstCaptured, second.QuotaSnapshots.Single(item => item.Kind == QuotaWindowKind.Weekly).CapturedAtUtc);
+        var fiveHour = second.QuotaSnapshots.Single(item => item.Kind == QuotaWindowKind.FiveHour);
+        var weekly = second.QuotaSnapshots.Single(item => item.Kind == QuotaWindowKind.Weekly);
+        Assert.Equal(secondCaptured, fiveHour.CapturedAtUtc);
+        Assert.Equal(firstCaptured, weekly.CapturedAtUtc);
+        Assert.True(second.IsQuotaSnapshotFresh(fiveHour));
+        Assert.False(second.IsQuotaSnapshotFresh(weekly));
+        Assert.Equal(TelemetryHealthState.Live, second.FindQuotaLane(fiveHour)!.State);
+        Assert.Equal(TelemetryHealthState.Stale, second.FindQuotaLane(weekly)!.State);
         Assert.Equal(TelemetryHealthState.Stale, second.Sources.Single(source => source.Provider == "Codex app-server").State);
     }
 
@@ -196,6 +202,12 @@ public sealed class TelemetryCoordinatorTests : IDisposable
             await Release.Task.WaitAsync(cancellationToken);
             return new IntelligenceRefreshResult(0, 0);
         }
+
+        public Task<IReadOnlyList<CurrentQuotaForecast>> BuildAndPersistCurrentForecastsAsync(
+            IReadOnlyList<QuotaLaneState> quotaLanes,
+            DateTimeOffset nowUtc,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
 
         public Task<IntelligenceDashboard> QueryAsync(IntelligenceQuery query, CancellationToken cancellationToken) =>
             throw new NotSupportedException();

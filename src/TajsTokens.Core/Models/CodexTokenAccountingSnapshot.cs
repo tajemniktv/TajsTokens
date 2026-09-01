@@ -13,7 +13,9 @@ public sealed record CodexTokenAccountingSnapshot(
     IReadOnlyList<TokenTimeBucket> Hourly,
     CodexAccountingReconciliation? Reconciliation = null,
     bool IsFallback = false,
-    string? Diagnostic = null);
+    string? Diagnostic = null,
+    DateTimeOffset? AsOfUtc = null,
+    long? Revision = null);
 
 /// <summary>
 /// Content-free comparison between the native projection and the optional Tokscale reference.

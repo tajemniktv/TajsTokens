@@ -5,8 +5,6 @@ using Microsoft.UI.Xaml.Controls;
 using TajsTokens.App.Models;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
-using TajsTokens.Core.Services;
-using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
 namespace TajsTokens.App.ViewModels;
@@ -14,8 +12,6 @@ namespace TajsTokens.App.ViewModels;
 public sealed partial class OverviewViewModel : ObservableObject
 {
     private readonly TelemetryCoordinator _telemetry;
-    private readonly SqliteTelemetryRepository _repository;
-    private readonly ForecastingService _forecastingService = new();
     private readonly SemaphoreSlim _applyGate = new(1, 1);
     private long _newestRequestedSnapshotTicks = DateTimeOffset.MinValue.UtcDateTime.Ticks;
 
@@ -42,10 +38,9 @@ public sealed partial class OverviewViewModel : ObservableObject
     public ObservableCollection<EventItem> RecentEvents { get; } = [];
     public IAsyncRelayCommand RefreshCommand { get; }
 
-    public OverviewViewModel(TelemetryCoordinator telemetry, SqliteTelemetryRepository repository)
+    public OverviewViewModel(TelemetryCoordinator telemetry)
     {
         _telemetry = telemetry;
-        _repository = repository;
         RefreshCommand = new AsyncRelayCommand(RefreshAsync);
     }
 
@@ -107,21 +102,21 @@ public sealed partial class OverviewViewModel : ObservableObject
 
             if (snapshot.TokenDataFresh || snapshot.TokenUsages.Count > 0 || snapshot.HourlyBuckets.Count > 0)
             {
-                RenderTokenSummary(snapshot.TokenUsages, snapshot.TokenDataFresh);
-                RenderHourlyHistory(snapshot.HourlyBuckets, snapshot.TokenDataFresh);
+                RenderTokenSummary(snapshot.TokenUsages, snapshot.TokenDataFresh, snapshot.TokenGeneration);
+                RenderHourlyHistory(snapshot.HourlyBuckets, snapshot.TokenDataFresh, snapshot.TokenGeneration);
             }
             else
             {
                 RenderTokenUnavailable();
             }
 
-            await RenderQuotaAsync(QuotaWindowKind.FiveHour, snapshot, cancellationToken);
+            RenderQuota(QuotaWindowKind.FiveHour, snapshot);
             if (IsSuperseded(snapshotTicks))
             {
                 return;
             }
 
-            await RenderQuotaAsync(QuotaWindowKind.Weekly, snapshot, cancellationToken);
+            RenderQuota(QuotaWindowKind.Weekly, snapshot);
             if (IsSuperseded(snapshotTicks))
             {
                 return;
@@ -166,10 +161,7 @@ public sealed partial class OverviewViewModel : ObservableObject
     private bool IsSuperseded(long snapshotTicks) =>
         snapshotTicks < Volatile.Read(ref _newestRequestedSnapshotTicks);
 
-    private async Task RenderQuotaAsync(
-        QuotaWindowKind kind,
-        TelemetrySnapshot snapshot,
-        CancellationToken cancellationToken)
+    private void RenderQuota(QuotaWindowKind kind, TelemetrySnapshot snapshot)
     {
         var current = snapshot.QuotaSnapshots
             .Where(item => item.Kind == kind)
@@ -183,33 +175,10 @@ public sealed partial class OverviewViewModel : ObservableObject
             return;
         }
 
-        Forecast? forecast = null;
-        if (snapshot.PersistenceAvailable && snapshot.QuotaDataFresh)
-        {
-            try
-            {
-                var history = await _repository.GetRecentQuotaSnapshotsAsync(
-                    kind,
-                    current.Provider,
-                    current.Profile,
-                    96,
-                    cancellationToken);
-
-                try
-                {
-                    forecast = _forecastingService.BuildForecast(history, DateTimeOffset.UtcNow);
-                }
-                catch (ArgumentException)
-                {
-                }
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                AddEvent("History unavailable", $"Live quota is still shown: {SummarizeError(exception)}");
-            }
-        }
-
-        SetQuotaCard(kind, BuildQuotaCard(title, current, forecast, snapshot.QuotaDataFresh));
+        var laneFresh = snapshot.IsQuotaSnapshotFresh(current);
+        var currentForecast = snapshot.FindCurrentForecast(current);
+        var forecast = currentForecast is { IsFresh: true } ? currentForecast.Forecast : null;
+        SetQuotaCard(kind, BuildQuotaCard(title, current, forecast, laneFresh));
     }
 
     private void SetQuotaCard(QuotaWindowKind kind, QuotaCardViewModel card)
@@ -224,7 +193,10 @@ public sealed partial class OverviewViewModel : ObservableObject
         }
     }
 
-    private void RenderTokenSummary(IReadOnlyList<TokenUsage> usages, bool isFresh)
+    private void RenderTokenSummary(
+        IReadOnlyList<TokenUsage> usages,
+        bool isFresh,
+        TokenAccountingGenerationState? generation)
     {
         TokenSummaryCards.Clear();
         var uncached = usages.Sum(item => item.Breakdown.UncachedInput);
@@ -233,8 +205,9 @@ public sealed partial class OverviewViewModel : ObservableObject
         var output = usages.Sum(item => item.Breakdown.NonReasoningOutput);
         var reasoning = usages.Sum(item => item.Breakdown.ReasoningOutput);
         var total = usages.Sum(item => item.Breakdown.Total);
-        var source = TokenSourceLabel(usages.Select(item => item.Provider));
-        var provenance = isFresh ? $"{source} · live" : $"{source} · last known good";
+        var source = generation?.Source ?? TokenSourceLabel(usages.Select(item => item.Provider));
+        var quality = generation?.IsFallback == true ? " · fallback" : string.Empty;
+        var provenance = isFresh ? $"{source} · live{quality}" : $"{source} · last known good{quality}";
 
         TokenSummaryCards.Add(new TokenSummaryCard("Uncached input", FormatTokenCount(uncached), $"{provenance} · disjoint input"));
         TokenSummaryCards.Add(new TokenSummaryCard("Cache read", FormatTokenCount(cacheRead), $"{provenance} · cached input"));
@@ -255,10 +228,13 @@ public sealed partial class OverviewViewModel : ObservableObject
         HistoryCaption = "Hourly history is unavailable until a Codex token-accounting source can be read.";
     }
 
-    private void RenderHourlyHistory(IReadOnlyList<TokenTimeBucket> buckets, bool isFresh)
+    private void RenderHourlyHistory(
+        IReadOnlyList<TokenTimeBucket> buckets,
+        bool isFresh,
+        TokenAccountingGenerationState? generation)
     {
         HistoryPoints.Clear();
-        var source = TokenSourceLabel(buckets.Select(item => item.Provider));
+        var source = generation?.Source ?? TokenSourceLabel(buckets.Select(item => item.Provider));
         var visible = buckets.TakeLast(12).ToArray();
         if (visible.Length == 0)
         {
@@ -277,7 +253,8 @@ public sealed partial class OverviewViewModel : ObservableObject
         }
 
         var freshness = isFresh ? "live" : "stale";
-        HistoryCaption = $"{source} hourly usage · {freshness} · last {visible.Length} bucket(s) · bars normalized to the busiest visible hour.";
+        var quality = generation?.IsFallback == true ? " · fallback" : string.Empty;
+        HistoryCaption = $"{source} hourly usage · {freshness}{quality} · last {visible.Length} bucket(s) · bars normalized to the busiest visible hour.";
     }
 
     private static QuotaCardViewModel BuildQuotaCard(

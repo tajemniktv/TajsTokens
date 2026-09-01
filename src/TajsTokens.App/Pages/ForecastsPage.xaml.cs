@@ -113,10 +113,15 @@ public sealed partial class ForecastsPage : Page
                     ? $"{burn:0.00} pp/h"
                     : "pace uncertain";
                 var pressure = forecast.BurnPressure is double value ? $" · {value:0.00}× sustainable" : string.Empty;
+                var anchor = snapshot.QuotaCapturedAtUtc is DateTimeOffset captured
+                    ? $" · anchor {snapshot.QuotaAuthority} @ {captured.ToLocalTime():g} · {snapshot.QuotaSource ?? "unknown source"}" +
+                      $" · window {(snapshot.QuotaWindowMinutes is int window ? $"{window}m" : "unknown window")}" +
+                      $" · reset {(snapshot.QuotaResetsAtUtc is DateTimeOffset reset ? reset.ToLocalTime().ToString("g") : "unknown reset")}"
+                    : " · legacy forecast without quota-anchor metadata";
                 return new ForecastRow(
                     $"{forecast.GeneratedAtUtc.ToLocalTime():g} · {FormatKind(forecast.Kind)} · {forecast.State}",
                     $"{pace}{pressure} · {outcome} · confidence {forecast.Confidence:P0}" +
-                    (string.IsNullOrWhiteSpace(forecast.Trend) ? string.Empty : $" · {forecast.Trend}"));
+                    (string.IsNullOrWhiteSpace(forecast.Trend) ? string.Empty : $" · {forecast.Trend}") + anchor);
             })
             .ToArray();
 
@@ -126,7 +131,7 @@ public sealed partial class ForecastsPage : Page
 
         StatusText.Text =
             $"{dashboard.FiveHourForecasts.Count + dashboard.WeeklyForecasts.Count:N0} persisted forecast sample(s) in the selected range. " +
-            "Each sample is scoped to its provider/profile/window epoch; old reset slopes are not blended into new windows.";
+            "New samples preserve the provider-authoritative quota anchor used by Overview; legacy rows remain explicitly unattributed.";
     }
 
     private async void OnEstimateClicked(object sender, RoutedEventArgs e)

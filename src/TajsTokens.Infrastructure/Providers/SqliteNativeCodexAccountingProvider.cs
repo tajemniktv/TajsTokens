@@ -55,11 +55,17 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
             var hourly = await LoadHourlyUsageAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
             transaction.Commit();
 
+            var asOfUtc = usage.Select(item => (DateTimeOffset?)item.ObservedAtUtc)
+                .Concat(hourly.Select(item => item.StartUtc))
+                .Where(item => item is not null)
+                .Max();
             var snapshot = new CodexTokenAccountingSnapshot(
                 "Native Codex",
                 "Local normalized Codex rollout history only; remote/cloud-only sessions are not assumed to be zero.",
                 usage,
-                hourly);
+                hourly,
+                AsOfUtc: asOfUtc,
+                Revision: stamp.Revision);
             _cachedStamp = stamp;
             _cachedSnapshot = snapshot;
             return snapshot;
@@ -123,7 +129,7 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
         var command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-            SELECT COALESCE(NULLIF(e.model, ''), NULLIF(a.model, ''), '(unknown)') AS model,
+            SELECT COALESCE(NULLIF(e.model, ''), '(unknown)') AS model,
                    MAX(e.observed_at_utc) AS observed_at_utc,
                    SUM(e.uncached_input_tokens),
                    SUM(e.cache_read_tokens),
@@ -132,8 +138,7 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
                    SUM(e.reasoning_output_tokens),
                    SUM(e.reported_total_tokens)
             FROM codex_native_token_events e
-            LEFT JOIN agents a ON a.agent_id = e.agent_id
-            GROUP BY COALESCE(NULLIF(e.model, ''), NULLIF(a.model, ''), '(unknown)')
+            GROUP BY COALESCE(NULLIF(e.model, ''), '(unknown)')
             HAVING SUM(e.uncached_input_tokens) +
                    SUM(e.cache_read_tokens) +
                    SUM(e.cache_write_tokens) +

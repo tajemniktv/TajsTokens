@@ -36,12 +36,12 @@ public sealed class CodexObservatoryTests
             var root = Assert.Single(sessions, item => item.SessionId == RootId);
             var child = Assert.Single(sessions, item => item.SessionId == ChildId);
 
-            Assert.Equal(1_870, root.NativeTokens.ReportedTotal);
+            Assert.Equal(1_650, root.NativeTokens.ReportedTotal);
             Assert.Equal(root.NativeTokens.ReportedTotal, root.NativeTokens.DisjointTotal);
-            Assert.Equal(350, root.NativeTokens.UncachedInput);
-            Assert.Equal(1_350, root.NativeTokens.CacheRead);
-            Assert.Equal(105, root.NativeTokens.NonReasoningOutput);
-            Assert.Equal(65, root.NativeTokens.ReasoningOutput);
+            Assert.Equal(300, root.NativeTokens.UncachedInput);
+            Assert.Equal(1_200, root.NativeTokens.CacheRead);
+            Assert.Equal(90, root.NativeTokens.NonReasoningOutput);
+            Assert.Equal(60, root.NativeTokens.ReasoningOutput);
             Assert.Equal(1, root.CompactionCount);
             Assert.InRange(root.PeakContextPercent!.Value, 96.7, 96.8);
 
@@ -59,7 +59,7 @@ public sealed class CodexObservatoryTests
             var replay = await ingestion.IngestAsync(rootPath, CancellationToken.None);
             Assert.Equal(0, replay.RecordsScanned);
             var replayed = Assert.Single(await observatory.GetSessionOverviewsAsync(20, CancellationToken.None), item => item.SessionId == RootId);
-            Assert.Equal(1_870, replayed.NativeTokens.ReportedTotal);
+            Assert.Equal(1_650, replayed.NativeTokens.ReportedTotal);
         }
         finally
         {

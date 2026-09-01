@@ -22,8 +22,17 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
     private readonly ForecastingService _forecasting = new();
     private readonly QuotaResetDetector _resetDetector = new();
     private readonly ScenarioPlannerService _scenarioPlanner = new();
+    private readonly Func<string, CancellationToken, Task>? _queryStageObserver;
 
     public SqliteIntelligenceService(string databasePath, SqliteTelemetryRepository telemetryRepository)
+        : this(databasePath, telemetryRepository, null)
+    {
+    }
+
+    internal SqliteIntelligenceService(
+        string databasePath,
+        SqliteTelemetryRepository telemetryRepository,
+        Func<string, CancellationToken, Task>? queryStageObserver)
     {
         _connectionString = new SqliteConnectionStringBuilder
         {
@@ -31,6 +40,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             Mode = SqliteOpenMode.ReadOnly
         }.ToString();
         _telemetryRepository = telemetryRepository;
+        _queryStageObserver = queryStageObserver;
     }
 
     public async Task<IntelligenceRefreshResult> RefreshAsync(CancellationToken cancellationToken)
@@ -38,46 +48,106 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         await EnsureInitializedAsync(cancellationToken);
 
         var groups = await LoadRecentQuotaGroupsAsync(512, cancellationToken);
-        var forecastsPersisted = 0;
         var resetEventsDetected = 0;
-        var now = DateTimeOffset.UtcNow;
-
         foreach (var group in groups)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var ordered = group.OrderBy(snapshot => snapshot.CapturedAtUtc).ToArray();
-            if (ordered.Length == 0)
-            {
-                continue;
-            }
-
             foreach (var resetEvent in _resetDetector.Detect(ordered))
             {
                 resetEventsDetected += await _telemetryRepository.UpsertQuotaResetEventAsync(resetEvent, cancellationToken);
             }
+        }
 
-            var latest = ordered[^1];
-            if (latest.UsedPercent is null)
+        // Current forecasts are owned by BuildAndPersistCurrentForecastsAsync and anchored to the
+        // coordinator's provider-authoritative current lanes. Historical refresh must not recompute
+        // a competing "current" generation from whichever persisted sample happens to be newest.
+        return new IntelligenceRefreshResult(0, resetEventsDetected);
+    }
+
+    public async Task<IReadOnlyList<CurrentQuotaForecast>> BuildAndPersistCurrentForecastsAsync(
+        IReadOnlyList<QuotaLaneState> quotaLanes,
+        DateTimeOffset nowUtc,
+        CancellationToken cancellationToken)
+    {
+        await EnsureInitializedAsync(cancellationToken);
+        var results = new List<CurrentQuotaForecast>();
+        foreach (var lane in quotaLanes.Where(lane => lane.Snapshot is not null))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var current = lane.Snapshot!;
+            if (!lane.IsFresh)
             {
+                results.Add(new CurrentQuotaForecast(
+                    current, TelemetryHealthState.Stale, null,
+                    "Forecasting is paused until this quota lane is provider-fresh.",
+                    "Last-known-good quota is displayed without borrowing a forecast from another generation."));
                 continue;
             }
 
+            if (current.Authority != QuotaObservationAuthority.ProviderAuthoritative)
+            {
+                results.Add(new CurrentQuotaForecast(
+                    current, TelemetryHealthState.Unavailable, null,
+                    "Current forecasts require a provider-authoritative quota anchor.",
+                    $"Current source '{current.Source}' is not classified as provider-authoritative."));
+                continue;
+            }
+
+            if (current.CapturedAtUtc > nowUtc)
+            {
+                results.Add(new CurrentQuotaForecast(
+                    current,
+                    TelemetryHealthState.Live,
+                    null,
+                    "Forecasting is paused for a future-dated quota anchor.",
+                    "The provider-authoritative anchor is newer than the forecast evaluation time."));
+                continue;
+            }
+
+            var history = await _telemetryRepository.GetRecentQuotaSnapshotsAsync(
+                current.Kind,
+                current.Provider,
+                current.Profile,
+                512,
+                cancellationToken,
+                current.CapturedAtUtc);
+            var anchored = history
+                .Where(item => item.CapturedAtUtc <= current.CapturedAtUtc)
+                .GroupBy(item => item.CapturedAtUtc)
+                .Select(group => group
+                    .OrderByDescending(item => item.Authority)
+                    .First())
+                .Where(item => item.CapturedAtUtc != current.CapturedAtUtc)
+                .Append(current)
+                .OrderBy(item => item.CapturedAtUtc)
+                .ToArray();
+
             try
             {
-                var forecast = _forecasting.BuildForecast(ordered, now);
-                await _telemetryRepository.UpsertForecastSnapshotAsync(
-                    new ForecastSnapshot(latest.Provider, latest.Profile, forecast),
-                    cancellationToken);
-                forecastsPersisted++;
+                var forecast = _forecasting.BuildForecast(anchored, nowUtc);
+                var persisted = new ForecastSnapshot(
+                    current.Provider, current.Profile, forecast,
+                    current.Source,
+                    current.Authority,
+                    current.CapturedAtUtc,
+                    current.WindowMinutes,
+                    current.ResetsAtUtc);
+                await _telemetryRepository.UpsertForecastSnapshotAsync(persisted, cancellationToken);
+                results.Add(new CurrentQuotaForecast(
+                    current, TelemetryHealthState.Live, forecast,
+                    "Provider-authoritative current quota plus compatible persisted history no newer than the current anchor."));
             }
-            catch (ArgumentException)
+            catch (ArgumentException exception)
             {
-                // A live quota sample remains useful while a malformed/insufficient history group is
-                // ignored. Forecasting never gets to erase provider telemetry.
+                results.Add(new CurrentQuotaForecast(
+                    current, TelemetryHealthState.Live, null,
+                    "Provider-authoritative current quota; more compatible history is required.",
+                    exception.Message));
             }
         }
 
-        return new IntelligenceRefreshResult(forecastsPersisted, resetEventsDetected);
+        return results;
     }
 
     public async Task<IntelligenceDashboard> QueryAsync(
@@ -90,50 +160,67 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
-        var hasNativeEvents = await TableExistsAsync(connection, "codex_native_token_events", cancellationToken);
-        var hasContext = await TableExistsAsync(connection, "context_observations", cancellationToken);
-        var usage = hasNativeEvents
-            ? await LoadUsageHistoryAsync(connection, effective, hasContext, cancellationToken)
-            : [];
-        var dimensions = hasNativeEvents
-            ? await LoadDimensionsAsync(connection, effective, cancellationToken)
-            : [];
-        var heatmap = hasNativeEvents
-            ? await LoadHeatmapAsync(connection, effective, cancellationToken)
-            : [];
-        var burnIntervals = await LoadQuotaBurnIntervalsAsync(
-            connection,
-            effective.FromUtc,
-            effective.ToUtc,
-            MaxBurnIntervals,
-            hasNativeEvents,
-            hasContext,
-            cancellationToken);
-        var resets = await LoadResetEventsAsync(connection, effective.FromUtc, effective.ToUtc, 200, cancellationToken);
-        var fiveHourForecasts = await LoadForecastHistoryAsync(
-            connection,
-            QuotaWindowKind.FiveHour,
-            effective.FromUtc,
-            effective.ToUtc,
-            500,
-            cancellationToken);
-        var weeklyForecasts = await LoadForecastHistoryAsync(
-            connection,
-            QuotaWindowKind.Weekly,
-            effective.FromUtc,
-            effective.ToUtc,
-            500,
-            cancellationToken);
+        // Keep every constituent SELECT on the same SQLite read snapshot. QueryAsync returns one
+        // dashboard generation, not a collage assembled across commits that happened mid-query.
+        await BeginReadSnapshotAsync(connection, cancellationToken);
+        try
+        {
+            var hasNativeEvents = await TableExistsAsync(connection, "codex_native_token_events", cancellationToken);
+            var hasContext = await TableExistsAsync(connection, "context_observations", cancellationToken);
+            var usage = hasNativeEvents
+                ? await LoadUsageHistoryAsync(connection, effective, hasContext, cancellationToken)
+                : [];
+            if (_queryStageObserver is not null)
+            {
+                await _queryStageObserver("usage-loaded", cancellationToken);
+            }
+            var dimensions = hasNativeEvents
+                ? await LoadDimensionsAsync(connection, effective, cancellationToken)
+                : [];
+            var heatmap = hasNativeEvents
+                ? await LoadHeatmapAsync(connection, effective, cancellationToken)
+                : [];
+            var burnIntervals = await LoadQuotaBurnIntervalsAsync(
+                connection,
+                effective.FromUtc,
+                effective.ToUtc,
+                MaxBurnIntervals,
+                hasNativeEvents,
+                hasContext,
+                cancellationToken);
+            var resets = await LoadResetEventsAsync(connection, effective.FromUtc, effective.ToUtc, 200, cancellationToken);
+            var fiveHourForecasts = await LoadForecastHistoryAsync(
+                connection,
+                QuotaWindowKind.FiveHour,
+                effective.FromUtc,
+                effective.ToUtc,
+                500,
+                cancellationToken);
+            var weeklyForecasts = await LoadForecastHistoryAsync(
+                connection,
+                QuotaWindowKind.Weekly,
+                effective.FromUtc,
+                effective.ToUtc,
+                500,
+                cancellationToken);
 
-        return new IntelligenceDashboard(
-            effective,
-            usage,
-            dimensions,
-            heatmap,
-            burnIntervals,
-            resets,
-            fiveHourForecasts,
-            weeklyForecasts);
+            var dashboard = new IntelligenceDashboard(
+                effective,
+                usage,
+                dimensions,
+                heatmap,
+                burnIntervals,
+                resets,
+                fiveHourForecasts,
+                weeklyForecasts);
+            await CommitReadSnapshotAsync(connection, cancellationToken);
+            return dashboard;
+        }
+        catch
+        {
+            await TryRollbackReadTransactionAsync(connection);
+            throw;
+        }
     }
 
     public async Task<QuotaBurnDetail> GetQuotaBurnDetailAsync(
@@ -337,7 +424,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
 
         return rows
             .GroupBy(row => (row.Provider, row.Profile, row.Kind))
-            .Select(group => (IReadOnlyList<QuotaSnapshot>)group.ToArray())
+            .Select(group => (IReadOnlyList<QuotaSnapshot>)CanonicalizeQuotaSnapshots(group).ToArray())
             .ToArray();
     }
 
@@ -503,8 +590,8 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         await AppendDimensionAsync(
             connection,
             results,
-            "Repository",
-            "COALESCE(NULLIF(s.repository, ''), 'unknown')",
+            "Session repository",
+            "COALESCE(NULLIF(s.repository, ''), '(unknown)')",
             "LEFT JOIN sessions s ON s.session_id = e.session_id",
             query,
             cancellationToken);
@@ -512,7 +599,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             connection,
             results,
             "Model",
-            "COALESCE(NULLIF(e.model, ''), 'unknown')",
+            "COALESCE(NULLIF(e.model, ''), '(unknown)')",
             string.Empty,
             query,
             cancellationToken);
@@ -542,6 +629,8 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                    COALESCE(SUM(e.reported_total_tokens), 0),
                    COALESCE(SUM(e.uncached_input_tokens), 0),
                    COALESCE(SUM(e.cache_read_tokens), 0),
+                   COALESCE(SUM(e.cache_write_tokens), 0),
+                   COALESCE(SUM(e.non_reasoning_output_tokens), 0),
                    COALESCE(SUM(e.reasoning_output_tokens), 0),
                    COUNT(DISTINCT e.session_id)
             FROM codex_native_token_events e
@@ -563,7 +652,9 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 reader.GetInt64(2),
                 reader.GetInt64(3),
                 reader.GetInt64(4),
-                reader.GetInt32(5)));
+                reader.GetInt64(5),
+                reader.GetInt64(6),
+                reader.GetInt32(7)));
         }
     }
 
@@ -813,7 +904,8 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         command.CommandText = """
             SELECT provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
                    estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence,
-                   state, burn_pressure, projected_remaining_at_reset_percent, trend, is_quantized_flat
+                   state, burn_pressure, projected_remaining_at_reset_percent, trend, is_quantized_flat,
+                   quota_source, quota_authority, quota_captured_at_utc, quota_window_minutes, quota_resets_at_utc
             FROM forecast_snapshots
             WHERE kind = $kind AND generated_at_utc >= $from AND generated_at_utc <= $to
             ORDER BY generated_at_utc DESC
@@ -845,7 +937,12 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                     reader.IsDBNull(10) ? null : reader.GetDouble(10),
                     reader.IsDBNull(11) ? null : reader.GetDouble(11),
                     reader.IsDBNull(12) ? null : reader.GetString(12),
-                    !reader.IsDBNull(13) && reader.GetInt32(13) != 0)));
+                    !reader.IsDBNull(13) && reader.GetInt32(13) != 0),
+                reader.IsDBNull(14) ? null : reader.GetString(14),
+                reader.IsDBNull(15) || !Enum.TryParse<QuotaObservationAuthority>(reader.GetString(15), out var authority) ? QuotaObservationAuthority.Unknown : authority,
+                reader.IsDBNull(16) ? null : ParseUtc(reader.GetString(16)),
+                reader.IsDBNull(17) ? null : reader.GetInt32(17),
+                reader.IsDBNull(18) ? null : ParseUtc(reader.GetString(18))));
         }
         return results;
     }
@@ -873,8 +970,23 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         {
             results.Add(ReadQuotaSnapshot(reader));
         }
-        return results;
+        return CanonicalizeQuotaSnapshots(results);
     }
+
+    private static IReadOnlyList<QuotaSnapshot> CanonicalizeQuotaSnapshots(
+        IEnumerable<QuotaSnapshot> snapshots) =>
+        snapshots
+            .GroupBy(snapshot => (
+                snapshot.Provider,
+                snapshot.Profile,
+                snapshot.Kind,
+                snapshot.CapturedAtUtc))
+            .Select(group => group
+                .OrderByDescending(snapshot => snapshot.Authority)
+                .ThenByDescending(snapshot => snapshot.Source, StringComparer.Ordinal)
+                .First())
+            .OrderBy(snapshot => snapshot.CapturedAtUtc)
+            .ToArray();
 
     private static QuotaSnapshot ReadQuotaSnapshot(SqliteDataReader reader) =>
         new(
@@ -934,6 +1046,34 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             current.ResetsAtUtc?.ToUniversalTime().ToString("O") ?? "none");
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material))).ToLowerInvariant();
         return $"quota-burn-{hash[..24]}";
+    }
+
+    private static async Task BeginReadSnapshotAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = "BEGIN DEFERRED;";
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task CommitReadSnapshotAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        var command = connection.CreateCommand();
+        command.CommandText = "COMMIT;";
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task TryRollbackReadTransactionAsync(SqliteConnection connection)
+    {
+        try
+        {
+            var rollback = connection.CreateCommand();
+            rollback.CommandText = "ROLLBACK;";
+            await rollback.ExecuteNonQueryAsync(CancellationToken.None);
+        }
+        catch (SqliteException)
+        {
+            // Preserve the query failure if SQLite already ended the transaction.
+        }
     }
 
     private static string SerializeUtc(DateTimeOffset value) =>

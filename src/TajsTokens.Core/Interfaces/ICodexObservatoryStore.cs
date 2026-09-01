@@ -10,7 +10,7 @@ public interface ICodexObservatoryStore
     Task UpsertAgentRelationshipAsync(AgentRelationship relationship, CancellationToken cancellationToken);
     Task UpsertUsageEventAsync(UsageEvent usageEvent, CancellationToken cancellationToken);
     Task UpsertQuotaSnapshotAsync(QuotaSnapshot snapshot, CancellationToken cancellationToken);
-    Task ApplyCumulativeTokenObservationAsync(CodexCumulativeTokenObservation observation, CancellationToken cancellationToken);
+    Task ApplyCumulativeTokenObservationAsync(CodexTokenCountObservation observation, CancellationToken cancellationToken);
     Task UpsertContextObservationAsync(CodexContextObservation observation, CancellationToken cancellationToken);
     Task<CodexParserResumeState?> GetParserResumeStateAsync(string sourceIdentity, CancellationToken cancellationToken);
     Task UpsertParserResumeStateAsync(CodexParserResumeState state, CancellationToken cancellationToken);

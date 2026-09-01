@@ -1,4 +1,5 @@
 using Microsoft.UI.Xaml;
+using System.Collections.ObjectModel;
 using Microsoft.UI.Xaml.Controls;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
@@ -10,10 +11,12 @@ public sealed partial class UsagePage : Page
     private CancellationTokenSource? _pageCancellation;
     private bool _isLoaded;
     private long _loadGeneration;
+    private readonly ObservableCollection<DimensionRow> _dimensionRows = [];
 
     public UsagePage()
     {
         InitializeComponent();
+        DimensionList.ItemsSource = _dimensionRows;
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
     }
@@ -97,7 +100,10 @@ public sealed partial class UsagePage : Page
         var fiveHourDelta = dashboard.UsageHistory.Sum(bucket => bucket.FiveHourQuotaDelta ?? 0);
         var weeklyDelta = dashboard.UsageHistory.Sum(bucket => bucket.WeeklyQuotaDelta ?? 0);
 
-        NativeTokensText.Text = FormatCount(totalTokens);
+        var integrityDelta = dashboard.UsageHistory.Sum(bucket => bucket.IntegrityDelta);
+        NativeTokensText.Text = integrityDelta == 0
+            ? FormatCount(totalTokens)
+            : $"{FormatCount(totalTokens)}  Δ {FormatSignedCount(integrityDelta)}";
         RoleTokensText.Text = $"{FormatCount(rootTokens)} / {FormatCount(subagentTokens)}";
         FiveHourDeltaText.Text = fiveHourDelta > 0 ? $"+{fiveHourDelta:0.#} pp" : "No observed rise";
         WeeklyDeltaText.Text = weeklyDelta > 0 ? $"+{weeklyDelta:0.#} pp" : "No observed rise";
@@ -112,12 +118,15 @@ public sealed partial class UsagePage : Page
                 (bucket.FiveHourQuotaDelta is double five ? $" · 5h +{five:0.#}pp" : string.Empty) +
                 (bucket.WeeklyQuotaDelta is double week ? $" · weekly +{week:0.#}pp" : string.Empty))).ToArray();
 
-        DimensionList.ItemsSource = dashboard.Dimensions.Count == 0
-            ? new[] { new DimensionRow("History", "No breakdowns", "—") }
-            : dashboard.Dimensions.Select(item => new DimensionRow(
-                item.Dimension,
-                item.Value,
-                $"{FormatCount(item.NativeTokens)} · {item.Sessions:N0} session(s) · cache {FormatPercent(item.CacheReadTokens, item.UncachedInputTokens + item.CacheReadTokens)}")).ToArray();
+        var desiredDimensions = dashboard.Dimensions.Count == 0
+            ? [new DimensionRow("History", "No breakdowns", "—")]
+            : dashboard.Dimensions.Select(item =>
+            {
+                var integrity = item.IntegrityExact ? string.Empty : $" · reported/disjoint Δ {FormatSignedCount(item.IntegrityDelta)}";
+                return new DimensionRow(item.Dimension, item.Value,
+                    $"{FormatCount(item.NativeTokens)} · {item.Sessions:N0} session(s) · cache {FormatPercent(item.CacheReadTokens, item.UncachedInputTokens + item.CacheReadTokens)}{integrity}");
+            }).ToArray();
+        SyncDimensionRows(desiredDimensions);
 
         var maxHeat = dashboard.Heatmap.Count == 0 ? 0L : dashboard.Heatmap.Max(cell => cell.NativeTokens);
         HeatmapList.ItemsSource = dashboard.Heatmap.Count == 0
@@ -134,8 +143,40 @@ public sealed partial class UsagePage : Page
         StatusText.Text =
             $"{dashboard.Query.FromUtc.ToLocalTime():g} → {dashboard.Query.ToUtc.ToLocalTime():g} · " +
             $"{dashboard.Query.BucketSize.ToString().ToLowerInvariant()} buckets · {dashboard.UsageHistory.Count:N0} populated bucket(s). " +
-            "Native Codex accounting is the active local-history source; remote/cloud-only activity is not included until remote coverage exists.";
+            (integrityDelta == 0 ? "Reported/disjoint token integrity is exact for this range. " : $"Reported/disjoint token Δ {FormatSignedCount(integrityDelta)} for this range. ") +
+            "Native Codex accounting is the active local-history source; repository attribution is session/workspace scoped and remote/cloud-only activity is not included until remote coverage exists.";
     }
+
+    private void SyncDimensionRows(IReadOnlyList<DimensionRow> desired)
+    {
+        for (var index = 0; index < desired.Count; index++)
+        {
+            var row = desired[index];
+            if (index < _dimensionRows.Count && SameDimensionKey(_dimensionRows[index], row))
+            {
+                if (_dimensionRows[index] != row) _dimensionRows[index] = row;
+                continue;
+            }
+
+            var existingIndex = -1;
+            for (var candidate = index + 1; candidate < _dimensionRows.Count; candidate++)
+            {
+                if (SameDimensionKey(_dimensionRows[candidate], row)) { existingIndex = candidate; break; }
+            }
+
+            if (existingIndex >= 0)
+            {
+                _dimensionRows.Move(existingIndex, index);
+                if (_dimensionRows[index] != row) _dimensionRows[index] = row;
+            }
+            else _dimensionRows.Insert(index, row);
+        }
+        while (_dimensionRows.Count > desired.Count) _dimensionRows.RemoveAt(_dimensionRows.Count - 1);
+    }
+
+    private static bool SameDimensionKey(DimensionRow left, DimensionRow right) =>
+        string.Equals(left.Dimension, right.Dimension, StringComparison.Ordinal) &&
+        string.Equals(left.Value, right.Value, StringComparison.Ordinal);
 
     private int ParseDays()
     {
@@ -165,6 +206,9 @@ public sealed partial class UsagePage : Page
 
     private static string FormatPercent(long numerator, long denominator) =>
         denominator <= 0 ? "n/a" : $"{100d * numerator / denominator:0.#}%";
+
+    private static string FormatSignedCount(long value) =>
+        value > 0 ? $"+{FormatCount(value)}" : FormatCount(value);
 
     private static string FormatCount(long value)
     {
