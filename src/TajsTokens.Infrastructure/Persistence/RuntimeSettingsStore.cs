@@ -29,8 +29,9 @@ public sealed class RuntimeSettingsStore
         }
         catch
         {
-            // Settings must never be able to brick the telemetry shell. A corrupt or inaccessible
-            // file falls back to safe defaults and can be replaced by the next successful save.
+            // Settings must never be able to brick the telemetry shell. A corrupt, inaccessible, or
+            // future-version file falls back to safe in-memory defaults. In particular, do not
+            // rewrite an unsupported newer schema merely because an older binary happened to start.
             return Normalize(new RuntimeSettings());
         }
     }
@@ -49,10 +50,19 @@ public sealed class RuntimeSettingsStore
         File.Move(temp, _path, overwrite: true);
     }
 
-    internal static RuntimeSettings Normalize(RuntimeSettings settings) => settings with
+    internal static RuntimeSettings Normalize(RuntimeSettings settings)
     {
-        SchemaVersion = RuntimeSettings.CurrentSchemaVersion,
-        PollIntervalSeconds = Math.Clamp(settings.PollIntervalSeconds, 15, 3600),
-        LowQuotaThresholds = RuntimeSettings.NormalizeLowQuotaThresholds(settings.LowQuotaThresholds)
-    };
+        if (settings.SchemaVersion > RuntimeSettings.CurrentSchemaVersion)
+        {
+            throw new InvalidOperationException(
+                $"Runtime settings schema {settings.SchemaVersion} is newer than supported version {RuntimeSettings.CurrentSchemaVersion}.");
+        }
+
+        return settings with
+        {
+            SchemaVersion = RuntimeSettings.CurrentSchemaVersion,
+            PollIntervalSeconds = Math.Clamp(settings.PollIntervalSeconds, 15, 3600),
+            LowQuotaThresholds = RuntimeSettings.NormalizeLowQuotaThresholds(settings.LowQuotaThresholds)
+        };
+    }
 }
