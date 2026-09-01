@@ -123,7 +123,7 @@ public sealed partial class UsagePage : Page
         HeatmapList.ItemsSource = dashboard.Heatmap.Count == 0
             ? new[] { new HeatmapRow("No heatmap", 0, "—") }
             : dashboard.Heatmap
-                .OrderBy(cell => ((int)cell.Day + 6) % 7) // Monday first without changing UTC semantics.
+                .OrderBy(cell => ((int)cell.Day + 6) % 7)
                 .ThenBy(cell => cell.Hour)
                 .Select(cell => new HeatmapRow(
                     $"{cell.Day} {cell.Hour:00}:00 UTC",
@@ -134,7 +134,7 @@ public sealed partial class UsagePage : Page
         StatusText.Text =
             $"{dashboard.Query.FromUtc.ToLocalTime():g} → {dashboard.Query.ToUtc.ToLocalTime():g} · " +
             $"{dashboard.Query.BucketSize.ToString().ToLowerInvariant()} buckets · {dashboard.UsageHistory.Count:N0} populated bucket(s). " +
-            "Native accounting remains shadow data until Phase 6 parity/cutover.";
+            "Native Codex accounting is the active local-history source; remote/cloud-only activity is not included until remote coverage exists.";
     }
 
     private int ParseDays()

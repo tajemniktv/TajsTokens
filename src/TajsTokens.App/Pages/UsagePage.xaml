@@ -80,10 +80,19 @@
 
         <TabView Grid.Row="3" IsAddTabButtonVisible="False">
             <TabViewItem Header="Timeline">
-                <ListView x:Name="HistoryList" SelectionMode="None" ScrollViewer.IsDeferredScrollingEnabled="True">
+                <ListView x:Name="HistoryList"
+                          SelectionMode="None"
+                          ScrollViewer.IsDeferredScrollingEnabled="True"
+                          ScrollViewer.HorizontalScrollMode="Disabled"
+                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
                     <ListView.ItemTemplate>
                         <DataTemplate>
-                            <Grid Padding="5" ColumnSpacing="12">
+                            <Grid Padding="5" ColumnSpacing="12" HorizontalAlignment="Stretch">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="150" />
                                     <ColumnDefinition Width="120" />
@@ -98,28 +107,52 @@
                 </ListView>
             </TabViewItem>
             <TabViewItem Header="Breakdowns">
-                <ListView x:Name="DimensionList" SelectionMode="None">
+                <ListView x:Name="DimensionList"
+                          SelectionMode="None"
+                          ScrollViewer.HorizontalScrollMode="Disabled"
+                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
                     <ListView.ItemTemplate>
                         <DataTemplate>
-                            <Grid Padding="5" ColumnSpacing="12">
+                            <Grid Padding="5" ColumnSpacing="12" HorizontalAlignment="Stretch">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="110" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="130" />
+                                    <ColumnDefinition Width="2*" />
+                                    <ColumnDefinition Width="3*" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="{Binding Dimension}" Opacity="0.7" />
-                                <TextBlock Grid.Column="1" Text="{Binding Value}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
-                                <TextBlock Grid.Column="2" Text="{Binding Detail}" HorizontalAlignment="Right" />
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding Value}"
+                                           FontWeight="SemiBold"
+                                           TextTrimming="CharacterEllipsis" />
+                                <TextBlock Grid.Column="2"
+                                           Text="{Binding Detail}"
+                                           Opacity="0.78"
+                                           TextAlignment="Right"
+                                           HorizontalAlignment="Stretch"
+                                           TextWrapping="Wrap" />
                             </Grid>
                         </DataTemplate>
                     </ListView.ItemTemplate>
                 </ListView>
             </TabViewItem>
             <TabViewItem Header="Hour heatmap">
-                <ListView x:Name="HeatmapList" SelectionMode="None">
+                <ListView x:Name="HeatmapList"
+                          SelectionMode="None"
+                          ScrollViewer.HorizontalScrollMode="Disabled"
+                          ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListView.ItemContainerStyle>
+                        <Style TargetType="ListViewItem">
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                        </Style>
+                    </ListView.ItemContainerStyle>
                     <ListView.ItemTemplate>
                         <DataTemplate>
-                            <Grid Padding="5" ColumnSpacing="12">
+                            <Grid Padding="5" ColumnSpacing="12" HorizontalAlignment="Stretch">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="120" />
                                     <ColumnDefinition Width="*" />

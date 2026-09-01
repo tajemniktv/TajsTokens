@@ -9,17 +9,18 @@ TajsTokens is a local-first native Windows observability application for Codex a
 The application currently has:
 
 - a real-data WinUI 3 dashboard;
-- Tokscale-backed broad token accounting;
+- native Codex local-history token accounting as the displayed/default accounting source;
+- optional Tokscale reconciliation/fallback, disabled by default;
 - provider-authoritative Codex quota through the local `codex app-server`;
 - SQLite quota/history persistence;
 - a process-lifetime telemetry coordinator shared by Overview, tray, alerts, Observatory and intelligence refresh;
 - background collection, close-to-tray lifecycle, notifications, runtime settings, Start with Windows, and a self-contained Windows x64 portable publish path;
 - direct incremental Codex rollout ingestion with privacy-safe session/root/subagent, token, quota, context/compaction, activity, and storage metadata;
-- native Codex accounting in shadow/reconciliation mode while Tokscale remains the displayed/default broad accounting source;
+- explicit local-only accounting coverage until remote/cloud-only Codex sessions have their own source;
 - merged Phase 4 intelligence for persisted forecast history, reset/re-anchor events, bounded historical aggregates, interval-based quota attribution and account-local scenario estimation;
 - real Usage, Forecasts and Analytics pages over normalized intelligence/query contracts.
 
-Phase 3.5 and Phase 4 are merged. The empirical post-change Windows profile is complete: it confirmed the UI-thread hardening worked and identified the next bottleneck as warm rollout discovery plus serialized semantic SQLite persistence. Phase 4.5 now owns state-indexed Codex discovery and bounded semantic persistence without weakening the Phase 6 native-accounting parity gate.
+Phase 3.5, Phase 4, and Phase 4.5 are merged. The empirical Windows profile confirmed the UI-thread hardening and state-indexed incremental ingestion. Phase 4.7 cuts displayed local-history accounting over to the native SQLite projection while retaining Tokscale as an opt-in reconciliation oracle/fallback. Native cutover does not magically imply account-global coverage: remote/cloud-only sessions remain a distinct source problem.
 
 ## Solution layout and dependency direction
 
@@ -57,25 +58,28 @@ Regression suite for accounting, forecasting, reset detection, scenario planning
 ## Current data flow
 
 ```text
-Tokscale CLI --------------------------\
-                                        \
-Codex local app-server quota ------------> TelemetryCoordinator -> immutable TelemetrySnapshot
-                                          /       |                 |        |        |
-Codex state SQLite -> changed threads ---/        |                 |        |        +-> alerts
-                         |                         |                 |        +----------> tray
-                         v                         |                 +-------------------> Overview
-Codex rollout JSONL -> incremental ingestion -----+-------------------------------------> Observatory refresh signal
-                                                   |
-                                                   +-> intelligence refresh
-                                                        -> forecast history
-                                                        -> reset/re-anchor events
+Codex local app-server quota ----------------------\
+                                                     \
+Codex state SQLite -> changed threads ---------------> TelemetryCoordinator -> immutable TelemetrySnapshot
+                         |                           /       |                 |        |        |
+                         v                          /        |                 |        |        +-> alerts
+Codex rollout JSONL -> incremental ingestion ------+         |                 |        +----------> tray
+                         |                         |         |                 +-------------------> Overview
+                         v                         |         |
+normalized native token events -> cached projection+         +-> Observatory refresh/status
+                                                           |
+                                                           +-> intelligence refresh
+                                                                -> forecast history
+                                                                -> reset/re-anchor events
+
+Tokscale CLI (optional reconciliation/fallback) ---> native-first accounting policy
 
 normalized history -------------------------------> SQLite
                                                        |
                                                        +-> bounded Usage/Forecasts/Analytics queries
 ```
 
-Codex state SQLite is used only as a read-only discovery/metadata/reconciliation index when its private schema is recognized. Rollout JSONL remains authoritative for event-level accounting, quota/context/activity observations, and TajsTokens-owned byte-checkpoint semantics. Provider telemetry is published before a potentially long historical rollout import. A first-run import must never keep quota/Tokscale blank merely because local history is large. Intelligence is derived after normalized persistence and must fail independently of provider freshness.
+Codex state SQLite is used only as a read-only discovery/metadata/reconciliation index when its private schema is recognized. Rollout JSONL remains authoritative for event-level accounting, quota/context/activity observations, and TajsTokens-owned byte-checkpoint semantics. Provider quota/interim telemetry may publish before a potentially long historical rollout import. Native accounting is projected only after the Observatory writer completes the current generation; failed/incomplete ingestion must keep token freshness stale rather than promoting a readable but incomplete SQLite projection as live. Intelligence is derived only after fresh normalized persistence and must fail independently of provider freshness.
 
 ## Execution, threading, and concurrency contract
 
@@ -103,7 +107,7 @@ Any reproducible synchronous UI freeze above roughly 250 ms is a performance bug
 
 ### Provider I/O
 
-Tokscale and Codex app-server operations run outside the caller's `SynchronizationContext`. They are cancellable and failures are isolated. A failed provider must not erase another provider's fresh data or make stale data look live.
+Tokscale and Codex app-server operations run outside the caller's `SynchronizationContext`. They are cancellable and failures are isolated. A failed provider must not erase another provider's fresh data or make stale data look live. Tokscale is not invoked on the ordinary default accounting path.
 
 ### Telemetry coordinator
 
@@ -112,7 +116,8 @@ One process-lifetime coordinator is authoritative for startup, periodic, manual,
 - Refreshes are serialized.
 - Manual refresh may supersede stale non-manual work.
 - Provider/interim snapshots may publish before the longer Observatory import, then a final snapshot follows.
-- Intelligence refresh runs only against persisted normalized telemetry and its failure cannot invalidate provider/Observatory data.
+- Native token freshness requires both a successful accounting projection and a fresh Observatory generation; an ingestion error preserves the last complete displayed token generation as stale.
+- Intelligence refresh runs only against fresh persisted normalized telemetry and its failure cannot invalidate provider/Observatory data.
 - Snapshot consumers must tolerate multiple snapshots per refresh and reject stale asynchronous results.
 - Subscriber callbacks must remain cheap; heavy subscriber work is queued/coalesced outside producer paths.
 
@@ -127,6 +132,8 @@ The intended shape is bounded and backpressured:
 5. publish aggregate progress.
 
 Do not create arbitrary parallel SQLite writers. One intentional writer path per database/profile is preferred. Parsing may become parallel, but durable mutations/checkpoints remain ordered where accounting semantics depend on observation order.
+
+If the same logical rollout path reappears with a different filesystem/source identity, retire its superseded native token/counter/parser/rollout generation atomically before activating the replacement. Same-identity replay remains idempotent.
 
 ### Cancellation and lifecycle
 
@@ -155,6 +162,7 @@ TajsTokens is itself an observability tool, so it should not become the workload
 - Prefer bounded transactions and prepared/reused operations over opening a connection/transaction for every normalized fragment when practical.
 - Keep correctness-critical cumulative accounting state ordered.
 - Advance checkpoints only after corresponding normalized writes have committed.
+- The expensive native model/hour projection must be cached/incremental across unchanged warm refreshes. A writer-owned accounting revision plus cheap event-table shape metadata invalidates the cache; model/hour reads for one generation share one SQLite read transaction.
 - WAL/synchronous configuration may be tuned only with an explicit durability rationale.
 - Large first-run imports may take time, but remain progressive, cancellable, and non-blocking to UI/provider freshness.
 
@@ -249,13 +257,26 @@ Use a scalable master-detail shape:
 
 ## Provider contracts
 
+### Native Codex accounting
+
+Native accounting is the default displayed source for local normalized Codex history.
+
+- Project only TajsTokens-owned normalized disjoint token events; do not reinterpret provider quota as token accounting.
+- Preserve model/hour generation coherence by reading both projections inside one SQLite read transaction.
+- Do not rescan the complete token-event table on every unchanged warm refresh; reuse the revision-keyed projection cache.
+- Report local-only coverage explicitly. Remote/cloud-only sessions are unknown until a remote source exists, never implicit zero.
+- A successful SQLite read is not enough to call a generation live if the upstream Observatory refresh failed or reported ingestion errors.
+
 ### Tokscale
 
-Tokscale is the bootstrap/default broad accounting provider while native Codex accounting matures.
+Tokscale is an optional reconciliation oracle and explicit fallback. Both uses are disabled by default.
 
+- Never invoke Tokscale on the ordinary native accounting path.
 - Consume documented machine-readable CLI output only.
-- Prefer a global `tokscale`; supported `npx --yes tokscale@latest` fallback is allowed when the command is genuinely unavailable.
+- When Tokscale is enabled, prefer a global `tokscale`; supported `npx --yes tokscale@latest` fallback is allowed when the command is genuinely unavailable.
 - Unsupported/malformed non-empty JSON is an error, not zero usage.
+- A reconciliation failure cannot invalidate a healthy native generation.
+- A Tokscale fallback must retain explicit fallback/stale provenance rather than masquerading as native accounting.
 - Preserve source/version/provenance where available.
 
 ### Codex quota
@@ -292,7 +313,7 @@ Base telemetry currently uses `%LOCALAPPDATA%\TajsTokens\telemetry.db`. `SqliteT
 
 Persist normalized telemetry and content-free identities, including quota/token history, session/agent relationships, normalized activity, context/compaction metadata, rollout storage metadata, parser/checkpoint state, privacy-safe Codex state change fingerprints, forecast snapshots and reset/re-anchor events.
 
-Historical usage/attribution is primarily derived from normalized facts rather than duplicating raw activity into another analytics warehouse.
+Historical usage/attribution is primarily derived from normalized facts rather than duplicating raw activity into another analytics warehouse. The native accounting revision table is content-free cache invalidation metadata, not another token ledger.
 
 Settings remain separate in `%LOCALAPPDATA%\TajsTokens\settings.json` and contain no auth material.
 
@@ -312,7 +333,7 @@ Normal telemetry must not persist ordinary:
 
 Large content-bearing rollout records are transient parser input and are reduced to type/status/size/timing/identity metadata. Sanitized fixtures use hand-authored structure or deterministic filler, never copied personal rollout payloads.
 
-Intelligence and Phase 4.5 ingestion consume normalized/content-minimal state. Do not create a parallel content-bearing cache for attribution, scenario fitting, or faster discovery.
+Intelligence and ingestion consume normalized/content-minimal state. Do not create a parallel content-bearing cache for attribution, scenario fitting, or faster discovery.
 
 ## Build and validation
 
@@ -323,7 +344,7 @@ dotnet build TajsTokens.sln
 dotnet test tests/TajsTokens.Core.Tests/TajsTokens.Core.Tests.csproj
 ```
 
-Release smoke additionally exercises the self-contained Windows x64 publish.
+Publish smoke additionally exercises the self-contained Windows x64 publish.
 
 Non-Windows builds compile a placeholder App target only. Never claim the WinUI/XAML application is validated based solely on Linux/macOS compilation.
 

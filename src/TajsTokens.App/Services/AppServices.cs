@@ -34,6 +34,12 @@ public sealed class AppServices
         Repository = new SqliteTelemetryRepository(DatabasePath);
         ObservatoryReadModel = new SqliteCodexObservatoryReadModel(DatabasePath);
         TokscaleProvider = new TokscaleProvider();
+        NativeCodexAccountingProvider = new SqliteNativeCodexAccountingProvider(DatabasePath);
+        CodexTokenAccountingProvider = new NativeFirstCodexAccountingProvider(
+            NativeCodexAccountingProvider,
+            TokscaleProvider,
+            () => Settings.TokscaleReconciliationEnabled,
+            () => Settings.TokscaleFallbackEnabled);
         CodexQuotaProvider = new CodexAppServerQuotaProvider();
 
         var observatory = CodexObservatoryRuntimeFactory.Create(DatabasePath, Repository);
@@ -43,7 +49,7 @@ public sealed class AppServices
 
         Intelligence = new SqliteIntelligenceService(DatabasePath, Repository);
         Telemetry = new TelemetryCoordinator(
-            TokscaleProvider,
+            CodexTokenAccountingProvider,
             CodexQuotaProvider,
             Repository,
             CodexObservatory,
@@ -59,6 +65,8 @@ public sealed class AppServices
     public ICodexObservatoryStore ObservatoryStore { get; }
     public SqliteCodexObservatoryReadModel ObservatoryReadModel { get; }
     public ITokscaleProvider TokscaleProvider { get; }
+    public ICodexTokenAccountingProvider NativeCodexAccountingProvider { get; }
+    public ICodexTokenAccountingProvider CodexTokenAccountingProvider { get; }
     public ICodexQuotaProvider CodexQuotaProvider { get; }
     public ICodexSessionIngestionService CodexSessionIngestion { get; }
     public ICodexObservatoryService CodexObservatory { get; }

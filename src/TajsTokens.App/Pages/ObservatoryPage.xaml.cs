@@ -477,7 +477,7 @@ public sealed partial class ObservatoryPage : Page
         var role = session.ParentSessionId is null ? "root" : "subagent";
         var peak = session.PeakContextPercent is double peakValue ? $" · peak ctx {peakValue:0.0}%" : string.Empty;
         SelectedSessionSummary.Text =
-            $"{role} · {session.Status} · {session.Repository} · {FormatCount(session.NativeTokens.ReportedTotal)} native shadow tokens · " +
+            $"{role} · {session.Status} · {session.Repository} · {FormatCount(session.NativeTokens.ReportedTotal)} native tokens · " +
             $"{session.CompactionCount:N0} compaction(s){peak} · {FormatBytes(session.RolloutBytes)} normalized rollout records";
     }
 
@@ -493,7 +493,7 @@ public sealed partial class ObservatoryPage : Page
             $"Model: {model}\n" +
             $"Started: {session.StartedAtUtc.ToLocalTime():g}\n" +
             $"Last activity: {lastActivity}\n" +
-            $"Native shadow total: {FormatCount(session.NativeTokens.ReportedTotal)}\n" +
+            $"Native total: {FormatCount(session.NativeTokens.ReportedTotal)}\n" +
             $"Context: {context} · {session.CompactionCount:N0} compaction(s)\n" +
             $"Timeline events: {session.TimelineEventCount:N0}\n" +
             $"Normalized rollout bytes: {FormatBytes(session.RolloutBytes)}";
@@ -503,7 +503,7 @@ public sealed partial class ObservatoryPage : Page
     {
         var tokens = session.NativeTokens;
         TokenDetailText.Text =
-            "Native Codex accounting is shadow/reconciliation telemetry; Tokscale remains the broad default until parity is demonstrated.\n\n" +
+            "Native Codex accounting is the active local-history source. Tokscale, when enabled, is used only for optional reconciliation or fallback. Remote/cloud-only sessions are outside this local total.\n\n" +
             $"Uncached input: {FormatCount(tokens.UncachedInput)}\n" +
             $"Cache read: {FormatCount(tokens.CacheRead)}\n" +
             $"Cache write: {FormatCount(tokens.CacheWrite)}\n" +

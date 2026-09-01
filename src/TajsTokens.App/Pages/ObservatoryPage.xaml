@@ -20,7 +20,7 @@
             </Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="Codex Observatory" FontSize="28" FontWeight="SemiBold" />
-                <TextBlock Text="Privacy-safe local session telemetry. Native accounting remains shadow data while Tokscale is the broad default source."
+                <TextBlock Text="Privacy-safe local session telemetry. Native Codex accounting is the default local-history source; Tokscale is optional reconciliation/fallback."
                            Opacity="0.72" TextWrapping="Wrap" Margin="0,4,0,0" />
                 <TextBlock x:Name="StatusText" Text="Loading local Codex sessions…" Opacity="0.72" Margin="0,8,0,0" TextWrapping="Wrap" />
             </StackPanel>
@@ -41,7 +41,7 @@
             </Border>
             <Border Grid.Column="1" Padding="14" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                 <StackPanel>
-                    <TextBlock Text="Native shadow tokens" Opacity="0.65" />
+                    <TextBlock Text="Native Codex tokens" Opacity="0.65" />
                     <TextBlock x:Name="NativeTokensText" Text="—" FontSize="22" FontWeight="SemiBold" />
                 </StackPanel>
             </Border>

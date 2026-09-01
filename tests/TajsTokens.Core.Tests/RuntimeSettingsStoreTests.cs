@@ -21,6 +21,8 @@ public sealed class RuntimeSettingsStoreTests
             Assert.True(settings.NotificationsEnabled);
             Assert.Equal(60, settings.PollIntervalSeconds);
             Assert.Equal([30, 20, 10, 5], settings.LowQuotaThresholds);
+            Assert.False(settings.TokscaleReconciliationEnabled);
+            Assert.False(settings.TokscaleFallbackEnabled);
             Assert.Equal(RuntimeSettings.CurrentSchemaVersion, settings.SchemaVersion);
             Assert.True(File.Exists(path));
 
@@ -49,6 +51,8 @@ public sealed class RuntimeSettingsStoreTests
             var settings = new RuntimeSettingsStore(path).Load();
             Assert.Equal(60, settings.PollIntervalSeconds);
             Assert.True(settings.RunInBackground);
+            Assert.False(settings.TokscaleReconciliationEnabled);
+            Assert.False(settings.TokscaleFallbackEnabled);
             Assert.Equal(RuntimeSettings.CurrentSchemaVersion, settings.SchemaVersion);
         }
         finally
@@ -58,7 +62,7 @@ public sealed class RuntimeSettingsStoreTests
     }
 
     [Fact]
-    public void Load_VersionlessFileNormalizesToCurrentSchema()
+    public void Load_VersionlessFileNormalizesToCurrentSchemaAndKeepsTokscaleOptional()
     {
         var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
@@ -80,6 +84,8 @@ public sealed class RuntimeSettingsStoreTests
             Assert.False(settings.RunInBackground);
             Assert.Equal(120, settings.PollIntervalSeconds);
             Assert.Equal([20, 10], settings.LowQuotaThresholds);
+            Assert.False(settings.TokscaleReconciliationEnabled);
+            Assert.False(settings.TokscaleFallbackEnabled);
         }
         finally
         {
@@ -123,7 +129,7 @@ public sealed class RuntimeSettingsStoreTests
     }
 
     [Fact]
-    public void Save_NormalizesPollingAndThresholdsAndRoundTrips()
+    public void Save_NormalizesAndRoundTripsOptionalTokscaleSettings()
     {
         var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         var path = Path.Combine(directory, "settings.json");
@@ -135,7 +141,9 @@ public sealed class RuntimeSettingsStoreTests
             {
                 PollIntervalSeconds = 1,
                 LowQuotaThresholds = [10, 30, 10, -1, 500],
-                NotificationsEnabled = false
+                NotificationsEnabled = false,
+                TokscaleReconciliationEnabled = true,
+                TokscaleFallbackEnabled = true
             });
 
             var settings = store.Load();
@@ -143,6 +151,8 @@ public sealed class RuntimeSettingsStoreTests
             Assert.Equal(15, settings.PollIntervalSeconds);
             Assert.Equal([30, 10], settings.LowQuotaThresholds);
             Assert.False(settings.NotificationsEnabled);
+            Assert.True(settings.TokscaleReconciliationEnabled);
+            Assert.True(settings.TokscaleFallbackEnabled);
         }
         finally
         {

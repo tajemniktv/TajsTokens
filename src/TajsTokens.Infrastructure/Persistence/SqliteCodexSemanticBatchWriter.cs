@@ -31,6 +31,7 @@ internal sealed class SqliteCodexIngestionBatchWriter(
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly ICodexObservatoryStore _observatoryStore = observatoryStore;
     private readonly SemaphoreSlim _writeGate = new(1, 1);
+    private bool _revisionStoreInitialized;
 
     public async Task WriteBatchAsync(
         string sourceIdentity,
@@ -50,6 +51,7 @@ internal sealed class SqliteCodexIngestionBatchWriter(
         {
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
+            await EnsureRevisionStoreAsync(connection, cancellationToken);
             using var transaction = connection.BeginTransaction();
 
             var safeFileLabel = BuildSafeFileLabel(filePath);
@@ -61,6 +63,11 @@ internal sealed class SqliteCodexIngestionBatchWriter(
                 Math.Max(0, fileSizeBytes),
                 records,
                 cancellationToken);
+
+            var bumpRevision = connection.CreateCommand();
+            bumpRevision.Transaction = transaction;
+            bumpRevision.CommandText = "UPDATE codex_native_accounting_revision SET revision = revision + 1 WHERE id = 1;";
+            await bumpRevision.ExecuteNonQueryAsync(cancellationToken);
             transaction.Commit();
 
             // Counter observations deliberately remain ordered and use the established replay/reset
@@ -83,6 +90,27 @@ internal sealed class SqliteCodexIngestionBatchWriter(
         }
     }
 
+    private async Task EnsureRevisionStoreAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        if (_revisionStoreInitialized)
+        {
+            return;
+        }
+
+        var command = connection.CreateCommand();
+        command.CommandText = """
+            CREATE TABLE IF NOT EXISTS codex_native_accounting_revision (
+                id INTEGER PRIMARY KEY CHECK(id = 1),
+                revision INTEGER NOT NULL
+            );
+            INSERT INTO codex_native_accounting_revision(id, revision)
+            VALUES(1, 0)
+            ON CONFLICT(id) DO NOTHING;
+            """;
+        await command.ExecuteNonQueryAsync(cancellationToken);
+        _revisionStoreInitialized = true;
+    }
+
     private static async Task WriteProjectionAndStorageBatchAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
@@ -97,16 +125,45 @@ internal sealed class SqliteCodexIngestionBatchWriter(
             .LastOrDefault(value => !string.IsNullOrWhiteSpace(value));
         var lastSeen = records.Max(record => record.TimestampUtc);
 
-        using (var removeAlias = BuildCommand(
+        // A logical rollout path can be replaced with a new filesystem identity. The token-event and
+        // counter tables predate source_identity columns, so the privacy-safe file label is their
+        // generation owner. Retire the old generation in the same transaction that activates the new
+        // rollout identity; otherwise a replacement replay leaves both generations in accounting.
+        using (var replaceGeneration = BuildCommand(
                    connection,
                    transaction,
-                   "DELETE FROM rollout_files WHERE file_path = $file AND source_identity <> $identity;",
+                   """
+                   DELETE FROM codex_native_token_events
+                   WHERE source_file = $file
+                     AND EXISTS (
+                         SELECT 1 FROM rollout_files
+                         WHERE file_path = $file AND source_identity <> $identity);
+
+                   DELETE FROM codex_counter_state
+                   WHERE source_file = $file
+                     AND EXISTS (
+                         SELECT 1 FROM rollout_files
+                         WHERE file_path = $file AND source_identity <> $identity);
+
+                   DELETE FROM codex_parser_state
+                   WHERE source_identity IN (
+                       SELECT source_identity FROM rollout_files
+                       WHERE file_path = $file AND source_identity <> $identity);
+
+                   DELETE FROM rollout_records
+                   WHERE source_identity IN (
+                       SELECT source_identity FROM rollout_files
+                       WHERE file_path = $file AND source_identity <> $identity);
+
+                   DELETE FROM rollout_files
+                   WHERE file_path = $file AND source_identity <> $identity;
+                   """,
                    "$file",
                    "$identity"))
         {
-            Set(removeAlias, "$file", safeFileLabel);
-            Set(removeAlias, "$identity", sourceIdentity);
-            await removeAlias.ExecuteNonQueryAsync(cancellationToken);
+            Set(replaceGeneration, "$file", safeFileLabel);
+            Set(replaceGeneration, "$identity", sourceIdentity);
+            await replaceGeneration.ExecuteNonQueryAsync(cancellationToken);
         }
 
         using (var rolloutFile = BuildCommand(
