@@ -32,8 +32,7 @@ public sealed class TelemetryCoordinatorThreadingTests
         finally
         {
             SynchronizationContext.SetSynchronizationContext(previousContext);
-            SqliteConnection.ClearAllPools();
-            Directory.Delete(directory, recursive: true);
+            SafeDeleteDirectory(directory);
         }
     }
 
@@ -41,9 +40,9 @@ public sealed class TelemetryCoordinatorThreadingTests
     public async Task RefreshAsync_PublishesProviderSnapshotBeforeObservatoryCompletes()
     {
         var directory = CreateTempDirectory();
+        var observatory = new BlockingObservatoryService();
         try
         {
-            var observatory = new BlockingObservatoryService();
             var coordinator = new TelemetryCoordinator(
                 new CapturingTokscaleProvider(),
                 new EmptyQuotaProvider(),
@@ -73,8 +72,10 @@ public sealed class TelemetryCoordinatorThreadingTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
-            Directory.Delete(directory, recursive: true);
+            // If an assertion/timeout happens before the normal completion point, release the fake
+            // observatory first. Cleanup itself must never replace the assertion with an IOException.
+            observatory.Complete();
+            SafeDeleteDirectory(directory);
         }
     }
 
@@ -83,6 +84,23 @@ public sealed class TelemetryCoordinatorThreadingTests
         var directory = Path.Combine(Path.GetTempPath(), "TajsTokens.Coordinator.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         return directory;
+    }
+
+    private static void SafeDeleteDirectory(string directory)
+    {
+        try
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(directory, recursive: true);
+        }
+        catch (IOException)
+        {
+            // A locked temp file must not mask the assertion result.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Same cleanup rule for transient Windows handle/permission races.
+        }
     }
 
     private sealed class CapturingTokscaleProvider : ITokscaleProvider
