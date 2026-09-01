@@ -37,6 +37,8 @@ A reset/re-anchor boundary is therefore never converted into negative burn or at
 
 The observation interval is `(previous captured_at, current captured_at]`. Native Codex activity inside that range is synchronized to the meter change. This does **not** establish which event caused the provider's quota update because the meter may be rounded, delayed or batched.
 
+A flat rounded meter reading is treated as **censored/quantized evidence**, not as proof that zero quota was consumed. Phase 4 therefore does not emit a zero-burn interval or feed a synthetic `0` target into the scenario planner for a flat pair. Only an observed positive meter movement becomes a quota-burn sample; uncertainty from flat readings remains represented by the reset-aware forecasting model's quantized-flat state. A future censored-data estimator may use bounds from flat periods, but it must not silently reinterpret them as exact zero consumption.
+
 ### Contributor score
 
 The first transparent heuristic is:
