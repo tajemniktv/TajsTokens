@@ -17,17 +17,26 @@ public sealed class CodexTokenCounterReducerTests
     }
 
     [Fact]
-    public void MonotonicObservation_PrefersMatchingLastUsageIncrement()
+    public void MonotonicObservation_PrefersLastUsageWhenCumulativeGapIsLarger()
     {
         var first = Reduce(Observation("first", 100, 40, 10, 4, 110));
         var second = CodexTokenCounterReducer.Reduce(
-            Observation("second", 130, 55, 20, 8, 142, Last(30, 15, 0, 10, 4, 32)),
+            Observation("second", 160, 80, 30, 10, 190, Last(30, 15, 0, 10, 4, 40)),
             first.NextState);
 
         Assert.Equal(CodexTokenAccountingDecisionKind.MonotonicIncrement, second.Kind);
-        Assert.Equal(new CodexTokenAccountingDelta(15, 15, 0, 6, 4, 32), second.Delta);
-        Assert.Equal(130, second.NextState!.InputTokens);
-        Assert.Equal(142, second.NextState.TotalTokens);
+        Assert.Equal(new CodexTokenAccountingDelta(15, 15, 0, 6, 4, 40), second.Delta);
+        Assert.Equal(160, second.NextState!.InputTokens);
+        Assert.Equal(190, second.NextState.TotalTokens);
+    }
+
+    [Fact]
+    public void FirstVisibleLifetimeTotal_LargerThanLastUsage_EmitsLastOnly()
+    {
+        var decision = Reduce(Observation("first", 1000, 700, 100, 20, 1100, Last(30, 20, 0, 8, 2, 38)));
+
+        Assert.Equal(CodexTokenAccountingDecisionKind.FirstObservation, decision.Kind);
+        Assert.Equal(new CodexTokenAccountingDelta(10, 20, 0, 6, 2, 38), decision.Delta);
     }
 
     [Fact]
@@ -57,11 +66,24 @@ public sealed class CodexTokenCounterReducerTests
     }
 
     [Fact]
+    public void UnchangedCumulativeTotal_WinsOverComponentNoiseAndRepeatedLast()
+    {
+        var first = Reduce(Observation("first", 100, 40, 10, 4, 110));
+        var unchanged = CodexTokenCounterReducer.Reduce(
+            Observation("unchanged", 99, 39, 9, 3, 110, Last(1, 1, 0, 1, 1, 2)),
+            first.NextState);
+
+        Assert.Equal(CodexTokenAccountingDecisionKind.NoIncrement, unchanged.Kind);
+        Assert.Equal(CodexTokenAccountingDelta.Zero, unchanged.Delta);
+        Assert.Equal(first.NextState!.InputTokens, unchanged.NextState!.InputTokens);
+    }
+
+    [Fact]
     public void SmallStaleRegression_IsIgnoredAndRecoveryDoesNotDoubleCount()
     {
         var first = Reduce(Observation("first", 100, 40, 10, 4, 110));
         var stale = CodexTokenCounterReducer.Reduce(
-            Observation("stale", 99, 39, 10, 4, 109),
+            Observation("stale", 99, 39, 9, 3, 109, Last(1, 1, 0, 1, 0, 2)),
             first.NextState);
         var recovered = CodexTokenCounterReducer.Reduce(
             Observation("recovered", 110, 45, 12, 5, 121, Last(10, 5, 0, 2, 1, 11)),
@@ -71,6 +93,26 @@ public sealed class CodexTokenCounterReducerTests
         Assert.Equal(CodexTokenAccountingDelta.Zero, stale.Delta);
         Assert.Equal(CodexTokenAccountingDecisionKind.MonotonicIncrement, recovered.Kind);
         Assert.Equal(new CodexTokenAccountingDelta(5, 5, 0, 1, 1, 11), recovered.Delta);
+        Assert.Equal(first.NextState, stale.NextState);
+    }
+
+    [Fact]
+    public void MeaningfulRegression_ReanchorsEpochAndSubsequentMovementCountsNormally()
+    {
+        var first = Reduce(Observation("first", 100, 80, 10, 4, 100));
+        var reset = CodexTokenCounterReducer.Reduce(
+            Observation("reset", 60, 45, 8, 3, 60, Last(10, 8, 0, 2, 1, 12)),
+            first.NextState);
+        var next = CodexTokenCounterReducer.Reduce(
+            Observation("next", 70, 53, 10, 4, 70, Last(10, 8, 0, 2, 1, 12)),
+            reset.NextState);
+
+        Assert.Equal(CodexTokenAccountingDecisionKind.CounterReset, reset.Kind);
+        Assert.Equal(new CodexTokenAccountingDelta(2, 8, 0, 1, 1, 12), reset.Delta);
+        Assert.Equal(1, reset.NextState!.Epoch);
+        Assert.Equal(CodexTokenAccountingDecisionKind.MonotonicIncrement, next.Kind);
+        Assert.Equal(reset.NextState.Epoch, next.NextState!.Epoch);
+        Assert.Equal(new CodexTokenAccountingDelta(2, 8, 0, 1, 1, 12), next.Delta);
     }
 
     [Fact]
@@ -98,6 +140,60 @@ public sealed class CodexTokenCounterReducerTests
     }
 
     [Fact]
+    public void TotalOnlyRegression_ReanchorsWithoutInventedUsage()
+    {
+        var first = Reduce(Observation("first", 100, 80, 10, 4, 110));
+        var reset = CodexTokenCounterReducer.Reduce(
+            Observation("reset", 60, 45, 8, 3, 60),
+            first.NextState);
+        var next = CodexTokenCounterReducer.Reduce(
+            Observation("next", 70, 53, 10, 4, 70),
+            reset.NextState);
+
+        Assert.Equal(CodexTokenAccountingDecisionKind.CounterReset, reset.Kind);
+        Assert.Equal(CodexTokenAccountingDelta.Zero, reset.Delta);
+        Assert.Equal(1, reset.NextState!.Epoch);
+        Assert.Equal(new CodexTokenAccountingDelta(2, 8, 0, 1, 1, 10), next.Delta);
+    }
+
+    [Fact]
+    public void FirstLastOnlyObservation_IsCountableWithoutCumulativeBaseline()
+    {
+        var decision = CodexTokenCounterReducer.Reduce(
+            LastOnly("first", Last(10, 6, 0, 4, 1, 15)),
+            null);
+
+        Assert.Equal(CodexTokenAccountingDecisionKind.FirstObservation, decision.Kind);
+        Assert.Equal(new CodexTokenAccountingDelta(4, 6, 0, 3, 1, 15), decision.Delta);
+        Assert.False(decision.NextState!.HasCumulativeBaseline);
+    }
+
+    [Fact]
+    public void LastOnlyObservation_WithPreviousBaseline_UsesSaturatingDerivedWatermark()
+    {
+        var first = Reduce(Observation("first", 100, 80, 10, 4, 110));
+        var lastOnly = CodexTokenCounterReducer.Reduce(
+            LastOnly("turn", Last(10, 6, 0, 4, 1, 15)),
+            first.NextState);
+
+        Assert.Equal(new CodexTokenAccountingDelta(4, 6, 0, 3, 1, 15), lastOnly.Delta);
+        Assert.True(lastOnly.NextState!.HasCumulativeBaseline);
+        Assert.Equal(125, lastOnly.NextState.TotalTokens);
+    }
+
+    [Fact]
+    public void TokenCountWithoutEitherSnapshot_ProducesNoObservation()
+    {
+        var decision = CodexTokenCounterReducer.Reduce(
+            LastOnly("empty", null),
+            null);
+
+        Assert.Equal(CodexTokenAccountingDecisionKind.NoObservation, decision.Kind);
+        Assert.Equal(CodexTokenAccountingDelta.Zero, decision.Delta);
+        Assert.False(decision.AdvanceState);
+    }
+
+    [Fact]
     public void CacheAndReasoningBucketsRemainDisjointWithLastUsage()
     {
         var decision = Reduce(Observation("first", 100, 80, 10, 4, 110, Last(100, 80, 0, 10, 4, 110)));
@@ -121,6 +217,9 @@ public sealed class CodexTokenCounterReducerTests
         long total,
         CodexTokenUsageSnapshot? last = null) =>
         new(id, "session.jsonl", "session", "session", Start, "model", "high", input, cached, 0, output, reasoning, total, last);
+
+    private static CodexTokenCountObservation LastOnly(string id, CodexTokenUsageSnapshot? last) =>
+        new(id, "session.jsonl", "session", "session", Start, "model", "high", null, last);
 
     private static CodexTokenUsageSnapshot Last(
         long input,

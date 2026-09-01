@@ -67,6 +67,57 @@ public sealed class SqliteCodexTokenAccountingReducerTests
         }
     }
 
+    [Fact]
+    public async Task Store_CountsLastOnlyRowsAndPersistsSyntheticBaselineMarker()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-last-only-");
+        var database = Path.Combine(directory.FullName, "telemetry.db");
+        var observed = DateTimeOffset.Parse("2026-09-01T10:00:00Z");
+
+        try
+        {
+            var repository = new SqliteTelemetryRepository(database);
+            await repository.InitializeAsync(CancellationToken.None);
+            var store = new SqliteCodexObservatoryStore(database);
+
+            await store.ApplyCumulativeTokenObservationAsync(
+                new CodexTokenCountObservation(
+                    "last-only", "session.jsonl", "session", "session", observed, "model", "high", null,
+                    Last(10, 6, 0, 4, 1, 14)),
+                CancellationToken.None);
+            await store.ApplyCumulativeTokenObservationAsync(
+                new CodexTokenCountObservation(
+                    "cumulative", "session.jsonl", "session", "session", observed.AddSeconds(1), "model", "high",
+                    new CodexTokenUsageSnapshot(25, 16, 0, 8, 2, 33)),
+                CancellationToken.None);
+
+            var summary = await store.GetSummaryAsync(CancellationToken.None);
+            await using (var debugConnection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = database }.ToString()))
+            {
+                await debugConnection.OpenAsync();
+                var debug = debugConnection.CreateCommand();
+                debug.CommandText = "SELECT reported_total_tokens FROM codex_native_token_events ORDER BY observed_at_utc;";
+                await using var debugReader = await debug.ExecuteReaderAsync();
+                var values = new List<long>();
+                while (await debugReader.ReadAsync()) values.Add(debugReader.GetInt64(0));
+                Assert.Equal("14,19", string.Join(',', values));
+            }
+            Assert.Equal(33, summary.NativeTokens.ReportedTotal);
+            Assert.Equal(summary.NativeTokens.ReportedTotal, summary.NativeTokens.DisjointTotal);
+
+            await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = database }.ToString());
+            await connection.OpenAsync();
+            var state = connection.CreateCommand();
+            state.CommandText = "SELECT has_cumulative_baseline FROM codex_counter_state WHERE session_id = 'session';";
+            Assert.Equal(1L, Convert.ToInt64(await state.ExecuteScalarAsync()));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
     private static CodexCumulativeTokenObservation Token(
         string id,
         DateTimeOffset observed,

@@ -20,7 +20,7 @@ internal interface ICodexIngestionBatchWriter
 /// <summary>
 /// Single high-volume writer lane for one Codex rollout batch. Semantic projections and rollout
 /// file/record metadata share one serialization gate, connection and transaction. Correctness-critical
-/// cumulative token observations remain ordered and are reduced by the dedicated Core accounting
+/// token-count observations remain ordered and are reduced by the dedicated Core accounting
 /// state machine after the projection transaction; the gate remains held until those writes complete,
 /// and the source checkpoint is advanced only after the entire batch succeeds.
 /// </summary>

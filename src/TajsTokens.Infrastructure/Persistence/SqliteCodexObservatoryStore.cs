@@ -89,7 +89,8 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                         reasoning_output_tokens INTEGER NOT NULL,
                         total_tokens INTEGER NOT NULL,
                         last_source_event_id TEXT NOT NULL,
-                        last_observed_at_utc TEXT NOT NULL
+                        last_observed_at_utc TEXT NOT NULL,
+                        has_cumulative_baseline INTEGER NOT NULL DEFAULT 1
                     );
 
                     CREATE TABLE IF NOT EXISTS context_observations (
@@ -150,10 +151,10 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                         ON rollout_files(file_path);
 
                     INSERT INTO observatory_schema(component, version)
-                    VALUES('codex-observatory', 3)
+                    VALUES('codex-observatory', 4)
                     ON CONFLICT(component) DO UPDATE SET version = excluded.version;
                     """, cancellationToken);
-                version = 3;
+                version = 4;
             }
 
             if (version == 1)
@@ -262,6 +263,40 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                     SET version = 3
                     WHERE component = 'codex-observatory';
                     """, cancellationToken);
+                version = 3;
+            }
+
+            if (version == 3)
+            {
+                var hasBaselineColumn = false;
+                var columnCheck = connection.CreateCommand();
+                columnCheck.CommandText = "PRAGMA table_info(codex_counter_state);";
+                await using (var columns = await columnCheck.ExecuteReaderAsync(cancellationToken))
+                {
+                    while (await columns.ReadAsync(cancellationToken))
+                    {
+                        if (string.Equals(columns.GetString(1), "has_cumulative_baseline", StringComparison.OrdinalIgnoreCase))
+                        {
+                            hasBaselineColumn = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!hasBaselineColumn)
+                {
+                    await ExecuteMigrationAsync(connection, """
+                        ALTER TABLE codex_counter_state
+                        ADD COLUMN has_cumulative_baseline INTEGER NOT NULL DEFAULT 1;
+                        """, cancellationToken);
+                }
+
+                await ExecuteMigrationAsync(connection, """
+                    UPDATE observatory_schema
+                    SET version = 4
+                    WHERE component = 'codex-observatory';
+                    """, cancellationToken);
+                version = 4;
             }
 
             // Scrub rows written by pre-hardening Phase 3 builds. typed-v3 forces one safe replay so
@@ -423,7 +458,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             cancellationToken);
     }
 
-    public async Task ApplyCumulativeTokenObservationAsync(CodexCumulativeTokenObservation observation, CancellationToken cancellationToken)
+    public async Task ApplyCumulativeTokenObservationAsync(CodexTokenCountObservation observation, CancellationToken cancellationToken)
     {
         await EnsureInitializedAsync(cancellationToken);
         await using var connection = new SqliteConnection(_connectionString);
@@ -440,7 +475,8 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         read.Transaction = transaction;
         read.CommandText = """
             SELECT source_file, counter_epoch, input_tokens, cached_input_tokens, cache_write_input_tokens,
-                   output_tokens, reasoning_output_tokens, total_tokens, last_source_event_id, last_observed_at_utc
+                   output_tokens, reasoning_output_tokens, total_tokens, last_source_event_id, last_observed_at_utc,
+                   has_cumulative_baseline
             FROM codex_counter_state
             WHERE session_id = $session;
             """;
@@ -461,12 +497,13 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                     reader.GetInt64(6),
                     reader.GetInt64(7),
                     reader.GetString(8),
-                    ParseUtc(reader.GetString(9)));
+                    ParseUtc(reader.GetString(9)),
+                    reader.GetInt64(10) != 0);
             }
         }
 
         var decision = CodexTokenCounterReducer.Reduce(observation, previous, sourceEventAlreadyPersisted);
-        if (decision.Kind == CodexTokenAccountingDecisionKind.Duplicate)
+        if (decision.Kind is CodexTokenAccountingDecisionKind.Duplicate or CodexTokenAccountingDecisionKind.NoObservation)
         {
             transaction.Commit();
             return;
@@ -505,8 +542,8 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             INSERT INTO codex_counter_state(
                 session_id, source_file, counter_epoch, input_tokens, cached_input_tokens,
                 cache_write_input_tokens, output_tokens, reasoning_output_tokens, total_tokens,
-                last_source_event_id, last_observed_at_utc)
-            VALUES($session, $file, $epoch, $input, $cached, $cacheWrite, $output, $reasoning, $total, $event, $observed)
+                last_source_event_id, last_observed_at_utc, has_cumulative_baseline)
+            VALUES($session, $file, $epoch, $input, $cached, $cacheWrite, $output, $reasoning, $total, $event, $observed, $hasBaseline)
             ON CONFLICT(session_id) DO UPDATE SET
               source_file = excluded.source_file,
               counter_epoch = excluded.counter_epoch,
@@ -517,7 +554,8 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
               reasoning_output_tokens = excluded.reasoning_output_tokens,
               total_tokens = excluded.total_tokens,
               last_source_event_id = excluded.last_source_event_id,
-              last_observed_at_utc = excluded.last_observed_at_utc;
+              last_observed_at_utc = excluded.last_observed_at_utc,
+              has_cumulative_baseline = excluded.has_cumulative_baseline;
             """;
         upsertState.Parameters.AddWithValue("$session", observation.SessionId);
         upsertState.Parameters.AddWithValue("$file", BuildSafeFileLabel(nextState.SourceFile));
@@ -530,6 +568,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         upsertState.Parameters.AddWithValue("$total", nextState.TotalTokens);
         upsertState.Parameters.AddWithValue("$event", nextState.LastSourceEventId);
         upsertState.Parameters.AddWithValue("$observed", SerializeUtc(nextState.LastObservedAtUtc));
+        upsertState.Parameters.AddWithValue("$hasBaseline", nextState.HasCumulativeBaseline ? 1 : 0);
         await upsertState.ExecuteNonQueryAsync(cancellationToken);
 
         transaction.Commit();
@@ -943,7 +982,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
     private static async Task<int> InsertNativeTokenEventAsync(
         SqliteConnection connection,
         SqliteTransaction transaction,
-        CodexCumulativeTokenObservation observation,
+        CodexTokenCountObservation observation,
         int epoch,
         long uncachedInput,
         long cacheRead,

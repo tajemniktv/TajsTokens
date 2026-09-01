@@ -44,7 +44,7 @@ Incremental resumes restore the content-free parser metadata that existed at the
 
 ## Native shadow accounting
 
-`token_count.info.total_token_usage` is treated as a cumulative per-session counter stream, not a session lifetime scalar tied to one physical file. `last_token_usage` is retained as an optional per-turn snapshot and preferred for emitted increments when it is complete and consistent with the cumulative observation. TajsTokens persists the latest raw counters and epoch by session id, so archive/rotation paths do not restart lifetime accounting. Exact duplicates and small stale cumulative regressions are ignored; a clear aggregate drop starts a new epoch.
+`token_count.info.total_token_usage` is treated as an optional cumulative per-session watermark, not a session lifetime scalar tied to one physical file. `last_token_usage` is retained as an optional per-turn snapshot and preferred for emitted increments whenever it is complete and non-negative; it is deliberately not required to equal cumulative movement. TajsTokens persists the latest raw counters and epoch by session id, so archive/rotation paths do not restart lifetime accounting. Exact duplicates and Tokscale-style stale cumulative regressions are ignored; an otherwise unexplained drop starts a new epoch. Last-only rows remain countable and use a synthetic saturating watermark until a real cumulative snapshot is available.
 
 Persisted shadow buckets are disjoint:
 

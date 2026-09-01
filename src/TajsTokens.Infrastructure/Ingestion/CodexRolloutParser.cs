@@ -76,13 +76,16 @@ internal sealed partial class CodexRolloutParser
             var totalUsage = info.TryGetProperty("total_token_usage", out var totalElement) && totalElement.ValueKind == JsonValueKind.Object
                 ? totalElement
                 : default;
-            CodexCumulativeTokenObservation? tokenObservation = null;
-            if (totalUsage.ValueKind == JsonValueKind.Object)
+            var totalSnapshot = totalUsage.ValueKind == JsonValueKind.Object
+                ? ParseTokenUsageSnapshot(totalUsage)
+                : null;
+            var lastUsage = info.TryGetProperty("last_token_usage", out var lastElement) && lastElement.ValueKind == JsonValueKind.Object
+                ? ParseTokenUsageSnapshot(lastElement)
+                : null;
+            CodexTokenCountObservation? tokenObservation = null;
+            if (totalSnapshot is not null || lastUsage is not null)
             {
-                var lastUsage = info.TryGetProperty("last_token_usage", out var lastElement) && lastElement.ValueKind == JsonValueKind.Object
-                    ? ParseTokenUsageSnapshot(lastElement)
-                    : null;
-                tokenObservation = new CodexCumulativeTokenObservation(
+                tokenObservation = new CodexTokenCountObservation(
                     sourceRecordId,
                     state.FilePath,
                     state.OwnSessionId!,
@@ -90,12 +93,7 @@ internal sealed partial class CodexRolloutParser
                     timestamp,
                     state.CurrentModel,
                     state.ReasoningEffort,
-                    ReadLong(totalUsage, "input_tokens") ?? 0,
-                    ReadLong(totalUsage, "cached_input_tokens") ?? 0,
-                    ReadLong(totalUsage, "cache_write_input_tokens") ?? 0,
-                    ReadLong(totalUsage, "output_tokens") ?? 0,
-                    ReadLong(totalUsage, "reasoning_output_tokens") ?? 0,
-                    ReadLong(totalUsage, "total_tokens") ?? 0,
+                    totalSnapshot,
                     lastUsage);
             }
 
@@ -105,7 +103,7 @@ internal sealed partial class CodexRolloutParser
                 state.ContextWindowTokens = contextWindow;
             }
 
-            var lastInput = tokenObservation?.LastTokenUsage?.InputTokens;
+            var lastInput = lastUsage?.InputTokens;
 
             var context = lastInput is null && contextWindow is null
                 ? null
@@ -503,7 +501,7 @@ internal sealed record ParsedRolloutRecord(
     Agent? Agent,
     AgentRelationship? Relationship,
     UsageEvent? UsageEvent,
-    CodexCumulativeTokenObservation? TokenObservation,
+    CodexTokenCountObservation? TokenObservation,
     IReadOnlyList<QuotaSnapshot> QuotaSnapshots,
     CodexContextObservation? ContextObservation)
 {

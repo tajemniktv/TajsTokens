@@ -140,7 +140,7 @@ public sealed class SqliteCodexObservatoryReadModelTests
 
             var versionCommand = verify.CreateCommand();
             versionCommand.CommandText = "SELECT version FROM observatory_schema WHERE component = 'codex-observatory';";
-            Assert.Equal(3L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
+            Assert.Equal(4L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
 
             var indexCommand = verify.CreateCommand();
             indexCommand.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_native_tokens_observed_time';";
