@@ -13,6 +13,7 @@ FileSystemCodexSessionEventProvider
         |
         v
 CodexSessionIngestionService
+  typed-v3 normalization
   stable file identity + exact byte checkpoint
   matching content-free parser resume state
         |
