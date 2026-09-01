@@ -49,7 +49,8 @@ internal static class ExternalProcess
         using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutSource.CancelAfter(timeout);
 
-        using var process = new Process { StartInfo = CreateStartInfo(command, arguments) };
+        using var process = new Process();
+        process.StartInfo = CreateStartInfo(command, arguments);
         try
         {
             if (!process.Start())

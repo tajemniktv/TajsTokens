@@ -87,7 +87,6 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                 // A byte checkpoint without parser metadata cannot safely resume semantic parsing. A
                 // one-time replay from zero is cheaper than overwriting established agent/model state.
                 fromOffset = 0;
-                canResume = false;
                 resumeState = null;
             }
         }

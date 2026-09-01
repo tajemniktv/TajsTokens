@@ -389,8 +389,16 @@ public sealed class TelemetryCoordinator
         {
             return;
         }
-        catch
+        catch (OperationCanceledException)
         {
+            // A manual refresh intentionally supersedes an in-flight startup refresh.
+        }
+        catch (Exception exception)
+        {
+            _backgroundEvents.Enqueue(new TelemetryRefreshEvent(
+                DateTimeOffset.UtcNow,
+                "Startup refresh failed",
+                $"Periodic telemetry will retry. {SummarizeError(exception)}"));
         }
 
         using var timer = new PeriodicTimer(interval);
@@ -406,8 +414,16 @@ public sealed class TelemetryCoordinator
                 {
                     break;
                 }
-                catch
+                catch (OperationCanceledException)
                 {
+                    // Manual refreshes intentionally supersede interval refreshes; this is not a failure.
+                }
+                catch (Exception exception)
+                {
+                    _backgroundEvents.Enqueue(new TelemetryRefreshEvent(
+                        DateTimeOffset.UtcNow,
+                        "Periodic refresh failed",
+                        $"Telemetry will retry on the next interval. {SummarizeError(exception)}"));
                 }
             }
         }

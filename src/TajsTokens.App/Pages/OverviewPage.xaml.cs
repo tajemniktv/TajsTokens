@@ -51,16 +51,23 @@ public sealed partial class OverviewPage : Page
 
     private void OnSnapshotUpdated(TelemetrySnapshot snapshot)
     {
-        DispatcherQueue.TryEnqueue(async () =>
+        DispatcherQueue.TryEnqueue(() => _ = ApplySnapshotUpdateAsync(snapshot));
+    }
+
+    private async Task ApplySnapshotUpdateAsync(TelemetrySnapshot snapshot)
+    {
+        try
         {
-            try
-            {
-                await ViewModel.ApplySnapshotAsync(snapshot, CancellationToken.None);
-            }
-            catch (OperationCanceledException)
-            {
-                // Application shutdown/navigation can abandon a UI-only render safely.
-            }
-        });
+            await ViewModel.ApplySnapshotAsync(snapshot, CancellationToken.None);
+        }
+        catch (OperationCanceledException)
+        {
+            // Application shutdown/navigation can abandon a UI-only render safely.
+        }
+        catch (Exception exception)
+        {
+            var detail = exception.GetBaseException().Message.ReplaceLineEndings(" ").Trim();
+            ViewModel.StatusText = $"Snapshot render failed: {(detail.Length <= 240 ? detail : detail[..240] + "…")}";
+        }
     }
 }

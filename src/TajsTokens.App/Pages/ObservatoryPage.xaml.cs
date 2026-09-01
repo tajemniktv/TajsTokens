@@ -72,22 +72,31 @@ public sealed partial class ObservatoryPage : Page
             return;
         }
 
-        DispatcherQueue.TryEnqueue(async () =>
-        {
-            if (!_isLoaded || cancellation.IsCancellationRequested || !ReferenceEquals(_pageCancellation, cancellation))
-            {
-                return;
-            }
+        DispatcherQueue.TryEnqueue(() => _ = ApplySnapshotUpdateAsync(cancellation));
+    }
 
-            try
+    private async Task ApplySnapshotUpdateAsync(CancellationTokenSource cancellation)
+    {
+        if (!_isLoaded || cancellation.IsCancellationRequested || !ReferenceEquals(_pageCancellation, cancellation))
+        {
+            return;
+        }
+
+        try
+        {
+            await LoadAsync(cancellation.Token);
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            // A queued snapshot callback may outlive navigation; detached pages do no work.
+        }
+        catch (Exception exception)
+        {
+            if (_isLoaded && ReferenceEquals(_pageCancellation, cancellation))
             {
-                await LoadAsync(cancellation.Token);
+                StatusText.Text = $"Observatory refresh unavailable: {Summarize(exception.Message)}";
             }
-            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
-            {
-                // A queued snapshot callback may outlive navigation; detached pages do no work.
-            }
-        });
+        }
     }
 
     private async void OnRefreshClicked(object sender, RoutedEventArgs e)
