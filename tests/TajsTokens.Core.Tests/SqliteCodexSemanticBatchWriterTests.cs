@@ -6,12 +6,12 @@ using TajsTokens.Infrastructure.Persistence;
 
 namespace TajsTokens.Core.Tests;
 
-public sealed class SqliteCodexSemanticBatchWriterTests
+public sealed class SqliteCodexIngestionBatchWriterTests
 {
     [Fact]
-    public async Task WriteBatchAsync_PersistsProjectionBatchAndKeepsTokenReplayIdempotent()
+    public async Task WriteBatchAsync_PersistsSemanticAndStorageBatchAndKeepsTokenReplayIdempotent()
     {
-        var directory = Directory.CreateTempSubdirectory("tajstokens-semantic-batch-");
+        var directory = Directory.CreateTempSubdirectory("tajstokens-ingestion-batch-");
         var database = Path.Combine(directory.FullName, "telemetry.db");
         var sourcePath = Path.Combine(directory.FullName, "private", "rollout.jsonl");
 
@@ -21,7 +21,7 @@ public sealed class SqliteCodexSemanticBatchWriterTests
             await repository.InitializeAsync(CancellationToken.None);
             var observatory = new SqliteCodexObservatoryStore(database);
             await observatory.InitializeAsync(CancellationToken.None);
-            var writer = new SqliteCodexSemanticBatchWriter(database, observatory);
+            var writer = new SqliteCodexIngestionBatchWriter(database, observatory);
             var start = DateTimeOffset.Parse("2026-09-01T10:00:00Z");
 
             var first = BuildRecord(
@@ -43,8 +43,8 @@ public sealed class SqliteCodexSemanticBatchWriterTests
                 reasoning: 9,
                 usedPercent: 12);
 
-            await writer.WriteBatchAsync([first, second], CancellationToken.None);
-            await writer.WriteBatchAsync([first, second], CancellationToken.None);
+            await writer.WriteBatchAsync("source-1", sourcePath, 1_234, [first, second], CancellationToken.None);
+            await writer.WriteBatchAsync("source-1", sourcePath, 1_234, [first, second], CancellationToken.None);
 
             await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = database }.ToString());
             await connection.OpenAsync();
@@ -54,8 +54,16 @@ public sealed class SqliteCodexSemanticBatchWriterTests
             Assert.Equal(2L, await CountAsync(connection, "usage_events"));
             Assert.Equal(2L, await CountAsync(connection, "context_observations"));
             Assert.Equal(2L, await CountAsync(connection, "quota_snapshots"));
+            Assert.Equal(2L, await CountAsync(connection, "rollout_records"));
+            Assert.Equal(1L, await CountAsync(connection, "rollout_files"));
             Assert.Equal(2L, await CountAsync(connection, "codex_native_token_events"));
             Assert.Equal(1L, await CountAsync(connection, "codex_counter_state"));
+
+            var storage = Assert.Single(await observatory.GetRolloutStorageAsync(10, CancellationToken.None));
+            Assert.Equal("session-a", storage.SessionId);
+            Assert.Equal(1_234, storage.SizeBytes);
+            Assert.Equal(2, storage.RecordsSeen);
+            Assert.DoesNotContain(directory.FullName, storage.FilePath, StringComparison.OrdinalIgnoreCase);
 
             var totals = await observatory.GetSummaryAsync(CancellationToken.None);
             Assert.Equal(110, totals.NativeTokens.UncachedInput);
