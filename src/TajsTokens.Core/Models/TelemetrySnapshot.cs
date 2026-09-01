@@ -15,6 +15,7 @@ public sealed record TelemetrySnapshot(
     IReadOnlyList<TelemetryRefreshEvent> Events)
 {
     public IReadOnlyList<QuotaLaneState> QuotaLanes { get; init; } = [];
+    public IReadOnlyList<CurrentQuotaForecast> CurrentForecasts { get; init; } = [];
     public TokenAccountingGenerationState? TokenGeneration { get; init; }
 
     public static TelemetrySnapshot Empty { get; } = new(
@@ -41,4 +42,11 @@ public sealed record TelemetrySnapshot(
         QuotaLanes.Count == 0
             ? QuotaDataFresh
             : FindQuotaLane(snapshot)?.IsFresh == true;
+
+    public CurrentQuotaForecast? FindCurrentForecast(QuotaSnapshot snapshot) =>
+        CurrentForecasts.FirstOrDefault(item =>
+            item.Current.Kind == snapshot.Kind &&
+            string.Equals(item.Current.Provider, snapshot.Provider, StringComparison.Ordinal) &&
+            string.Equals(item.Current.Profile, snapshot.Profile, StringComparison.Ordinal) &&
+            item.Current.CapturedAtUtc == snapshot.CapturedAtUtc);
 }

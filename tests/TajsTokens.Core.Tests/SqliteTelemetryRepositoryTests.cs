@@ -24,7 +24,7 @@ public sealed class SqliteTelemetryRepositoryTests
     ];
 
     [Fact]
-    public async Task InitializeAsync_CreatesCompleteVersion5FoundationSchema()
+    public async Task InitializeAsync_CreatesCompleteVersion6FoundationSchema()
     {
         var directory = CreateTempDirectory();
         var path = Path.Combine(directory, "telemetry.db");
@@ -38,7 +38,7 @@ public sealed class SqliteTelemetryRepositoryTests
             {
                 await connection.OpenAsync();
 
-                Assert.Equal(5, await ReadSchemaVersionAsync(connection));
+                Assert.Equal(6, await ReadSchemaVersionAsync(connection));
                 var tables = await ReadTableNamesAsync(connection);
                 foreach (var expected in s_foundationTables)
                 {
@@ -89,7 +89,7 @@ public sealed class SqliteTelemetryRepositoryTests
             await using (var migrated = new SqliteConnection($"Data Source={path}"))
             {
                 await migrated.OpenAsync();
-                Assert.Equal(5, await ReadSchemaVersionAsync(migrated));
+                Assert.Equal(6, await ReadSchemaVersionAsync(migrated));
                 Assert.Contains("repositories", await ReadTableNamesAsync(migrated));
                 Assert.Contains("workspaces", await ReadTableNamesAsync(migrated));
                 Assert.Contains("forecast_snapshots", await ReadTableNamesAsync(migrated));
@@ -219,7 +219,10 @@ public sealed class SqliteTelemetryRepositoryTests
                     1.17,
                     22.5,
                     "accelerating",
-                    true));
+                    true),
+                "codex-app-server:codex",
+                QuotaObservationAuthority.ProviderAuthoritative,
+                now.AddMinutes(-1));
             await repository.UpsertForecastSnapshotAsync(snapshot, CancellationToken.None);
 
             var forecasts = await repository.GetRecentForecastSnapshotsAsync(

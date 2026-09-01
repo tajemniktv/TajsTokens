@@ -116,6 +116,9 @@ public sealed class TelemetryCoordinator
                 ? null
                 : previous.TokenGeneration with { State = TelemetryHealthState.Stale };
             var observatoryFresh = _observatoryService is null;
+            var currentForecasts = previous.CurrentForecasts
+                .Select(item => item with { State = TelemetryHealthState.Stale })
+                .ToArray();
 
             var quotaSnapshots = previous.QuotaSnapshots;
             var quotaLanes = BuildInitialQuotaLanes(previous);
@@ -227,7 +230,8 @@ public sealed class TelemetryCoordinator
                     scanSources,
                     scanEvents,
                     quotaLanes,
-                    tokenGeneration);
+                    tokenGeneration,
+                    currentForecasts);
 
                 observatoryTask = _observatoryService.RefreshAsync(refreshToken);
             }
@@ -378,6 +382,27 @@ public sealed class TelemetryCoordinator
                 events.Add(new TelemetryRefreshEvent(startedAt, "Token accounting unavailable", detail));
             }
 
+            if (persistenceAvailable && _intelligenceService is not null)
+            {
+                try
+                {
+                    currentForecasts = (await _intelligenceService.BuildAndPersistCurrentForecastsAsync(
+                        quotaLanes, DateTimeOffset.UtcNow, refreshToken)).ToArray();
+                    var liveForecasts = currentForecasts.Count(item => item.IsFresh && item.Forecast is not null);
+                    events.Add(new TelemetryRefreshEvent(
+                        DateTimeOffset.UtcNow,
+                        "Current forecasts",
+                        $"Built and persisted {liveForecasts} provider-anchored current forecast(s)."));
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    currentForecasts = previous.CurrentForecasts
+                        .Select(item => item with { State = TelemetryHealthState.Stale, Diagnostic = AppendDiagnostic(item.Diagnostic, SummarizeError(exception)) })
+                        .ToArray();
+                    events.Add(new TelemetryRefreshEvent(DateTimeOffset.UtcNow, "Forecast unavailable", SummarizeError(exception)));
+                }
+            }
+
             refreshToken.ThrowIfCancellationRequested();
             stopwatch.Stop();
             events.Add(new TelemetryRefreshEvent(
@@ -396,7 +421,8 @@ public sealed class TelemetryCoordinator
                 sources,
                 events,
                 quotaLanes,
-                tokenGeneration);
+                tokenGeneration,
+                currentForecasts);
 
             // Historical intelligence is derived from already-persisted normalized telemetry. Queue
             // it only after the final telemetry snapshot has been published, and never hold the
@@ -502,8 +528,8 @@ public sealed class TelemetryCoordinator
             var intelligence = await _intelligenceService.RefreshAsync(cancellationToken);
             _backgroundEvents.Enqueue(new TelemetryRefreshEvent(
                 DateTimeOffset.UtcNow,
-                "Phase 4 intelligence",
-                $"Persisted {intelligence.ForecastsPersisted} forecast snapshot(s); detected {intelligence.ResetEventsDetected} new reset/re-anchor event(s)."));
+                "Historical intelligence",
+                $"Detected {intelligence.ResetEventsDetected} new reset/re-anchor event(s); current forecasts are owned by the provider-anchored refresh path."));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -535,7 +561,8 @@ public sealed class TelemetryCoordinator
         IEnumerable<ProviderHealthSnapshot> sources,
         IEnumerable<TelemetryRefreshEvent> events,
         IReadOnlyList<QuotaLaneState> quotaLanes,
-        TokenAccountingGenerationState? tokenGeneration)
+        TokenAccountingGenerationState? tokenGeneration,
+        IReadOnlyList<CurrentQuotaForecast> currentForecasts)
     {
         var snapshot = new TelemetrySnapshot(
             DateTimeOffset.UtcNow,
@@ -550,6 +577,7 @@ public sealed class TelemetryCoordinator
             events.ToArray())
         {
             QuotaLanes = quotaLanes,
+            CurrentForecasts = currentForecasts,
             TokenGeneration = tokenGeneration
         };
 

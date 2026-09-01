@@ -14,9 +14,7 @@ public sealed partial class OverviewPage : Page
         InitializeComponent();
 
         _app = (App)Application.Current;
-        ViewModel = new OverviewViewModel(
-            _app.Services.Telemetry,
-            _app.Services.Repository);
+        ViewModel = new OverviewViewModel(_app.Services.Telemetry);
         DataContext = ViewModel;
 
         Loaded += OnLoaded;

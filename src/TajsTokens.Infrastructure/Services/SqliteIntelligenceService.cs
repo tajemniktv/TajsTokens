@@ -48,46 +48,86 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         await EnsureInitializedAsync(cancellationToken);
 
         var groups = await LoadRecentQuotaGroupsAsync(512, cancellationToken);
-        var forecastsPersisted = 0;
         var resetEventsDetected = 0;
-        var now = DateTimeOffset.UtcNow;
-
         foreach (var group in groups)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var ordered = group.OrderBy(snapshot => snapshot.CapturedAtUtc).ToArray();
-            if (ordered.Length == 0)
-            {
-                continue;
-            }
-
             foreach (var resetEvent in _resetDetector.Detect(ordered))
             {
                 resetEventsDetected += await _telemetryRepository.UpsertQuotaResetEventAsync(resetEvent, cancellationToken);
             }
+        }
 
-            var latest = ordered[^1];
-            if (latest.UsedPercent is null)
+        // Current forecasts are owned by BuildAndPersistCurrentForecastsAsync and anchored to the
+        // coordinator's provider-authoritative current lanes. Historical refresh must not recompute
+        // a competing "current" generation from whichever persisted sample happens to be newest.
+        return new IntelligenceRefreshResult(0, resetEventsDetected);
+    }
+
+    public async Task<IReadOnlyList<CurrentQuotaForecast>> BuildAndPersistCurrentForecastsAsync(
+        IReadOnlyList<QuotaLaneState> quotaLanes,
+        DateTimeOffset nowUtc,
+        CancellationToken cancellationToken)
+    {
+        await EnsureInitializedAsync(cancellationToken);
+        var results = new List<CurrentQuotaForecast>();
+        foreach (var lane in quotaLanes.Where(lane => lane.Snapshot is not null))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var current = lane.Snapshot!;
+            if (!lane.IsFresh)
             {
+                results.Add(new CurrentQuotaForecast(
+                    current, TelemetryHealthState.Stale, null,
+                    "Forecasting is paused until this quota lane is provider-fresh.",
+                    "Last-known-good quota is displayed without borrowing a forecast from another generation."));
                 continue;
             }
 
+            if (current.Authority != QuotaObservationAuthority.ProviderAuthoritative)
+            {
+                results.Add(new CurrentQuotaForecast(
+                    current, TelemetryHealthState.Unavailable, null,
+                    "Current forecasts require a provider-authoritative quota anchor.",
+                    $"Current source '{current.Source}' is not classified as provider-authoritative."));
+                continue;
+            }
+
+            var history = await _telemetryRepository.GetRecentQuotaSnapshotsAsync(
+                current.Kind, current.Provider, current.Profile, 512, cancellationToken);
+            var anchored = history
+                .Where(item => item.CapturedAtUtc <= current.CapturedAtUtc)
+                .GroupBy(item => item.CapturedAtUtc)
+                .Select(group => group
+                    .OrderByDescending(item => item.Authority)
+                    .First())
+                .Where(item => item.CapturedAtUtc != current.CapturedAtUtc)
+                .Append(current)
+                .OrderBy(item => item.CapturedAtUtc)
+                .ToArray();
+
             try
             {
-                var forecast = _forecasting.BuildForecast(ordered, now);
-                await _telemetryRepository.UpsertForecastSnapshotAsync(
-                    new ForecastSnapshot(latest.Provider, latest.Profile, forecast),
-                    cancellationToken);
-                forecastsPersisted++;
+                var forecast = _forecasting.BuildForecast(anchored, nowUtc);
+                var persisted = new ForecastSnapshot(
+                    current.Provider, current.Profile, forecast,
+                    current.Source, current.Authority, current.CapturedAtUtc);
+                await _telemetryRepository.UpsertForecastSnapshotAsync(persisted, cancellationToken);
+                results.Add(new CurrentQuotaForecast(
+                    current, TelemetryHealthState.Live, forecast,
+                    "Provider-authoritative current quota plus compatible persisted history no newer than the current anchor."));
             }
-            catch (ArgumentException)
+            catch (ArgumentException exception)
             {
-                // A live quota sample remains useful while a malformed/insufficient history group is
-                // ignored. Forecasting never gets to erase provider telemetry.
+                results.Add(new CurrentQuotaForecast(
+                    current, TelemetryHealthState.Live, null,
+                    "Provider-authoritative current quota; more compatible history is required.",
+                    exception.Message));
             }
         }
 
-        return new IntelligenceRefreshResult(forecastsPersisted, resetEventsDetected);
+        return results;
     }
 
     public async Task<IntelligenceDashboard> QueryAsync(
@@ -844,7 +884,8 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         command.CommandText = """
             SELECT provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
                    estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence,
-                   state, burn_pressure, projected_remaining_at_reset_percent, trend, is_quantized_flat
+                   state, burn_pressure, projected_remaining_at_reset_percent, trend, is_quantized_flat,
+                   quota_source, quota_authority, quota_captured_at_utc
             FROM forecast_snapshots
             WHERE kind = $kind AND generated_at_utc >= $from AND generated_at_utc <= $to
             ORDER BY generated_at_utc DESC
@@ -876,7 +917,10 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                     reader.IsDBNull(10) ? null : reader.GetDouble(10),
                     reader.IsDBNull(11) ? null : reader.GetDouble(11),
                     reader.IsDBNull(12) ? null : reader.GetString(12),
-                    !reader.IsDBNull(13) && reader.GetInt32(13) != 0)));
+                    !reader.IsDBNull(13) && reader.GetInt32(13) != 0),
+                reader.IsDBNull(14) ? null : reader.GetString(14),
+                reader.IsDBNull(15) || !Enum.TryParse<QuotaObservationAuthority>(reader.GetString(15), out var authority) ? QuotaObservationAuthority.Unknown : authority,
+                reader.IsDBNull(16) ? null : ParseUtc(reader.GetString(16))));
         }
         return results;
     }

@@ -8,7 +8,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 
 public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryRepository, ISessionIngestionCheckpointStore
 {
-    private const int CurrentSchemaVersion = 5;
+    private const int CurrentSchemaVersion = 6;
     private const int IntelligenceSchemaVersion = 1;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _intelligenceInitializeGate = new(1, 1);
@@ -172,6 +172,9 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                     projected_remaining_at_reset_percent REAL,
                     trend TEXT,
                     is_quantized_flat INTEGER NOT NULL DEFAULT 0,
+                    quota_source TEXT,
+                    quota_authority TEXT NOT NULL DEFAULT 'Unknown',
+                    quota_captured_at_utc TEXT,
                     PRIMARY KEY(provider, profile, kind, generated_at_utc)
                 );
 
@@ -184,7 +187,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 CREATE INDEX IF NOT EXISTS idx_forecast_snapshots_lookup
                     ON forecast_snapshots(provider, profile, kind, generated_at_utc DESC);
 
-                PRAGMA user_version = 5;
+                PRAGMA user_version = 6;
                 """, cancellationToken);
             return;
         }
@@ -267,6 +270,17 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 );
                 CREATE INDEX IF NOT EXISTS idx_agent_relationships_child ON agent_relationships(child_agent_id);
                 PRAGMA user_version = 5;
+                """, cancellationToken);
+            version = 5;
+        }
+
+        if (version == 5)
+        {
+            await ExecuteMigrationAsync(connection, """
+                ALTER TABLE forecast_snapshots ADD COLUMN quota_source TEXT;
+                ALTER TABLE forecast_snapshots ADD COLUMN quota_authority TEXT NOT NULL DEFAULT 'Unknown';
+                ALTER TABLE forecast_snapshots ADD COLUMN quota_captured_at_utc TEXT;
+                PRAGMA user_version = 6;
                 """, cancellationToken);
         }
     }
@@ -615,9 +629,11 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
             INSERT INTO forecast_snapshots(
                 provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
                 estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence,
-                state, burn_pressure, projected_remaining_at_reset_percent, trend, is_quantized_flat)
+                state, burn_pressure, projected_remaining_at_reset_percent, trend, is_quantized_flat,
+                quota_source, quota_authority, quota_captured_at_utc)
             VALUES($provider, $profile, $kind, $generated, $burnRate, $exhaustion, $survives, $sustainable, $confidence,
-                   $state, $pressure, $remainingAtReset, $trend, $quantizedFlat)
+                   $state, $pressure, $remainingAtReset, $trend, $quantizedFlat,
+                   $quotaSource, $quotaAuthority, $quotaCaptured)
             ON CONFLICT(provider, profile, kind, generated_at_utc) DO UPDATE SET
               burn_rate_percent_per_hour = excluded.burn_rate_percent_per_hour,
               estimated_exhaustion_at_utc = excluded.estimated_exhaustion_at_utc,
@@ -628,7 +644,10 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
               burn_pressure = excluded.burn_pressure,
               projected_remaining_at_reset_percent = excluded.projected_remaining_at_reset_percent,
               trend = excluded.trend,
-              is_quantized_flat = excluded.is_quantized_flat;
+              is_quantized_flat = excluded.is_quantized_flat,
+              quota_source = excluded.quota_source,
+              quota_authority = excluded.quota_authority,
+              quota_captured_at_utc = excluded.quota_captured_at_utc;
             """,
             cmd =>
             {
@@ -647,6 +666,9 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 cmd.Parameters.AddWithValue("$remainingAtReset", DbValue(forecast.ProjectedRemainingAtResetPercent));
                 cmd.Parameters.AddWithValue("$trend", DbValue(forecast.Trend));
                 cmd.Parameters.AddWithValue("$quantizedFlat", forecast.IsQuantizedFlat ? 1 : 0);
+                cmd.Parameters.AddWithValue("$quotaSource", DbValue(snapshot.QuotaSource));
+                cmd.Parameters.AddWithValue("$quotaAuthority", snapshot.QuotaAuthority.ToString());
+                cmd.Parameters.AddWithValue("$quotaCaptured", snapshot.QuotaCapturedAtUtc is null ? DBNull.Value : SerializeUtc(snapshot.QuotaCapturedAtUtc.Value));
             },
             cancellationToken);
 
@@ -705,7 +727,8 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
         command.CommandText = """
             SELECT provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
                    estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence,
-                   state, burn_pressure, projected_remaining_at_reset_percent, trend, is_quantized_flat
+                   state, burn_pressure, projected_remaining_at_reset_percent, trend, is_quantized_flat,
+                   quota_source, quota_authority, quota_captured_at_utc
             FROM forecast_snapshots
             WHERE kind = $kind AND provider = $provider AND profile = $profile
             ORDER BY generated_at_utc DESC
@@ -739,7 +762,10 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                     reader.IsDBNull(10) ? null : reader.GetDouble(10),
                     reader.IsDBNull(11) ? null : reader.GetDouble(11),
                     reader.IsDBNull(12) ? null : reader.GetString(12),
-                    !reader.IsDBNull(13) && reader.GetInt32(13) != 0)));
+                    !reader.IsDBNull(13) && reader.GetInt32(13) != 0),
+                reader.IsDBNull(14) ? null : reader.GetString(14),
+                reader.IsDBNull(15) || !Enum.TryParse<QuotaObservationAuthority>(reader.GetString(15), out var authority) ? QuotaObservationAuthority.Unknown : authority,
+                reader.IsDBNull(16) ? null : ParseUtc(reader.GetString(16))));
         }
 
         return results;

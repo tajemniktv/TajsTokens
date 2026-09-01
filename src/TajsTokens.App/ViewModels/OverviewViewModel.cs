@@ -5,8 +5,6 @@ using Microsoft.UI.Xaml.Controls;
 using TajsTokens.App.Models;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
-using TajsTokens.Core.Services;
-using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
 namespace TajsTokens.App.ViewModels;
@@ -14,8 +12,6 @@ namespace TajsTokens.App.ViewModels;
 public sealed partial class OverviewViewModel : ObservableObject
 {
     private readonly TelemetryCoordinator _telemetry;
-    private readonly SqliteTelemetryRepository _repository;
-    private readonly ForecastingService _forecastingService = new();
     private readonly SemaphoreSlim _applyGate = new(1, 1);
     private long _newestRequestedSnapshotTicks = DateTimeOffset.MinValue.UtcDateTime.Ticks;
 
@@ -42,10 +38,9 @@ public sealed partial class OverviewViewModel : ObservableObject
     public ObservableCollection<EventItem> RecentEvents { get; } = [];
     public IAsyncRelayCommand RefreshCommand { get; }
 
-    public OverviewViewModel(TelemetryCoordinator telemetry, SqliteTelemetryRepository repository)
+    public OverviewViewModel(TelemetryCoordinator telemetry)
     {
         _telemetry = telemetry;
-        _repository = repository;
         RefreshCommand = new AsyncRelayCommand(RefreshAsync);
     }
 
@@ -115,13 +110,13 @@ public sealed partial class OverviewViewModel : ObservableObject
                 RenderTokenUnavailable();
             }
 
-            await RenderQuotaAsync(QuotaWindowKind.FiveHour, snapshot, cancellationToken);
+            RenderQuota(QuotaWindowKind.FiveHour, snapshot);
             if (IsSuperseded(snapshotTicks))
             {
                 return;
             }
 
-            await RenderQuotaAsync(QuotaWindowKind.Weekly, snapshot, cancellationToken);
+            RenderQuota(QuotaWindowKind.Weekly, snapshot);
             if (IsSuperseded(snapshotTicks))
             {
                 return;
@@ -166,10 +161,7 @@ public sealed partial class OverviewViewModel : ObservableObject
     private bool IsSuperseded(long snapshotTicks) =>
         snapshotTicks < Volatile.Read(ref _newestRequestedSnapshotTicks);
 
-    private async Task RenderQuotaAsync(
-        QuotaWindowKind kind,
-        TelemetrySnapshot snapshot,
-        CancellationToken cancellationToken)
+    private void RenderQuota(QuotaWindowKind kind, TelemetrySnapshot snapshot)
     {
         var current = snapshot.QuotaSnapshots
             .Where(item => item.Kind == kind)
@@ -184,32 +176,8 @@ public sealed partial class OverviewViewModel : ObservableObject
         }
 
         var laneFresh = snapshot.IsQuotaSnapshotFresh(current);
-        Forecast? forecast = null;
-        if (snapshot.PersistenceAvailable && laneFresh)
-        {
-            try
-            {
-                var history = await _repository.GetRecentQuotaSnapshotsAsync(
-                    kind,
-                    current.Provider,
-                    current.Profile,
-                    96,
-                    cancellationToken);
-
-                try
-                {
-                    forecast = _forecastingService.BuildForecast(history, DateTimeOffset.UtcNow);
-                }
-                catch (ArgumentException)
-                {
-                }
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                AddEvent("History unavailable", $"Live quota is still shown: {SummarizeError(exception)}");
-            }
-        }
-
+        var currentForecast = snapshot.FindCurrentForecast(current);
+        var forecast = currentForecast is { IsFresh: true } ? currentForecast.Forecast : null;
         SetQuotaCard(kind, BuildQuotaCard(title, current, forecast, laneFresh));
     }
 

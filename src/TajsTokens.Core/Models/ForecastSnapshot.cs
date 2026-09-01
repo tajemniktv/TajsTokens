@@ -6,4 +6,7 @@ namespace TajsTokens.Core.Models;
 public sealed record ForecastSnapshot(
     string Provider,
     string Profile,
-    Forecast Forecast);
+    Forecast Forecast,
+    string? QuotaSource = null,
+    QuotaObservationAuthority QuotaAuthority = QuotaObservationAuthority.Unknown,
+    DateTimeOffset? QuotaCapturedAtUtc = null);
