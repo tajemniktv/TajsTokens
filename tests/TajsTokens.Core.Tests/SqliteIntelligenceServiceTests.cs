@@ -9,11 +9,39 @@ namespace TajsTokens.Core.Tests;
 public sealed class SqliteIntelligenceServiceTests
 {
     [Fact]
+    public async Task Query_OnFreshDatabase_InitializesBaseTelemetrySchema()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-intelligence-fresh-");
+        var database = Path.Combine(directory.FullName, "telemetry.db");
+
+        try
+        {
+            var repository = new SqliteTelemetryRepository(database);
+            var intelligence = new SqliteIntelligenceService(database, repository);
+            var now = DateTimeOffset.UtcNow;
+
+            var dashboard = await intelligence.QueryAsync(
+                new IntelligenceQuery(now.AddHours(-1), now, AnalyticsBucketSize.Hour, 24),
+                CancellationToken.None);
+
+            Assert.Empty(dashboard.UsageHistory);
+            Assert.Empty(dashboard.QuotaBurnIntervals);
+            Assert.Empty(dashboard.ResetEvents);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task RefreshAndQuery_PersistForecastsDetectResetAndCorrelateBurnIntervals()
     {
         var directory = Directory.CreateTempSubdirectory("tajstokens-intelligence-");
         var database = Path.Combine(directory.FullName, "telemetry.db");
-        var start = new DateTimeOffset(2026, 9, 1, 1, 0, 0, TimeSpan.Zero);
+        var observedNow = DateTimeOffset.UtcNow;
+        var start = observedNow.AddHours(-8);
 
         try
         {
@@ -67,7 +95,7 @@ public sealed class SqliteIntelligenceServiceTests
             Assert.True(refresh.ResetEventsDetected >= 1);
 
             var dashboard = await intelligence.QueryAsync(
-                new IntelligenceQuery(start.AddMinutes(-1), start.AddHours(11), AnalyticsBucketSize.Minute, 720),
+                new IntelligenceQuery(start.AddMinutes(-1), observedNow.AddMinutes(1), AnalyticsBucketSize.Minute, 720),
                 CancellationToken.None);
 
             Assert.NotEmpty(dashboard.UsageHistory);
@@ -89,6 +117,36 @@ public sealed class SqliteIntelligenceServiceTests
             Assert.Contains(detail.Contributors, item => item.SessionId == "root" && !item.IsSubagent);
             Assert.Contains(detail.Contributors, item => item.SessionId == "child" && item.IsSubagent);
             Assert.Contains("Estimated attribution", detail.Methodology, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Query_DoesNotCreateBurnIntervalWhenResetIdentityIsUnknown()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-intelligence-reset-");
+        var database = Path.Combine(directory.FullName, "telemetry.db");
+        var now = DateTimeOffset.UtcNow;
+
+        try
+        {
+            var repository = new SqliteTelemetryRepository(database);
+            var intelligence = new SqliteIntelligenceService(database, repository);
+            await repository.InitializeAsync(CancellationToken.None);
+
+            await repository.UpsertQuotaSnapshotAsync(QuotaWithoutReset(QuotaWindowKind.FiveHour, now.AddMinutes(-20), 10), CancellationToken.None);
+            await repository.UpsertQuotaSnapshotAsync(QuotaWithoutReset(QuotaWindowKind.FiveHour, now.AddMinutes(-10), 25), CancellationToken.None);
+
+            var dashboard = await intelligence.QueryAsync(
+                new IntelligenceQuery(now.AddHours(-1), now, AnalyticsBucketSize.Hour, 24),
+                CancellationToken.None);
+
+            Assert.Empty(dashboard.QuotaBurnIntervals);
+            Assert.All(dashboard.UsageHistory, bucket => Assert.Null(bucket.FiveHourQuotaDelta));
         }
         finally
         {
@@ -136,4 +194,18 @@ public sealed class SqliteIntelligenceServiceTests
             "codex",
             "default",
             source);
+
+    private static QuotaSnapshot QuotaWithoutReset(
+        QuotaWindowKind kind,
+        DateTimeOffset captured,
+        double used) =>
+        new(
+            kind,
+            captured,
+            used,
+            kind == QuotaWindowKind.FiveHour ? 300 : 10_080,
+            null,
+            "codex",
+            "default",
+            "fixture");
 }
