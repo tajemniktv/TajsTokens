@@ -1,7 +1,6 @@
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
 using TajsTokens.Core.Services;
-using TajsTokens.Infrastructure.Ingestion;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Providers;
 using TajsTokens.Infrastructure.Services;
@@ -9,8 +8,8 @@ using TajsTokens.Infrastructure.Services;
 namespace TajsTokens.App.Services;
 
 /// <summary>
-/// Process-lifetime composition root shared by the dashboard, tray, alert engine, and Phase 3 Codex
-/// observatory. Provider surfaces consume normalized local services instead of parsing files directly.
+/// Process-lifetime application composition root. Codex rollout reader/parser construction remains
+/// behind the Infrastructure observatory factory; UI surfaces consume only normalized interfaces.
 /// </summary>
 public sealed class AppServices
 {
@@ -33,13 +32,13 @@ public sealed class AppServices
         SettingsStore = new RuntimeSettingsStore(settingsPath);
         Settings = SettingsStore.Load();
         Repository = new SqliteTelemetryRepository(DatabasePath);
-        ObservatoryStore = new SqliteCodexObservatoryStore(DatabasePath);
         TokscaleProvider = new TokscaleProvider();
         CodexQuotaProvider = new CodexAppServerQuotaProvider();
 
-        var rolloutProvider = new FileSystemCodexSessionEventProvider();
-        CodexSessionIngestion = new CodexSessionIngestionService(rolloutProvider, Repository, ObservatoryStore);
-        CodexObservatory = new CodexObservatoryService(CodexSessionIngestion, ObservatoryStore);
+        var observatory = CodexObservatoryRuntimeFactory.Create(DatabasePath, Repository);
+        ObservatoryStore = observatory.Store;
+        CodexSessionIngestion = observatory.Ingestion;
+        CodexObservatory = observatory.Service;
 
         Telemetry = new TelemetryCoordinator(TokscaleProvider, CodexQuotaProvider, Repository, CodexObservatory);
         AlertEngine = new QuotaAlertEngine(Settings.LowQuotaThresholds);
@@ -50,7 +49,7 @@ public sealed class AppServices
     public RuntimeSettings Settings { get; private set; }
     public RuntimeSettingsStore SettingsStore { get; }
     public SqliteTelemetryRepository Repository { get; }
-    public SqliteCodexObservatoryStore ObservatoryStore { get; }
+    public ICodexObservatoryStore ObservatoryStore { get; }
     public ITokscaleProvider TokscaleProvider { get; }
     public ICodexQuotaProvider CodexQuotaProvider { get; }
     public ICodexSessionIngestionService CodexSessionIngestion { get; }
