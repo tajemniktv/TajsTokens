@@ -41,7 +41,13 @@ public sealed class AppServices
         CodexSessionIngestion = observatory.Ingestion;
         CodexObservatory = observatory.Service;
 
-        Telemetry = new TelemetryCoordinator(TokscaleProvider, CodexQuotaProvider, Repository, CodexObservatory);
+        Intelligence = new SqliteIntelligenceService(DatabasePath, Repository);
+        Telemetry = new TelemetryCoordinator(
+            TokscaleProvider,
+            CodexQuotaProvider,
+            Repository,
+            CodexObservatory,
+            Intelligence);
         AlertEngine = new QuotaAlertEngine(Settings.LowQuotaThresholds);
     }
 
@@ -56,6 +62,7 @@ public sealed class AppServices
     public ICodexQuotaProvider CodexQuotaProvider { get; }
     public ICodexSessionIngestionService CodexSessionIngestion { get; }
     public ICodexObservatoryService CodexObservatory { get; }
+    public IIntelligenceService Intelligence { get; }
     public TelemetryCoordinator Telemetry { get; }
     public QuotaAlertEngine AlertEngine { get; }
     public Exception? StartupPersistenceError { get; }
