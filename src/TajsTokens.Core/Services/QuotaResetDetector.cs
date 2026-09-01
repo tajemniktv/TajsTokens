@@ -66,6 +66,12 @@ public sealed class QuotaResetDetector
                         confidence = nearExpectedBoundary ? 0.8 : 0.68;
                         explanation = "Quota decreased materially while the provider changed the window identity outside the clean expected-reset pattern.";
                     }
+                    else if (drop >= 1)
+                    {
+                        classification = QuotaResetClassification.UnusualReset;
+                        confidence = 0.55;
+                        explanation = "Quota decreased slightly while the provider changed the window identity outside the expected boundary. The evidence is ambiguous, so it is not treated as a clean rolling-window re-anchor.";
+                    }
                     else if (current.ResetsAtUtc is DateTimeOffset currentReset &&
                              previous.ResetsAtUtc is DateTimeOffset previousReset &&
                              currentReset > previousReset)
@@ -97,7 +103,7 @@ public sealed class QuotaResetDetector
                     ? current.Source
                     : $"{previous.Source} → {current.Source}";
                 events.Add(new QuotaResetEvent(
-                    BuildEventId(previous, current, classification.Value),
+                    BuildEventId(previous, current),
                     current.Kind,
                     current.Provider,
                     current.Profile,
@@ -117,20 +123,17 @@ public sealed class QuotaResetDetector
         return events;
     }
 
-    private static string BuildEventId(
-        QuotaSnapshot previous,
-        QuotaSnapshot current,
-        QuotaResetClassification classification)
+    private static string BuildEventId(QuotaSnapshot previous, QuotaSnapshot current)
     {
+        // Event identity belongs to the observation pair, not its current interpretation. A provider
+        // correction or newly-arrived reset metadata should update this event instead of creating a
+        // second historical reset for the same adjacent observations.
         var material = string.Join('|',
             current.Provider,
             current.Profile,
             current.Kind,
             previous.CapturedAtUtc.ToUniversalTime().ToString("O"),
-            current.CapturedAtUtc.ToUniversalTime().ToString("O"),
-            previous.ResetsAtUtc?.ToUniversalTime().ToString("O") ?? "none",
-            current.ResetsAtUtc?.ToUniversalTime().ToString("O") ?? "none",
-            classification);
+            current.CapturedAtUtc.ToUniversalTime().ToString("O"));
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material))).ToLowerInvariant();
         return $"quota-reset-{hash[..24]}";
     }
