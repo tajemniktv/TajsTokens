@@ -12,8 +12,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: rolling-release
-  cancel-in-progress: true
+  group: rolling-release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -139,15 +139,25 @@ jobs:
         run: |
           set -euo pipefail
 
-          git fetch --force origin main:refs/remotes/origin/main
-          current_main="$(git rev-parse refs/remotes/origin/main)"
-          if [[ "$current_main" != "$GITHUB_SHA" ]]; then
-            echo "Skipping stale rolling publication: main=$current_main workflow=$GITHUB_SHA"
-            exit 0
-          fi
+          revalidate_main() {
+            git fetch --force origin main:refs/remotes/origin/main
+            current_main="$(git rev-parse refs/remotes/origin/main)"
+            if [[ "$current_main" != "$GITHUB_SHA" ]]; then
+              echo "Skipping stale rolling publication: main=$current_main workflow=$GITHUB_SHA"
+              exit 0
+            fi
+          }
+
+          # The workflow-level concurrency group is intentionally non-cancelling so publication
+          # cannot be interrupted halfway through and then finish out of order with a newer run.
+          revalidate_main
 
           git tag -f rolling "$GITHUB_SHA"
           git push --force origin refs/tags/rolling
+
+          # Main may have advanced while the tag was being updated. Do not mutate the public
+          # prerelease assets/notes unless this commit is still the current main commit.
+          revalidate_main
 
           notes="$(cat <<EOF
           Automated portable build from \`main\`.
