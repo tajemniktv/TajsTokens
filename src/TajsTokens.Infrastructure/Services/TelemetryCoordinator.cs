@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Interfaces;
@@ -7,8 +8,8 @@ using TajsTokens.Infrastructure.Persistence;
 namespace TajsTokens.Infrastructure.Services;
 
 /// <summary>
-/// Owns provider refresh serialization for the whole process. Dashboard, tray, alerts, and the
-/// Phase 3 rollout observatory consume one refresh cadence rather than creating competing loops.
+/// Owns provider refresh serialization for the whole process. Dashboard, tray, alerts, Observatory,
+/// and Phase 4 intelligence consume one refresh cadence rather than creating competing loops.
 /// </summary>
 public sealed class TelemetryCoordinator
 {
@@ -16,7 +17,10 @@ public sealed class TelemetryCoordinator
     private readonly ICodexQuotaProvider _quotaProvider;
     private readonly SqliteTelemetryRepository _repository;
     private readonly ICodexObservatoryService? _observatoryService;
+    private readonly IIntelligenceService? _intelligenceService;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private readonly SemaphoreSlim _intelligenceRefreshGate = new(1, 1);
+    private readonly ConcurrentQueue<TelemetryRefreshEvent> _backgroundEvents = new();
     private readonly object _activeRefreshSync = new();
     private CancellationTokenSource? _activeRefreshCancellation;
     private RefreshTrigger? _activeRefreshTrigger;
@@ -26,12 +30,14 @@ public sealed class TelemetryCoordinator
         ITokscaleProvider tokscaleProvider,
         ICodexQuotaProvider quotaProvider,
         SqliteTelemetryRepository repository,
-        ICodexObservatoryService? observatoryService = null)
+        ICodexObservatoryService? observatoryService = null,
+        IIntelligenceService? intelligenceService = null)
     {
         _tokscaleProvider = tokscaleProvider;
         _quotaProvider = quotaProvider;
         _repository = repository;
         _observatoryService = observatoryService;
+        _intelligenceService = intelligenceService;
     }
 
     public TelemetrySnapshot Latest => Volatile.Read(ref _latest);
@@ -73,8 +79,12 @@ public sealed class TelemetryCoordinator
             var startedAt = DateTimeOffset.UtcNow;
             var stopwatch = Stopwatch.StartNew();
             var previous = Latest;
-            var sources = new List<ProviderHealthSnapshot>(4);
+            var sources = new List<ProviderHealthSnapshot>(5);
             var events = new List<TelemetryRefreshEvent>();
+            while (_backgroundEvents.TryDequeue(out var backgroundEvent))
+            {
+                events.Add(backgroundEvent);
+            }
 
             var persistenceAvailable = false;
             try
@@ -275,7 +285,7 @@ public sealed class TelemetryCoordinator
                 "Refresh completed",
                 $"{trigger.ToString().ToLowerInvariant()} refresh finished in {stopwatch.Elapsed.TotalSeconds:0.0}s."));
 
-            return PublishSnapshot(
+            var publishedSnapshot = PublishSnapshot(
                 trigger,
                 tokenUsages,
                 hourlyBuckets,
@@ -285,6 +295,18 @@ public sealed class TelemetryCoordinator
                 persistenceAvailable,
                 sources,
                 events);
+
+            // Historical intelligence is derived from already-persisted normalized telemetry. Queue
+            // it only after the final telemetry snapshot has been published, and never hold the
+            // shared provider/Observatory refresh gate while the heavier history scan is running.
+            // A second request while one intelligence refresh is active is intentionally coalesced;
+            // the next normal telemetry cadence will derive any newer persisted observations.
+            if (persistenceAvailable && _intelligenceService is not null)
+            {
+                QueueIntelligenceRefresh(cancellationToken);
+            }
+
+            return publishedSnapshot;
         }
         finally
         {
@@ -340,6 +362,47 @@ public sealed class TelemetryCoordinator
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
+        }
+    }
+
+    private void QueueIntelligenceRefresh(CancellationToken cancellationToken)
+    {
+        _ = RefreshIntelligenceAsync(cancellationToken);
+    }
+
+    private async Task RefreshIntelligenceAsync(CancellationToken cancellationToken)
+    {
+        var entered = false;
+        try
+        {
+            entered = await _intelligenceRefreshGate.WaitAsync(0, cancellationToken);
+            if (!entered || _intelligenceService is null)
+            {
+                return;
+            }
+
+            var intelligence = await _intelligenceService.RefreshAsync(cancellationToken);
+            _backgroundEvents.Enqueue(new TelemetryRefreshEvent(
+                DateTimeOffset.UtcNow,
+                "Phase 4 intelligence",
+                $"Persisted {intelligence.ForecastsPersisted} forecast snapshot(s); detected {intelligence.ResetEventsDetected} new reset/re-anchor event(s)."));
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            _backgroundEvents.Enqueue(new TelemetryRefreshEvent(
+                DateTimeOffset.UtcNow,
+                "Intelligence unavailable",
+                $"Telemetry remains available; historical intelligence will retry. {SummarizeError(exception)}"));
+        }
+        finally
+        {
+            if (entered)
+            {
+                _intelligenceRefreshGate.Release();
+            }
         }
     }
 

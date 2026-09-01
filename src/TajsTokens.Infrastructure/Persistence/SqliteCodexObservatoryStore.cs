@@ -14,7 +14,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 /// </summary>
 public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObservatoryStore
 {
-    private const int ObservatorySchemaVersion = 2;
+    private const int ObservatorySchemaVersion = 3;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _initializeGate = new(1, 1);
     private volatile bool _initialized;
@@ -138,6 +138,8 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
 
                     CREATE INDEX IF NOT EXISTS idx_native_tokens_session_time
                         ON codex_native_token_events(session_id, observed_at_utc DESC);
+                    CREATE INDEX IF NOT EXISTS idx_native_tokens_observed_time
+                        ON codex_native_token_events(observed_at_utc DESC);
                     CREATE INDEX IF NOT EXISTS idx_context_session_time
                         ON context_observations(session_id, observed_at_utc DESC);
                     CREATE INDEX IF NOT EXISTS idx_rollout_records_identity
@@ -148,10 +150,10 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                         ON rollout_files(file_path);
 
                     INSERT INTO observatory_schema(component, version)
-                    VALUES('codex-observatory', 2)
+                    VALUES('codex-observatory', 3)
                     ON CONFLICT(component) DO UPDATE SET version = excluded.version;
                     """, cancellationToken);
-                version = 2;
+                version = 3;
             }
 
             if (version == 1)
@@ -245,6 +247,19 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
 
                     UPDATE observatory_schema
                     SET version = 2
+                    WHERE component = 'codex-observatory';
+                    """, cancellationToken);
+                version = 2;
+            }
+
+            if (version == 2)
+            {
+                await ExecuteMigrationAsync(connection, """
+                    CREATE INDEX IF NOT EXISTS idx_native_tokens_observed_time
+                        ON codex_native_token_events(observed_at_utc DESC);
+
+                    UPDATE observatory_schema
+                    SET version = 3
                     WHERE component = 'codex-observatory';
                     """, cancellationToken);
             }

@@ -22,9 +22,10 @@ public sealed partial class MainWindow : Window
         var pageType = page switch
         {
             "overview" => typeof(OverviewPage),
+            "usage" => typeof(UsagePage),
             "observatory" => typeof(ObservatoryPage),
-            "usage" => typeof(PlaceholderPage),
-            "forecasts" => typeof(PlaceholderPage),
+            "forecasts" => typeof(ForecastsPage),
+            "analytics" => typeof(AnalyticsPage),
             "diagnostics" => typeof(PlaceholderPage),
             "settings" => typeof(PlaceholderPage),
             _ => typeof(OverviewPage)
@@ -35,6 +36,7 @@ public sealed partial class MainWindow : Window
             "usage" => "Usage",
             "observatory" => "Codex Observatory",
             "forecasts" => "Forecasts",
+            "analytics" => "Analytics",
             "diagnostics" => "Diagnostics",
             "settings" => "Settings",
             _ => "Overview"
