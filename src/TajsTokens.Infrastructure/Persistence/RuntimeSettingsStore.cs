@@ -19,7 +19,9 @@ public sealed class RuntimeSettingsStore
         {
             if (!File.Exists(_path))
             {
-                return new RuntimeSettings();
+                var defaults = Normalize(new RuntimeSettings());
+                Save(defaults);
+                return defaults;
             }
 
             var json = File.ReadAllText(_path);
@@ -29,7 +31,7 @@ public sealed class RuntimeSettingsStore
         {
             // Settings must never be able to brick the telemetry shell. A corrupt or inaccessible
             // file falls back to safe defaults and can be replaced by the next successful save.
-            return new RuntimeSettings();
+            return Normalize(new RuntimeSettings());
         }
     }
 
@@ -49,6 +51,7 @@ public sealed class RuntimeSettingsStore
 
     internal static RuntimeSettings Normalize(RuntimeSettings settings) => settings with
     {
+        SchemaVersion = RuntimeSettings.CurrentSchemaVersion,
         PollIntervalSeconds = Math.Clamp(settings.PollIntervalSeconds, 15, 3600),
         LowQuotaThresholds = RuntimeSettings.NormalizeLowQuotaThresholds(settings.LowQuotaThresholds)
     };
