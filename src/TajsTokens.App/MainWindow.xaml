@@ -11,7 +11,7 @@
     <Grid>
         <NavigationView x:Name="AppNavigation"
                         IsBackButtonVisible="Collapsed"
-                        IsSettingsVisible="False"
+                        IsSettingsVisible="True"
                         PaneDisplayMode="LeftCompact"
                         SelectionChanged="OnNavigationSelectionChanged">
             <NavigationView.MenuItems>
