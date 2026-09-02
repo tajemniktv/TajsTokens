@@ -4,6 +4,8 @@ TajsTokens is a local-first native Windows application for **rich Codex observab
 
 The current focus is understanding and exposing what Codex already knows about its own activity: source state, projects, threads, turns, relationships, tools, logs, runtime metadata, usage-related observations, and other source-native structures where their semantics can be established safely from evidence.
 
+Local-first means users should be able to inspect the data their own Codex installation exposes without that data needing to leave the machine. Durable duplication and export are separate decisions: content-bearing source data does not automatically belong in TajsTokens' own database, and any export surface should make the boundary explicit and offer sanitization/redaction where appropriate.
+
 Possible future providers are a design consideration, not the current product scope. TajsTokens is intentionally **Codex-first, not Codex-shaped**: Codex can have a rich first-class model, while a future provider should be free to keep its own native concepts rather than being forced into Codex's schema.
 
 ## Architecture reset
