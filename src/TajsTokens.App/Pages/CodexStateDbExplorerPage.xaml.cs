@@ -77,6 +77,10 @@ public sealed partial class CodexStateDbExplorerPage : Page
             {
                 DatabaseComboBox.ItemsSource = candidates;
                 DatabaseComboBox.SelectedItem = selected;
+                var comparisonPath = (ComparisonComboBox.SelectedItem as CodexStateDatabaseCandidate)?.Path;
+                ComparisonComboBox.ItemsSource = candidates;
+                ComparisonComboBox.SelectedItem = candidates.FirstOrDefault(candidate =>
+                    string.Equals(candidate.Path, comparisonPath, StringComparison.OrdinalIgnoreCase));
             }
             finally
             {
@@ -156,6 +160,110 @@ public sealed partial class CodexStateDbExplorerPage : Page
             if (CanApply(generation, cancellation))
             {
                 StatusText.Text = $"State DB inspection unavailable: {Summarize(exception.Message)}";
+            }
+        }
+    }
+
+    private async void OnCompareClicked(object sender, RoutedEventArgs e)
+    {
+        var current = _inspection;
+        var comparison = ComparisonComboBox.SelectedItem as CodexStateDatabaseCandidate;
+        var cancellation = _cancellation;
+        if (current is null || comparison is null || cancellation is null || cancellation.IsCancellationRequested)
+        {
+            ComparisonText.Text = current is null
+                ? "Inspect a database before comparing source instances or snapshots."
+                : "Select another source instance or snapshot to compare.";
+            return;
+        }
+
+        var generation = Interlocked.Increment(ref _loadGeneration);
+        try
+        {
+            StatusText.Text = $"Comparing {Path.GetFileName(current.Database.Path)} with {Path.GetFileName(comparison.Path)}…";
+            var other = await Task.Run(
+                () => App.Services.CodexStateExplorer.InspectAsync(comparison.Path, cancellation.Token),
+                cancellation.Token);
+            if (!CanApply(generation, cancellation))
+            {
+                return;
+            }
+
+            var diff = CodexStateDbExplorerService.Compare(current.Snapshot, other.Snapshot);
+            ComparisonDiffList.ItemsSource = diff.Tables;
+            var schemaSummary = diff.SchemaChanged
+                ? $"schema changed ({ShortFingerprint(diff.BaselineSchemaFingerprint)} → {ShortFingerprint(diff.CurrentSchemaFingerprint)})"
+                : $"schema identical ({ShortFingerprint(diff.CurrentSchemaFingerprint)})";
+            ComparisonText.Text =
+                $"{current.Database.Path} ↔ {other.Database.Path} · {schemaSummary} · " +
+                (diff.HasChanges
+                    ? $"{diff.Tables.Count:N0} table/row difference(s) observed."
+                    : "no table or bounded row differences observed.");
+            StatusText.Text = "Source comparison complete; no source database was modified.";
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            if (CanApply(generation, cancellation))
+            {
+                ComparisonText.Text = $"Source comparison unavailable: {Summarize(exception.Message)}";
+                ComparisonDiffList.ItemsSource = Array.Empty<CodexStateTableDiff>();
+                StatusText.Text = ComparisonText.Text;
+            }
+        }
+    }
+
+    private async void OnTraceClicked(object sender, RoutedEventArgs e)
+    {
+        var columnName = TraceColumnTextBox.Text?.Trim();
+        var value = TraceValueTextBox.Text?.Trim();
+        var cancellation = _cancellation;
+        if (string.IsNullOrWhiteSpace(columnName) || string.IsNullOrWhiteSpace(value))
+        {
+            TraceStatusText.Text = "Enter an exact source column name and value first.";
+            return;
+        }
+
+        if (!_loaded || cancellation is null || cancellation.IsCancellationRequested)
+        {
+            return;
+        }
+
+        var generation = Interlocked.Increment(ref _loadGeneration);
+        try
+        {
+            TraceStatusText.Text = $"Searching discovered stores for exact {columnName}={value}…";
+            var candidates = await Task.Run(
+                () => App.Services.CodexStateExplorer.DiscoverCandidates(),
+                cancellation.Token);
+            var result = await Task.Run(
+                () => App.Services.CodexStateExplorer.TraceKeyAsync(
+                    candidates.Select(candidate => candidate.Path),
+                    columnName,
+                    value,
+                    cancellationToken: cancellation.Token),
+                cancellation.Token);
+            if (!CanApply(generation, cancellation))
+            {
+                return;
+            }
+
+            TraceList.ItemsSource = result.Matches;
+            TraceStatusText.Text = $"{result.Summary} across {candidates.Count:N0} discovered store(s).";
+            StatusText.Text = "Source-native key trace complete; no joins or source mutations were performed.";
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            if (CanApply(generation, cancellation))
+            {
+                TraceList.ItemsSource = Array.Empty<CodexStateKeyTraceMatch>();
+                TraceStatusText.Text = $"Key trace unavailable: {Summarize(exception.Message)}";
+                StatusText.Text = TraceStatusText.Text;
             }
         }
     }
@@ -385,7 +493,7 @@ public sealed partial class CodexStateDbExplorerPage : Page
 
         _baseline = _inspection.Snapshot;
         DiffList.ItemsSource = Array.Empty<CodexStateTableDiff>();
-        BaselineText.Text = $"Baseline captured {_baseline.CapturedAtUtc.ToLocalTime():g} · {_baseline.Tables.Count:N0} tables. Refresh to compare table schemas and bounded row fingerprints.";
+        BaselineText.Text = $"Baseline captured {_baseline.CapturedAtUtc.ToLocalTime():g} · {_baseline.Tables.Count:N0} tables · schema {ShortFingerprint(_baseline.SchemaFingerprint)}. Refresh to compare table schemas and bounded row fingerprints.";
         StatusText.Text = "Baseline captured in memory only; no inspection data was persisted.";
     }
 
@@ -547,6 +655,7 @@ public sealed partial class CodexStateDbExplorerPage : Page
         FocusedTableComboBox.ItemsSource = inspection.FocusedTables;
         TableCountText.Text = $"{inspection.Tables.Count:N0} objects · {inspection.Database.FileName}";
         DatabasePathText.Text = inspection.Database.Path;
+        SchemaFingerprintText.Text = $"Schema fingerprint: {inspection.Snapshot.SchemaFingerprint}";
 
         var selectedTable = inspection.Tables.FirstOrDefault(table =>
             string.Equals(table.Name, selectedTableName, StringComparison.OrdinalIgnoreCase))
@@ -566,9 +675,12 @@ public sealed partial class CodexStateDbExplorerPage : Page
         {
             var diff = CodexStateDbExplorerService.Compare(_baseline, inspection.Snapshot);
             DiffList.ItemsSource = diff.Tables;
+            var schemaSummary = diff.SchemaChanged
+                ? $"schema changed ({ShortFingerprint(diff.BaselineSchemaFingerprint)} → {ShortFingerprint(diff.CurrentSchemaFingerprint)})"
+                : $"schema unchanged ({ShortFingerprint(diff.CurrentSchemaFingerprint)})";
             BaselineText.Text = diff.HasChanges
-                ? $"Compared with baseline from {diff.BaselineCapturedAtUtc.ToLocalTime():g}: {diff.Tables.Count:N0} changed/added/removed table(s)."
-                : $"Compared with baseline from {diff.BaselineCapturedAtUtc.ToLocalTime():g}: no table or row changes observed.";
+                ? $"Compared with baseline from {diff.BaselineCapturedAtUtc.ToLocalTime():g}: {schemaSummary} · {diff.Tables.Count:N0} changed/added/removed table(s)."
+                : $"Compared with baseline from {diff.BaselineCapturedAtUtc.ToLocalTime():g}: {schemaSummary} · no table or row changes observed.";
         }
         else if (_baseline is not null)
         {
@@ -582,10 +694,15 @@ public sealed partial class CodexStateDbExplorerPage : Page
     private void ClearInspection(string message)
     {
         DatabasePathText.Text = "No database selected";
+        SchemaFingerprintText.Text = "Schema fingerprint: —";
         TableCountText.Text = "0 objects";
         TableList.ItemsSource = Array.Empty<CodexStateTableInfo>();
         FocusedTableComboBox.ItemsSource = Array.Empty<CodexStateTableInfo>();
         DiffList.ItemsSource = Array.Empty<CodexStateTableDiff>();
+        ComparisonDiffList.ItemsSource = Array.Empty<CodexStateTableDiff>();
+        ComparisonText.Text = "Select another source instance or snapshot, then compare its raw schema and bounded row observations.";
+        TraceList.ItemsSource = Array.Empty<CodexStateKeyTraceMatch>();
+        TraceStatusText.Text = "No trace run yet.";
         ClearTableDetail();
         StatusText.Text = message;
     }
@@ -629,4 +746,9 @@ public sealed partial class CodexStateDbExplorerPage : Page
     }
 
     private static string Summarize(string message) => message.ReplaceLineEndings(" ").Trim();
+
+    private static string ShortFingerprint(string fingerprint) =>
+        string.IsNullOrWhiteSpace(fingerprint)
+            ? "unavailable"
+            : fingerprint.Length <= 12 ? fingerprint : fingerprint[..12];
 }

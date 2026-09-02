@@ -39,7 +39,13 @@ public sealed record CodexStateTableInfo(
     IReadOnlyList<CodexStateColumnInfo> Columns,
     IReadOnlyList<CodexStateIndexInfo> Indexes)
 {
+    public string SchemaFingerprint { get; init; } = string.Empty;
+
     public string RowCountSummary => RowCount < 0 ? "Row count unavailable" : $"{RowCount:N0} rows";
+
+    public string SchemaFingerprintSummary => string.IsNullOrWhiteSpace(SchemaFingerprint)
+        ? "Schema fingerprint unavailable"
+        : $"Schema {SchemaFingerprint[..Math.Min(12, SchemaFingerprint.Length)]}…";
 
     public string ColumnSummary => Columns.Count == 0
         ? "(no declared columns)"
@@ -86,6 +92,12 @@ public sealed record CodexStateInspectionSnapshot(
     DateTimeOffset CapturedAtUtc,
     IReadOnlyList<CodexStateTableSnapshot> Tables)
 {
+    /// <summary>
+    /// A deterministic fingerprint of the discovered sqlite_master objects and their declared
+    /// columns/indexes. It intentionally excludes row content.
+    /// </summary>
+    public string SchemaFingerprint { get; init; } = string.Empty;
+
     public IReadOnlyDictionary<string, CodexStateTableSnapshot> ByName =>
         Tables.ToDictionary(table => table.Name, StringComparer.OrdinalIgnoreCase);
 }
@@ -95,6 +107,8 @@ public sealed record CodexStateInspectionResult(
     IReadOnlyList<CodexStateTableInfo> Tables,
     CodexStateInspectionSnapshot Snapshot)
 {
+    public string SchemaFingerprint => Snapshot.SchemaFingerprint;
+
     public IReadOnlyList<CodexStateTableInfo> FocusedTables => Tables
         .Where(table => CodexStateDbExplorerService.IsInterestingTable(table.Name))
         .ToArray();
@@ -123,5 +137,70 @@ public sealed record CodexStateInspectionDiff(
     DateTimeOffset ComparedAtUtc,
     IReadOnlyList<CodexStateTableDiff> Tables)
 {
-    public bool HasChanges => Tables.Count > 0;
+    public string BaselineDatabasePath { get; init; } = string.Empty;
+
+    public string CurrentDatabasePath { get; init; } = string.Empty;
+
+    public string BaselineSchemaFingerprint { get; init; } = string.Empty;
+
+    public string CurrentSchemaFingerprint { get; init; } = string.Empty;
+
+    public bool SchemaChanged => !string.Equals(
+        BaselineSchemaFingerprint,
+        CurrentSchemaFingerprint,
+        StringComparison.Ordinal);
+
+    public bool HasChanges => SchemaChanged || Tables.Count > 0;
+}
+
+/// <summary>
+/// A raw match for an exact source-native column/value lookup. This is deliberately not a
+/// relationship or domain object: each match remains tied to its originating database object.
+/// </summary>
+public sealed record CodexStateKeyTraceMatch(
+    string DatabasePath,
+    string SourceDescription,
+    string TableName,
+    string ColumnName,
+    IReadOnlyList<string> Columns,
+    IReadOnlyList<object?> Values)
+{
+    public string SourceTableSummary =>
+        $"{Path.GetFileName(DatabasePath)} · {TableName} · {ColumnName}";
+
+    public string ColumnSummary => string.Join("  |  ", Columns);
+
+    public string DisplayText => string.Join(
+        "  |  ",
+        Values.Select(CodexStateDbExplorerService.FormatRawValue));
+}
+
+public sealed record CodexStateKeyTraceResult(
+    string ColumnName,
+    string Value,
+    IReadOnlyList<CodexStateKeyTraceMatch> Matches)
+{
+    public IReadOnlyList<string> UnavailableSources { get; init; } = Array.Empty<string>();
+
+    public bool MayBeTruncated { get; init; }
+
+    public bool HasMatches => Matches.Count > 0;
+
+    public string Summary
+    {
+        get
+        {
+            var summary = HasMatches
+                ? $"{Matches.Count:N0} exact source matches for {ColumnName}={Value}"
+                : $"No exact source matches for {ColumnName}={Value}";
+            if (MayBeTruncated)
+            {
+                summary += "; result limit reached (matches may be omitted)";
+            }
+
+            return UnavailableSources.Count == 0
+                ? summary
+                : $"{summary}; {UnavailableSources.Count:N0} source/object lookup(s) unavailable";
+        }
+    }
 }

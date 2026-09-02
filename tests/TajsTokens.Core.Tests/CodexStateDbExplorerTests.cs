@@ -28,6 +28,7 @@ public sealed class CodexStateDbExplorerTests
             Assert.Contains(threads.Columns, column => column.Name == "prompt");
             Assert.Contains(threads.Indexes, index => index.Name == "idx_threads_model");
             Assert.Contains(result.FocusedTables, table => table.Name == "threads");
+            Assert.Matches("^[0-9A-F]{64}$", result.Snapshot.SchemaFingerprint);
             Assert.True(CodexStateDbExplorerService.IsInterestingTable("logs"));
             Assert.True(CodexStateDbExplorerService.IsInterestingTable("thread_turn_summaries"));
         }
@@ -137,6 +138,7 @@ public sealed class CodexStateDbExplorerTests
             var changed = Assert.Single(diff.Tables, table => table.Name == "threads");
             Assert.True(changed.RowsChanged);
             Assert.False(changed.SchemaChanged);
+            Assert.False(diff.SchemaChanged);
             Assert.Equal(2, changed.PreviousRowCount);
             Assert.Equal(2, changed.CurrentRowCount);
         }
@@ -185,10 +187,81 @@ public sealed class CodexStateDbExplorerTests
 
             Assert.Contains($"-- SOURCE: {Path.GetFullPath(firstPath)}", export);
             Assert.Contains($"-- SOURCE: {Path.GetFullPath(secondPath)}", export);
+            Assert.Contains($"-- SCHEMA FINGERPRINT: {first.Snapshot.SchemaFingerprint}", export);
             Assert.Contains("CREATE TABLE threads", export);
             Assert.Contains("-- COLUMN 0: id TEXT", export);
             Assert.DoesNotContain("prompt one", export);
             Assert.DoesNotContain("thread-1", export);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Compare_ReportsSchemaFingerprintAndCrossSourceChanges()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-db-schema-diff-");
+        try
+        {
+            var firstPath = Path.Combine(directory.FullName, "state_5.sqlite");
+            var secondPath = Path.Combine(directory.FullName, "state_6.sqlite");
+            await CreateDatabaseAsync(firstPath);
+            File.Copy(firstPath, secondPath);
+            await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = secondPath }.ToString()))
+            {
+                await connection.OpenAsync();
+                var alter = connection.CreateCommand();
+                alter.CommandText = "ALTER TABLE threads ADD COLUMN source_marker TEXT;";
+                await alter.ExecuteNonQueryAsync();
+            }
+
+            var explorer = new CodexStateDbExplorerService(directory.FullName);
+            var first = await explorer.InspectAsync(firstPath, includeRowFingerprints: false);
+            var second = await explorer.InspectAsync(secondPath, includeRowFingerprints: false);
+            var diff = CodexStateDbExplorerService.Compare(first.Snapshot, second.Snapshot);
+
+            Assert.NotEqual(first.Snapshot.SchemaFingerprint, second.Snapshot.SchemaFingerprint);
+            Assert.True(diff.SchemaChanged);
+            Assert.Equal(firstPath, diff.BaselineDatabasePath);
+            Assert.Equal(secondPath, diff.CurrentDatabasePath);
+            Assert.Contains(diff.Tables, table => table.Name == "threads" && table.SchemaChanged);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task TraceKey_SearchesExactSourceColumnAcrossDatabasesWithoutJoining()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-db-trace-");
+        try
+        {
+            var firstPath = Path.Combine(directory.FullName, "state_5.sqlite");
+            var secondPath = Path.Combine(directory.FullName, "queue_1_snapshot.sqlite");
+            await CreateDatabaseAsync(firstPath);
+            await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = secondPath }.ToString()))
+            {
+                await connection.OpenAsync();
+                var schema = connection.CreateCommand();
+                schema.CommandText = "CREATE TABLE queue_items(thread_id TEXT, state TEXT); INSERT INTO queue_items VALUES ('thread-2', 'queued'), ('other', 'ignored');";
+                await schema.ExecuteNonQueryAsync();
+            }
+
+            var explorer = new CodexStateDbExplorerService(directory.FullName);
+            var trace = await explorer.TraceKeyAsync([firstPath, secondPath], "thread_id", "thread-2");
+
+            var match = Assert.Single(trace.Matches);
+            Assert.Equal(Path.GetFullPath(secondPath), match.DatabasePath);
+            Assert.Equal("queue_items", match.TableName);
+            Assert.Equal("thread_id", match.ColumnName);
+            Assert.Contains("thread-2", match.DisplayText);
+            Assert.DoesNotContain(trace.Matches, candidate => candidate.TableName == "threads");
         }
         finally
         {

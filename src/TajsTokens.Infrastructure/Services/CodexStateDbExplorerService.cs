@@ -103,7 +103,8 @@ public sealed class CodexStateDbExplorerService
             var indexes = await ReadIndexesAsync(connection, tableName, cancellationToken);
             var rowCount = await TryReadRowCountAsync(connection, tableName, cancellationToken);
 
-            tables.Add(new CodexStateTableInfo(tableName, objectType, sql, rowCount, columns, indexes));
+            var table = new CodexStateTableInfo(tableName, objectType, sql, rowCount, columns, indexes);
+            tables.Add(table with { SchemaFingerprint = FingerprintSchema(table) });
         }
 
         var snapshots = new List<CodexStateTableSnapshot>(tables.Count);
@@ -111,7 +112,7 @@ public sealed class CodexStateDbExplorerService
         foreach (var table in tables)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var schemaFingerprint = FingerprintSchema(table);
+            var schemaFingerprint = table.SchemaFingerprint;
             var rowFingerprint = includeRowFingerprints
                 ? await ComputeRowFingerprintAsync(
                     connection,
@@ -127,13 +128,15 @@ public sealed class CodexStateDbExplorerService
                 rowFingerprint));
         }
 
-        return new CodexStateInspectionResult(
-            candidate,
-            tables,
-            new CodexStateInspectionSnapshot(
-                candidate.Path,
-                DateTimeOffset.UtcNow,
-                snapshots));
+        var snapshot = new CodexStateInspectionSnapshot(
+            candidate.Path,
+            DateTimeOffset.UtcNow,
+            snapshots)
+        {
+            SchemaFingerprint = ComputeSchemaFingerprint(snapshots)
+        };
+
+        return new CodexStateInspectionResult(candidate, tables, snapshot);
     }
 
     public async Task<CodexStateRawPage> ReadPageAsync(
@@ -198,6 +201,141 @@ public sealed class CodexStateDbExplorerService
             rows);
     }
 
+    /// <summary>
+    /// Searches the supplied source files for an exact column name and exact value. The query is
+    /// intentionally per-object and unjoined: a match is evidence from that source object only,
+    /// not an inferred relationship between databases or tables.
+    /// </summary>
+    public async Task<CodexStateKeyTraceResult> TraceKeyAsync(
+        IEnumerable<string> databasePaths,
+        string columnName,
+        string value,
+        int maxMatches = 200,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(databasePaths);
+        ArgumentException.ThrowIfNullOrWhiteSpace(columnName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(value);
+        maxMatches = Math.Clamp(maxMatches, 1, 5_000);
+
+        var matches = new List<CodexStateKeyTraceMatch>();
+        var unavailable = new List<string>();
+        var paths = databasePaths
+            .Where(path => !string.IsNullOrWhiteSpace(path))
+            .Select(Path.GetFullPath)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        foreach (var databasePath in paths)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            CodexStateInspectionResult inspection;
+            try
+            {
+                // Schema-only inspection avoids scanning content-heavy source tables twice.
+                inspection = await InspectAsync(
+                    databasePath,
+                    includeRowFingerprints: false,
+                    cancellationToken: cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception) when (exception is SqliteException or IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+            {
+                // A single unavailable/corrupt source must not hide matches from the other
+                // discovered stores. Preserve the failure as source evidence for the caller.
+                unavailable.Add($"{databasePath}: {exception.Message.ReplaceLineEndings(" ").Trim()}");
+                continue;
+            }
+
+            var matchingTables = inspection.Tables
+                .Where(table => table.Columns.Any(column =>
+                    string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase)))
+                .ToArray();
+            if (matchingTables.Length == 0)
+            {
+                continue;
+            }
+
+            SqliteConnection connection;
+            try
+            {
+                connection = await OpenReadOnlyAsync(databasePath, cancellationToken);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception exception) when (exception is SqliteException or IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+            {
+                unavailable.Add($"{databasePath}: {exception.Message.ReplaceLineEndings(" ").Trim()}");
+                continue;
+            }
+
+            await using (connection)
+            {
+                foreach (var table in matchingTables)
+                {
+                    if (matches.Count >= maxMatches)
+                    {
+                        break;
+                    }
+
+                    var sourceColumn = table.Columns.First(column =>
+                        string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase));
+                    await using var command = connection.CreateCommand();
+                    command.CommandText = $"SELECT * FROM {QuoteIdentifier(table.Name)} WHERE {QuoteIdentifier(sourceColumn.Name)} = $value LIMIT $limit;";
+                    command.Parameters.AddWithValue("$value", value);
+                    command.Parameters.AddWithValue("$limit", maxMatches - matches.Count);
+
+                    try
+                    {
+                        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                        var columns = Enumerable.Range(0, reader.FieldCount)
+                            .Select(reader.GetName)
+                            .ToArray();
+                        while (await reader.ReadAsync(cancellationToken))
+                        {
+                            var values = new object?[reader.FieldCount];
+                            for (var index = 0; index < reader.FieldCount; index++)
+                            {
+                                values[index] = reader.IsDBNull(index) ? null : reader.GetValue(index);
+                            }
+
+                            matches.Add(new CodexStateKeyTraceMatch(
+                                inspection.Database.Path,
+                                inspection.Database.SourceDescription,
+                                table.Name,
+                                sourceColumn.Name,
+                                columns,
+                                values));
+                            if (matches.Count >= maxMatches)
+                            {
+                                break;
+                            }
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception exception) when (exception is SqliteException or IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+                    {
+                        unavailable.Add($"{databasePath} · {table.Name}: {exception.Message.ReplaceLineEndings(" ").Trim()}");
+                    }
+                }
+            }
+        }
+
+        return new CodexStateKeyTraceResult(columnName, value, matches)
+        {
+            UnavailableSources = unavailable,
+            MayBeTruncated = matches.Count >= maxMatches
+        };
+    }
+
     public static CodexStateInspectionDiff Compare(
         CodexStateInspectionSnapshot baseline,
         CodexStateInspectionSnapshot current)
@@ -243,7 +381,30 @@ public sealed class CodexStateDbExplorerService
         return new CodexStateInspectionDiff(
             baseline.CapturedAtUtc,
             current.CapturedAtUtc,
-            diffs);
+            diffs)
+        {
+            BaselineDatabasePath = baseline.DatabasePath,
+            CurrentDatabasePath = current.DatabasePath,
+            BaselineSchemaFingerprint = baseline.SchemaFingerprint,
+            CurrentSchemaFingerprint = current.SchemaFingerprint
+        };
+    }
+
+    /// <summary>
+    /// Computes a database-level schema fingerprint from sorted source-object fingerprints. Row
+    /// observations are deliberately excluded so the value changes only when schema metadata does.
+    /// </summary>
+    public static string ComputeSchemaFingerprint(
+        IEnumerable<CodexStateTableSnapshot> tables)
+    {
+        ArgumentNullException.ThrowIfNull(tables);
+        var material = string.Join(
+            "\n",
+            tables
+                .OrderBy(table => table.Name, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(table => table.ObjectType, StringComparer.Ordinal)
+                .Select(table => $"{table.ObjectType}|{table.Name}|{table.SchemaFingerprint}"));
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material)));
     }
 
     /// <summary>
@@ -289,6 +450,7 @@ public sealed class CodexStateDbExplorerService
             builder.AppendLine($"-- SOURCE: {inspection.Database.Path}");
             builder.AppendLine($"-- SOURCE KIND: {inspection.Database.SourceDescription}");
             builder.AppendLine($"-- OBJECTS: {inspection.Tables.Count:N0}");
+            builder.AppendLine($"-- SCHEMA FINGERPRINT: {inspection.Snapshot.SchemaFingerprint}");
             builder.AppendLine();
 
             foreach (var table in inspection.Tables.OrderBy(table => table.Name, StringComparer.OrdinalIgnoreCase))
@@ -551,7 +713,7 @@ public sealed class CodexStateDbExplorerService
     private static string FingerprintSchema(CodexStateTableInfo table)
     {
         var builder = new StringBuilder()
-            .Append(table.ObjectType).Append('\n').Append(table.Sql).Append('\n');
+            .Append(table.ObjectType).Append('\n').Append(table.Name).Append('\n').Append(table.Sql).Append('\n');
         foreach (var column in table.Columns)
         {
             builder.Append(column.Ordinal).Append('|').Append(column.Name).Append('|')
@@ -559,7 +721,7 @@ public sealed class CodexStateDbExplorerService
                 .Append(column.DefaultValue).Append('|').Append(column.IsPrimaryKey).Append('\n');
         }
 
-        foreach (var index in table.Indexes)
+        foreach (var index in table.Indexes.OrderBy(index => index.Name, StringComparer.OrdinalIgnoreCase))
         {
             builder.Append(index.Name).Append('|').Append(index.IsUnique).Append('|')
                 .Append(index.Origin).Append('|').Append(index.IsPartial).Append('|')

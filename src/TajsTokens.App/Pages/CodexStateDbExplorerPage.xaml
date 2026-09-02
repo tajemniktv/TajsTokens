@@ -36,6 +36,7 @@
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto" />
@@ -45,8 +46,15 @@
                 <TextBlock Text="Inspecting:" VerticalAlignment="Center" FontWeight="SemiBold" />
                 <ComboBox x:Name="DatabaseComboBox" Grid.Column="1" SelectionChanged="OnDatabaseSelectionChanged"
                           DisplayMemberPath="DisplayName" PlaceholderText="No Codex SQLite files discovered" />
-                <TextBlock x:Name="DatabasePathText" Grid.Row="1" Grid.ColumnSpan="3" Text="No database selected" Opacity="0.72" TextWrapping="Wrap" />
+                <StackPanel Grid.Row="1" Grid.ColumnSpan="3" Spacing="2">
+                    <TextBlock x:Name="DatabasePathText" Text="No database selected" Opacity="0.72" TextWrapping="Wrap" />
+                    <TextBlock x:Name="SchemaFingerprintText" Text="Schema fingerprint: —" Opacity="0.62" FontFamily="Consolas" TextWrapping="Wrap" />
+                </StackPanel>
                 <TextBlock Grid.Column="2" Text="Read-only · query_only" Opacity="0.72" VerticalAlignment="Center" />
+                <TextBlock Grid.Row="2" Text="Compare with:" VerticalAlignment="Center" FontWeight="SemiBold" />
+                <ComboBox x:Name="ComparisonComboBox" Grid.Row="2" Grid.Column="1"
+                          DisplayMemberPath="DisplayName" PlaceholderText="Select another source instance or snapshot" />
+                <Button Grid.Row="2" Grid.Column="2" Content="Compare" Click="OnCompareClicked" />
             </Grid>
         </Border>
 
@@ -85,6 +93,7 @@
                                     </Grid>
                                     <TextBlock Text="{Binding RowCountSummary}" Opacity="0.74" />
                                     <TextBlock Text="{Binding ColumnSummary}" Opacity="0.62" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding SchemaFingerprintSummary}" Opacity="0.55" FontFamily="Consolas" />
                                 </StackPanel>
                             </DataTemplate>
                         </ListView.ItemTemplate>
@@ -99,6 +108,8 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
                         <RowDefinition Height="Auto" />
                     </Grid.RowDefinitions>
                     <StackPanel Spacing="2">
@@ -140,6 +151,26 @@
                     </Grid>
                     <Border Grid.Row="4" Padding="8" CornerRadius="8" Background="{ThemeResource SubtleFillColorTransparentBrush}">
                         <StackPanel Spacing="3">
+                            <TextBlock Text="Source comparison" FontWeight="SemiBold" />
+                            <TextBlock x:Name="ComparisonText" Text="Select another source instance or snapshot, then compare its raw schema and bounded row observations." Opacity="0.72" TextWrapping="Wrap" />
+                            <ListView x:Name="ComparisonDiffList" MaxHeight="120" SelectionMode="None">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <Grid ColumnSpacing="8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Text="{Binding Name}" />
+                                            <TextBlock Grid.Column="1" Text="{Binding Summary}" Opacity="0.72" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </StackPanel>
+                    </Border>
+                    <Border Grid.Row="5" Padding="8" CornerRadius="8" Background="{ThemeResource SubtleFillColorTransparentBrush}">
+                        <StackPanel Spacing="3">
                             <TextBlock Text="Baseline diff" FontWeight="SemiBold" />
                             <TextBlock x:Name="BaselineText" Text="No baseline captured. Capture one, then refresh to compare source tables and bounded row fingerprints." Opacity="0.72" TextWrapping="Wrap" />
                             <ListView x:Name="DiffList" MaxHeight="120" SelectionMode="None">
@@ -158,6 +189,36 @@
                             </ListView>
                         </StackPanel>
                     </Border>
+                    <Expander Grid.Row="6" Header="Trace a source-native key across discovered stores">
+                        <StackPanel Padding="4,6" Spacing="6">
+                            <TextBlock Text="Exact column/value lookup only. Results remain tied to each originating database object; no joins or semantic relationships are inferred."
+                                       Opacity="0.7" TextWrapping="Wrap" />
+                            <Grid ColumnSpacing="8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="180" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="TraceColumnTextBox" Header="Column" Text="thread_id" />
+                                <TextBox x:Name="TraceValueTextBox" Grid.Column="1" Header="Exact value" PlaceholderText="Paste a source-native key value" />
+                                <Button Grid.Column="2" Content="Trace across stores" Click="OnTraceClicked" VerticalAlignment="Bottom" />
+                            </Grid>
+                            <TextBlock x:Name="TraceStatusText" Text="No trace run yet." Opacity="0.72" TextWrapping="Wrap" />
+                            <ListView x:Name="TraceList" MaxHeight="220" SelectionMode="None">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Padding="3,5" Spacing="2">
+                                            <TextBlock Text="{Binding SourceTableSummary}" FontWeight="SemiBold" />
+                                            <TextBlock Text="{Binding SourceDescription}" Opacity="0.65" />
+                                            <TextBlock Text="{Binding DatabasePath}" Opacity="0.58" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding ColumnSummary}" Opacity="0.58" FontFamily="Consolas" TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding DisplayText}" FontFamily="Consolas" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </StackPanel>
+                    </Expander>
                 </Grid>
             </Border>
         </Grid>

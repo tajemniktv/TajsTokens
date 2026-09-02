@@ -84,3 +84,7 @@ dotnet build TajsTokens.sln -c Debug
 ```
 
 For focused changes, run the narrowest relevant tests first, then the full Core test suite and Windows application build before considering the change complete.
+
+## References
+
+Codex CLI source code is in `E:\dev\codex` folder. It is a cloned, read-only reference repo, that should be used for research or exploration on how Codex works.
