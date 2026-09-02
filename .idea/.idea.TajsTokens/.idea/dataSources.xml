@@ -57,5 +57,12 @@
       <jdbc-url>jdbc:sqlite:$PROJECT_DIR$/private/thread_history_1_snapshot.sqlite</jdbc-url>
       <working-dir>$ProjectFileDir$</working-dir>
     </data-source>
+    <data-source source="LOCAL" name="telemetry" uuid="52b097b5-838e-4fe2-acb6-66b895f1d680">
+      <driver-ref>sqlite.xerial</driver-ref>
+      <synchronize>true</synchronize>
+      <jdbc-driver>org.sqlite.JDBC</jdbc-driver>
+      <jdbc-url>jdbc:sqlite:$USER_HOME$/AppData/Local/TajsTokens/telemetry.db</jdbc-url>
+      <working-dir>$ProjectFileDir$</working-dir>
+    </data-source>
   </component>
 </project>

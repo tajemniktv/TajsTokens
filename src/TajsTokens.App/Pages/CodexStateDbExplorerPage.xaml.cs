@@ -653,7 +653,7 @@ public sealed partial class CodexStateDbExplorerPage : Page
         var selectedTableName = (TableList.SelectedItem as CodexStateTableInfo)?.Name;
         TableList.ItemsSource = inspection.Tables;
         FocusedTableComboBox.ItemsSource = inspection.FocusedTables;
-        TableCountText.Text = $"{inspection.Tables.Count:N0} objects · {inspection.Database.FileName}";
+        TableCountText.Text = $"{inspection.Tables.Count:N0} tables/views · {inspection.SchemaObjects.Count:N0} schema objects · {inspection.Database.FileName}";
         DatabasePathText.Text = inspection.Database.Path;
         SchemaFingerprintText.Text = $"Schema fingerprint: {inspection.Snapshot.SchemaFingerprint}";
 
@@ -688,7 +688,7 @@ public sealed partial class CodexStateDbExplorerPage : Page
             BaselineText.Text = $"A baseline exists for {Path.GetFileName(_baseline.DatabasePath)}, not this selected file.";
         }
 
-        StatusText.Text = $"Inspecting {inspection.Database.Path} · {inspection.Tables.Count:N0} tables/views · read-only/query_only · refreshed {inspection.Snapshot.CapturedAtUtc.ToLocalTime():g}.";
+        StatusText.Text = $"Inspecting {inspection.Database.Path} · {inspection.Tables.Count:N0} tables/views · {inspection.SchemaObjects.Count:N0} schema objects · read-only/query_only · refreshed {inspection.Snapshot.CapturedAtUtc.ToLocalTime():g}.";
     }
 
     private void ClearInspection(string message)

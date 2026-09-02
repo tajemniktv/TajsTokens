@@ -162,6 +162,14 @@ internal sealed class CodexStateCatalog
         await using var connection = new SqliteConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
 
+        // Keep this optional acceleration source explicitly read-only as well as using
+        // Mode=ReadOnly. This is a defense-in-depth guard for the private Codex state catalog.
+        await using (var queryOnly = connection.CreateCommand())
+        {
+            queryOnly.CommandText = "PRAGMA query_only = ON;";
+            await queryOnly.ExecuteNonQueryAsync(cancellationToken);
+        }
+
         if (!await HasRecognizedThreadsSchemaAsync(connection, cancellationToken))
         {
             return null;

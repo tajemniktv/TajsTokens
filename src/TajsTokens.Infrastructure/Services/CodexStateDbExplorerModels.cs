@@ -13,6 +13,12 @@ public sealed record CodexStateDatabaseCandidate(
 {
     public string SourceDescription { get; init; } = "Explicit source";
 
+    /// <summary>
+    /// Stable acquisition-location label. This is discovery provenance only; it is not a
+    /// provider, database, or domain classification.
+    /// </summary>
+    public string DiscoveryKind { get; init; } = "explicit";
+
     public string DisplayName => $"{FileName} · {SourceDescription} · {SizeBytes:N0} bytes · {LastWriteTimeUtc: u}";
 }
 
@@ -22,14 +28,38 @@ public sealed record CodexStateColumnInfo(
     string DeclaredType,
     bool NotNull,
     string? DefaultValue,
-    bool IsPrimaryKey);
+    bool IsPrimaryKey)
+{
+    /// <summary>
+    /// Raw value from PRAGMA table_xinfo hidden column. Zero means ordinary; other values are
+    /// retained as source metadata (for example generated or virtual-table columns).
+    /// </summary>
+    public int Hidden { get; init; }
+
+    public bool IsHidden => Hidden != 0;
+}
+
+public sealed record CodexStateSchemaObjectInfo(
+    string Name,
+    string ObjectType,
+    string? Sql)
+{
+    public string? AssociatedTableName { get; init; }
+}
 
 public sealed record CodexStateIndexInfo(
     string Name,
     bool IsUnique,
     string Origin,
     bool IsPartial,
-    IReadOnlyList<string> Columns);
+    IReadOnlyList<string> Columns)
+{
+    /// <summary>
+    /// The raw sqlite_master definition, including expression/collation details that PRAGMA
+    /// index_info does not expose. It remains source text, not an interpreted capability.
+    /// </summary>
+    public string? Sql { get; init; }
+}
 
 public sealed record CodexStateTableInfo(
     string Name,
@@ -93,6 +123,13 @@ public sealed record CodexStateInspectionSnapshot(
     IReadOnlyList<CodexStateTableSnapshot> Tables)
 {
     /// <summary>
+    /// Every object observed in sqlite_master, including indexes and triggers that are not
+    /// represented by <see cref="CodexStateTableSnapshot"/> rows.
+    /// </summary>
+    public IReadOnlyList<CodexStateSchemaObjectInfo> SchemaObjects { get; init; } =
+        Array.Empty<CodexStateSchemaObjectInfo>();
+
+    /// <summary>
     /// A deterministic fingerprint of the discovered sqlite_master objects and their declared
     /// columns/indexes. It intentionally excludes row content.
     /// </summary>
@@ -109,9 +146,35 @@ public sealed record CodexStateInspectionResult(
 {
     public string SchemaFingerprint => Snapshot.SchemaFingerprint;
 
+    public IReadOnlyList<CodexStateSchemaObjectInfo> SchemaObjects => Snapshot.SchemaObjects;
+
     public IReadOnlyList<CodexStateTableInfo> FocusedTables => Tables
         .Where(table => CodexStateDbExplorerService.IsInterestingTable(table.Name))
         .ToArray();
+}
+
+/// <summary>
+/// Result of inspecting all currently discovered source instances. A failed source is retained
+/// as an unavailable item so one locked, invalid, or disappearing file cannot hide other sources.
+/// </summary>
+public sealed record CodexStateSourceInspection(
+    CodexStateDatabaseCandidate Database,
+    CodexStateInspectionResult? Inspection,
+    string? Error)
+{
+    public bool IsAvailable => Inspection is not null;
+
+    public string Status => IsAvailable ? "available" : "unavailable";
+}
+
+public sealed record CodexStateMultiInspectionResult(
+    IReadOnlyList<CodexStateSourceInspection> Sources)
+{
+    public IReadOnlyList<CodexStateSourceInspection> AvailableSources =>
+        Sources.Where(source => source.IsAvailable).ToArray();
+
+    public IReadOnlyList<CodexStateSourceInspection> UnavailableSources =>
+        Sources.Where(source => !source.IsAvailable).ToArray();
 }
 
 public sealed record CodexStateTableDiff(

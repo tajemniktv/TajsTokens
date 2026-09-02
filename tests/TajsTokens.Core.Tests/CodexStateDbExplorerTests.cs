@@ -270,6 +270,135 @@ public sealed class CodexStateDbExplorerTests
         }
     }
 
+    [Fact]
+    public void DiscoverCandidates_EnumeratesAllRootSqliteStoresWithLocationProvenance()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-db-root-discovery-");
+        try
+        {
+            var sqliteDirectory = Directory.CreateDirectory(Path.Combine(directory.FullName, "sqlite"));
+            File.WriteAllBytes(Path.Combine(directory.FullName, "state_5.sqlite"), []);
+            File.WriteAllBytes(Path.Combine(directory.FullName, "logs_2.sqlite"), []);
+            File.WriteAllBytes(Path.Combine(directory.FullName, "goals_1.db"), []);
+            File.WriteAllBytes(Path.Combine(sqliteDirectory.FullName, "codex-dev.db"), []);
+
+            var candidates = new CodexStateDbExplorerService(directory.FullName).DiscoverCandidates();
+
+            Assert.Equal(4, candidates.Count);
+            Assert.All(candidates.Where(candidate => candidate.SourceDescription == "Codex home"),
+                candidate => Assert.Equal("codex-home", candidate.DiscoveryKind, StringComparer.OrdinalIgnoreCase));
+            Assert.Equal("codex-sqlite-folder", Assert.Single(candidates, candidate => candidate.FileName == "codex-dev.db").DiscoveryKind,
+                ignoreCase: true);
+        }
+        finally
+        {
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task InspectDiscoveredAsync_PreservesUnavailableInvalidSourcesAndInspectsOthers()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-db-batch-");
+        try
+        {
+            var validPath = Path.Combine(directory.FullName, "state_5.sqlite");
+            var invalidPath = Path.Combine(directory.FullName, "logs_2.sqlite");
+            await CreateDatabaseAsync(validPath);
+            await File.WriteAllTextAsync(invalidPath, "not a sqlite database");
+
+            var result = await new CodexStateDbExplorerService(directory.FullName)
+                .InspectDiscoveredAsync(includeRowFingerprints: false);
+
+            var valid = Assert.Single(result.AvailableSources, source => source.Database.Path == validPath);
+            Assert.Equal(validPath, valid.Inspection!.Database.Path);
+            var unavailable = Assert.Single(result.UnavailableSources, source => source.Database.Path == invalidPath);
+            Assert.False(string.IsNullOrWhiteSpace(unavailable.Error));
+            Assert.Equal("unavailable", unavailable.Status);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SchemaFingerprint_IsStableAndChangesForSchemaObjectsNotRows()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-db-fingerprint-");
+        try
+        {
+            var firstPath = Path.Combine(directory.FullName, "state_5.sqlite");
+            var secondDirectory = Directory.CreateDirectory(Path.Combine(directory.FullName, "other-source"));
+            var secondPath = Path.Combine(secondDirectory.FullName, "state_5.sqlite");
+            await CreateDatabaseAsync(firstPath);
+            File.Copy(firstPath, secondPath);
+            var explorer = new CodexStateDbExplorerService(directory.FullName);
+
+            var first = await explorer.InspectAsync(firstPath, includeRowFingerprints: false);
+            var repeat = await explorer.InspectAsync(firstPath, includeRowFingerprints: false);
+            Assert.Equal(first.SchemaFingerprint, repeat.SchemaFingerprint);
+
+            await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = secondPath }.ToString()))
+            {
+                await connection.OpenAsync();
+                var alter = connection.CreateCommand();
+                alter.CommandText = "CREATE TRIGGER threads_after_insert AFTER INSERT ON threads BEGIN SELECT 1; END;";
+                await alter.ExecuteNonQueryAsync();
+            }
+
+            var second = await explorer.InspectAsync(secondPath, includeRowFingerprints: false);
+            Assert.NotEqual(first.SchemaFingerprint, second.SchemaFingerprint);
+            Assert.Contains(second.SchemaObjects, schemaObject => schemaObject.ObjectType == "trigger");
+
+            await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = firstPath }.ToString()))
+            {
+                await connection.OpenAsync();
+                var insert = connection.CreateCommand();
+                insert.CommandText = "INSERT INTO threads(id, model) VALUES ('thread-3', 'gpt-c');";
+                await insert.ExecuteNonQueryAsync();
+            }
+
+            var afterRowChange = await explorer.InspectAsync(firstPath, includeRowFingerprints: false);
+            Assert.Equal(first.SchemaFingerprint, afterRowChange.SchemaFingerprint);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task SchemaInspection_RetainsGeneratedColumnsAndIndexDefinitions()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-db-schema-detail-");
+        try
+        {
+            var path = Path.Combine(directory.FullName, "state_5.sqlite");
+            await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path }.ToString()))
+            {
+                await connection.OpenAsync();
+                var schema = connection.CreateCommand();
+                schema.CommandText = "CREATE TABLE values_table(raw TEXT, generated TEXT GENERATED ALWAYS AS (upper(raw)) STORED); CREATE INDEX values_index ON values_table(upper(raw));";
+                await schema.ExecuteNonQueryAsync();
+            }
+
+            var inspection = await new CodexStateDbExplorerService(directory.FullName)
+                .InspectAsync(path, includeRowFingerprints: false);
+            var table = Assert.Single(inspection.Tables, candidate => candidate.Name == "values_table");
+            Assert.Contains(table.Columns, column => column.Name == "generated" && column.IsHidden);
+            Assert.Contains(table.Indexes, index => index.Name == "values_index" && index.Sql is not null);
+            Assert.Contains(inspection.SchemaObjects, schemaObject => schemaObject.ObjectType == "index");
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
     private static async Task CreateDatabaseAsync(string path)
     {
         await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path }.ToString());
