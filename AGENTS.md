@@ -26,7 +26,7 @@ The architectural shorthand is:
 - Do not delete working implementation merely because it is pre-reset. Change or remove it only when reset work establishes a reason.
 - **Do not confuse local inspection with durable collection.** TajsTokens may show a user raw/content-bearing data exposed by their local Codex installation when that is useful for observability. That does not automatically authorize copying the same payload into TajsTokens' durable evidence store.
 - Durable duplication of prompts, reasoning text, source-code bodies, credentials, authentication material, and similar sensitive payloads requires an explicit design decision and source-specific justification.
-- Any export path is a separate privacy boundary. Make it explicit what leaves the machine; provide sanitization/redaction where appropriate; never silently convert a raw view into a lossy export or silently upload source data.
+- Any export path is a separate privacy boundary. Make it explicit what leaves the machine; provide sanitization/redaction where appropriate; never silently convert a raw view into a lossy export or silently upload source data. If raw export is supported, it must be an explicit user choice.
 - Fixtures, bug reports, documentation examples, and other artifacts intended to leave the user's machine must be sanitized or deliberately reviewed before sharing.
 - Secret-bearing values require special handling even if their source is locally inspectable.
 - External application data and credentials are read-only unless a future source contract explicitly establishes otherwise.
