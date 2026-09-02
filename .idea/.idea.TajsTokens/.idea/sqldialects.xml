@@ -2,5 +2,7 @@
 <project version="4">
   <component name="SqlDialectMappings">
     <file url="file://$PROJECT_DIR$/src/TajsTokens.Infrastructure/Persistence/SqliteTelemetryRepository.cs" dialect="SQLite" />
+    <file url="file://$PROJECT_DIR$/src/TajsTokens.Infrastructure/Services/CodexStateCatalog.cs" dialect="SQLite" />
+    <file url="file://$PROJECT_DIR$/src/TajsTokens.Infrastructure/Services/SqliteIntelligenceService.cs" dialect="SQLite" />
   </component>
 </project>
