@@ -167,6 +167,36 @@ public sealed class CodexStateDbExplorerTests
         Assert.DoesNotContain("private prompt", export);
     }
 
+    [Fact]
+    public async Task CombinedSchemaExport_LabelsEachDatabaseWithoutExportingRows()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-db-schema-");
+        try
+        {
+            var firstPath = Path.Combine(directory.FullName, "state_5_snapshot.sqlite");
+            var secondPath = Path.Combine(directory.FullName, "codex-dev.db");
+            await CreateDatabaseAsync(firstPath);
+            File.Copy(firstPath, secondPath);
+
+            var explorer = new CodexStateDbExplorerService(directory.FullName, directory.FullName);
+            var first = await explorer.InspectAsync(firstPath, includeRowFingerprints: false);
+            var second = await explorer.InspectAsync(secondPath, includeRowFingerprints: false);
+            var export = CodexStateDbExplorerService.BuildCombinedSchemaExport([first, second]);
+
+            Assert.Contains($"-- SOURCE: {Path.GetFullPath(firstPath)}", export);
+            Assert.Contains($"-- SOURCE: {Path.GetFullPath(secondPath)}", export);
+            Assert.Contains("CREATE TABLE threads", export);
+            Assert.Contains("-- COLUMN 0: id TEXT", export);
+            Assert.DoesNotContain("prompt one", export);
+            Assert.DoesNotContain("thread-1", export);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
     private static async Task CreateDatabaseAsync(string path)
     {
         await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path }.ToString());
