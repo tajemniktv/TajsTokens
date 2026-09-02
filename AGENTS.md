@@ -24,7 +24,11 @@ The architectural shorthand is:
 - Preserve source provenance, source-native identity, missing fields, ambiguity, and conflicting observations instead of silently resolving them during ingestion.
 - Do not add new roadmap/phase/architecture documents. Update `PROJECT.md`.
 - Do not delete working implementation merely because it is pre-reset. Change or remove it only when reset work establishes a reason.
-- Keep privacy conservative: do not expand durable storage of prompts, reasoning text, source-code bodies, credentials, or other content-bearing payloads without an explicit design decision.
+- **Do not confuse local inspection with durable collection.** TajsTokens may show a user raw/content-bearing data exposed by their local Codex installation when that is useful for observability. That does not automatically authorize copying the same payload into TajsTokens' durable evidence store.
+- Durable duplication of prompts, reasoning text, source-code bodies, credentials, authentication material, and similar sensitive payloads requires an explicit design decision and source-specific justification.
+- Any export path is a separate privacy boundary. Make it explicit what leaves the machine; provide sanitization/redaction where appropriate; never silently convert a raw view into a lossy export or silently upload source data.
+- Fixtures, bug reports, documentation examples, and other artifacts intended to leave the user's machine must be sanitized or deliberately reviewed before sharing.
+- Secret-bearing values require special handling even if their source is locally inspectable.
 - External application data and credentials are read-only unless a future source contract explicitly establishes otherwise.
 - Source explorers and raw inspection tools are acquisition aids. Their output does not become product truth merely because it came from a Codex-owned database or API.
 
@@ -37,7 +41,7 @@ The architectural shorthand is:
 - Shared cross-provider concepts belong primarily in read-model projections and must be justified by demonstrated semantic overlap, not by similar names.
 - If a read model maps a source-native value into a broader presentation category, retain the native value and treat the broad category as derived policy. For example, do not replace a provider's exact state with a generic `Running`/`Failed` classification and then persist the classification as evidence.
 - Provider-specific UI and read models are first-class. Codex views may be substantially richer than future shared views.
-- Do not discard a safe, understood source-native field merely because no current UI renders it. Also do not persist a field merely because it exists: its semantics and privacy posture still need a contract.
+- Do not discard a safe, understood source-native field merely because no current UI renders it. Also do not persist a field merely because it exists: its semantics and retention posture still need a contract.
 - Avoid speculative provider capability matrices, plugin systems, or generic base classes whose only justification is possible future breadth. Prefer small seams that keep provider ownership explicit.
 
 ## Working style
@@ -67,7 +71,7 @@ The present solution contains:
 
 These are current implementation boundaries, not guaranteed target architecture.
 
-The repository also contains a read-only Codex State DB Explorer. Treat it as acquisition/investigation tooling according to the boundary documented in `PROJECT.md`, not as permission to directly project raw private SQLite rows into product semantics.
+The repository also contains a read-only Codex State DB Explorer. Treat it as acquisition/investigation tooling according to the boundary documented in `PROJECT.md`, not as permission to directly project raw private SQLite rows into product semantics. Local raw inspection is allowed by the product direction; durable retention and export remain separate decisions.
 
 ## Build and validation
 
