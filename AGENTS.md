@@ -71,7 +71,7 @@ The present solution contains:
 
 These are current implementation boundaries, not guaranteed target architecture.
 
-The repository also contains a read-only Codex State DB Explorer. Treat it as acquisition/investigation tooling according to the boundary documented in `PROJECT.md`, not as permission to directly project raw private SQLite rows into product semantics. Local raw inspection is allowed by the product direction; durable retention and export remain separate decisions.
+The repository also contains a read-only Codex State DB Explorer. Treat it as acquisition/investigation tooling according to the boundary documented in `PROJECT.md`, not as permission to directly project raw private SQLite rows into product semantics. Local raw inspection, including content-bearing fields, is allowed by the product direction; durable retention and export remain separate decisions.
 
 ## Build and validation
 
