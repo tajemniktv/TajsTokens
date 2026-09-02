@@ -68,13 +68,17 @@ There is deliberately no universal provider schema in the middle of this pipelin
 - **Shared abstractions must be earned.** Similar names or shapes are not enough. A shared concept is introduced only when its observable semantics are sufficiently equivalent for the read-model question being answered.
 - **Derived views are rebuildable.** Selection, aggregation, classification, and policy belong above durable evidence and must be replaceable without rewriting history.
 - **Native state and derived presentation state are distinct.** If a read model later classifies source-native states into broader categories, the source-native value remains evidence and the broader category remains explicit policy.
-- **Privacy stays conservative during the reset.** Do not expand durable collection of prompts, reasoning text, source bodies, credentials, or other content-bearing payloads merely to make analysis easier.
+- **Local visibility is not durable collection.** TajsTokens is local-first and should be able to let a user inspect the data their local Codex installation exposes, including content-bearing values where appropriate. Showing a source value on-device does not by itself justify copying it into TajsTokens' durable evidence store.
+- **Export is a separate privacy boundary.** If TajsTokens exports source data, the export path must make the data leaving the local inspection boundary explicit and should support sanitization/redaction where appropriate. Raw and sanitized export modes, if both exist, must be distinguishable rather than silently changing the evidence.
+- **Privacy stays conservative for duplication and secrets.** Do not expand durable duplication of prompts, reasoning text, source bodies, credentials, authentication material, or other sensitive payloads merely to make analysis easier. Secret-bearing data requires explicit handling even when the source can be inspected locally.
 - **Existing implementation has no grandfathered semantic authority.** Useful plumbing may survive; claims must earn their way back through source evidence.
 - **Do not design for hypothetical provider symmetry.** A clean provider boundary is valuable; forcing Codex into a lowest-common-denominator model is not.
 
 ## 1. Raw source acquisition
 
-Work one source at a time. For each source, first establish how TajsTokens can read it and collect representative, sanitized examples across normal and awkward states.
+Work one source at a time. For each source, first establish how TajsTokens can read it and collect representative examples across normal and awkward states.
+
+Local inspection may expose raw source values to the user. Fixtures, bug reports, documentation examples, and other artifacts intended to leave the user's machine must be sanitized or deliberately reviewed before sharing.
 
 At this layer we record what the source emitted. We do not calculate product metrics, reconcile it with other sources, or decide which source is "right".
 
@@ -88,7 +92,7 @@ Source acquisition must document at least:
 - error, unavailable, partial, and stale-looking responses;
 - whether the source is read-only from TajsTokens' point of view.
 
-Raw content does not automatically belong in the durable database. Retention is a separate decision made per source after privacy and reprocessing needs are understood.
+Raw content does not automatically belong in the durable database. Retention is a separate decision made per source after privacy, product value, and reprocessing needs are understood.
 
 ## 2. Source contracts
 
@@ -155,7 +159,7 @@ Two conflicting source observations may normalize into two conflicting observati
 
 ## 4. Durable evidence store
 
-The durable store is history of normalized evidence, not a warehouse of product conclusions.
+The durable store is history of normalized evidence, not a warehouse of product conclusions and not an automatic mirror of every readable source payload.
 
 Its design must support:
 
@@ -171,6 +175,8 @@ Its design must support:
 The evidence store may contain provider-specific tables or structures when that preserves contracted semantics cleanly. A single generic table is not inherently more architectural than several honest provider-native structures.
 
 Fact/evidence tables must not contain values whose only justification is a current UI formula, cross-source selection policy, inferred classification, or other derived interpretation.
+
+A source field being useful for local inspection does not automatically make it appropriate for durable duplication. Durable retention of content-bearing values must be justified independently from the ability to display those values from the source on demand.
 
 If an existing database table cannot satisfy these constraints cleanly, compatibility with that table is not more important than getting the evidence model right. Migration, rebuild, or replacement remain valid options.
 
@@ -230,7 +236,7 @@ Source: Codex private SQLite files discovered as `state_*.sqlite` under `CODEX_H
 
 Acquisition method: enumerate candidates, explicitly select one file, open with SQLite `Mode=ReadOnly` and `PRAGMA query_only=ON`, then query `sqlite_master`, table/index pragmas, counts, and raw rows.
 
-Read/write posture: TajsTokens must not mutate the selected Codex file. Baseline snapshots and row fingerprints are held in memory only. A user may explicitly copy or export a selected page; exports are sanitized heuristically for content-bearing columns, paths, and blobs and are not interpreted facts or durable product evidence. SQLite may create or refresh transient WAL shared-memory sidecars while reading a live WAL database; those are an SQLite read-path effect, not content writes by TajsTokens.
+Read/write posture: TajsTokens must not mutate the selected Codex file. Baseline snapshots and row fingerprints are held in memory only. Local inspection may display raw values from the selected source. If an export surface is provided, it must clearly distinguish what is being exported and should provide sanitization/redaction before data leaves the local boundary where appropriate; raw export, if supported, must be an explicit user choice rather than an accidental side effect. SQLite may create or refresh transient WAL shared-memory sidecars while reading a live WAL database; those are an SQLite read-path effect, not content writes by TajsTokens.
 
 Known: schema shape, table names, column declarations, indexes, row counts, and the values returned by the read-only queries are source observations.
 
