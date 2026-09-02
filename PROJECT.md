@@ -41,9 +41,9 @@ Codex sources
     -> Codex-native normalized observations
     -> durable evidence
     -> rich Codex read models
-    -> Codex-specific UI
                  \
                   -> optional shared observability projections
+    -> Codex-specific UI
 
 Future provider sources
     -> provider-specific source contracts
