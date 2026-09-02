@@ -1,0 +1,98 @@
+<Page
+    x:Class="TajsTokens.App.Pages.CodexSourcesPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid Padding="24" RowSpacing="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel>
+                <TextBlock Text="Codex Sources" FontSize="28" FontWeight="SemiBold" />
+                <TextBlock Text="Provider-native, read-only views of Codex memory, goals, queue, artifacts and Desktop stores. Content-bearing values stay local to this inspection session; choose the shown path in State DB Explorer for deliberate raw inspection."
+                           Opacity="0.72" TextWrapping="Wrap" Margin="0,4,0,0" />
+                <TextBlock x:Name="StatusText" Text="Loading Codex source capabilities…" Opacity="0.72" Margin="0,8,0,0" TextWrapping="Wrap" />
+            </StackPanel>
+            <Button Grid.Column="1" Content="Refresh" Click="OnRefreshClicked" VerticalAlignment="Top" />
+        </Grid>
+
+        <StackPanel Grid.Row="1" Spacing="8">
+            <TextBox x:Name="FilterTextBox"
+                     PlaceholderText="Filter source rows by thread, status, id or host"
+                     TextChanged="OnFilterChanged" />
+            <ItemsControl x:Name="SourceStatusList">
+            <ItemsControl.ItemsPanel>
+                <ItemsPanelTemplate>
+                    <ItemsStackPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+            </ItemsControl.ItemsPanel>
+            <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                    <Border Padding="10,8" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                            <TextBlock Text="{Binding Status}" Opacity="0.72" />
+                        </StackPanel>
+                    </Border>
+                </DataTemplate>
+            </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </StackPanel>
+
+        <TabView x:Name="SourceTabs" Grid.Row="2" IsAddTabButtonVisible="False">
+            <TabViewItem Header="Memory">
+                <Grid RowSpacing="8">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                    <TextBlock x:Name="MemorySourceText" TextWrapping="Wrap" Opacity="0.72" />
+                    <ListView x:Name="MemoryList" Grid.Row="1" SelectionMode="None" />
+                </Grid>
+            </TabViewItem>
+            <TabViewItem Header="Goals">
+                <Grid RowSpacing="8">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                    <TextBlock x:Name="GoalsSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                    <ListView x:Name="GoalsList" Grid.Row="1" SelectionMode="None" />
+                </Grid>
+            </TabViewItem>
+            <TabViewItem Header="Queue">
+                <Grid RowSpacing="8">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                    <TextBlock x:Name="QueueSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                    <ListView x:Name="QueueList" Grid.Row="1" SelectionMode="None" />
+                </Grid>
+            </TabViewItem>
+            <TabViewItem Header="Artifacts">
+                <Grid RowSpacing="8">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                    <TextBlock x:Name="ArtifactsSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                    <ListView x:Name="ArtifactsList" Grid.Row="1" SelectionMode="None" />
+                </Grid>
+            </TabViewItem>
+            <TabViewItem Header="Desktop catalog">
+                <Grid RowSpacing="8">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                    <TextBlock x:Name="CatalogSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                    <ListView x:Name="CatalogList" Grid.Row="1" SelectionMode="None" />
+                </Grid>
+            </TabViewItem>
+            <TabViewItem Header="Thread summaries">
+                <Grid RowSpacing="8">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                    <TextBlock x:Name="SummariesSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                    <ListView x:Name="SummariesList" Grid.Row="1" SelectionMode="None" />
+                </Grid>
+            </TabViewItem>
+        </TabView>
+    </Grid>
+</Page>

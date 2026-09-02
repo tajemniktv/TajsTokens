@@ -272,6 +272,41 @@ spawn edges, dynamic-tool registrations, and history turns/items as provider-nat
 retains source paths and capability absence, keeps realtime rows in a separate lane, and leaves
 unresolved field meaning visible rather than manufacturing cross-source relationships.
 
+## Auxiliary Codex source observability
+
+The auxiliary Codex source read model is intentionally provider-native and read-only. It discovers
+the current `memories_*`, `goals_*`, `queue_*`, `state_*`, `codex-dev.db`, and
+`codex-thread-summaries-dev.db` instances through the same explorer boundary used for raw SQLite
+inspection. Each source result retains its selected path and discovery provenance, capture time,
+schema fingerprint, supported table names, the latest `_sqlx_migrations.version` when exposed, and
+the corroborating upstream reference commit (`8e3b180d49`). The installed source
+remains authoritative; the commit is not treated as a version guarantee.
+
+The model currently exposes bounded (250-row) metadata reads for the observed `jobs` and
+`stage1_outputs` memory tables, `thread_goals` and continuation-deferral rows, `queued_items` and
+`queued_thread_revisions`, `thread_artifacts`, `local_thread_catalog`, and
+`thread_turn_summaries`. Native status, revision, ordering, nullable fields, and source identities
+remain source-shaped. Missing expected tables are reported as unsupported; a present table with no
+rows is reported as empty; a missing file is unavailable; and open/query failures are errors.
+Content-bearing memory, goal, queue, artifact, catalog, and summary values are never written to the
+TajsTokens database by this surface. The UI shows metadata and content-presence flags while raw
+values remain available only through deliberate local inspection.
+
+Artifacts remain an explicit empty/unsupported capability when no rows are observed. No rows are
+manufactured and no artifact lifecycle or relationship is inferred from the table name alone.
+Desktop catalog and thread-summary rows are displayed as observations from their own source; they
+are not reconciled with core state or rollout history merely because thread IDs happen to match.
+
+The inspected upstream `state` model corroborates only the narrow artifact shape: a server-assigned
+UUIDv7 `id`, owning `thread_id`, client-defined `artifact_type` and `identity_key`, bounded JSON
+`payload`, and integer Unix-seconds `created_at`, with uniqueness per thread/type/key and an
+attach-existing outcome that leaves payload and creation time unchanged. The current checked-in
+runtime snapshot has zero `thread_artifacts` rows, so no local lifecycle transition is claimed.
+The inspected app-server protocol at that commit exposes no supported artifact attach/list workflow
+for reproducing a row; this implementation therefore performs no database writes or synthetic
+fixture insertion and reports the runtime capability as empty/unsupported until a normal product
+workflow produces evidence.
+
 ## Documentation rule
 
 Do not create a competing roadmap, architecture guide, phase document, or semantic specification while this reset is active. Update this file instead.
