@@ -73,6 +73,12 @@ public sealed class CodexStateDbExplorerService
     public async Task<CodexStateInspectionResult> InspectAsync(
         string databasePath,
         CancellationToken cancellationToken = default)
+        => await InspectAsync(databasePath, includeRowFingerprints: true, cancellationToken: cancellationToken);
+
+    public async Task<CodexStateInspectionResult> InspectAsync(
+        string databasePath,
+        bool includeRowFingerprints,
+        CancellationToken cancellationToken = default)
     {
         var candidate = CreateCandidateForPath(databasePath);
         await using var connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
@@ -106,11 +112,13 @@ public sealed class CodexStateDbExplorerService
         {
             cancellationToken.ThrowIfCancellationRequested();
             var schemaFingerprint = FingerprintSchema(table);
-            var rowFingerprint = await ComputeRowFingerprintAsync(
-                connection,
-                table,
-                allowDeepRowFingerprint,
-                cancellationToken);
+            var rowFingerprint = includeRowFingerprints
+                ? await ComputeRowFingerprintAsync(
+                    connection,
+                    table,
+                    allowDeepRowFingerprint,
+                    cancellationToken)
+                : FingerprintBoundedRowObservation(table);
             snapshots.Add(new CodexStateTableSnapshot(
                 table.Name,
                 table.ObjectType,
@@ -257,6 +265,58 @@ public sealed class CodexStateDbExplorerService
         {
             builder.AppendLine(string.Join("\t", page.Columns.Zip(row.Values, SanitizeForExport)
                 .Select(EscapeExportValue)));
+        }
+
+        return builder.ToString();
+    }
+
+    public static string BuildCombinedSchemaExport(
+        IEnumerable<CodexStateInspectionResult> inspections)
+    {
+        ArgumentNullException.ThrowIfNull(inspections);
+        var results = inspections
+            .Where(inspection => inspection is not null)
+            .OrderBy(inspection => inspection.Database.Path, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var builder = new StringBuilder();
+        builder.AppendLine("Codex SQLite combined schema inspection");
+        builder.AppendLine("Schema only · no table rows or interpreted TajsTokens facts");
+        builder.AppendLine($"Databases: {results.Length:N0}");
+        builder.AppendLine();
+
+        foreach (var inspection in results)
+        {
+            builder.AppendLine($"-- SOURCE: {inspection.Database.Path}");
+            builder.AppendLine($"-- SOURCE KIND: {inspection.Database.SourceDescription}");
+            builder.AppendLine($"-- OBJECTS: {inspection.Tables.Count:N0}");
+            builder.AppendLine();
+
+            foreach (var table in inspection.Tables.OrderBy(table => table.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                builder.Append("-- OBJECT: ").Append(table.ObjectType).Append(' ').AppendLine(table.Name);
+                builder.Append("-- ROW COUNT OBSERVED: ").AppendLine(
+                    table.RowCount < 0 ? "unavailable" : table.RowCount.ToString(CultureInfo.InvariantCulture));
+                builder.AppendLine(table.Sql ?? "-- SQL: (not provided)");
+                foreach (var column in table.Columns)
+                {
+                    builder.Append("-- COLUMN ").Append(column.Ordinal.ToString(CultureInfo.InvariantCulture))
+                        .Append(": ").Append(column.Name).Append(" ").Append(column.DeclaredType)
+                        .Append(" NOT NULL=").Append(column.NotNull)
+                        .Append(" PK=").Append(column.IsPrimaryKey)
+                        .Append(" DEFAULT=").AppendLine(column.DefaultValue ?? "NULL");
+                }
+
+                foreach (var index in table.Indexes)
+                {
+                    builder.Append("-- INDEX: ").Append(index.Name)
+                        .Append(" UNIQUE=").Append(index.IsUnique)
+                        .Append(" ORIGIN=").Append(index.Origin)
+                        .Append(" PARTIAL=").Append(index.IsPartial)
+                        .Append(" COLUMNS=").AppendLine(string.Join(", ", index.Columns));
+                }
+
+                builder.AppendLine();
+            }
         }
 
         return builder.ToString();

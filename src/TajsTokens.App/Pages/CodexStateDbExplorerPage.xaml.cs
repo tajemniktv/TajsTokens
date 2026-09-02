@@ -454,6 +454,73 @@ public sealed partial class CodexStateDbExplorerPage : Page
         }
     }
 
+    private async void OnExportCombinedSchemaClicked(object sender, RoutedEventArgs e)
+    {
+        var cancellation = _cancellation;
+        if (!_loaded || cancellation is null || cancellation.IsCancellationRequested)
+        {
+            return;
+        }
+
+        try
+        {
+            StatusText.Text = "Reading schemas from all discovered Codex databases…";
+            var candidates = await Task.Run(
+                () => App.Services.CodexStateExplorer.DiscoverCandidates(),
+                cancellation.Token);
+            var inspections = new List<CodexStateInspectionResult>(candidates.Count);
+            var failures = new List<string>();
+            foreach (var candidate in candidates)
+            {
+                cancellation.Token.ThrowIfCancellationRequested();
+                try
+                {
+                    // Schema export does not need row fingerprints. This keeps large content-heavy
+                    // snapshots useful without scanning their bodies.
+                    inspections.Add(await Task.Run(
+                        () => App.Services.CodexStateExplorer.InspectAsync(
+                            candidate.Path,
+                            includeRowFingerprints: false,
+                            cancellationToken: cancellation.Token),
+                        cancellation.Token));
+                }
+                catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    failures.Add($"{candidate.Path}: {Summarize(exception.Message)}");
+                }
+            }
+
+            var schema = new StringBuilder(CodexStateDbExplorerService.BuildCombinedSchemaExport(inspections));
+            if (failures.Count > 0)
+            {
+                schema.AppendLine("-- UNAVAILABLE SOURCES");
+                foreach (var failure in failures)
+                {
+                    schema.Append("-- ").AppendLine(failure);
+                }
+            }
+
+            var exportDirectory = Path.Combine(App.Services.DataFolder, "InspectionExports");
+            Directory.CreateDirectory(exportDirectory);
+            var path = Path.Combine(
+                exportDirectory,
+                $"codex-combined-schema-{DateTimeOffset.Now:yyyyMMdd-HHmmss}.sql");
+            await File.WriteAllTextAsync(path, schema.ToString(), Encoding.UTF8, cancellation.Token);
+            StatusText.Text = $"Combined schema exported to {path} · {inspections.Count:N0}/{candidates.Count:N0} databases read.";
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+        }
+        catch (Exception exception)
+        {
+            StatusText.Text = $"Combined schema export failed: {Summarize(exception.Message)}";
+        }
+    }
+
     private string? BuildSelectedExport()
     {
         if (_page is null)

@@ -162,6 +162,10 @@ facts or durable product evidence. SQLite may create or refresh transient WAL sh
 while reading a live WAL database; those are an SQLite read-path effect, not content writes by
 TajsTokens.
 
+The explorer can also emit one schema-only export across all discovered databases. Each source keeps
+its own path heading and table/view definitions; similarly named objects are not merged, and row
+payloads are not included.
+
 Known: schema shape, table names, column declarations, indexes, row counts, and the values returned
 by the read-only queries are source observations.
 
