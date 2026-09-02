@@ -141,6 +141,40 @@ There is deliberately no phase roadmap during the reset. Work proceeds by establ
 
 The first investigation should begin with the source behind the quota values currently shown in the app, because those values triggered the reset. The task is to capture and study its real responses over time, document the contract and unknowns, and avoid designing downstream calculations until that contract is trustworthy.
 
+## Codex state SQLite inspection boundary
+
+TajsTokens includes a read-only **Codex State DB Explorer** as an acquisition and investigation
+surface. It is deliberately separate from the observatory and product models: the explorer returns
+the selected source path, SQLite object definitions, `PRAGMA table_info`/index metadata, row counts,
+and paged raw values without assigning domain meaning to any field.
+
+Source: Codex private SQLite files discovered as `state_*.sqlite` under `CODEX_HOME`, `.db`/`.sqlite`
+files under `CODEX_HOME/sqlite`, and explicitly configured or development-local snapshot folders
+(the checked-out `private` folder is one such snapshot folder).
+
+Acquisition method: enumerate candidates, explicitly select one file, open with SQLite `Mode=ReadOnly`
+and `PRAGMA query_only=ON`, then query `sqlite_master`, table/index pragmas, counts, and raw rows.
+
+Read/write posture: TajsTokens must not mutate the selected Codex file. Baseline snapshots and row
+fingerprints are held in memory only. A user may explicitly copy or export a selected page; exports
+are sanitized heuristically for content-bearing columns, paths, and blobs and are not interpreted
+facts or durable product evidence. SQLite may create or refresh transient WAL shared-memory sidecars
+while reading a live WAL database; those are an SQLite read-path effect, not content writes by
+TajsTokens.
+
+Known: schema shape, table names, column declarations, indexes, row counts, and the values returned
+by the read-only queries are source observations.
+
+Observed but unexplained: table names and fields may vary with Codex versions, migrations, or runtime
+state. Compact databases use in-memory row hashes to report same-count row changes. Large
+databases (over 64 MiB) or tables over 100,000 rows intentionally use a bounded row-count
+fingerprint so inspecting content-heavy snapshots remains responsive; all fingerprints are an
+inspection aid rather than a semantic change classification.
+
+Unknown: field meaning, lifecycle guarantees, identity semantics, and update ordering remain unknown
+until separately supported by captured source evidence. Discoveries in this explorer do not become
+normalized TajsTokens observations automatically.
+
 ## Documentation rule
 
 Do not create a competing roadmap, architecture guide, phase document, or semantic specification while this reset is active. Update this file instead.

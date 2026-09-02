@@ -33,6 +33,7 @@ public sealed class AppServices
         Settings = SettingsStore.Load();
         Repository = new SqliteTelemetryRepository(DatabasePath);
         ObservatoryReadModel = new SqliteCodexObservatoryReadModel(DatabasePath);
+        CodexStateExplorer = new CodexStateDbExplorerService();
         TokscaleProvider = new TokscaleProvider();
         NativeCodexAccountingProvider = new SqliteNativeCodexAccountingProvider(DatabasePath);
         CodexTokenAccountingProvider = new NativeFirstCodexAccountingProvider(
@@ -64,6 +65,7 @@ public sealed class AppServices
     public SqliteTelemetryRepository Repository { get; }
     public ICodexObservatoryStore ObservatoryStore { get; }
     public SqliteCodexObservatoryReadModel ObservatoryReadModel { get; }
+    public CodexStateDbExplorerService CodexStateExplorer { get; }
     public ITokscaleProvider TokscaleProvider { get; }
     public ICodexTokenAccountingProvider NativeCodexAccountingProvider { get; }
     public ICodexTokenAccountingProvider CodexTokenAccountingProvider { get; }

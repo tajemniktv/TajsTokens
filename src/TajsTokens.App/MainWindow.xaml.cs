@@ -24,6 +24,7 @@ public sealed partial class MainWindow : Window
             "overview" => typeof(OverviewPage),
             "usage" => typeof(UsagePage),
             "observatory" => typeof(ObservatoryPage),
+            "state-db" => typeof(CodexStateDbExplorerPage),
             "forecasts" => typeof(ForecastsPage),
             "analytics" => typeof(AnalyticsPage),
             "diagnostics" => typeof(PlaceholderPage),
@@ -35,6 +36,7 @@ public sealed partial class MainWindow : Window
         {
             "usage" => "Usage",
             "observatory" => "Codex Observatory",
+            "state-db" => "State DB Explorer",
             "forecasts" => "Forecasts",
             "analytics" => "Analytics",
             "diagnostics" => "Diagnostics",
