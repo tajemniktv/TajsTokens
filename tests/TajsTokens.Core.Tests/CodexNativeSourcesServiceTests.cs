@@ -122,6 +122,92 @@ public sealed class CodexNativeSourcesServiceTests
     }
 
     [Fact]
+    public async Task ReadAsync_NullOptionalBooleansRemainFalse()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-native-source-null-flags-");
+        try
+        {
+            await CreateDatabaseAsync(Path.Combine(directory.FullName, "memories_1.sqlite"), """
+                CREATE TABLE stage1_outputs (thread_id TEXT, source_updated_at INTEGER, selected_for_phase2 INTEGER, generated_at INTEGER);
+                INSERT INTO stage1_outputs VALUES ('thread-1', 10, NULL, 11);
+                """);
+            await CreateDatabaseAsync(Path.Combine(directory.FullName, "codex-dev.db"), """
+                CREATE TABLE local_thread_catalog (host_id TEXT, thread_id TEXT, display_title TEXT, source_kind TEXT, missing_candidate INTEGER, pending_observed_title INTEGER);
+                INSERT INTO local_thread_catalog VALUES ('host-1', 'thread-1', 'Title', 'local', NULL, NULL);
+                """);
+
+            var snapshot = await new CodexNativeSourcesService(directory.FullName).ReadAsync();
+
+            Assert.False(Assert.Single(snapshot.Memory.Stage1Outputs).SelectedForPhase2);
+            var entry = Assert.Single(snapshot.DesktopCatalog.Entries);
+            Assert.False(entry.MissingCandidate);
+            Assert.False(entry.PendingObservedTitle);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ReadAsync_OrdersBeforeBoundingAndJoinsRelationsBySelectedIds()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-native-source-bounds-");
+        try
+        {
+            var migrations = string.Join(Environment.NewLine, Enumerable.Range(1, 300).Select(version => $"INSERT INTO _sqlx_migrations VALUES ({version});"));
+            var jobs = string.Join(Environment.NewLine, Enumerable.Range(1, 300).Select(index => $"INSERT INTO jobs VALUES ('memory', 'job-{index}', 'done', {index});"));
+            await CreateDatabaseAsync(Path.Combine(directory.FullName, "memories_1.sqlite"), $"""
+                CREATE TABLE _sqlx_migrations (version INTEGER);
+                CREATE TABLE jobs (kind TEXT, job_key TEXT, status TEXT, started_at INTEGER);
+                {migrations}
+                {jobs}
+                """);
+
+            var goals = string.Join(Environment.NewLine, Enumerable.Range(1, 300).Select(index => $"INSERT INTO thread_goals VALUES ('thread-{index}', 'goal-{index}', 'objective', 'active', {index}, 1, 1, {index}, {index});"));
+            await CreateDatabaseAsync(Path.Combine(directory.FullName, "goals_1.sqlite"), $"""
+                CREATE TABLE thread_goals (thread_id TEXT, goal_id TEXT, objective TEXT, status TEXT, token_budget INTEGER, tokens_used INTEGER, time_used_seconds INTEGER, created_at_ms INTEGER, updated_at_ms INTEGER);
+                CREATE TABLE thread_goal_continuation_deferrals (thread_id TEXT);
+                {goals}
+                {string.Join(Environment.NewLine, Enumerable.Range(1, 299).Select(index => $"INSERT INTO thread_goal_continuation_deferrals VALUES ('other-{index}');"))}
+                INSERT INTO thread_goal_continuation_deferrals VALUES ('thread-300');
+                """);
+
+            var queue = string.Join(Environment.NewLine, Enumerable.Range(1, 300).Select(index => $"INSERT INTO queued_items VALUES ('item-{index}', 'thread-{index}', NULL, {index}, {index}, {index});"));
+            await CreateDatabaseAsync(Path.Combine(directory.FullName, "queue_1.sqlite"), $"""
+                CREATE TABLE queued_items (id TEXT, thread_id TEXT, payload_json TEXT, queue_order INTEGER, created_at_ms INTEGER, updated_at_ms INTEGER);
+                CREATE TABLE queued_thread_revisions (revision INTEGER, thread_id TEXT);
+                {queue}
+                {string.Join(Environment.NewLine, Enumerable.Range(1, 299).Select(index => $"INSERT INTO queued_thread_revisions VALUES ({index}, 'other-{index}');"))}
+                INSERT INTO queued_thread_revisions VALUES (77, 'thread-1');
+                """);
+
+            var snapshot = await new CodexNativeSourcesService(directory.FullName).ReadAsync();
+
+            Assert.Equal("300", snapshot.Memory.Source.SourceVersion);
+            Assert.Equal("job-300", snapshot.Memory.Jobs[0].JobKey);
+            Assert.Equal(250, snapshot.Memory.Jobs.Count);
+            Assert.True(snapshot.Memory.Source.HasMoreRows);
+            var goal = snapshot.Goals.Goals[0];
+            Assert.Equal("thread-300", goal.ThreadId);
+            Assert.True(goal.HasContinuationDeferral);
+            Assert.Equal(250, snapshot.Goals.Goals.Count);
+            Assert.True(snapshot.Goals.Source.HasMoreRows);
+            var item = snapshot.Queue.Items[0];
+            Assert.Equal("thread-1", item.ThreadId);
+            Assert.Equal(77, item.Revision);
+            Assert.Equal(250, snapshot.Queue.Items.Count);
+            Assert.True(snapshot.Queue.Source.HasMoreRows);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ReadAsync_DesktopSourcesReportIncompatibleCapabilities()
     {
         var directory = Directory.CreateTempSubdirectory("tajstokens-native-desktop-variant-");
@@ -159,6 +245,27 @@ public sealed class CodexNativeSourcesServiceTests
 
             Assert.Equal("installed", Assert.Single(source.Jobs).JobKey);
             Assert.Equal("codex-home", source.Source.DiscoveryKind);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ReadAsync_SourceErrorsPreserveDiscoveryKind()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-native-source-error-provenance-");
+        try
+        {
+            File.WriteAllText(Path.Combine(directory.FullName, "memories_1.sqlite"), "not a sqlite database");
+
+            var source = await new CodexNativeSourcesService(directory.FullName).ReadMemoryAsync();
+
+            Assert.Equal(CodexNativeSourceAvailability.Error, source.Source.Availability);
+            Assert.Equal("codex-home", source.Source.DiscoveryKind);
+            Assert.Equal(Path.Combine(directory.FullName, "memories_1.sqlite"), source.Source.DatabasePath);
         }
         finally
         {

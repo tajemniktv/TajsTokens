@@ -290,6 +290,217 @@ public sealed class CodexStateDbExplorerService
     }
 
     /// <summary>
+    /// Reads a bounded page after applying source-native ordering. Ordering belongs at the SQLite
+    /// boundary so a table larger than the page cannot hide its newest/highest-ranked rows.
+    /// Unknown order columns are ignored to keep schema variants inspectable.
+    /// </summary>
+    public async Task<CodexStateRawPage> ReadOrderedPageAsync(
+        string databasePath,
+        string tableName,
+        IReadOnlyList<(string Column, bool Descending)> orderBy,
+        int pageIndex = 0,
+        int pageSize = DefaultPageSize,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tableName);
+        ArgumentNullException.ThrowIfNull(orderBy);
+        pageIndex = Math.Max(0, pageIndex);
+        pageSize = Math.Clamp(pageSize, 1, MaxPageSize);
+
+        var candidate = CreateCandidateForPath(databasePath);
+        await using var connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
+        var objectType = await ReadObjectTypeAsync(connection, tableName, cancellationToken);
+        if (objectType is null)
+        {
+            throw new KeyNotFoundException($"The source database does not contain a table or view named '{tableName}'.");
+        }
+
+        var availableColumns = (await ReadColumnsAsync(connection, tableName, cancellationToken))
+            .Select(column => column.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var ordering = orderBy
+            .Where(order => !string.IsNullOrWhiteSpace(order.Column) && availableColumns.Contains(order.Column))
+            .Select(order => $"{QuoteIdentifier(order.Column)} {(order.Descending ? "DESC" : "ASC")}")
+            .ToArray();
+        var orderClause = ordering.Length == 0 ? string.Empty : $" ORDER BY {string.Join(", ", ordering)}";
+        var totalRows = await TryReadRowCountAsync(connection, tableName, cancellationToken);
+        var offset = checked((long)pageIndex * pageSize);
+        return await ReadRawPageAsync(
+            connection,
+            candidate.Path,
+            tableName,
+            pageIndex,
+            pageSize,
+            totalRows,
+            $"SELECT * FROM {QuoteIdentifier(tableName)}{orderClause} LIMIT $limit OFFSET $offset;",
+            command =>
+            {
+                command.Parameters.AddWithValue("$limit", pageSize);
+                command.Parameters.AddWithValue("$offset", offset);
+            },
+            cancellationToken);
+    }
+
+    /// <summary>Reads rows whose source-native key is one of the supplied values.</summary>
+    public async Task<CodexStateRawPage> ReadRowsByTextValuesAsync(
+        string databasePath,
+        string tableName,
+        string keyColumn,
+        IReadOnlyList<string> values,
+        IReadOnlyList<(string Column, bool Descending)>? orderBy = null,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tableName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(keyColumn);
+        ArgumentNullException.ThrowIfNull(values);
+
+        var candidate = CreateCandidateForPath(databasePath);
+        await using var connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
+        var objectType = await ReadObjectTypeAsync(connection, tableName, cancellationToken);
+        if (objectType is null)
+        {
+            throw new KeyNotFoundException($"The source database does not contain a table or view named '{tableName}'.");
+        }
+
+        var availableColumns = (await ReadColumnsAsync(connection, tableName, cancellationToken))
+            .Select(column => column.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!availableColumns.Contains(keyColumn))
+        {
+            return new CodexStateRawPage(candidate.Path, tableName, 0, values.Count, 0, [], []);
+        }
+
+        var distinctValues = values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (distinctValues.Length == 0)
+        {
+            return new CodexStateRawPage(candidate.Path, tableName, 0, 1, 0, [], []);
+        }
+
+        var parameters = distinctValues.Select((_, index) => $"$value{index}").ToArray();
+        var predicate = $"{QuoteIdentifier(keyColumn)} IN ({string.Join(", ", parameters)})";
+        var ordering = (orderBy ?? Array.Empty<(string Column, bool Descending)>())
+            .Where(order => !string.IsNullOrWhiteSpace(order.Column) && availableColumns.Contains(order.Column))
+            .Select(order => $"{QuoteIdentifier(order.Column)} {(order.Descending ? "DESC" : "ASC")}")
+            .ToArray();
+        var orderClause = ordering.Length == 0 ? string.Empty : $" ORDER BY {string.Join(", ", ordering)}";
+        var totalRows = await ReadCountWhereAsync(connection, tableName, predicate, distinctValues, cancellationToken);
+        // The key set is already bounded by the gateway's visible base page. Do not apply a
+        // second arbitrary row limit here: relation rows must remain complete for those keys.
+        var relationPageSize = checked((int)Math.Min(int.MaxValue, Math.Max(1, totalRows)));
+        return await ReadRawPageAsync(
+            connection,
+            candidate.Path,
+            tableName,
+            0,
+            relationPageSize,
+            totalRows,
+            $"SELECT * FROM {QuoteIdentifier(tableName)} WHERE {predicate}{orderClause};",
+            command =>
+            {
+                for (var index = 0; index < distinctValues.Length; index++)
+                {
+                    command.Parameters.AddWithValue(parameters[index], distinctValues[index]);
+                }
+            },
+            cancellationToken);
+    }
+
+    /// <summary>Reads a source-native integer aggregate without applying a bounded row page.</summary>
+    public async Task<long?> ReadMaxInt64Async(
+        string databasePath,
+        string tableName,
+        string columnName,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tableName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(columnName);
+        var candidate = CreateCandidateForPath(databasePath);
+        await using var connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
+        var objectType = await ReadObjectTypeAsync(connection, tableName, cancellationToken);
+        if (objectType is null)
+        {
+            throw new KeyNotFoundException($"The source database does not contain a table or view named '{tableName}'.");
+        }
+
+        var availableColumns = (await ReadColumnsAsync(connection, tableName, cancellationToken))
+            .Select(column => column.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!availableColumns.Contains(columnName))
+        {
+            return null;
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT MAX(CAST({QuoteIdentifier(columnName)} AS INTEGER)) FROM {QuoteIdentifier(tableName)};";
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        return value is null or DBNull ? null : Convert.ToInt64(value, CultureInfo.InvariantCulture);
+    }
+
+    private static async Task<CodexStateRawPage> ReadRawPageAsync(
+        SqliteConnection connection,
+        string databasePath,
+        string tableName,
+        int pageIndex,
+        int pageSize,
+        long totalRows,
+        string commandText,
+        Action<SqliteCommand> configure,
+        CancellationToken cancellationToken)
+    {
+        var columns = new List<string>();
+        var rows = new List<CodexStateRawRow>();
+        await using var command = connection.CreateCommand();
+        command.CommandText = commandText;
+        configure(command);
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        for (var index = 0; index < reader.FieldCount; index++)
+        {
+            columns.Add(reader.GetName(index));
+        }
+
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var values = new object?[reader.FieldCount];
+            var display = new StringBuilder();
+            for (var index = 0; index < reader.FieldCount; index++)
+            {
+                values[index] = reader.IsDBNull(index) ? null : reader.GetValue(index);
+                if (index > 0)
+                {
+                    display.Append("  |  ");
+                }
+
+                display.Append(FormatRawValue(values[index]));
+            }
+
+            rows.Add(new CodexStateRawRow(values, display.ToString()));
+        }
+
+        return new CodexStateRawPage(databasePath, tableName, pageIndex, pageSize, totalRows, columns, rows);
+    }
+
+    private static async Task<long> ReadCountWhereAsync(
+        SqliteConnection connection,
+        string tableName,
+        string predicate,
+        IReadOnlyList<string> values,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT COUNT(*) FROM {QuoteIdentifier(tableName)} WHERE {predicate};";
+        for (var index = 0; index < values.Count; index++)
+        {
+            command.Parameters.AddWithValue($"$value{index}", values[index]);
+        }
+
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return Convert.ToInt64(result, CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
     /// Searches the supplied source files for an exact column name and exact value. The query is
     /// intentionally per-object and unjoined: a match is evidence from that source object only,
     /// not an inferred relationship between databases or tables.

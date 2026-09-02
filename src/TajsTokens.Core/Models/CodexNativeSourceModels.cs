@@ -40,11 +40,14 @@ public sealed record CodexNativeSourceInfo(
     /// <summary>Explorer discovery provenance (for example codex-home or snapshot-folder).</summary>
     public string? DiscoveryKind { get; init; }
 
+    /// <summary>At least one source-native table contained rows beyond the bounded read.</summary>
+    public bool HasMoreRows { get; init; }
+
     public bool IsInspectable => Availability is CodexNativeSourceAvailability.Available or CodexNativeSourceAvailability.Empty;
 
     public string StatusText => Availability switch
     {
-        CodexNativeSourceAvailability.Available => $"Available · {SupportedTables.Count:N0} supported table(s)",
+        CodexNativeSourceAvailability.Available => $"Available · {SupportedTables.Count:N0} supported table(s)" + (HasMoreRows ? " · more rows available" : string.Empty),
         CodexNativeSourceAvailability.Empty => "Supported · no rows observed",
         CodexNativeSourceAvailability.Unsupported => "Source found · capability unsupported",
         CodexNativeSourceAvailability.Unavailable => "Source not discovered",

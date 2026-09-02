@@ -24,7 +24,7 @@
                            Opacity="0.72" TextWrapping="Wrap" Margin="0,4,0,0" />
                 <TextBlock x:Name="StatusText" Text="Loading Codex source capabilities…" Opacity="0.72" Margin="0,8,0,0" TextWrapping="Wrap" />
             </StackPanel>
-            <Button Grid.Column="1" Content="Refresh" Click="OnRefreshClicked" VerticalAlignment="Top" />
+            <Button x:Name="RefreshButton" Grid.Column="1" Content="Refresh" Click="OnRefreshClicked" VerticalAlignment="Top" />
         </Grid>
 
         <StackPanel Grid.Row="1" Spacing="8">

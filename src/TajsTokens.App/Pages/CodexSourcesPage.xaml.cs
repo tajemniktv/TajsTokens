@@ -11,6 +11,7 @@ public sealed partial class CodexSourcesPage : Page
     private CodexNativeSourcesSnapshot? _snapshot;
     private bool _loaded;
     private bool _loading;
+    private bool _reloadRequested;
 
     public CodexSourcesPage()
     {
@@ -33,6 +34,7 @@ public sealed partial class CodexSourcesPage : Page
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         _loaded = false;
+        _reloadRequested = false;
         var cancellation = Interlocked.Exchange(ref _cancellation, null);
         cancellation?.Cancel();
         cancellation?.Dispose();
@@ -42,6 +44,13 @@ public sealed partial class CodexSourcesPage : Page
     {
         if (_cancellation is { IsCancellationRequested: false } cancellation)
         {
+            if (_loading)
+            {
+                _reloadRequested = true;
+                StatusText.Text = "Refresh queued; the current inspection will finish first…";
+                return;
+            }
+
             await LoadAsync(cancellation.Token);
         }
     }
@@ -56,20 +65,31 @@ public sealed partial class CodexSourcesPage : Page
 
     private async Task LoadAsync(CancellationToken cancellationToken)
     {
-        if (!_loaded || _loading)
+        if (!_loaded)
         {
+            return;
+        }
+
+        if (_loading)
+        {
+            _reloadRequested = true;
             return;
         }
 
         _loading = true;
         try
         {
-            StatusText.Text = "Inspecting Codex source capabilities…";
-            var snapshot = await Task.Run(
-                () => App.Services.CodexNativeSources.ReadAsync(cancellationToken),
-                cancellationToken);
-            cancellationToken.ThrowIfCancellationRequested();
-            Apply(snapshot);
+            do
+            {
+                _reloadRequested = false;
+                StatusText.Text = "Inspecting Codex source capabilities…";
+                var snapshot = await Task.Run(
+                    () => App.Services.CodexNativeSources.ReadAsync(cancellationToken),
+                    cancellationToken);
+                cancellationToken.ThrowIfCancellationRequested();
+                Apply(snapshot);
+            }
+            while (_reloadRequested && _loaded && !cancellationToken.IsCancellationRequested);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
