@@ -380,6 +380,11 @@ public sealed partial class ObservatoryPage : Page
             return;
         }
 
+        if (selectedTab == 6)
+        {
+            ThreadSourceDetailText.Text = "Loading source-native thread metadata and history…";
+        }
+
         try
         {
             var store = App.Services.ObservatoryStore;
@@ -450,6 +455,19 @@ public sealed partial class ObservatoryPage : Page
                     StorageList.ItemsSource = rows.Length == 0
                         ? new[] { new StorageRow("No rollout source", "No current storage row is associated with this session.") }
                         : rows;
+                    break;
+                }
+                case 6:
+                {
+                    var thread = await Task.Run(
+                        () => App.Services.CodexThreadObservability.ReadThreadAsync(session.SessionId, cancellation.Token),
+                        cancellation.Token);
+                    if (!CanApplyDetail(session.SessionId, selectionGeneration, detailGeneration, cancellation))
+                    {
+                        return;
+                    }
+
+                    ThreadSourceDetailText.Text = RenderThreadSourceDetail(thread);
                     break;
                 }
             }
@@ -531,6 +549,7 @@ public sealed partial class ObservatoryPage : Page
         TimelineList.ItemsSource = null;
         ContextList.ItemsSource = null;
         StorageList.ItemsSource = null;
+        ThreadSourceDetailText.Text = "Select a session to inspect its source-native Codex thread data.";
     }
 
     private static SessionRow ToSessionRow(CodexSessionOverview session)
@@ -652,4 +671,79 @@ public sealed partial class ObservatoryPage : Page
     private sealed record ContextRow(string Header, string Detail);
     private sealed record AgentTreeRow(string Text);
     private sealed record StorageRow(string FileName, string Detail);
+
+    private static string RenderThreadSourceDetail(CodexThreadReadResult result)
+    {
+        if (!result.HasThread && result.Turns.Count == 0 && result.Items.Count == 0 && result.RealtimeItems.Count == 0)
+        {
+            return string.Join("\n", result.Warnings.DefaultIfEmpty(
+                "No source-native state/history row is available for this session."));
+        }
+
+        var thread = result.Thread;
+        var lines = new List<string>
+        {
+            "Source-native Codex thread data (on-demand local inspection)",
+            $"Captured: {result.CapturedAtUtc.ToLocalTime():g}",
+            $"Thread ID: {thread?.ThreadId ?? "unknown"}",
+            $"State source: {result.StateSourcePath ?? "unavailable"} · {result.StateSourceDescription ?? "unknown"}",
+            $"History source: {result.HistorySourcePath ?? "unavailable"} · {result.HistorySourceDescription ?? "unknown"}",
+            $"Source: {thread?.Source ?? "unavailable"} · thread source: {thread?.ThreadSource ?? "unavailable"}",
+            $"Model provider: {thread?.ModelProvider ?? "unavailable"} · model: {thread?.Model ?? "unavailable"} · reasoning: {thread?.ReasoningEffort ?? "unavailable"}",
+            $"Created: {FormatDate(thread?.CreatedAtUtc)} · updated: {FormatDate(thread?.UpdatedAtUtc)} · recency: {FormatDate(thread?.RecencyAtUtc)}",
+            $"CWD: {thread?.Cwd ?? "unavailable"}",
+            $"Git: {thread?.GitBranch ?? "unavailable"} · {thread?.GitSha ?? "unavailable"} · {thread?.GitOriginUrl ?? "unavailable"}",
+            $"Sandbox: {thread?.SandboxPolicy ?? "unavailable"} · approval: {thread?.ApprovalMode ?? "unavailable"} · memory: {thread?.MemoryMode ?? "unavailable"}",
+            $"History mode (source field): {thread?.HistoryMode ?? "unavailable"} · archived: {FormatBool(thread?.Archived)} · pinned: {FormatBool(thread?.IsPinned)}"
+        };
+
+        if (result.Project is { } project)
+        {
+            lines.Add($"Project: {project.Name} ({project.ProjectId}) · ordered roots: {project.OrderedRoots.Count:N0} · capability={FormatCapability(result.ProjectCapabilityAvailable)}");
+            lines.AddRange(project.OrderedRoots.Select((root, index) => $"  root[{index}]: {root}"));
+        }
+        else
+        {
+            lines.Add($"Project: unavailable (missing project_id or project row) · capability={FormatCapability(result.ProjectCapabilityAvailable)}");
+        }
+
+        if (result.Section is { } section)
+        {
+            lines.Add($"Section: {section.Name} ({section.SectionId}) · appearance: {section.Appearance ?? "unavailable"}");
+        }
+
+        lines.Add($"Spawn edges (directional source rows): {result.SpawnEdges.Count:N0} · capability={FormatCapability(result.SpawnEdgesCapabilityAvailable)}");
+        lines.AddRange(result.SpawnEdges.Take(80).Select(edge =>
+            $"  {edge.ParentThreadId} → {edge.ChildThreadId} · status={edge.Status}"));
+        lines.Add($"Dynamic tools: {result.DynamicTools.Count:N0} · capability={FormatCapability(result.DynamicToolsCapabilityAvailable)}");
+        lines.AddRange(result.DynamicTools.Take(80).Select(tool =>
+            $"  [{tool.Position}] {tool.Name} · namespace={tool.Namespace ?? "unavailable"} · defer_loading={tool.DeferLoading}"));
+        lines.Add($"Turns (rollout order): {result.Turns.Count:N0} · capability={FormatCapability(result.TurnsCapabilityAvailable)}");
+        lines.AddRange(result.Turns.Take(120).Select(turn =>
+            $"  [{turn.RolloutOrdinal}] {turn.TurnId} · status={turn.Status} · duration={FormatDuration(turn.DurationMs)}"));
+        lines.Add($"Normal history items (rollout order): {result.Items.Count:N0} · capability={FormatCapability(result.ItemsCapabilityAvailable)}");
+        lines.AddRange(result.Items.Take(160).Select(item =>
+            $"  [{item.RolloutOrdinal}] {item.DisplaySummary}"));
+        lines.Add($"Realtime timeline items (separate source lane): {result.RealtimeItems.Count:N0} · capability={FormatCapability(result.RealtimeCapabilityAvailable)}");
+        lines.AddRange(result.RealtimeItems.Take(160).Select(item =>
+            $"  [{item.RolloutOrdinal}] {item.ItemType} · {item.ItemId}"));
+
+        if (result.Items.Count > 160 || result.RealtimeItems.Count > 160 || result.Turns.Count > 120)
+        {
+            lines.Add("Some history rows are omitted from this UI summary; source rows remain available through the State DB Explorer.");
+        }
+
+        if (result.Warnings.Count > 0)
+        {
+            lines.Add("Warnings:");
+            lines.AddRange(result.Warnings.Select(warning => $"  {warning}"));
+        }
+
+        return string.Join("\n", lines);
+
+        static string FormatDate(DateTimeOffset? value) => value?.ToLocalTime().ToString("g") ?? "unavailable";
+        static string FormatBool(bool? value) => value is null ? "unavailable" : value.Value ? "yes" : "no";
+        static string FormatCapability(bool? value) => value is null ? "unknown" : value.Value ? "present" : "absent";
+        static string FormatDuration(long? value) => value is long milliseconds ? $"{milliseconds:N0} ms" : "unavailable";
+    }
 }

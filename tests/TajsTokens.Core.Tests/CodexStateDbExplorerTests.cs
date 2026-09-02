@@ -141,6 +141,174 @@ public sealed class CodexStateDbExplorerTests
             Assert.False(diff.SchemaChanged);
             Assert.Equal(2, changed.PreviousRowCount);
             Assert.Equal(2, changed.CurrentRowCount);
+            Assert.Contains(changed.RowChanges, row => row.ChangeKind == "changed" && row.RowIdentity.Contains("thread-2", StringComparison.Ordinal));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Compare_ReportsAddedRemovedAndChangedRowCandidatesWithSourceProvenance()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-db-row-diff-");
+        try
+        {
+            var baselinePath = Path.Combine(directory.FullName, "state_5.sqlite");
+            var currentPath = Path.Combine(directory.FullName, "state_6.sqlite");
+            await CreateDatabaseAsync(baselinePath);
+            File.Copy(baselinePath, currentPath);
+
+            await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = currentPath }.ToString()))
+            {
+                await connection.OpenAsync();
+                var update = connection.CreateCommand();
+                update.CommandText = "UPDATE threads SET model = 'gpt-new' WHERE id = 'thread-2'; DELETE FROM threads WHERE id = 'thread-1'; INSERT INTO threads(id, model) VALUES ('thread-3', 'gpt-c');";
+                await update.ExecuteNonQueryAsync();
+            }
+
+            var explorer = new CodexStateDbExplorerService(directory.FullName);
+            var baseline = (await explorer.InspectAsync(baselinePath)).Snapshot;
+            var current = (await explorer.InspectAsync(currentPath)).Snapshot;
+            var diff = CodexStateDbExplorerService.Compare(baseline, current);
+            var table = Assert.Single(diff.Tables, candidate => candidate.Name == "threads");
+
+            Assert.True(table.RowComparisonComplete);
+            Assert.False(table.RowComparisonBounded);
+            Assert.Equal(3, table.RowChanges.Count);
+            Assert.Contains(table.RowChanges, row => row.ChangeKind == "removed" && row.RowIdentity.Contains("thread-1", StringComparison.Ordinal));
+            Assert.Contains(table.RowChanges, row => row.ChangeKind == "changed" && row.RowIdentity.Contains("thread-2", StringComparison.Ordinal));
+            Assert.Contains(table.RowChanges, row => row.ChangeKind == "added" && row.RowIdentity.Contains("thread-3", StringComparison.Ordinal));
+            Assert.All(table.RowChanges, row =>
+            {
+                Assert.Equal(Path.GetFullPath(baselinePath), row.BaselineDatabasePath);
+                Assert.Equal(Path.GetFullPath(currentPath), row.CurrentDatabasePath);
+                Assert.Equal("primary-key", row.IdentityKind);
+            });
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task Compare_UnchangedSmallSourceHasCompleteRowEvidenceAndNoDiffs()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-db-row-unchanged-");
+        try
+        {
+            var path = Path.Combine(directory.FullName, "state_5.sqlite");
+            await CreateDatabaseAsync(path);
+            var explorer = new CodexStateDbExplorerService(directory.FullName);
+            var first = (await explorer.InspectAsync(path)).Snapshot;
+            var second = (await explorer.InspectAsync(path)).Snapshot;
+            var threads = Assert.Single(first.Tables, table => table.Name == "threads");
+
+            Assert.True(threads.RowComparisonComplete);
+            Assert.Equal(2, threads.RowObservationCount);
+            var diff = CodexStateDbExplorerService.Compare(first, second);
+            Assert.False(diff.HasChanges);
+            Assert.False(diff.HasIncompleteComparisons);
+            Assert.Empty(diff.Tables);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Compare_ReportsCountOnlyCoverageWhenRowsWereNotCaptured()
+    {
+        var before = new CodexStateInspectionSnapshot(
+            "before.sqlite",
+            DateTimeOffset.UtcNow.AddMinutes(-1),
+            [new CodexStateTableSnapshot("threads", "table", 10, "schema", "rows")])
+        {
+            SourceDescription = "baseline",
+            RowObservations = new Dictionary<string, IReadOnlyList<CodexStateRowObservation>>(StringComparer.OrdinalIgnoreCase),
+        };
+        var after = new CodexStateInspectionSnapshot(
+            "after.sqlite",
+            DateTimeOffset.UtcNow,
+            [new CodexStateTableSnapshot("threads", "table", 10, "schema", "rows")
+            {
+                RowComparisonBounded = true,
+                RowComparisonNote = "count-only: database exceeds 64 MiB"
+            }])
+        {
+            SourceDescription = "current",
+            RowObservations = new Dictionary<string, IReadOnlyList<CodexStateRowObservation>>(StringComparer.OrdinalIgnoreCase),
+        };
+
+        var diff = CodexStateDbExplorerService.Compare(before, after);
+        var table = Assert.Single(diff.Tables);
+        Assert.Equal("incomplete", table.ChangeKind);
+        Assert.False(table.RowsChanged);
+        Assert.True(diff.HasChanges);
+        Assert.True(diff.HasIncompleteComparisons);
+        Assert.Contains("count-only", table.EvidenceSummary, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void Compare_DoesNotTreatDifferentFingerprintModesAsAContentChange()
+    {
+        var before = new CodexStateInspectionSnapshot(
+            "before.sqlite",
+            DateTimeOffset.UtcNow.AddMinutes(-1),
+            [new CodexStateTableSnapshot("threads", "table", 2, "schema", "full-fingerprint")
+            {
+                RowComparisonComplete = true,
+                RowFingerprintMode = "full",
+                RowObservationCount = 2
+            }]);
+        var after = new CodexStateInspectionSnapshot(
+            "after.sqlite",
+            DateTimeOffset.UtcNow,
+            [new CodexStateTableSnapshot("threads", "table", 2, "schema", "count-fingerprint")
+            {
+                RowComparisonBounded = true,
+                RowFingerprintMode = "count-only",
+                RowComparisonNote = "count-only inspection requested"
+            }]);
+
+        var diff = CodexStateDbExplorerService.Compare(before, after);
+        var table = Assert.Single(diff.Tables);
+        Assert.Equal("incomplete", table.ChangeKind);
+        Assert.False(table.RowsChanged);
+        Assert.False(table.HasRowLevelChanges);
+        Assert.Contains("fingerprint modes differ", table.EvidenceSummary, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task Inspect_LargeTableUsesBoundedCountOnlyEvidence()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-db-large-table-");
+        try
+        {
+            var path = Path.Combine(directory.FullName, "state_5.sqlite");
+            await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path }.ToString()))
+            {
+                await connection.OpenAsync();
+                var command = connection.CreateCommand();
+                command.CommandText = "CREATE TABLE large_rows(id INTEGER PRIMARY KEY, value TEXT); WITH RECURSIVE numbers(value) AS (SELECT 1 UNION ALL SELECT value + 1 FROM numbers WHERE value < 100001) INSERT INTO large_rows(id, value) SELECT value, 'filler' FROM numbers;";
+                await command.ExecuteNonQueryAsync();
+            }
+
+            var explorer = new CodexStateDbExplorerService(directory.FullName);
+            var snapshot = (await explorer.InspectAsync(path)).Snapshot;
+            var table = Assert.Single(snapshot.Tables);
+
+            Assert.Equal(100001, table.RowCount);
+            Assert.False(table.RowComparisonComplete);
+            Assert.True(table.RowComparisonBounded);
+            Assert.Empty(snapshot.RowObservations["large_rows"]);
+            Assert.Contains("count-only", table.RowComparisonNote, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -227,7 +395,7 @@ public sealed class CodexStateDbExplorerTests
             Assert.True(diff.SchemaChanged);
             Assert.Equal(firstPath, diff.BaselineDatabasePath);
             Assert.Equal(secondPath, diff.CurrentDatabasePath);
-            Assert.Contains(diff.Tables, table => table.Name == "threads" && table.SchemaChanged);
+            Assert.Contains(diff.Tables, table => table.Name == "threads" && table.SchemaChanged && table.AddedColumns.Contains("source_marker"));
         }
         finally
         {
@@ -261,7 +429,34 @@ public sealed class CodexStateDbExplorerTests
             Assert.Equal("queue_items", match.TableName);
             Assert.Equal("thread_id", match.ColumnName);
             Assert.Contains("thread-2", match.DisplayText);
+            Assert.Equal("Codex home", match.SourceDescription);
+            Assert.Equal("codex-home", match.DiscoveryKind);
+            Assert.Equal(Path.GetFullPath(secondPath), match.SourceCandidate!.Path);
+            Assert.NotEqual(default, match.InspectionCapturedAtUtc);
             Assert.DoesNotContain(trace.Matches, candidate => candidate.TableName == "threads");
+
+            await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = secondPath }.ToString()))
+            {
+                await connection.OpenAsync();
+                var insert = connection.CreateCommand();
+                insert.CommandText = "CREATE TABLE repeated(thread_id TEXT); INSERT INTO repeated VALUES ('same'), ('same'), ('same'); CREATE TABLE case_insensitive(thread_id TEXT COLLATE NOCASE); INSERT INTO case_insensitive VALUES ('mixed');";
+                await insert.ExecuteNonQueryAsync();
+            }
+
+            var capped = await explorer.TraceKeyAsync([secondPath], "thread_id", "same", maxMatches: 2);
+            Assert.Equal(2, capped.Matches.Count);
+            Assert.True(capped.MayBeTruncated);
+
+            var exactlyCapped = await explorer.TraceKeyAsync([secondPath], "thread_id", "same", maxMatches: 3);
+            Assert.Equal(3, exactlyCapped.Matches.Count);
+            Assert.False(exactlyCapped.MayBeTruncated);
+
+            var exact = await explorer.TraceKeyAsync([secondPath], "thread_id", "SAME");
+            Assert.Empty(exact.Matches);
+            Assert.False(exact.MayBeTruncated);
+
+            var caseSensitive = await explorer.TraceKeyAsync([secondPath], "thread_id", "MIXED");
+            Assert.DoesNotContain(caseSensitive.Matches, candidate => candidate.TableName == "case_insensitive");
         }
         finally
         {

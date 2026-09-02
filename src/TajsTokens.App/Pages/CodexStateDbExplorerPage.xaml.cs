@@ -196,9 +196,12 @@ public sealed partial class CodexStateDbExplorerPage : Page
                 : $"schema identical ({ShortFingerprint(diff.CurrentSchemaFingerprint)})";
             ComparisonText.Text =
                 $"{current.Database.Path} ↔ {other.Database.Path} · {schemaSummary} · " +
-                (diff.HasChanges
+                (diff.HasObservedChanges
                     ? $"{diff.Tables.Count:N0} table/row difference(s) observed."
-                    : "no table or bounded row differences observed.");
+                    : "no table or row differences observed.") +
+                (diff.HasIncompleteComparisons
+                    ? " Some row comparisons are incomplete or bounded/count-only; unchanged counts do not prove unchanged rows."
+                    : string.Empty);
             StatusText.Text = "Source comparison complete; no source database was modified.";
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -218,7 +221,9 @@ public sealed partial class CodexStateDbExplorerPage : Page
     private async void OnTraceClicked(object sender, RoutedEventArgs e)
     {
         var columnName = TraceColumnTextBox.Text?.Trim();
-        var value = TraceValueTextBox.Text?.Trim();
+        // Preserve the literal value exactly as entered. Only the column identifier is trimmed;
+        // source equality is decided by SQLite's parameterized comparison.
+        var value = TraceValueTextBox.Text;
         var cancellation = _cancellation;
         if (string.IsNullOrWhiteSpace(columnName) || string.IsNullOrWhiteSpace(value))
         {
@@ -234,13 +239,26 @@ public sealed partial class CodexStateDbExplorerPage : Page
         var generation = Interlocked.Increment(ref _loadGeneration);
         try
         {
-            TraceStatusText.Text = $"Searching discovered stores for exact {columnName}={value}…";
-            var candidates = await Task.Run(
-                () => App.Services.CodexStateExplorer.DiscoverCandidates(),
-                cancellation.Token);
+            var selectedCandidates = new[]
+                {
+                    DatabaseComboBox.SelectedItem as CodexStateDatabaseCandidate,
+                    ComparisonComboBox.SelectedItem as CodexStateDatabaseCandidate
+                }
+                .Where(candidate => candidate is not null)
+                .Cast<CodexStateDatabaseCandidate>()
+                .GroupBy(candidate => candidate.Path, StringComparer.OrdinalIgnoreCase)
+                .Select(group => group.First())
+                .ToArray();
+            if (selectedCandidates.Length == 0)
+            {
+                TraceStatusText.Text = "Select at least one source instance before tracing a key.";
+                return;
+            }
+
+            TraceStatusText.Text = $"Searching {selectedCandidates.Length:N0} selected store(s) for exact {columnName}={value}…";
             var result = await Task.Run(
                 () => App.Services.CodexStateExplorer.TraceKeyAsync(
-                    candidates.Select(candidate => candidate.Path),
+                    selectedCandidates.Select(candidate => candidate.Path),
                     columnName,
                     value,
                     cancellationToken: cancellation.Token),
@@ -251,7 +269,7 @@ public sealed partial class CodexStateDbExplorerPage : Page
             }
 
             TraceList.ItemsSource = result.Matches;
-            TraceStatusText.Text = $"{result.Summary} across {candidates.Count:N0} discovered store(s).";
+            TraceStatusText.Text = $"{result.Summary} across {selectedCandidates.Length:N0} selected store(s). Same-looking values are observations only; no semantic identity was inferred.";
             StatusText.Text = "Source-native key trace complete; no joins or source mutations were performed.";
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -678,9 +696,13 @@ public sealed partial class CodexStateDbExplorerPage : Page
             var schemaSummary = diff.SchemaChanged
                 ? $"schema changed ({ShortFingerprint(diff.BaselineSchemaFingerprint)} → {ShortFingerprint(diff.CurrentSchemaFingerprint)})"
                 : $"schema unchanged ({ShortFingerprint(diff.CurrentSchemaFingerprint)})";
-            BaselineText.Text = diff.HasChanges
+            BaselineText.Text = diff.HasObservedChanges
                 ? $"Compared with baseline from {diff.BaselineCapturedAtUtc.ToLocalTime():g}: {schemaSummary} · {diff.Tables.Count:N0} changed/added/removed table(s)."
                 : $"Compared with baseline from {diff.BaselineCapturedAtUtc.ToLocalTime():g}: {schemaSummary} · no table or row changes observed.";
+            if (diff.HasIncompleteComparisons)
+            {
+                BaselineText.Text += " Some row comparisons are incomplete or bounded/count-only; unchanged counts do not prove unchanged rows.";
+            }
         }
         else if (_baseline is not null)
         {
