@@ -48,17 +48,22 @@ The architectural shorthand is:
 
 Prefer small, source-focused changes that can be reviewed against captured evidence. New parsers or adapters should come with sanitized fixtures/probes covering observed variants and edge cases.
 
-When code and source evidence disagree, report the disagreement. Do not make the fixture imitate the code merely to keep a test green.
+When TajsTokens code, observed runtime data, and upstream Codex implementation disagree, report the disagreement rather than forcing them to agree. The installed runtime is authoritative for what the user's installation actually emits; matching upstream source is corroboration and explanation of intended semantics, not permission to overwrite contradictory observation.
 
-For Codex investigation work:
+### Codex evidence workflow
 
-1. identify the exact Codex-owned source being studied;
-2. capture representative values/states without assigning unsupported meaning;
-3. document known / observed-but-unexplained / hypothesized / unknown semantics;
-4. establish identity, time, lifecycle, mutation, and coverage behavior where possible;
-5. only then add normalized/durable evidence or a read-model interpretation.
+Do not experimentally re-prove every relationship that Codex itself states explicitly in implementation, migrations, protocol types, and tests. Use the strongest practical evidence for the question:
 
-When multiple Codex sources appear to describe the same concept, do not choose an authority by convenience. Preserve the observations and put any precedence/reconciliation rule in an explicit read-model policy after the relationship is demonstrated.
+1. observed runtime/source data from the installed Codex sources;
+2. matching or near-matching `openai/codex` implementation, migrations, protocol types, and tests;
+3. targeted controlled experiments for version-sensitive, desktop-only, ambiguous, or contradictory behavior;
+4. inference only when explicitly labelled and harmless to the product claim.
+
+When relying on upstream Codex source, record the commit/tag/version inspected and whether it is known to match the installed build. A source-code relationship may support a source contract when it is explicit and consistent with observed runtime data. Manual experiments are still required when the installed behavior differs, when source coverage is uncertain, or when a user-facing label would otherwise overclaim.
+
+The public Codex repository may not contain every desktop/app subsystem. Absence from `openai/codex` is not evidence that an observed local source is invalid; keep desktop-only or otherwise unmatched sources runtime/schema-driven until matching implementation evidence is found.
+
+When multiple Codex sources appear to describe the same concept, do not choose an authority by convenience. Preserve the observations and put any precedence/reconciliation rule in an explicit read-model policy after the relationship is sufficiently supported.
 
 ## Current repository
 
@@ -87,4 +92,4 @@ For focused changes, run the narrowest relevant tests first, then the full Core 
 
 ## References
 
-Codex CLI source code is in `E:\dev\codex` folder. It is a cloned, read-only reference repo, that should be used for research or exploration on how Codex works.
+The local read-only clone of the Codex CLI source is at `E:\dev\codex`. Use it as a first-class corroborating reference for Codex semantics, together with the installed runtime evidence. Do not add it as a TajsTokens dependency or submodule.
