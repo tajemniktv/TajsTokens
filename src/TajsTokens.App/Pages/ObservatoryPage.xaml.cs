@@ -687,7 +687,9 @@ public sealed partial class ObservatoryPage : Page
             $"Captured: {result.CapturedAtUtc.ToLocalTime():g}",
             $"Thread ID: {thread?.ThreadId ?? "unknown"}",
             $"State source: {result.StateSourcePath ?? "unavailable"} · {result.StateSourceDescription ?? "unknown"}",
+            $"State thread observations: {result.StateThreadObservations.Count:N0} · reconciliation: {result.StateReconciliationPolicy ?? "unknown"}",
             $"History source: {result.HistorySourcePath ?? "unavailable"} · {result.HistorySourceDescription ?? "unknown"}",
+            $"History reconciliation: {result.HistoryReconciliationPolicy ?? "unknown"}",
             $"Source: {thread?.Source ?? "unavailable"} · thread source: {thread?.ThreadSource ?? "unavailable"}",
             $"Model provider: {thread?.ModelProvider ?? "unavailable"} · model: {thread?.Model ?? "unavailable"} · reasoning: {thread?.ReasoningEffort ?? "unavailable"}",
             $"Created: {FormatDate(thread?.CreatedAtUtc)} · updated: {FormatDate(thread?.UpdatedAtUtc)} · recency: {FormatDate(thread?.RecencyAtUtc)}",
@@ -707,35 +709,54 @@ public sealed partial class ObservatoryPage : Page
             lines.Add($"Project: unavailable (missing project_id or project row) · capability={FormatCapability(result.ProjectCapabilityAvailable)}");
         }
 
+        if (!string.IsNullOrWhiteSpace(result.StateSourceSelectionRationale))
+        {
+            lines.Add($"State presentation source rationale: {result.StateSourceSelectionRationale}");
+        }
+
         if (result.Section is { } section)
         {
             lines.Add($"Section: {section.Name} ({section.SectionId}) · appearance: {section.Appearance ?? "unavailable"}");
         }
 
-        lines.Add($"Spawn edges (directional source rows): {result.SpawnEdges.Count:N0} · capability={FormatCapability(result.SpawnEdgesCapabilityAvailable)}");
+        lines.Add($"History source observations: {result.HistorySources.Count:N0}");
+        lines.AddRange(result.HistorySources.Select(source =>
+            $"  {source.SourcePath} · turns={source.Turns.Count:N0} ({FormatTruncation(source.TurnsTruncated)}) · items={source.Items.Count:N0} ({FormatTruncation(source.ItemsTruncated)}) · realtime={source.RealtimeItems.Count:N0} ({FormatTruncation(source.RealtimeItemsTruncated)})"));
+        if (!string.IsNullOrWhiteSpace(result.HistorySourceSelectionRationale))
+        {
+            lines.Add($"History presentation source rationale: {result.HistorySourceSelectionRationale}");
+        }
+
+        lines.Add($"Spawn edges (directional source rows): {result.SpawnEdges.Count:N0} · capability={FormatCapability(result.SpawnEdgesCapabilityAvailable)} · truncated={FormatTruncation(result.SpawnEdgesTruncated)}");
         lines.AddRange(result.SpawnEdges.Take(80).Select(edge =>
             $"  {edge.ParentThreadId} → {edge.ChildThreadId} · status={edge.Status}"));
-        lines.Add($"Dynamic tools: {result.DynamicTools.Count:N0} · capability={FormatCapability(result.DynamicToolsCapabilityAvailable)}");
+        lines.Add($"Dynamic tools: {result.DynamicTools.Count:N0} · capability={FormatCapability(result.DynamicToolsCapabilityAvailable)} · truncated={FormatTruncation(result.DynamicToolsTruncated)}");
         lines.AddRange(result.DynamicTools.Take(80).Select(tool =>
             $"  [{tool.Position}] {tool.Name} · namespace={tool.Namespace ?? "unavailable"} · defer_loading={tool.DeferLoading}"));
-        lines.Add($"Turns (rollout order): {result.Turns.Count:N0} · capability={FormatCapability(result.TurnsCapabilityAvailable)}");
+        lines.Add($"Turns (rollout order): {result.Turns.Count:N0} · capability={FormatCapability(result.TurnsCapabilityAvailable)} · truncated={FormatTruncation(result.TurnsTruncated)}");
         lines.AddRange(result.Turns.Take(120).Select(turn =>
             $"  [{turn.RolloutOrdinal}] {turn.TurnId} · status={turn.Status} · duration={FormatDuration(turn.DurationMs)}"));
-        lines.Add($"Normal history items (rollout order): {result.Items.Count:N0} · capability={FormatCapability(result.ItemsCapabilityAvailable)}");
+        lines.Add($"Normal history items (rollout order): {result.Items.Count:N0} · capability={FormatCapability(result.ItemsCapabilityAvailable)} · truncated={FormatTruncation(result.ItemsTruncated)}");
         lines.AddRange(result.Items.Take(160).Select(item =>
             $"  [{item.RolloutOrdinal}] {item.DisplaySummary}"));
-        lines.Add($"Realtime timeline items (separate source lane): {result.RealtimeItems.Count:N0} · capability={FormatCapability(result.RealtimeCapabilityAvailable)}");
+        lines.Add($"Realtime timeline items (separate source lane): {result.RealtimeItems.Count:N0} · capability={FormatCapability(result.RealtimeCapabilityAvailable)} · truncated={FormatTruncation(result.RealtimeItemsTruncated)}");
         lines.AddRange(result.RealtimeItems.Take(160).Select(item =>
             $"  [{item.RolloutOrdinal}] {item.ItemType} · {item.ItemId}"));
 
         if (result.Items.Count > 160 || result.RealtimeItems.Count > 160 || result.Turns.Count > 120)
         {
-            lines.Add("Some history rows are omitted from this UI summary; source rows remain available through the State DB Explorer.");
+            lines.Add("UI summary abbreviation: some history rows are omitted from this view; source rows remain available through the State DB Explorer.");
+        }
+
+        if (result.CoverageWarnings.Count > 0)
+        {
+            lines.Add("Source coverage warnings:");
+            lines.AddRange(result.CoverageWarnings.Select(warning => $"  {warning}"));
         }
 
         if (result.Warnings.Count > 0)
         {
-            lines.Add("Warnings:");
+            lines.Add("Source read warnings:");
             lines.AddRange(result.Warnings.Select(warning => $"  {warning}"));
         }
 
@@ -744,6 +765,7 @@ public sealed partial class ObservatoryPage : Page
         static string FormatDate(DateTimeOffset? value) => value?.ToLocalTime().ToString("g") ?? "unavailable";
         static string FormatBool(bool? value) => value is null ? "unavailable" : value.Value ? "yes" : "no";
         static string FormatCapability(bool? value) => value is null ? "unknown" : value.Value ? "present" : "absent";
+        static string FormatTruncation(bool? value) => value is null ? "unknown" : value.Value ? "truncated" : "complete";
         static string FormatDuration(long? value) => value is long milliseconds ? $"{milliseconds:N0} ms" : "unavailable";
     }
 }

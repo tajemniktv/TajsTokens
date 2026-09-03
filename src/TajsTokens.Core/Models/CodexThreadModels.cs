@@ -40,6 +40,10 @@ public sealed record CodexThreadCatalogEntry(
 
     public string DiscoveryKind { get; init; } = string.Empty;
 
+    public int? SourceGeneration { get; init; }
+
+    public DateTimeOffset? SourceLastWriteTimeUtc { get; init; }
+
     public string DisplayName
     {
         get
@@ -58,6 +62,45 @@ public sealed record CodexThreadCatalogEntry(
 
     private static string? FirstNonEmpty(params string?[] values) =>
         values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+}
+
+/// <summary>
+/// A reconciled catalog presentation entry. All source observations for the thread remain attached
+/// so callers can inspect conflicts and provenance instead of treating the preferred row as truth.
+/// </summary>
+public sealed record CodexThreadCatalogSearchEntry(
+    CodexThreadCatalogEntry Preferred,
+    IReadOnlyList<CodexThreadCatalogEntry> Observations,
+    string SelectionRationale);
+
+/// <summary>
+/// Result of searching Codex thread catalogs. <see cref="Entries"/> is the bounded presentation
+/// result; <see cref="SourceObservations"/> retains every matching row read from every source
+/// (with <see cref="SourceRowsTruncated"/> marking a source-level bound).
+/// </summary>
+public sealed record CodexThreadSearchResult(
+    IReadOnlyList<CodexThreadCatalogSearchEntry> Entries,
+    IReadOnlyList<CodexThreadCatalogEntry> SourceObservations,
+    IReadOnlyList<string> Warnings)
+    : IReadOnlyList<CodexThreadCatalogEntry>
+{
+    public string ReconciliationPolicy { get; init; } = string.Empty;
+
+    public bool SourceRowsTruncated { get; init; }
+
+    public IReadOnlyList<string> CoverageWarnings { get; init; } = Array.Empty<string>();
+
+    public IReadOnlyList<CodexThreadCatalogEntry> PreferredEntries =>
+        Entries.Select(entry => entry.Preferred).ToArray();
+
+    public int Count => Entries.Count;
+
+    public CodexThreadCatalogEntry this[int index] => Entries[index].Preferred;
+
+    public IEnumerator<CodexThreadCatalogEntry> GetEnumerator() =>
+        Entries.Select(entry => entry.Preferred).GetEnumerator();
+
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 }
 
 public sealed record CodexThreadProject(
@@ -103,7 +146,12 @@ public sealed record CodexThreadTurn(
     string? FinalAgentItemId,
     long? RolloutByteOffset,
     long? RolloutEndOrdinal,
-    long? RolloutEndByteOffset);
+    long? RolloutEndByteOffset)
+{
+    public string SourcePath { get; init; } = string.Empty;
+
+    public string SourceDescription { get; init; } = string.Empty;
+}
 
 /// <summary>
 /// History item content is source data and is returned only for local on-demand inspection. It is
@@ -118,6 +166,10 @@ public sealed record CodexThreadItem(
     string ItemJson,
     long? UpdatedAtOrdinal)
 {
+    public string SourcePath { get; init; } = string.Empty;
+
+    public string SourceDescription { get; init; } = string.Empty;
+
     public string DisplaySummary => string.IsNullOrWhiteSpace(ItemType)
         ? ItemId
         : $"{ItemType} · {ItemId}";
@@ -128,7 +180,36 @@ public sealed record CodexThreadRealtimeItem(
     long RolloutOrdinal,
     DateTimeOffset? CreatedAtUtc,
     string ItemType,
-    string ItemJson);
+    string ItemJson)
+{
+    public string SourcePath { get; init; } = string.Empty;
+
+    public string SourceDescription { get; init; } = string.Empty;
+}
+
+/// <summary>
+/// All history observations read from one source instance. Empty lanes remain meaningful when a
+/// source exposes a table but has no row for the selected thread.
+/// </summary>
+public sealed record CodexThreadHistorySourceObservation(
+    string SourcePath,
+    string SourceDescription,
+    IReadOnlyList<CodexThreadTurn> Turns,
+    IReadOnlyList<CodexThreadItem> Items,
+    IReadOnlyList<CodexThreadRealtimeItem> RealtimeItems)
+{
+    public bool? TurnsCapabilityAvailable { get; init; }
+
+    public bool? ItemsCapabilityAvailable { get; init; }
+
+    public bool? RealtimeCapabilityAvailable { get; init; }
+
+    public bool TurnsTruncated { get; init; }
+
+    public bool ItemsTruncated { get; init; }
+
+    public bool RealtimeItemsTruncated { get; init; }
+}
 
 /// <summary>
 /// A provider-native, on-demand thread view assembled from the Codex state and thread-history
@@ -165,9 +246,41 @@ public sealed record CodexThreadReadResult(
 
     public bool? RealtimeCapabilityAvailable { get; init; }
 
+    public bool? ProjectRootsTruncated { get; init; }
+
+    public bool? DynamicToolsTruncated { get; init; }
+
+    public bool? SpawnEdgesTruncated { get; init; }
+
+    public bool? TurnsTruncated { get; init; }
+
+    public bool? ItemsTruncated { get; init; }
+
+    public bool? RealtimeItemsTruncated { get; init; }
+
     public string? StateSourceDescription { get; init; }
 
+    public IReadOnlyList<CodexThreadCatalogEntry> StateThreadObservations { get; init; } =
+        Array.Empty<CodexThreadCatalogEntry>();
+
+    public string StateReconciliationPolicy { get; init; } = string.Empty;
+
+    public string? StateSourceSelectionRationale { get; init; }
+
     public string? HistorySourceDescription { get; init; }
+
+    /// <summary>
+    /// Every readable history source is retained. The flat lanes are a deterministic union keyed
+    /// by source path; no source silently overrides another source's observation.
+    /// </summary>
+    public IReadOnlyList<CodexThreadHistorySourceObservation> HistorySources { get; init; } =
+        Array.Empty<CodexThreadHistorySourceObservation>();
+
+    public string HistoryReconciliationPolicy { get; init; } = string.Empty;
+
+    public string? HistorySourceSelectionRationale { get; init; }
+
+    public IReadOnlyList<string> CoverageWarnings { get; init; } = Array.Empty<string>();
 
     public bool HasStateSource => !string.IsNullOrWhiteSpace(StateSourcePath);
 

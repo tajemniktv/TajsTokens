@@ -307,6 +307,16 @@ for reproducing a row; this implementation therefore performs no database writes
 fixture insertion and reports the runtime capability as empty/unsupported until a normal product
 workflow produces evidence.
 
+Thread catalog search exposes a bounded presentation list plus every matching source observation.
+Its named reconciliation policy prefers newest recency, then updated/created time, source
+generation, source write time, and source path; the selected entry retains its alternatives and
+rationale. Thread-history reads use a separate named union policy: every readable history store is
+retained in a source bundle and in source-qualified flat lanes, ordered by generation, write time,
+description, and path without one store overriding another. Candidate generation parsing covers
+both `state_*` and `thread_history_*` filenames, but generation remains discovery provenance only.
+All bounded source reads request one extra row and expose per-category truncation flags/warnings;
+absence of a capability remains distinct from an empty result and from an unreadable source.
+
 ## Documentation rule
 
 Do not create a competing roadmap, architecture guide, phase document, or semantic specification while this reset is active. Update this file instead.

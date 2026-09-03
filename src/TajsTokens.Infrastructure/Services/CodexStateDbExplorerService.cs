@@ -1760,8 +1760,12 @@ public sealed class CodexStateDbExplorerService
 
     private static int? TryParseGeneration(string fileName)
     {
-        const string prefix = "state_";
-        if (!fileName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        var prefix = fileName.StartsWith("state_", StringComparison.OrdinalIgnoreCase)
+            ? "state_"
+            : fileName.StartsWith("thread_history_", StringComparison.OrdinalIgnoreCase)
+                ? "thread_history_"
+                : null;
+        if (prefix is null)
         {
             return null;
         }
