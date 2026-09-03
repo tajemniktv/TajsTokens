@@ -26,7 +26,7 @@ There is deliberately no universal provider schema between acquisition and the U
 
 ## Current investigation tooling
 
-The application includes a read-only Codex State DB Explorer for inspecting Codex-owned SQLite state without assigning domain meaning to fields merely because they exist. It supports the evidence-first source-contract work described in `PROJECT.md` and is not itself a semantic model.
+The application includes a read-only Codex State DB Explorer for inspecting Codex-owned SQLite state without assigning domain meaning to fields merely because they exist. The Codex Sources page builds bounded, provider-native views for memory, goals, queue, thread artifacts, and Desktop catalog/summary stores on top of that same boundary. It supports the evidence-first source-contract work described in `PROJECT.md`; content-bearing values remain local to inspection and are not mirrored into the TajsTokens database.
 
 ## Repository layout
 

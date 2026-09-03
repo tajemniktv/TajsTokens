@@ -163,6 +163,13 @@
                                 </ListView.ItemTemplate>
                             </ListView>
                         </TabViewItem>
+                        <TabViewItem Header="Thread source">
+                            <ScrollViewer Padding="8">
+                                <TextBlock x:Name="ThreadSourceDetailText"
+                                           Text="Select a session to inspect its source-native Codex thread data."
+                                           TextWrapping="Wrap" />
+                            </ScrollViewer>
+                        </TabViewItem>
                     </TabView>
                 </Grid>
             </Border>

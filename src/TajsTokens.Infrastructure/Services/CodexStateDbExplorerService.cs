@@ -5,6 +5,23 @@ using Microsoft.Data.Sqlite;
 
 namespace TajsTokens.Infrastructure.Services;
 
+internal enum CodexOrderedSourceTable
+{
+    Jobs,
+    Stage1Outputs,
+    ThreadGoals,
+    QueuedItems,
+    ThreadArtifacts,
+    LocalThreadCatalog,
+    ThreadTurnSummaries
+}
+
+internal enum CodexRelationSourceTable
+{
+    ThreadGoalContinuationDeferrals,
+    QueuedThreadRevisions
+}
+
 /// <summary>
 /// Read-only inspection boundary for Codex's private SQLite databases and captured snapshots.
 ///
@@ -15,11 +32,40 @@ public sealed class CodexStateDbExplorerService
 {
     private const int DefaultPageSize = 50;
     private const int MaxPageSize = 500;
+    private const int MaxRelationKeys = 250;
+    private static readonly string RelationParameterList = string.Join(", ", Enumerable.Range(0, MaxRelationKeys).Select(static index => string.Concat("$value", index.ToString(CultureInfo.InvariantCulture))));
     private const int MaxFingerprintRows = 100_000;
     private const long MaxFingerprintDatabaseBytes = 64L * 1024 * 1024;
 
     private readonly string _codexHome;
     private readonly string? _snapshotDirectory;
+
+    private sealed record OrderedSourceSpecification(
+        string TableName,
+        string OrderedQuery,
+        string UnorderedQuery,
+        IReadOnlyList<string> RequiredOrderColumns);
+
+    private sealed record RelationSourceSpecification(
+        string TableName,
+        string OrderedQuery,
+        string UnorderedQuery,
+        string RequiredOrderColumn);
+
+    private sealed record RowFingerprintResult(
+        string Fingerprint,
+        IReadOnlyList<CodexStateRowObservation> Observations,
+        bool Complete,
+        bool Bounded,
+        string Note,
+        string Mode)
+    {
+        public static RowFingerprintResult CountOnly(string fingerprint, string note) =>
+            new(fingerprint, Array.Empty<CodexStateRowObservation>(), false, true, note, "count-only");
+
+        public static RowFingerprintResult Unavailable(string fingerprint, string note) =>
+            new(fingerprint, Array.Empty<CodexStateRowObservation>(), false, false, note, "unavailable");
+    }
 
     public CodexStateDbExplorerService(string? codexHome = null, string? snapshotDirectory = null)
     {
@@ -160,34 +206,53 @@ public sealed class CodexStateDbExplorerService
             tables.Add(table with { SchemaFingerprint = FingerprintSchema(table) });
         }
 
+        var capturedAtUtc = DateTimeOffset.UtcNow;
         var snapshots = new List<CodexStateTableSnapshot>(tables.Count);
-        var allowDeepRowFingerprint = candidate.SizeBytes <= MaxFingerprintDatabaseBytes;
+        var rowObservations = new Dictionary<string, IReadOnlyList<CodexStateRowObservation>>(
+            StringComparer.OrdinalIgnoreCase);
+        var allowDeepRowFingerprint = includeRowFingerprints && candidate.SizeBytes <= MaxFingerprintDatabaseBytes;
         foreach (var table in tables)
         {
             cancellationToken.ThrowIfCancellationRequested();
             var schemaFingerprint = table.SchemaFingerprint;
-            var rowFingerprint = includeRowFingerprints
+            var rowResult = includeRowFingerprints
                 ? await ComputeRowFingerprintAsync(
                     connection,
                     table,
                     allowDeepRowFingerprint,
+                    candidate,
                     cancellationToken)
-                : FingerprintBoundedRowObservation(table);
+                : RowFingerprintResult.CountOnly(FingerprintBoundedRowObservation(table),
+                    "count-only inspection requested");
             snapshots.Add(new CodexStateTableSnapshot(
                 table.Name,
                 table.ObjectType,
                 table.RowCount,
                 schemaFingerprint,
-                rowFingerprint));
+                rowResult.Fingerprint)
+            {
+                RowComparisonComplete = rowResult.Complete,
+                RowComparisonBounded = rowResult.Bounded,
+                RowComparisonNote = rowResult.Note,
+                RowObservationCount = rowResult.Observations.Count,
+                RowFingerprintMode = rowResult.Mode,
+                Columns = table.Columns,
+                Indexes = table.Indexes
+            });
+            rowObservations[table.Name] = rowResult.Observations
+                .Select(observation => observation with { CapturedAtUtc = capturedAtUtc })
+                .ToArray();
         }
 
         var snapshot = new CodexStateInspectionSnapshot(
             candidate.Path,
-            DateTimeOffset.UtcNow,
+            capturedAtUtc,
             snapshots)
         {
             SchemaObjects = schemaObjects,
-            SchemaFingerprint = ComputeSchemaFingerprint(schemaObjects, snapshots)
+            SchemaFingerprint = ComputeSchemaFingerprint(schemaObjects, snapshots),
+            RowObservations = rowObservations,
+            SourceDescription = candidate.SourceDescription
         };
 
         return new CodexStateInspectionResult(candidate, tables, snapshot);
@@ -256,6 +321,230 @@ public sealed class CodexStateDbExplorerService
     }
 
     /// <summary>
+    /// Reads a bounded page after applying source-native ordering. Ordering belongs at the SQLite
+    /// boundary so a table larger than the page cannot hide its newest/highest-ranked rows.
+    /// Unknown order columns are ignored to keep schema variants inspectable.
+    /// </summary>
+    internal async Task<CodexStateRawPage> ReadOrderedPageAsync(
+        string databasePath,
+        CodexOrderedSourceTable sourceTable,
+        int pageIndex = 0,
+        int pageSize = DefaultPageSize,
+        CancellationToken cancellationToken = default)
+    {
+        pageIndex = Math.Max(0, pageIndex);
+        pageSize = Math.Clamp(pageSize, 1, MaxPageSize);
+        var specification = sourceTable switch
+        {
+            CodexOrderedSourceTable.Jobs => new OrderedSourceSpecification("jobs", "SELECT * FROM jobs ORDER BY started_at DESC, kind ASC, job_key ASC LIMIT $limit OFFSET $offset;", "SELECT * FROM jobs LIMIT $limit OFFSET $offset;", ["started_at", "kind", "job_key"]),
+            CodexOrderedSourceTable.Stage1Outputs => new OrderedSourceSpecification("stage1_outputs", "SELECT * FROM stage1_outputs ORDER BY source_updated_at DESC, thread_id ASC LIMIT $limit OFFSET $offset;", "SELECT * FROM stage1_outputs LIMIT $limit OFFSET $offset;", ["source_updated_at", "thread_id"]),
+            CodexOrderedSourceTable.ThreadGoals => new OrderedSourceSpecification("thread_goals", "SELECT * FROM thread_goals ORDER BY updated_at_ms DESC, thread_id ASC LIMIT $limit OFFSET $offset;", "SELECT * FROM thread_goals LIMIT $limit OFFSET $offset;", ["updated_at_ms", "thread_id"]),
+            CodexOrderedSourceTable.QueuedItems => new OrderedSourceSpecification("queued_items", "SELECT * FROM queued_items ORDER BY thread_id ASC, queue_order ASC, id ASC LIMIT $limit OFFSET $offset;", "SELECT * FROM queued_items LIMIT $limit OFFSET $offset;", ["thread_id", "queue_order", "id"]),
+            CodexOrderedSourceTable.ThreadArtifacts => new OrderedSourceSpecification("thread_artifacts", "SELECT * FROM thread_artifacts ORDER BY thread_id ASC, created_at ASC, id ASC LIMIT $limit OFFSET $offset;", "SELECT * FROM thread_artifacts LIMIT $limit OFFSET $offset;", ["thread_id", "created_at", "id"]),
+            CodexOrderedSourceTable.LocalThreadCatalog => new OrderedSourceSpecification("local_thread_catalog", "SELECT * FROM local_thread_catalog ORDER BY source_recency_at DESC, source_created_at DESC, host_id ASC, thread_id ASC LIMIT $limit OFFSET $offset;", "SELECT * FROM local_thread_catalog LIMIT $limit OFFSET $offset;", ["source_recency_at", "source_created_at", "host_id", "thread_id"]),
+            CodexOrderedSourceTable.ThreadTurnSummaries => new OrderedSourceSpecification("thread_turn_summaries", "SELECT * FROM thread_turn_summaries ORDER BY updated_at DESC, thread_id ASC LIMIT $limit OFFSET $offset;", "SELECT * FROM thread_turn_summaries LIMIT $limit OFFSET $offset;", ["updated_at", "thread_id"]),
+            _ => throw new ArgumentOutOfRangeException(nameof(sourceTable), sourceTable, "Unknown ordered Codex source table.")
+        };
+
+        var candidate = CreateCandidateForPath(databasePath);
+        await using var connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
+        var objectType = await ReadObjectTypeAsync(connection, specification.TableName, cancellationToken);
+        if (objectType is null)
+        {
+            throw new KeyNotFoundException($"The source database does not contain a table or view named '{specification.TableName}'.");
+        }
+
+        var availableColumns = (await ReadColumnsAsync(connection, specification.TableName, cancellationToken))
+            .Select(column => column.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var totalRows = await TryReadRowCountAsync(connection, specification.TableName, cancellationToken);
+        var offset = checked((long)pageIndex * pageSize);
+        var query = specification.RequiredOrderColumns.All(availableColumns.Contains)
+            ? specification.OrderedQuery
+            : specification.UnorderedQuery;
+        return await ReadRawPageAsync(
+            connection,
+            candidate.Path,
+            specification.TableName,
+            pageIndex,
+            pageSize,
+            totalRows,
+            () =>
+            {
+                var command = new SqliteCommand(query, connection);
+                command.Parameters.AddWithValue("$limit", pageSize);
+                command.Parameters.AddWithValue("$offset", offset);
+                return command;
+            },
+            cancellationToken);
+    }
+
+    /// <summary>Reads rows whose source-native relation key is one of the supplied values.</summary>
+    internal async Task<CodexStateRawPage> ReadRowsByTextValuesAsync(
+        string databasePath,
+        CodexRelationSourceTable sourceTable,
+        IReadOnlyList<string> values,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(values);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(values.Count, MaxRelationKeys);
+        var specification = sourceTable switch
+        {
+            CodexRelationSourceTable.ThreadGoalContinuationDeferrals => new RelationSourceSpecification(
+                "thread_goal_continuation_deferrals",
+                BuildRelationQuery("thread_goal_continuation_deferrals", ordered: false),
+                BuildRelationQuery("thread_goal_continuation_deferrals", ordered: false),
+                string.Empty),
+            CodexRelationSourceTable.QueuedThreadRevisions => new RelationSourceSpecification(
+                "queued_thread_revisions",
+                BuildRelationQuery("queued_thread_revisions", ordered: true),
+                BuildRelationQuery("queued_thread_revisions", ordered: false),
+                "revision"),
+            _ => throw new ArgumentOutOfRangeException(nameof(sourceTable), sourceTable, "Unknown Codex relation table.")
+        };
+
+        var candidate = CreateCandidateForPath(databasePath);
+        await using var connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
+        var objectType = await ReadObjectTypeAsync(connection, specification.TableName, cancellationToken);
+        if (objectType is null)
+        {
+            throw new KeyNotFoundException($"The source database does not contain a table or view named '{specification.TableName}'.");
+        }
+
+        var availableColumns = (await ReadColumnsAsync(connection, specification.TableName, cancellationToken))
+            .Select(column => column.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!availableColumns.Contains("thread_id"))
+        {
+            return new CodexStateRawPage(candidate.Path, specification.TableName, 0, 1, 0, [], []);
+        }
+
+        var distinctValues = values
+            .Where(value => !string.IsNullOrWhiteSpace(value))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (distinctValues.Length == 0)
+        {
+            return new CodexStateRawPage(candidate.Path, specification.TableName, 0, 1, 0, [], []);
+        }
+
+        // The key set is already bounded by the gateway's visible base page. Do not apply a
+        // second arbitrary row limit here: relation rows must remain complete for those keys.
+        var query = specification.RequiredOrderColumn.Length > 0 && availableColumns.Contains(specification.RequiredOrderColumn)
+            ? specification.OrderedQuery
+            : specification.UnorderedQuery;
+        return await ReadRawPageAsync(
+            connection,
+            candidate.Path,
+            specification.TableName,
+            0,
+            MaxPageSize,
+            -1,
+            () =>
+            {
+                var command = new SqliteCommand(query, connection);
+                for (var index = 0; index < MaxRelationKeys; index++)
+                {
+                    command.Parameters.AddWithValue(
+                        string.Concat("$value", index.ToString(CultureInfo.InvariantCulture)),
+                        index < distinctValues.Length ? distinctValues[index] : DBNull.Value);
+                }
+
+                return command;
+            },
+            cancellationToken);
+    }
+
+    private static string BuildRelationQuery(string tableName, bool ordered) =>
+        tableName switch
+        {
+            "thread_goal_continuation_deferrals" => string.Concat(
+                "SELECT * FROM thread_goal_continuation_deferrals WHERE thread_id IN (",
+                RelationParameterList,
+                ");"),
+            "queued_thread_revisions" when ordered => string.Concat(
+                "SELECT * FROM queued_thread_revisions WHERE thread_id IN (",
+                RelationParameterList,
+                ") ORDER BY revision DESC;"),
+            "queued_thread_revisions" => string.Concat(
+                "SELECT * FROM queued_thread_revisions WHERE thread_id IN (",
+                RelationParameterList,
+                ");"),
+            _ => throw new ArgumentOutOfRangeException(nameof(tableName), tableName, "Unknown Codex relation table.")
+        };
+
+    /// <summary>Reads a source-native integer aggregate without applying a bounded row page.</summary>
+    public async Task<long?> ReadMaxInt64Async(
+        string databasePath,
+        string tableName,
+        string columnName,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tableName);
+        ArgumentException.ThrowIfNullOrWhiteSpace(columnName);
+        var candidate = CreateCandidateForPath(databasePath);
+        await using var connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
+        var objectType = await ReadObjectTypeAsync(connection, tableName, cancellationToken);
+        if (objectType is null)
+        {
+            throw new KeyNotFoundException($"The source database does not contain a table or view named '{tableName}'.");
+        }
+
+        var availableColumns = (await ReadColumnsAsync(connection, tableName, cancellationToken))
+            .Select(column => column.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!availableColumns.Contains(columnName))
+        {
+            return null;
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"SELECT MAX(CAST({QuoteIdentifier(columnName)} AS INTEGER)) FROM {QuoteIdentifier(tableName)};";
+        var value = await command.ExecuteScalarAsync(cancellationToken);
+        return value is null or DBNull ? null : Convert.ToInt64(value, CultureInfo.InvariantCulture);
+    }
+
+    private static async Task<CodexStateRawPage> ReadRawPageAsync(
+        SqliteConnection connection,
+        string databasePath,
+        string tableName,
+        int pageIndex,
+        int pageSize,
+        long totalRows,
+        Func<SqliteCommand> createCommand,
+        CancellationToken cancellationToken)
+    {
+        var columns = new List<string>();
+        var rows = new List<CodexStateRawRow>();
+        await using var command = createCommand();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        for (var index = 0; index < reader.FieldCount; index++)
+        {
+            columns.Add(reader.GetName(index));
+        }
+
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            var values = new object?[reader.FieldCount];
+            var display = new StringBuilder();
+            for (var index = 0; index < reader.FieldCount; index++)
+            {
+                values[index] = reader.IsDBNull(index) ? null : reader.GetValue(index);
+                if (index > 0)
+                {
+                    display.Append("  |  ");
+                }
+
+                display.Append(FormatRawValue(values[index]));
+            }
+
+            rows.Add(new CodexStateRawRow(values, display.ToString()));
+        }
+
+        return new CodexStateRawPage(databasePath, tableName, pageIndex, pageSize, totalRows, columns, rows);
+    }
+
+    /// <summary>
     /// Searches the supplied source files for an exact column name and exact value. The query is
     /// intentionally per-object and unjoined: a match is evidence from that source object only,
     /// not an inferred relationship between databases or tables.
@@ -274,14 +563,32 @@ public sealed class CodexStateDbExplorerService
 
         var matches = new List<CodexStateKeyTraceMatch>();
         var unavailable = new List<string>();
-        var paths = databasePaths
-            .Where(path => !string.IsNullOrWhiteSpace(path))
-            .Select(Path.GetFullPath)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        var paths = new List<string>();
+        foreach (var path in databasePaths.Where(path => !string.IsNullOrWhiteSpace(path)))
+        {
+            try
+            {
+                var fullPath = Path.GetFullPath(path);
+                if (!paths.Contains(fullPath, StringComparer.OrdinalIgnoreCase))
+                {
+                    paths.Add(fullPath);
+                }
+            }
+            catch (Exception exception) when (exception is ArgumentException or IOException or UnauthorizedAccessException)
+            {
+                unavailable.Add($"{path}: {exception.Message.ReplaceLineEndings(" ").Trim()}");
+            }
+        }
+
+        var truncated = false;
 
         foreach (var databasePath in paths)
         {
+            if (truncated)
+            {
+                break;
+            }
+
             cancellationToken.ThrowIfCancellationRequested();
             CodexStateInspectionResult inspection;
             try
@@ -332,7 +639,7 @@ public sealed class CodexStateDbExplorerService
             {
                 foreach (var table in matchingTables)
                 {
-                    if (matches.Count >= maxMatches)
+                    if (truncated)
                     {
                         break;
                     }
@@ -340,9 +647,9 @@ public sealed class CodexStateDbExplorerService
                     var sourceColumn = table.Columns.First(column =>
                         string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase));
                     await using var command = connection.CreateCommand();
-                    command.CommandText = $"SELECT * FROM {QuoteIdentifier(table.Name)} WHERE {QuoteIdentifier(sourceColumn.Name)} = $value LIMIT $limit;";
+                    command.CommandText = $"SELECT * FROM {QuoteIdentifier(table.Name)} WHERE {QuoteIdentifier(sourceColumn.Name)} COLLATE BINARY = $value COLLATE BINARY LIMIT $limit;";
                     command.Parameters.AddWithValue("$value", value);
-                    command.Parameters.AddWithValue("$limit", maxMatches - matches.Count);
+                    command.Parameters.AddWithValue("$limit", maxMatches - matches.Count + 1);
 
                     try
                     {
@@ -352,6 +659,12 @@ public sealed class CodexStateDbExplorerService
                             .ToArray();
                         while (await reader.ReadAsync(cancellationToken))
                         {
+                            if (matches.Count >= maxMatches)
+                            {
+                                truncated = true;
+                                break;
+                            }
+
                             var values = new object?[reader.FieldCount];
                             for (var index = 0; index < reader.FieldCount; index++)
                             {
@@ -364,11 +677,11 @@ public sealed class CodexStateDbExplorerService
                                 table.Name,
                                 sourceColumn.Name,
                                 columns,
-                                values));
-                            if (matches.Count >= maxMatches)
+                                values)
                             {
-                                break;
-                            }
+                                SourceCandidate = inspection.Database,
+                                InspectionCapturedAtUtc = inspection.Snapshot.CapturedAtUtc
+                            });
                         }
                     }
                     catch (OperationCanceledException)
@@ -386,7 +699,7 @@ public sealed class CodexStateDbExplorerService
         return new CodexStateKeyTraceResult(columnName, value, matches)
         {
             UnavailableSources = unavailable,
-            MayBeTruncated = matches.Count >= maxMatches
+            MayBeTruncated = truncated
         };
     }
 
@@ -408,27 +721,90 @@ public sealed class CodexStateDbExplorerService
             var hasAfter = after.TryGetValue(name, out var next);
             if (!hasBefore)
             {
-                diffs.Add(new CodexStateTableDiff(name, "added", null, next!.RowCount, true, true));
+                diffs.Add(CreateTableDiff(
+                    baseline,
+                    current,
+                    name,
+                    "added",
+                    null,
+                    next!.RowCount,
+                    schemaChanged: true,
+                    rowsChanged: true,
+                    rowComparisonComplete: false,
+                    rowComparisonBounded: false,
+                    "table added; no baseline row comparison is available",
+                    addedColumns: next.Columns.Select(column => column.Name).ToArray(),
+                    addedIndexes: next.Indexes.Select(index => index.Name).ToArray()));
                 continue;
             }
 
             if (!hasAfter)
             {
-                diffs.Add(new CodexStateTableDiff(name, "removed", previous!.RowCount, null, true, true));
+                diffs.Add(CreateTableDiff(
+                    baseline,
+                    current,
+                    name,
+                    "removed",
+                    previous!.RowCount,
+                    null,
+                    schemaChanged: true,
+                    rowsChanged: true,
+                    rowComparisonComplete: false,
+                    rowComparisonBounded: false,
+                    "table removed; no current row comparison is available",
+                    removedColumns: previous.Columns.Select(column => column.Name).ToArray(),
+                    removedIndexes: previous.Indexes.Select(index => index.Name).ToArray()));
                 continue;
             }
 
             var schemaChanged = !string.Equals(previous!.SchemaFingerprint, next!.SchemaFingerprint, StringComparison.Ordinal);
-            var rowsChanged = !string.Equals(previous.RowFingerprint, next.RowFingerprint, StringComparison.Ordinal);
-            if (schemaChanged || rowsChanged)
+            var rowCountChanged = previous.RowCount >= 0 && next.RowCount >= 0 && previous.RowCount != next.RowCount;
+            var rowFingerprintModesComparable =
+                (!string.IsNullOrWhiteSpace(previous.RowFingerprintMode) ||
+                 !string.IsNullOrWhiteSpace(next.RowFingerprintMode))
+                    ? string.Equals(previous.RowFingerprintMode, next.RowFingerprintMode, StringComparison.Ordinal)
+                    : true;
+            var rowsChanged = rowCountChanged ||
+                (rowFingerprintModesComparable &&
+                 !string.Equals(previous.RowFingerprint, next.RowFingerprint, StringComparison.Ordinal));
+            var rowComparisonComplete = previous.RowComparisonComplete && next.RowComparisonComplete;
+            var rowComparisonBounded = previous.RowComparisonBounded || next.RowComparisonBounded;
+            var rowIdentityPairingSafe = rowComparisonComplete && CanPairRows(baseline, current, previous, next);
+            rowComparisonComplete = rowComparisonComplete && rowIdentityPairingSafe;
+            var rowChanges = rowIdentityPairingSafe
+                ? CompareRows(baseline, current, previous, next)
+                : Array.Empty<CodexStateRowDiff>();
+            var rowComparisonNote = BuildRowComparisonNote(
+                previous,
+                next,
+                rowComparisonComplete,
+                rowComparisonBounded,
+                rowFingerprintModesComparable,
+                rowIdentityPairingSafe);
+            var schemaDetails = CompareSchemaDetails(previous, next);
+
+            if (schemaChanged || rowsChanged || !rowComparisonComplete)
             {
-                diffs.Add(new CodexStateTableDiff(
+                var changeKind = schemaChanged || rowsChanged ? "changed" : "incomplete";
+                diffs.Add(CreateTableDiff(
+                    baseline,
+                    current,
                     name,
-                    "changed",
+                    changeKind,
                     previous.RowCount,
                     next.RowCount,
                     schemaChanged,
-                    rowsChanged));
+                    rowsChanged,
+                    rowComparisonComplete,
+                    rowComparisonBounded,
+                    rowComparisonNote,
+                    rowChanges,
+                    schemaDetails.AddedColumns,
+                    schemaDetails.RemovedColumns,
+                    schemaDetails.ChangedColumns,
+                    schemaDetails.AddedIndexes,
+                    schemaDetails.RemovedIndexes,
+                    schemaDetails.ChangedIndexes));
             }
         }
 
@@ -440,8 +816,223 @@ public sealed class CodexStateDbExplorerService
             BaselineDatabasePath = baseline.DatabasePath,
             CurrentDatabasePath = current.DatabasePath,
             BaselineSchemaFingerprint = baseline.SchemaFingerprint,
-            CurrentSchemaFingerprint = current.SchemaFingerprint
+            CurrentSchemaFingerprint = current.SchemaFingerprint,
+            BaselineSourceDescription = baseline.SourceDescription,
+            CurrentSourceDescription = current.SourceDescription
         };
+    }
+
+    private static CodexStateTableDiff CreateTableDiff(
+        CodexStateInspectionSnapshot baseline,
+        CodexStateInspectionSnapshot current,
+        string name,
+        string changeKind,
+        long? previousRowCount,
+        long? currentRowCount,
+        bool schemaChanged,
+        bool rowsChanged,
+        bool rowComparisonComplete,
+        bool rowComparisonBounded,
+        string rowComparisonNote,
+        IReadOnlyList<CodexStateRowDiff>? rowChanges = null,
+        IReadOnlyList<string>? addedColumns = null,
+        IReadOnlyList<string>? removedColumns = null,
+        IReadOnlyList<string>? changedColumns = null,
+        IReadOnlyList<string>? addedIndexes = null,
+        IReadOnlyList<string>? removedIndexes = null,
+        IReadOnlyList<string>? changedIndexes = null)
+    {
+        return new CodexStateTableDiff(
+            name,
+            changeKind,
+            previousRowCount,
+            currentRowCount,
+            schemaChanged,
+            rowsChanged)
+        {
+            BaselineDatabasePath = baseline.DatabasePath,
+            CurrentDatabasePath = current.DatabasePath,
+            BaselineSourceDescription = baseline.SourceDescription,
+            CurrentSourceDescription = current.SourceDescription,
+            BaselineCapturedAtUtc = baseline.CapturedAtUtc,
+            CurrentCapturedAtUtc = current.CapturedAtUtc,
+            RowComparisonComplete = rowComparisonComplete,
+            RowComparisonBounded = rowComparisonBounded,
+            RowComparisonNote = rowComparisonNote,
+            RowChanges = rowChanges ?? Array.Empty<CodexStateRowDiff>(),
+            AddedColumns = addedColumns ?? Array.Empty<string>(),
+            RemovedColumns = removedColumns ?? Array.Empty<string>(),
+            ChangedColumns = changedColumns ?? Array.Empty<string>(),
+            AddedIndexes = addedIndexes ?? Array.Empty<string>(),
+            RemovedIndexes = removedIndexes ?? Array.Empty<string>(),
+            ChangedIndexes = changedIndexes ?? Array.Empty<string>()
+        };
+    }
+
+    private static SchemaDifference CompareSchemaDetails(
+        CodexStateTableSnapshot previous,
+        CodexStateTableSnapshot next)
+    {
+        var beforeColumns = previous.Columns.ToDictionary(column => column.Name, StringComparer.OrdinalIgnoreCase);
+        var afterColumns = next.Columns.ToDictionary(column => column.Name, StringComparer.OrdinalIgnoreCase);
+        var addedColumns = afterColumns.Keys.Except(beforeColumns.Keys, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var removedColumns = beforeColumns.Keys.Except(afterColumns.Keys, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var changedColumns = beforeColumns.Keys.Intersect(afterColumns.Keys, StringComparer.OrdinalIgnoreCase)
+            .Where(name => !Equals(beforeColumns[name], afterColumns[name]))
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        var beforeIndexes = previous.Indexes.ToDictionary(index => index.Name, StringComparer.OrdinalIgnoreCase);
+        var afterIndexes = next.Indexes.ToDictionary(index => index.Name, StringComparer.OrdinalIgnoreCase);
+        var addedIndexes = afterIndexes.Keys.Except(beforeIndexes.Keys, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var removedIndexes = beforeIndexes.Keys.Except(afterIndexes.Keys, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        var changedIndexes = beforeIndexes.Keys.Intersect(afterIndexes.Keys, StringComparer.OrdinalIgnoreCase)
+            .Where(name => !Equals(beforeIndexes[name], afterIndexes[name]))
+            .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return new SchemaDifference(
+            addedColumns,
+            removedColumns,
+            changedColumns,
+            addedIndexes,
+            removedIndexes,
+            changedIndexes);
+    }
+
+    private sealed record SchemaDifference(
+        IReadOnlyList<string> AddedColumns,
+        IReadOnlyList<string> RemovedColumns,
+        IReadOnlyList<string> ChangedColumns,
+        IReadOnlyList<string> AddedIndexes,
+        IReadOnlyList<string> RemovedIndexes,
+        IReadOnlyList<string> ChangedIndexes);
+
+    private static bool CanPairRows(
+        CodexStateInspectionSnapshot baseline,
+        CodexStateInspectionSnapshot current,
+        CodexStateTableSnapshot previous,
+        CodexStateTableSnapshot next)
+    {
+        if (!baseline.RowObservations.TryGetValue(previous.Name, out var beforeRows) ||
+            !current.RowObservations.TryGetValue(next.Name, out var afterRows))
+        {
+            return false;
+        }
+
+        return beforeRows.Select(row => row.RowIdentity)
+                   .Distinct(StringComparer.Ordinal)
+                   .Count() == beforeRows.Count &&
+               afterRows.Select(row => row.RowIdentity)
+                   .Distinct(StringComparer.Ordinal)
+                   .Count() == afterRows.Count;
+    }
+
+    private static IReadOnlyList<CodexStateRowDiff> CompareRows(
+        CodexStateInspectionSnapshot baseline,
+        CodexStateInspectionSnapshot current,
+        CodexStateTableSnapshot previous,
+        CodexStateTableSnapshot next)
+    {
+        if (!baseline.RowObservations.TryGetValue(previous.Name, out var beforeRows) ||
+            !current.RowObservations.TryGetValue(next.Name, out var afterRows))
+        {
+            return Array.Empty<CodexStateRowDiff>();
+        }
+
+        var beforeGroups = beforeRows.GroupBy(row => row.RowIdentity, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
+        var afterGroups = afterRows.GroupBy(row => row.RowIdentity, StringComparer.Ordinal)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
+        // Duplicate identities are ambiguous source evidence. Do not manufacture a row pairing.
+        if (beforeGroups.Any(group => group.Value.Length != 1) || afterGroups.Any(group => group.Value.Length != 1))
+        {
+            return Array.Empty<CodexStateRowDiff>();
+        }
+
+        var changes = new List<CodexStateRowDiff>();
+        foreach (var identity in beforeGroups.Keys.Union(afterGroups.Keys, StringComparer.Ordinal)
+                     .OrderBy(value => value, StringComparer.Ordinal))
+        {
+            var hasBefore = beforeGroups.TryGetValue(identity, out var beforeGroup);
+            var hasAfter = afterGroups.TryGetValue(identity, out var afterGroup);
+            var beforeRow = hasBefore ? beforeGroup![0] : null;
+            var afterRow = hasAfter ? afterGroup![0] : null;
+            var changeKind = !hasBefore
+                ? "added"
+                : !hasAfter
+                    ? "removed"
+                    : string.Equals(beforeRow!.RowHash, afterRow!.RowHash, StringComparison.Ordinal)
+                        ? null
+                        : "changed";
+            if (changeKind is null)
+            {
+                continue;
+            }
+
+            changes.Add(new CodexStateRowDiff(
+                next.Name,
+                changeKind,
+                identity,
+                beforeRow?.RowHash,
+                afterRow?.RowHash,
+                beforeRow?.Columns ?? Array.Empty<string>(),
+                beforeRow?.Values ?? Array.Empty<object?>(),
+                afterRow?.Columns ?? Array.Empty<string>(),
+                afterRow?.Values ?? Array.Empty<object?>())
+            {
+                BaselineDatabasePath = baseline.DatabasePath,
+                CurrentDatabasePath = current.DatabasePath,
+                BaselineSourceDescription = baseline.SourceDescription,
+                CurrentSourceDescription = current.SourceDescription,
+                BaselineCapturedAtUtc = baseline.CapturedAtUtc,
+                CurrentCapturedAtUtc = current.CapturedAtUtc,
+                IdentityKind = afterRow?.IdentityKind ?? beforeRow?.IdentityKind ?? "unknown"
+            });
+        }
+
+        return changes;
+    }
+
+    private static string BuildRowComparisonNote(
+        CodexStateTableSnapshot previous,
+        CodexStateTableSnapshot next,
+        bool complete,
+        bool bounded,
+        bool rowFingerprintModesComparable,
+        bool rowIdentityPairingSafe)
+    {
+        if (complete)
+        {
+            return $"complete row observation ({previous.RowObservationCount:N0} → {next.RowObservationCount:N0} rows)";
+        }
+
+        var notes = new[] { previous.RowComparisonNote, next.RowComparisonNote }
+            .Where(note => !string.IsNullOrWhiteSpace(note))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        var prefix = bounded ? "bounded/count-only" : "row comparison unavailable";
+        if (!rowFingerprintModesComparable)
+        {
+            notes = notes.Append(
+                    $"fingerprint modes differ ({previous.RowFingerprintMode} vs {next.RowFingerprintMode})")
+                .ToArray();
+        }
+
+        if (!rowIdentityPairingSafe)
+        {
+            notes = notes.Append("row identities are missing or ambiguous; row-level pairing omitted").ToArray();
+        }
+
+        return notes.Length == 0 ? prefix : $"{prefix}: {string.Join("; ", notes)}";
     }
 
     /// <summary>
@@ -773,51 +1364,87 @@ public sealed class CodexStateDbExplorerService
         }
     }
 
-    private static async Task<string> ComputeRowFingerprintAsync(
+    private static async Task<RowFingerprintResult> ComputeRowFingerprintAsync(
         SqliteConnection connection,
         CodexStateTableInfo table,
         bool allowDeepRowFingerprint,
+        CodexStateDatabaseCandidate candidate,
         CancellationToken cancellationToken)
     {
-        if (!allowDeepRowFingerprint || table.RowCount > MaxFingerprintRows)
+        if (!allowDeepRowFingerprint)
         {
-            return FingerprintBoundedRowObservation(table);
+            var note = candidate.SizeBytes > MaxFingerprintDatabaseBytes
+                ? $"count-only: database exceeds {MaxFingerprintDatabaseBytes / (1024 * 1024):N0} MiB"
+                : "count-only inspection requested";
+            return RowFingerprintResult.CountOnly(FingerprintBoundedRowObservation(table), note);
+        }
+
+        if (table.RowCount > MaxFingerprintRows)
+        {
+            return RowFingerprintResult.CountOnly(
+                FingerprintBoundedRowObservation(table),
+                $"count-only: table exceeds {MaxFingerprintRows:N0} rows");
         }
 
         var rowHashes = new List<string>();
+        var observations = new List<CodexStateRowObservation>();
         var bounded = false;
         try
         {
             await using var command = connection.CreateCommand();
             command.CommandText = $"SELECT * FROM {QuoteIdentifier(table.Name)};";
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            var columns = Enumerable.Range(0, reader.FieldCount)
+                .Select(reader.GetName)
+                .ToArray();
+            var columnPositions = columns
+                .Select((name, position) => (name, position))
+                .ToDictionary(item => item.name, item => item.position, StringComparer.OrdinalIgnoreCase);
+            var primaryKeyColumns = table.Columns
+                .Where(column => column.IsPrimaryKey)
+                .OrderBy(column => column.Ordinal)
+                .Select(column => column.Name)
+                .ToArray();
+
             while (await reader.ReadAsync(cancellationToken))
             {
-                var row = new StringBuilder();
-                for (var index = 0; index < reader.FieldCount; index++)
+                if (observations.Count >= MaxFingerprintRows)
                 {
-                    if (index > 0)
-                    {
-                        row.Append('\u001F');
-                    }
-
-                    AppendCanonical(row, reader.IsDBNull(index) ? null : reader.GetValue(index));
-                }
-
-                rowHashes.Add(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(row.ToString()))));
-                if (rowHashes.Count >= MaxFingerprintRows)
-                {
-                    // Keep refresh responsive for an unexpectedly large private table while retaining
-                    // an explicit marker that the fingerprint is a bounded observation.
+                    // Retain at most the bounded sample. The extra row proves that the result is
+                    // incomplete without requiring an unbounded read of a live source.
                     bounded = true;
                     break;
                 }
+
+                var values = new object?[reader.FieldCount];
+                for (var index = 0; index < reader.FieldCount; index++)
+                {
+                    values[index] = reader.IsDBNull(index) ? null : reader.GetValue(index);
+                }
+
+                var rowHash = ComputeRowHash(columns, values);
+                var (identityKind, rowIdentity) = BuildRowIdentity(
+                    primaryKeyColumns,
+                    columnPositions,
+                    values,
+                    rowHash);
+                observations.Add(new CodexStateRowObservation(
+                    candidate.Path,
+                    candidate.SourceDescription,
+                    table.Name,
+                    identityKind,
+                    rowIdentity,
+                    rowHash,
+                    columns,
+                    values));
+                rowHashes.Add(rowHash);
             }
         }
-        catch (SqliteException)
+        catch (SqliteException exception)
         {
-            rowHashes.Clear();
-            rowHashes.Add("<unavailable>");
+            return RowFingerprintResult.Unavailable(
+                FingerprintBoundedRowObservation(table),
+                $"row scan unavailable: {exception.Message.ReplaceLineEndings(" ").Trim()}");
         }
 
         if (rowHashes.Count == 0 && table.RowCount < 0)
@@ -827,7 +1454,61 @@ public sealed class CodexStateDbExplorerService
 
         rowHashes.Sort(StringComparer.Ordinal);
         var material = $"rows={table.RowCount}\nbounded={bounded}\n{string.Join('\n', rowHashes)}";
-        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material)));
+        return new RowFingerprintResult(
+            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material))),
+            observations,
+            Complete: !bounded,
+            Bounded: bounded,
+            Note: bounded
+                ? $"bounded row observation at {MaxFingerprintRows:N0} rows"
+                : $"complete row observation ({observations.Count:N0} rows)",
+            Mode: "full");
+    }
+
+    private static string ComputeRowHash(
+        IReadOnlyList<string> columns,
+        IReadOnlyList<object?> values)
+    {
+        var builder = new StringBuilder();
+        for (var index = 0; index < columns.Count; index++)
+        {
+            AppendSchemaText(builder, "column", columns[index]);
+            builder.Append("value:");
+            AppendCanonical(builder, index < values.Count ? values[index] : null);
+            builder.Append('\n');
+        }
+
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(builder.ToString())));
+    }
+
+    private static (string IdentityKind, string RowIdentity) BuildRowIdentity(
+        IReadOnlyList<string> primaryKeyColumns,
+        IReadOnlyDictionary<string, int> columnPositions,
+        IReadOnlyList<object?> values,
+        string rowHash)
+    {
+        var positions = primaryKeyColumns
+            .Select(name => columnPositions.TryGetValue(name, out var position) ? position : -1)
+            .ToArray();
+        if (positions.Length == primaryKeyColumns.Count &&
+            positions.All(position => position >= 0 && position < values.Count && values[position] is not null))
+        {
+            var builder = new StringBuilder("pk:");
+            for (var index = 0; index < primaryKeyColumns.Count; index++)
+            {
+                if (index > 0)
+                {
+                    builder.Append('|');
+                }
+
+                builder.Append(primaryKeyColumns[index]).Append('=');
+                AppendCanonical(builder, values[positions[index]]);
+            }
+
+            return ("primary-key", builder.ToString());
+        }
+
+        return ("row-hash", $"hash:{rowHash}");
     }
 
     private static string FingerprintBoundedRowObservation(CodexStateTableInfo table)
@@ -883,28 +1564,40 @@ public sealed class CodexStateDbExplorerService
 
     private static void AppendCanonical(StringBuilder builder, object? value)
     {
+        string type;
+        string representation;
         switch (value)
         {
             case null:
-                builder.Append("<null>");
+                type = "null";
+                representation = string.Empty;
                 break;
             case byte[] bytes:
-                builder.Append("blob:").Append(Convert.ToHexString(bytes));
+                type = "blob";
+                representation = Convert.ToHexString(bytes);
                 break;
             case double number:
-                builder.Append("double:").Append(number.ToString("R", CultureInfo.InvariantCulture));
+                type = "double";
+                representation = number.ToString("R", CultureInfo.InvariantCulture);
                 break;
             case float number:
-                builder.Append("single:").Append(number.ToString("R", CultureInfo.InvariantCulture));
+                type = "single";
+                representation = number.ToString("R", CultureInfo.InvariantCulture);
                 break;
             case IFormattable formattable:
-                builder.Append(value.GetType().FullName).Append(':')
-                    .Append(formattable.ToString(null, CultureInfo.InvariantCulture));
+                type = value.GetType().FullName ?? value.GetType().Name;
+                representation = formattable.ToString(null, CultureInfo.InvariantCulture) ?? string.Empty;
                 break;
             default:
-                builder.Append(value.GetType().FullName).Append(':').Append(value);
+                type = value.GetType().FullName ?? value.GetType().Name;
+                representation = value.ToString() ?? string.Empty;
                 break;
         }
+
+        // Length-prefix both pieces so delimiters/newlines in raw source values cannot create
+        // an ambiguous row representation.
+        builder.Append(type.Length).Append(':').Append(type)
+            .Append('|').Append(representation.Length).Append(':').Append(representation);
     }
 
     private static object SanitizeForExport(string columnName, object? value)
@@ -1067,8 +1760,12 @@ public sealed class CodexStateDbExplorerService
 
     private static int? TryParseGeneration(string fileName)
     {
-        const string prefix = "state_";
-        if (!fileName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        var prefix = fileName.StartsWith("state_", StringComparison.OrdinalIgnoreCase)
+            ? "state_"
+            : fileName.StartsWith("thread_history_", StringComparison.OrdinalIgnoreCase)
+                ? "thread_history_"
+                : null;
+        if (prefix is null)
         {
             return null;
         }

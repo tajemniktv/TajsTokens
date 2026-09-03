@@ -156,14 +156,28 @@
                             <ListView x:Name="ComparisonDiffList" MaxHeight="120" SelectionMode="None">
                                 <ListView.ItemTemplate>
                                     <DataTemplate>
-                                        <Grid ColumnSpacing="8">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Text="{Binding Name}" />
-                                            <TextBlock Grid.Column="1" Text="{Binding Summary}" Opacity="0.72" />
-                                        </Grid>
+                                        <StackPanel Spacing="2">
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding Name}" />
+                                                <TextBlock Grid.Column="1" Text="{Binding Summary}" Opacity="0.72" />
+                                            </Grid>
+                                            <TextBlock Text="{Binding EvidenceSummary}" Opacity="0.58" TextWrapping="Wrap" />
+                                            <ListView ItemsSource="{Binding RowChanges}" MaxHeight="90" SelectionMode="None">
+                                                <ListView.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel Spacing="1">
+                                                            <TextBlock Text="{Binding Summary}" FontFamily="Consolas" FontSize="11" />
+                                                            <TextBlock Text="{Binding PreviousRowHash}" Opacity="0.5" FontFamily="Consolas" FontSize="10" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Text="{Binding CurrentRowHash}" Opacity="0.5" FontFamily="Consolas" FontSize="10" TextTrimming="CharacterEllipsis" />
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ListView.ItemTemplate>
+                                            </ListView>
+                                        </StackPanel>
                                     </DataTemplate>
                                 </ListView.ItemTemplate>
                             </ListView>
@@ -176,22 +190,36 @@
                             <ListView x:Name="DiffList" MaxHeight="120" SelectionMode="None">
                                 <ListView.ItemTemplate>
                                     <DataTemplate>
-                                        <Grid ColumnSpacing="8">
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="*" />
-                                                <ColumnDefinition Width="Auto" />
-                                            </Grid.ColumnDefinitions>
-                                            <TextBlock Text="{Binding Name}" />
-                                            <TextBlock Grid.Column="1" Text="{Binding Summary}" Opacity="0.72" />
-                                        </Grid>
+                                        <StackPanel Spacing="2">
+                                            <Grid ColumnSpacing="8">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <TextBlock Text="{Binding Name}" />
+                                                <TextBlock Grid.Column="1" Text="{Binding Summary}" Opacity="0.72" />
+                                            </Grid>
+                                            <TextBlock Text="{Binding EvidenceSummary}" Opacity="0.58" TextWrapping="Wrap" />
+                                            <ListView ItemsSource="{Binding RowChanges}" MaxHeight="90" SelectionMode="None">
+                                                <ListView.ItemTemplate>
+                                                    <DataTemplate>
+                                                        <StackPanel Spacing="1">
+                                                            <TextBlock Text="{Binding Summary}" FontFamily="Consolas" FontSize="11" />
+                                                            <TextBlock Text="{Binding PreviousRowHash}" Opacity="0.5" FontFamily="Consolas" FontSize="10" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Text="{Binding CurrentRowHash}" Opacity="0.5" FontFamily="Consolas" FontSize="10" TextTrimming="CharacterEllipsis" />
+                                                        </StackPanel>
+                                                    </DataTemplate>
+                                                </ListView.ItemTemplate>
+                                            </ListView>
+                                        </StackPanel>
                                     </DataTemplate>
                                 </ListView.ItemTemplate>
                             </ListView>
                         </StackPanel>
                     </Border>
-                    <Expander Grid.Row="6" Header="Trace a source-native key across discovered stores">
+                    <Expander Grid.Row="6" Header="Trace a source-native key across selected stores">
                         <StackPanel Padding="4,6" Spacing="6">
-                            <TextBlock Text="Exact column/value lookup only. Results remain tied to each originating database object; no joins or semantic relationships are inferred."
+                            <TextBlock Text="Exact column/value lookup only against the selected Inspecting and Compare-with sources. Results remain tied to each originating database object; no joins or semantic relationships are inferred."
                                        Opacity="0.7" TextWrapping="Wrap" />
                             <Grid ColumnSpacing="8">
                                 <Grid.ColumnDefinitions>
