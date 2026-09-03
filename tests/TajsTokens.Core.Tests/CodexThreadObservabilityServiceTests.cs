@@ -137,6 +137,7 @@ public sealed class CodexThreadObservabilityServiceTests
             Assert.Equal(2, result.HistorySources.Count);
             Assert.Equal(Path.GetFullPath(secondPath), result.HistorySourcePath);
             Assert.Equal(4, result.Turns.Count);
+            Assert.Equal(Path.GetFullPath(secondPath), result.Turns[0].SourcePath);
             Assert.Equal(4, result.Items.Count);
             Assert.Equal(2, result.RealtimeItems.Count);
             Assert.Equal(2, result.HistorySources.Select(source => source.SourcePath).Distinct(StringComparer.OrdinalIgnoreCase).Count());

@@ -354,10 +354,15 @@ public sealed class CodexThreadObservabilityService
             }
         }
 
+        var historySourceOrder = historySources
+            .Select((source, index) => (source.SourcePath, index))
+            .ToDictionary(item => item.SourcePath, item => item.index, StringComparer.OrdinalIgnoreCase);
+
         turns = turns
             .GroupBy(turn => $"{turn.SourcePath}\u001f{turn.TurnId}", StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .OrderBy(turn => turn.RolloutOrdinal)
+            .ThenBy(turn => historySourceOrder.TryGetValue(turn.SourcePath, out var order) ? order : int.MaxValue)
             .ThenBy(turn => turn.SourcePath, StringComparer.OrdinalIgnoreCase)
             .ThenBy(turn => turn.TurnId, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -365,6 +370,7 @@ public sealed class CodexThreadObservabilityService
             .GroupBy(item => $"{item.SourcePath}\u001f{item.TurnId}\u001f{item.ItemId}", StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .OrderBy(item => item.RolloutOrdinal)
+            .ThenBy(item => historySourceOrder.TryGetValue(item.SourcePath, out var order) ? order : int.MaxValue)
             .ThenBy(item => item.SourcePath, StringComparer.OrdinalIgnoreCase)
             .ThenBy(item => item.ItemId, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -372,6 +378,7 @@ public sealed class CodexThreadObservabilityService
             .GroupBy(item => $"{item.SourcePath}\u001f{item.ItemId}", StringComparer.OrdinalIgnoreCase)
             .Select(group => group.First())
             .OrderBy(item => item.RolloutOrdinal)
+            .ThenBy(item => historySourceOrder.TryGetValue(item.SourcePath, out var order) ? order : int.MaxValue)
             .ThenBy(item => item.SourcePath, StringComparer.OrdinalIgnoreCase)
             .ThenBy(item => item.ItemId, StringComparer.OrdinalIgnoreCase)
             .ToList();
