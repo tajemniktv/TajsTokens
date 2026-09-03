@@ -14,6 +14,12 @@ public sealed partial class MainWindow : Window
 
     private void OnNavigationSelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
+        if (args.IsSettingsSelected)
+        {
+            ContentFrame.Navigate(typeof(SettingsPage), "Settings");
+            return;
+        }
+
         if (args.SelectedItemContainer?.Tag is not string page)
         {
             return;
