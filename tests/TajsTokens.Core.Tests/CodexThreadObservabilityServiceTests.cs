@@ -217,6 +217,49 @@ public sealed class CodexThreadObservabilityServiceTests
     }
 
     [Fact]
+    public async Task ReadThread_RetainsOptionalStateAlternativesAndMarksConflicts()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-thread-state-conflicts-");
+        try
+        {
+            await CreateStateAsync(Path.Combine(directory.FullName, "state_1.sqlite"));
+            var newerPath = Path.Combine(directory.FullName, "state_2.sqlite");
+            await CreateStateAsync(newerPath);
+            await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = newerPath }.ToString()))
+            {
+                await connection.OpenAsync();
+                var command = connection.CreateCommand();
+                command.CommandText = "UPDATE projects SET name = 'Project Two'; UPDATE project_roots SET path = 'C:/repo/new'; UPDATE thread_sections SET appearance = '{\"accent\":\"green\"}'; UPDATE thread_dynamic_tools SET name = 'browse'; UPDATE thread_spawn_edges SET status = 'closed' WHERE child_thread_id = 'thread-2';";
+                await command.ExecuteNonQueryAsync();
+            }
+
+            var result = await new CodexThreadObservabilityService(directory.FullName)
+                .ReadThreadAsync("thread-1", CancellationToken.None);
+
+            Assert.NotNull(result.StateReadModel);
+            var state = result.StateReadModel!;
+            Assert.Equal(2, result.StateSources.Count);
+            Assert.Equal("Project Two", state.PreferredProject!.Name);
+            Assert.Single(state.ProjectAlternatives);
+            Assert.True(state.ProjectConflict);
+            Assert.Single(state.ProjectRootsAlternatives);
+            Assert.True(state.ProjectRootsConflict);
+            Assert.Single(state.SectionAlternatives);
+            Assert.True(state.SectionConflict);
+            Assert.Single(state.DynamicToolsAlternatives);
+            Assert.True(state.DynamicToolsConflict);
+            Assert.Single(state.SpawnEdgesAlternatives);
+            Assert.True(state.SpawnEdgesConflict);
+            Assert.Contains("Conflicts:", state.SelectionRationale, StringComparison.Ordinal);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ReadThread_ExposesSourceTruncationForEveryHistoryLane()
     {
         var directory = Directory.CreateTempSubdirectory("tajstokens-thread-history-truncation-");

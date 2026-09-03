@@ -460,7 +460,7 @@ public sealed partial class ObservatoryPage : Page
                 case 6:
                 {
                     var thread = await Task.Run(
-                        () => App.Services.CodexThreadObservability.ReadThreadAsync(session.SessionId, cancellation.Token),
+                        () => App.Services.CodexThreadReadModel.ReadThreadAsync(session.SessionId, cancellation.Token),
                         cancellation.Token);
                     if (!CanApplyDetail(session.SessionId, selectionGeneration, detailGeneration, cancellation))
                     {

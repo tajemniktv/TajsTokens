@@ -5,8 +5,9 @@ using TajsTokens.Core.Models;
 namespace TajsTokens.Infrastructure.Services;
 
 /// <summary>
-/// Read-only, provider-native Codex thread view. The state catalog and thread-history stores are
-/// queried on demand; no source rows are mirrored into the TajsTokens database.
+/// Read-only Codex source reader used by the provider-native thread read model. The state catalog
+/// and thread-history stores are queried on demand; no source rows are mirrored into the TajsTokens
+/// database. Product surfaces should depend on <see cref="CodexThreadReadModel"/> instead.
 /// </summary>
 public sealed class CodexThreadObservabilityService
 {
@@ -15,7 +16,7 @@ public sealed class CodexThreadObservabilityService
     private const string CatalogReconciliationPolicy =
         "Prefer newest recency, then updated/created time, source generation, source write time, and source path; retain every source observation.";
     private const string StateReconciliationPolicy =
-        "Prefer the first thread row in explicit source order (generation, write time, description, then path) for related state tables; retain every thread row observation.";
+        "Prefer the first thread row in explicit source order (generation, write time, description, then path); reconcile optional related state values in CodexThreadReadModelPolicy while retaining every source-qualified observation.";
     private const string HistoryReconciliationPolicy =
         "Union readable history rows by source-qualified identity; source order is generation, write time, description, then path, and no source overrides another.";
     private readonly CodexStateDbExplorerService _sources;
@@ -134,6 +135,7 @@ public sealed class CodexThreadObservabilityService
         var capturedAtUtc = DateTimeOffset.UtcNow;
         CodexThreadCatalogEntry? thread = null;
         var stateThreadObservations = new List<CodexThreadCatalogEntry>();
+        var stateSources = new List<CodexThreadStateSourceObservation>();
         CodexThreadProject? project = null;
         CodexThreadSection? section = null;
         var edges = Array.Empty<CodexThreadSpawnEdge>();
@@ -148,11 +150,6 @@ public sealed class CodexThreadObservabilityService
         bool? projectRootsTruncated = null;
         bool? dynamicToolsTruncated = null;
         bool? spawnEdgesTruncated = null;
-        var projectSourceSelected = false;
-        var projectRootsSourceSelected = false;
-        var sectionSourceSelected = false;
-        var dynamicToolsSourceSelected = false;
-        var spawnEdgesSourceSelected = false;
 
         foreach (var candidate in OrderCandidates())
         {
@@ -180,9 +177,9 @@ public sealed class CodexThreadObservabilityService
 
                 stateThreadObservations.Add(observation);
                 // The first matching state row remains the preferred metadata presentation, but
-                // optional related capabilities are selected independently. A rotated/older
-                // state file may contain the thread row while a later candidate is the first one
-                // that actually carries projects, sections, dynamic tools or spawn edges.
+                // each matching source is read independently for optional related capabilities.
+                // A rotated/older state file may contain only the thread row; its empty/absent
+                // optional observations remain attached alongside later capable sources.
                 if (thread is null)
                 {
                     thread = observation;
@@ -190,51 +187,22 @@ public sealed class CodexThreadObservabilityService
                     stateSourceDescription = candidate.SourceDescription;
                 }
 
-                var preferredThread = thread;
-                if (preferredThread is null)
-                {
-                    continue;
-                }
-
                 var hasProjects = await HasTableAsync(connection, "projects", cancellationToken);
                 var hasProjectRoots = await HasTableAsync(connection, "project_roots", cancellationToken);
                 projectCapability = ObserveCapability(projectCapability, hasProjects);
                 projectRootsCapability = ObserveCapability(projectRootsCapability, hasProjectRoots);
-                if (!projectSourceSelected && !string.IsNullOrWhiteSpace(preferredThread.ProjectId) && hasProjects)
+                CodexThreadProject? sourceProject = null;
+                var sourceProjectRootsTruncated = false;
+                if (!string.IsNullOrWhiteSpace(observation.ProjectId) && hasProjects)
                 {
-                    var projectRead = await ReadProjectAsync(connection, preferredThread.ProjectId!, cancellationToken);
-                    if (projectRead.Project is not null)
-                    {
-                        project = projectRead.Project;
-                        projectSourceSelected = true;
-                        projectRootsSourceSelected = hasProjectRoots;
-                        projectRootsTruncated = ObserveTruncation(
-                            projectRootsTruncated,
-                            projectRead.RootsTruncated,
-                            hasProjectRoots);
-                        if (projectRead.RootsTruncated)
-                        {
-                            coverageWarnings.Add($"{candidate.Path}: project_roots was truncated at {MaxHistoryRows:N0} rows.");
-                        }
-                    }
-                }
-                else if (project is not null && !projectRootsSourceSelected && hasProjectRoots)
-                {
-                    var rootsRead = await ReadProjectRootsAsync(
-                        connection,
-                        preferredThread.ProjectId!,
-                        cancellationToken);
-                    project = project with
-                    {
-                        OrderedRoots = rootsRead.Rows,
-                        RootsCapabilityAvailable = true
-                    };
-                    projectRootsSourceSelected = true;
+                    var projectRead = await ReadProjectAsync(connection, observation.ProjectId!, cancellationToken);
+                    sourceProject = projectRead.Project;
+                    sourceProjectRootsTruncated = projectRead.RootsTruncated;
                     projectRootsTruncated = ObserveTruncation(
                         projectRootsTruncated,
-                        rootsRead.IsTruncated,
-                        capabilityObserved: true);
-                    if (rootsRead.IsTruncated)
+                        sourceProjectRootsTruncated,
+                        hasProjectRoots);
+                    if (sourceProjectRootsTruncated)
                     {
                         coverageWarnings.Add($"{candidate.Path}: project_roots was truncated at {MaxHistoryRows:N0} rows.");
                     }
@@ -242,28 +210,26 @@ public sealed class CodexThreadObservabilityService
 
                 var hasSections = await HasTableAsync(connection, "thread_sections", cancellationToken);
                 sectionCapability = ObserveCapability(sectionCapability, hasSections);
-                if (!sectionSourceSelected && !string.IsNullOrWhiteSpace(preferredThread.SectionId) && hasSections)
+                CodexThreadSection? sourceSection = null;
+                if (!string.IsNullOrWhiteSpace(observation.SectionId) && hasSections)
                 {
-                    var sectionRead = await ReadSectionAsync(connection, preferredThread.SectionId!, cancellationToken);
-                    if (sectionRead is not null)
-                    {
-                        section = sectionRead;
-                        sectionSourceSelected = true;
-                    }
+                    sourceSection = await ReadSectionAsync(connection, observation.SectionId!, cancellationToken);
                 }
 
                 var hasDynamicTools = await HasTableAsync(connection, "thread_dynamic_tools", cancellationToken);
                 dynamicToolsCapability = ObserveCapability(dynamicToolsCapability, hasDynamicTools);
-                if (!dynamicToolsSourceSelected && hasDynamicTools)
+                var sourceDynamicTools = Array.Empty<CodexThreadDynamicTool>();
+                var sourceDynamicToolsTruncated = false;
+                if (hasDynamicTools)
                 {
                     var toolsRead = await ReadDynamicToolsAsync(connection, threadId, cancellationToken);
-                    dynamicTools = toolsRead.Rows.ToArray();
-                    dynamicToolsSourceSelected = true;
+                    sourceDynamicTools = toolsRead.Rows.ToArray();
+                    sourceDynamicToolsTruncated = toolsRead.IsTruncated;
                     dynamicToolsTruncated = ObserveTruncation(
                         dynamicToolsTruncated,
-                        toolsRead.IsTruncated,
+                        sourceDynamicToolsTruncated,
                         true);
-                    if (toolsRead.IsTruncated)
+                    if (sourceDynamicToolsTruncated)
                     {
                         coverageWarnings.Add($"{candidate.Path}: thread_dynamic_tools was truncated at {MaxHistoryRows:N0} rows.");
                     }
@@ -271,20 +237,41 @@ public sealed class CodexThreadObservabilityService
 
                 var hasSpawnEdges = await HasTableAsync(connection, "thread_spawn_edges", cancellationToken);
                 spawnEdgesCapability = ObserveCapability(spawnEdgesCapability, hasSpawnEdges);
-                if (!spawnEdgesSourceSelected && hasSpawnEdges)
+                var sourceEdges = Array.Empty<CodexThreadSpawnEdge>();
+                var sourceSpawnEdgesTruncated = false;
+                if (hasSpawnEdges)
                 {
                     var edgesRead = await ReadSpawnEdgesAsync(connection, threadId, cancellationToken);
-                    edges = edgesRead.Rows.ToArray();
-                    spawnEdgesSourceSelected = true;
+                    sourceEdges = edgesRead.Rows.ToArray();
+                    sourceSpawnEdgesTruncated = edgesRead.IsTruncated;
                     spawnEdgesTruncated = ObserveTruncation(
                         spawnEdgesTruncated,
-                        edgesRead.IsTruncated,
+                        sourceSpawnEdgesTruncated,
                         true);
-                    if (edgesRead.IsTruncated)
+                    if (sourceSpawnEdgesTruncated)
                     {
                         coverageWarnings.Add($"{candidate.Path}: thread_spawn_edges was truncated at {MaxHistoryRows:N0} rows.");
                     }
                 }
+
+                stateSources.Add(new CodexThreadStateSourceObservation(
+                    candidate.Path,
+                    candidate.SourceDescription,
+                    observation,
+                    sourceProject,
+                    sourceSection,
+                    sourceEdges,
+                    sourceDynamicTools)
+                {
+                    ProjectCapabilityAvailable = hasProjects,
+                    ProjectRootsCapabilityAvailable = hasProjectRoots,
+                    SectionCapabilityAvailable = hasSections,
+                    DynamicToolsCapabilityAvailable = hasDynamicTools,
+                    SpawnEdgesCapabilityAvailable = hasSpawnEdges,
+                    ProjectRootsTruncated = sourceProjectRootsTruncated,
+                    DynamicToolsTruncated = sourceDynamicToolsTruncated,
+                    SpawnEdgesTruncated = sourceSpawnEdgesTruncated
+                });
 
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -295,6 +282,17 @@ public sealed class CodexThreadObservabilityService
             {
                 warnings.Add($"{candidate.Path}: {Summarize(exception.Message)}");
             }
+        }
+
+        var stateReadModel = stateSources.Count == 0
+            ? null
+            : CodexThreadReadModelPolicy.Reconcile(stateSources);
+        if (stateReadModel is not null)
+        {
+            project = stateReadModel.PreferredProject;
+            section = stateReadModel.PreferredSection;
+            dynamicTools = stateReadModel.PreferredDynamicTools.ToArray();
+            edges = stateReadModel.PreferredSpawnEdges.ToArray();
         }
 
         var turns = new List<CodexThreadTurn>();
@@ -473,10 +471,13 @@ public sealed class CodexThreadObservabilityService
             RealtimeItemsTruncated = realtimeItemsTruncated,
             StateSourceDescription = stateSourceDescription,
             StateThreadObservations = stateThreadObservations,
+            StateSources = stateSources,
+            StateReadModel = stateReadModel,
             StateReconciliationPolicy = StateReconciliationPolicy,
             StateSourceSelectionRationale = thread is null
                 ? null
-                : $"Preferred thread metadata comes from {stateSourcePath}; each optional related table uses the first capable source in explicit order, and all {stateThreadObservations.Count:N0} thread row observation(s) remain attached.",
+                : stateReadModel?.SelectionRationale ??
+                  $"Preferred thread metadata comes from {stateSourcePath}; all {stateThreadObservations.Count:N0} thread row observation(s) remain attached.",
             HistorySourceDescription = historySourceDescription,
             HistorySources = historySources,
             HistoryReconciliationPolicy = HistoryReconciliationPolicy,

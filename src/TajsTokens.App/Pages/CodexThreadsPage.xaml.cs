@@ -119,18 +119,28 @@ public sealed partial class CodexThreadsPage : Page
                 search = SearchTextBox.Text.Trim();
                 StatusText.Text = "Reading discovered Codex thread sources…";
                 var result = await Task.Run(
-                    () => App.Services.CodexThreadObservability.SearchThreadsAsync(
+                    () => App.Services.CodexThreadReadModel.SearchThreadsAsync(
                         search,
                         search.Length == 0 ? 750 : 250,
                         cancellationToken),
                     cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
 
-                if (!_loaded || (searchGeneration is not null &&
-                                 searchGeneration.Value != Volatile.Read(ref _searchGeneration)) ||
-                    !string.Equals(SearchTextBox.Text.Trim(), search, StringComparison.Ordinal))
+                if (!_loaded)
                 {
                     return;
+                }
+
+                if ((searchGeneration is not null &&
+                     searchGeneration.Value != Volatile.Read(ref _searchGeneration)) ||
+                    !string.Equals(SearchTextBox.Text.Trim(), search, StringComparison.Ordinal))
+                {
+                    // The result is stale, but the active source read has completed. Consume the
+                    // queued request in the loop using the latest TextBox value instead of
+                    // returning while _loading is still true and dropping that request.
+                    searchGeneration = null;
+                    _reloadRequested = true;
+                    continue;
                 }
 
                 var selectedId = (ThreadList.SelectedItem as CodexThreadCatalogSearchEntry)?.Preferred.ThreadId;
@@ -200,7 +210,7 @@ public sealed partial class CodexThreadsPage : Page
         try
         {
             var result = await Task.Run(
-                () => App.Services.CodexThreadObservability.ReadThreadAsync(
+                () => App.Services.CodexThreadReadModel.ReadThreadAsync(
                     entry.Preferred.ThreadId,
                     cancellation.Token),
                 cancellation.Token);
@@ -250,9 +260,17 @@ public sealed partial class CodexThreadsPage : Page
             $"Sandbox: {thread?.SandboxPolicy ?? "unavailable"} · approval: {thread?.ApprovalMode ?? "unavailable"}",
             $"History mode: {thread?.HistoryMode ?? "unavailable"} · memory: {thread?.MemoryMode ?? "unavailable"} · archived: {FormatBool(thread?.Archived)} · pinned: {FormatBool(thread?.IsPinned)}",
             $"Agent: {thread?.AgentNickname ?? "unavailable"} · role: {thread?.AgentRole ?? "unavailable"} · path: {thread?.AgentPath ?? "unavailable"}",
-            $"State observations: {result.StateThreadObservations.Count:N0} · policy: {result.StateReconciliationPolicy}",
+            $"State observations: {result.StateThreadObservations.Count:N0} · source-qualified optional observations: {result.StateSources.Count:N0} · policy: {result.StateReconciliationPolicy}",
             $"History sources: {result.HistorySources.Count:N0} · policy: {result.HistoryReconciliationPolicy}"
         };
+
+        if (result.StateReadModel is { } stateReadModel)
+        {
+            lines.Add($"Optional state read-model policy: {stateReadModel.SelectionRationale}");
+            lines.Add($"Alternatives retained: project={stateReadModel.ProjectAlternatives.Count:N0} (conflict={stateReadModel.ProjectConflict}), roots={stateReadModel.ProjectRootsAlternatives.Count:N0} (conflict={stateReadModel.ProjectRootsConflict}), section={stateReadModel.SectionAlternatives.Count:N0} (conflict={stateReadModel.SectionConflict}), dynamic tools={stateReadModel.DynamicToolsAlternatives.Count:N0} (conflict={stateReadModel.DynamicToolsConflict}), spawn edges={stateReadModel.SpawnEdgesAlternatives.Count:N0} (conflict={stateReadModel.SpawnEdgesConflict})");
+            lines.AddRange(result.StateSources.Select(source =>
+                $"  state source: {source.SourceDescription} · {source.SourcePath} · project={FormatCapability(source.ProjectCapabilityAvailable)} · section={FormatCapability(source.SectionCapabilityAvailable)} · tools={FormatCapability(source.DynamicToolsCapabilityAvailable)} · edges={FormatCapability(source.SpawnEdgesCapabilityAvailable)}"));
+        }
 
         if (result.Project is { } project)
         {
