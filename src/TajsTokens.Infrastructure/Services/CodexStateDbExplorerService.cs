@@ -369,11 +369,12 @@ public sealed class CodexStateDbExplorerService
             pageIndex,
             pageSize,
             totalRows,
-            query,
-            command =>
+            () =>
             {
+                var command = new SqliteCommand(query, connection);
                 command.Parameters.AddWithValue("$limit", pageSize);
                 command.Parameters.AddWithValue("$offset", offset);
+                return command;
             },
             cancellationToken);
     }
@@ -439,15 +440,17 @@ public sealed class CodexStateDbExplorerService
             0,
             MaxPageSize,
             -1,
-            query,
-            command =>
+            () =>
             {
+                var command = new SqliteCommand(query, connection);
                 for (var index = 0; index < MaxRelationKeys; index++)
                 {
                     command.Parameters.AddWithValue(
                         string.Concat("$value", index.ToString(CultureInfo.InvariantCulture)),
                         index < distinctValues.Length ? distinctValues[index] : DBNull.Value);
                 }
+
+                return command;
             },
             cancellationToken);
     }
@@ -508,15 +511,12 @@ public sealed class CodexStateDbExplorerService
         int pageIndex,
         int pageSize,
         long totalRows,
-        string commandText,
-        Action<SqliteCommand> configure,
+        Func<SqliteCommand> createCommand,
         CancellationToken cancellationToken)
     {
         var columns = new List<string>();
         var rows = new List<CodexStateRawRow>();
-        await using var command = connection.CreateCommand();
-        command.CommandText = commandText;
-        configure(command);
+        await using var command = createCommand();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         for (var index = 0; index < reader.FieldCount; index++)
         {
