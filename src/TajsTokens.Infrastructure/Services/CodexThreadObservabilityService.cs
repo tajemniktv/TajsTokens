@@ -5,8 +5,9 @@ using TajsTokens.Core.Models;
 namespace TajsTokens.Infrastructure.Services;
 
 /// <summary>
-/// Read-only, provider-native Codex thread view. The state catalog and thread-history stores are
-/// queried on demand; no source rows are mirrored into the TajsTokens database.
+/// Read-only Codex source reader used by the provider-native thread read model. The state catalog
+/// and thread-history stores are queried on demand; no source rows are mirrored into the TajsTokens
+/// database. Product surfaces should depend on <see cref="CodexThreadReadModel"/> instead.
 /// </summary>
 public sealed class CodexThreadObservabilityService
 {
@@ -15,7 +16,7 @@ public sealed class CodexThreadObservabilityService
     private const string CatalogReconciliationPolicy =
         "Prefer newest recency, then updated/created time, source generation, source write time, and source path; retain every source observation.";
     private const string StateReconciliationPolicy =
-        "Prefer the first thread row in explicit source order (generation, write time, description, then path) for related state tables; retain every thread row observation.";
+        "Prefer the first thread row in explicit source order (generation, write time, description, then path); reconcile optional related state values in CodexThreadReadModelPolicy while retaining every source-qualified observation.";
     private const string HistoryReconciliationPolicy =
         "Union readable history rows by source-qualified identity; source order is generation, write time, description, then path, and no source overrides another.";
     private readonly CodexStateDbExplorerService _sources;
@@ -134,6 +135,7 @@ public sealed class CodexThreadObservabilityService
         var capturedAtUtc = DateTimeOffset.UtcNow;
         CodexThreadCatalogEntry? thread = null;
         var stateThreadObservations = new List<CodexThreadCatalogEntry>();
+        var stateSources = new List<CodexThreadStateSourceObservation>();
         CodexThreadProject? project = null;
         CodexThreadSection? section = null;
         var edges = Array.Empty<CodexThreadSpawnEdge>();
@@ -174,76 +176,102 @@ public sealed class CodexThreadObservabilityService
                 }
 
                 stateThreadObservations.Add(observation);
-                if (thread is not null)
+                // The first matching state row remains the preferred metadata presentation, but
+                // each matching source is read independently for optional related capabilities.
+                // A rotated/older state file may contain only the thread row; its empty/absent
+                // optional observations remain attached alongside later capable sources.
+                if (thread is null)
                 {
-                    continue;
+                    thread = observation;
+                    stateSourcePath = candidate.Path;
+                    stateSourceDescription = candidate.SourceDescription;
                 }
 
-                thread = observation;
-
-                stateSourcePath = candidate.Path;
-                stateSourceDescription = candidate.SourceDescription;
-                projectCapability = ObserveCapability(
-                    projectCapability,
-                    await HasTableAsync(connection, "projects", cancellationToken));
-                if (!string.IsNullOrWhiteSpace(thread.ProjectId) && projectCapability == true)
+                var hasProjects = await HasTableAsync(connection, "projects", cancellationToken);
+                var hasProjectRoots = await HasTableAsync(connection, "project_roots", cancellationToken);
+                projectCapability = ObserveCapability(projectCapability, hasProjects);
+                projectRootsCapability = ObserveCapability(projectRootsCapability, hasProjectRoots);
+                CodexThreadProject? sourceProject = null;
+                var sourceProjectRootsTruncated = false;
+                if (!string.IsNullOrWhiteSpace(observation.ProjectId) && hasProjects)
                 {
-                    projectRootsCapability = ObserveCapability(
-                        projectRootsCapability,
-                        await HasTableAsync(connection, "project_roots", cancellationToken));
-                    var projectRead = await ReadProjectAsync(connection, thread.ProjectId!, cancellationToken);
-                    project = projectRead.Project;
+                    var projectRead = await ReadProjectAsync(connection, observation.ProjectId!, cancellationToken);
+                    sourceProject = projectRead.Project;
+                    sourceProjectRootsTruncated = projectRead.RootsTruncated;
                     projectRootsTruncated = ObserveTruncation(
                         projectRootsTruncated,
-                        projectRead.RootsTruncated,
-                        projectRootsCapability == true);
-                    if (projectRead.RootsTruncated)
+                        sourceProjectRootsTruncated,
+                        hasProjectRoots);
+                    if (sourceProjectRootsTruncated)
                     {
                         coverageWarnings.Add($"{candidate.Path}: project_roots was truncated at {MaxHistoryRows:N0} rows.");
                     }
                 }
 
-                sectionCapability = ObserveCapability(
-                    sectionCapability,
-                    await HasTableAsync(connection, "thread_sections", cancellationToken));
-                if (!string.IsNullOrWhiteSpace(thread.SectionId) && sectionCapability == true)
+                var hasSections = await HasTableAsync(connection, "thread_sections", cancellationToken);
+                sectionCapability = ObserveCapability(sectionCapability, hasSections);
+                CodexThreadSection? sourceSection = null;
+                if (!string.IsNullOrWhiteSpace(observation.SectionId) && hasSections)
                 {
-                    section = await ReadSectionAsync(connection, thread.SectionId!, cancellationToken);
+                    sourceSection = await ReadSectionAsync(connection, observation.SectionId!, cancellationToken);
                 }
 
-                dynamicToolsCapability = ObserveCapability(
-                    dynamicToolsCapability,
-                    await HasTableAsync(connection, "thread_dynamic_tools", cancellationToken));
-                if (dynamicToolsCapability == true)
+                var hasDynamicTools = await HasTableAsync(connection, "thread_dynamic_tools", cancellationToken);
+                dynamicToolsCapability = ObserveCapability(dynamicToolsCapability, hasDynamicTools);
+                var sourceDynamicTools = Array.Empty<CodexThreadDynamicTool>();
+                var sourceDynamicToolsTruncated = false;
+                if (hasDynamicTools)
                 {
                     var toolsRead = await ReadDynamicToolsAsync(connection, threadId, cancellationToken);
-                    dynamicTools = toolsRead.Rows.ToArray();
+                    sourceDynamicTools = toolsRead.Rows.ToArray();
+                    sourceDynamicToolsTruncated = toolsRead.IsTruncated;
                     dynamicToolsTruncated = ObserveTruncation(
                         dynamicToolsTruncated,
-                        toolsRead.IsTruncated,
+                        sourceDynamicToolsTruncated,
                         true);
-                    if (toolsRead.IsTruncated)
+                    if (sourceDynamicToolsTruncated)
                     {
                         coverageWarnings.Add($"{candidate.Path}: thread_dynamic_tools was truncated at {MaxHistoryRows:N0} rows.");
                     }
                 }
 
-                spawnEdgesCapability = ObserveCapability(
-                    spawnEdgesCapability,
-                    await HasTableAsync(connection, "thread_spawn_edges", cancellationToken));
-                if (spawnEdgesCapability == true)
+                var hasSpawnEdges = await HasTableAsync(connection, "thread_spawn_edges", cancellationToken);
+                spawnEdgesCapability = ObserveCapability(spawnEdgesCapability, hasSpawnEdges);
+                var sourceEdges = Array.Empty<CodexThreadSpawnEdge>();
+                var sourceSpawnEdgesTruncated = false;
+                if (hasSpawnEdges)
                 {
                     var edgesRead = await ReadSpawnEdgesAsync(connection, threadId, cancellationToken);
-                    edges = edgesRead.Rows.ToArray();
+                    sourceEdges = edgesRead.Rows.ToArray();
+                    sourceSpawnEdgesTruncated = edgesRead.IsTruncated;
                     spawnEdgesTruncated = ObserveTruncation(
                         spawnEdgesTruncated,
-                        edgesRead.IsTruncated,
+                        sourceSpawnEdgesTruncated,
                         true);
-                    if (edgesRead.IsTruncated)
+                    if (sourceSpawnEdgesTruncated)
                     {
                         coverageWarnings.Add($"{candidate.Path}: thread_spawn_edges was truncated at {MaxHistoryRows:N0} rows.");
                     }
                 }
+
+                stateSources.Add(new CodexThreadStateSourceObservation(
+                    candidate.Path,
+                    candidate.SourceDescription,
+                    observation,
+                    sourceProject,
+                    sourceSection,
+                    sourceEdges,
+                    sourceDynamicTools)
+                {
+                    ProjectCapabilityAvailable = hasProjects,
+                    ProjectRootsCapabilityAvailable = hasProjectRoots,
+                    SectionCapabilityAvailable = hasSections,
+                    DynamicToolsCapabilityAvailable = hasDynamicTools,
+                    SpawnEdgesCapabilityAvailable = hasSpawnEdges,
+                    ProjectRootsTruncated = sourceProjectRootsTruncated,
+                    DynamicToolsTruncated = sourceDynamicToolsTruncated,
+                    SpawnEdgesTruncated = sourceSpawnEdgesTruncated
+                });
 
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -254,6 +282,17 @@ public sealed class CodexThreadObservabilityService
             {
                 warnings.Add($"{candidate.Path}: {Summarize(exception.Message)}");
             }
+        }
+
+        var stateReadModel = stateSources.Count == 0
+            ? null
+            : CodexThreadReadModelPolicy.Reconcile(stateSources);
+        if (stateReadModel is not null)
+        {
+            project = stateReadModel.PreferredProject;
+            section = stateReadModel.PreferredSection;
+            dynamicTools = stateReadModel.PreferredDynamicTools.ToArray();
+            edges = stateReadModel.PreferredSpawnEdges.ToArray();
         }
 
         var turns = new List<CodexThreadTurn>();
@@ -432,10 +471,13 @@ public sealed class CodexThreadObservabilityService
             RealtimeItemsTruncated = realtimeItemsTruncated,
             StateSourceDescription = stateSourceDescription,
             StateThreadObservations = stateThreadObservations,
+            StateSources = stateSources,
+            StateReadModel = stateReadModel,
             StateReconciliationPolicy = StateReconciliationPolicy,
             StateSourceSelectionRationale = thread is null
                 ? null
-                : $"Related state tables selected from {stateSourcePath} by explicit source order; all {stateThreadObservations.Count:N0} thread row observation(s) remain attached.",
+                : stateReadModel?.SelectionRationale ??
+                  $"Preferred thread metadata comes from {stateSourcePath}; all {stateThreadObservations.Count:N0} thread row observation(s) remain attached.",
             HistorySourceDescription = historySourceDescription,
             HistorySources = historySources,
             HistoryReconciliationPolicy = HistoryReconciliationPolicy,
@@ -551,29 +593,10 @@ public sealed class CodexThreadObservabilityService
             return (null, false);
         }
 
-        var roots = new List<string>();
         var rootsCapability = await HasTableAsync(connection, "project_roots", cancellationToken);
-        var rootsTruncated = false;
-        if (rootsCapability)
-        {
-            var rootRead = await ReadRowsAsync(
-                connection,
-                "project_roots",
-                "project_id = $value",
-                projectId,
-                "position ASC",
-                MaxHistoryRows,
-                cancellationToken);
-            rootsTruncated = rootRead.IsTruncated;
-            foreach (var root in rootRead.Rows)
-            {
-                var path = ReadOptionalString(root, "path");
-                if (path is not null)
-                {
-                    roots.Add(path);
-                }
-            }
-        }
+        var rootsRead = rootsCapability
+            ? await ReadProjectRootsAsync(connection, projectId, cancellationToken)
+            : new BoundedRead<string>(Array.Empty<string>(), false);
 
         return (new CodexThreadProject(
             projectId,
@@ -582,10 +605,31 @@ public sealed class CodexThreadObservabilityService
             ReadNullableInt(values, "position"),
             ReadTimestamp(values, "created_at_ms", "created_at"),
             ReadTimestamp(values, "updated_at_ms", "updated_at"),
-            roots)
+            rootsRead.Rows)
         {
             RootsCapabilityAvailable = rootsCapability
-        }, rootsTruncated);
+        }, rootsRead.IsTruncated);
+    }
+
+    private static async Task<BoundedRead<string>> ReadProjectRootsAsync(
+        SqliteConnection connection,
+        string projectId,
+        CancellationToken cancellationToken)
+    {
+        var rootRead = await ReadRowsAsync(
+            connection,
+            "project_roots",
+            "project_id = $value",
+            projectId,
+            await HasColumnAsync(connection, "project_roots", "position", cancellationToken) ? "position ASC" : null,
+            MaxHistoryRows,
+            cancellationToken);
+        var roots = rootRead.Rows
+            .Select(root => ReadOptionalString(root, "path"))
+            .Where(path => path is not null)
+            .Cast<string>()
+            .ToArray();
+        return new BoundedRead<string>(roots, rootRead.IsTruncated);
     }
 
     private static async Task<CodexThreadSection?> ReadSectionAsync(
@@ -613,7 +657,7 @@ public sealed class CodexThreadObservabilityService
             "thread_dynamic_tools",
             "thread_id = $value",
             threadId,
-            "position ASC",
+            await HasColumnAsync(connection, "thread_dynamic_tools", "position", cancellationToken) ? "position ASC" : null,
             MaxHistoryRows,
             cancellationToken);
         foreach (var values in read.Rows)
@@ -738,7 +782,7 @@ public sealed class CodexThreadObservabilityService
             "thread_turns",
             "thread_id = $value",
             threadId,
-            "rollout_ordinal ASC",
+            await HasColumnAsync(connection, "thread_turns", "rollout_ordinal", cancellationToken) ? "rollout_ordinal ASC" : null,
             MaxHistoryRows,
             cancellationToken);
         foreach (var values in read.Rows)
@@ -749,9 +793,10 @@ public sealed class CodexThreadObservabilityService
                 continue;
             }
 
+            var rolloutOrdinal = ReadNullableLong(values, "rollout_ordinal");
             turns.Add(new CodexThreadTurn(
                 turnId,
-                ReadNullableLong(values, "rollout_ordinal") ?? turns.Count,
+                rolloutOrdinal ?? turns.Count,
                 ReadOptionalString(values, "status") ?? "unknown",
                 ReadOptionalString(values, "error_json"),
                 ReadTimestamp(values, "started_at_ms", "started_at"),
@@ -764,7 +809,8 @@ public sealed class CodexThreadObservabilityService
                  ReadNullableLong(values, "rollout_end_byte_offset"))
             {
                 SourcePath = candidate.Path,
-                SourceDescription = candidate.SourceDescription
+                SourceDescription = candidate.SourceDescription,
+                RolloutOrdinalAvailable = rolloutOrdinal is not null
             });
         }
 
@@ -783,7 +829,7 @@ public sealed class CodexThreadObservabilityService
             "thread_items",
             "thread_id = $value",
             threadId,
-            "rollout_ordinal ASC",
+            await HasColumnAsync(connection, "thread_items", "rollout_ordinal", cancellationToken) ? "rollout_ordinal ASC" : null,
             MaxHistoryRows,
             cancellationToken);
         foreach (var values in read.Rows)
@@ -794,17 +840,19 @@ public sealed class CodexThreadObservabilityService
                 continue;
             }
 
+            var rolloutOrdinal = ReadNullableLong(values, "rollout_ordinal");
             items.Add(new CodexThreadItem(
                 ReadOptionalString(values, "turn_id") ?? string.Empty,
                 itemId,
-                ReadNullableLong(values, "rollout_ordinal") ?? items.Count,
+                rolloutOrdinal ?? items.Count,
                 ReadTimestamp(values, "created_at_ms", "created_at"),
                 ReadOptionalString(values, "item_type") ?? string.Empty,
                  ReadOptionalString(values, "item_json") ?? string.Empty,
                  ReadNullableLong(values, "updated_at_ordinal"))
             {
                 SourcePath = candidate.Path,
-                SourceDescription = candidate.SourceDescription
+                SourceDescription = candidate.SourceDescription,
+                RolloutOrdinalAvailable = rolloutOrdinal is not null
             });
         }
 
@@ -823,7 +871,7 @@ public sealed class CodexThreadObservabilityService
             "thread_realtime_items",
             "thread_id = $value",
             threadId,
-            "rollout_ordinal ASC",
+            await HasColumnAsync(connection, "thread_realtime_items", "rollout_ordinal", cancellationToken) ? "rollout_ordinal ASC" : null,
             MaxHistoryRows,
             cancellationToken);
         foreach (var values in read.Rows)
@@ -834,15 +882,17 @@ public sealed class CodexThreadObservabilityService
                 continue;
             }
 
+            var rolloutOrdinal = ReadNullableLong(values, "rollout_ordinal");
             items.Add(new CodexThreadRealtimeItem(
                 itemId,
-                ReadNullableLong(values, "rollout_ordinal") ?? items.Count,
+                rolloutOrdinal ?? items.Count,
                 ReadTimestamp(values, "created_at_ms", "created_at"),
                  ReadOptionalString(values, "item_type") ?? string.Empty,
                  ReadOptionalString(values, "item_json") ?? string.Empty)
             {
                 SourcePath = candidate.Path,
-                SourceDescription = candidate.SourceDescription
+                SourceDescription = candidate.SourceDescription,
+                RolloutOrdinalAvailable = rolloutOrdinal is not null
             });
         }
 
@@ -925,6 +975,26 @@ public sealed class CodexThreadObservabilityService
         command.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $name LIMIT 1;";
         command.Parameters.AddWithValue("$name", table);
         return await command.ExecuteScalarAsync(cancellationToken) is not null;
+    }
+
+    private static async Task<bool> HasColumnAsync(
+        SqliteConnection connection,
+        string table,
+        string column,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = $"PRAGMA table_xinfo({QuoteIdentifier(table)});";
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            if (string.Equals(reader.GetString(1), column, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static async Task<SqliteConnection> OpenReadOnlyAsync(

@@ -151,6 +151,8 @@ public sealed record CodexThreadTurn(
     public string SourcePath { get; init; } = string.Empty;
 
     public string SourceDescription { get; init; } = string.Empty;
+
+    public bool RolloutOrdinalAvailable { get; init; } = true;
 }
 
 /// <summary>
@@ -170,6 +172,8 @@ public sealed record CodexThreadItem(
 
     public string SourceDescription { get; init; } = string.Empty;
 
+    public bool RolloutOrdinalAvailable { get; init; } = true;
+
     public string DisplaySummary => string.IsNullOrWhiteSpace(ItemType)
         ? ItemId
         : $"{ItemType} · {ItemId}";
@@ -185,6 +189,8 @@ public sealed record CodexThreadRealtimeItem(
     public string SourcePath { get; init; } = string.Empty;
 
     public string SourceDescription { get; init; } = string.Empty;
+
+    public bool RolloutOrdinalAvailable { get; init; } = true;
 }
 
 /// <summary>
@@ -210,6 +216,59 @@ public sealed record CodexThreadHistorySourceObservation(
 
     public bool RealtimeItemsTruncated { get; init; }
 }
+
+/// <summary>
+/// Optional state observations read from one matching Codex state source. An observation is kept
+/// even when a related table is absent or has no row so capability boundaries and conflicts remain
+/// visible to the read-model policy.
+/// </summary>
+public sealed record CodexThreadStateSourceObservation(
+    string SourcePath,
+    string SourceDescription,
+    CodexThreadCatalogEntry Thread,
+    CodexThreadProject? Project,
+    CodexThreadSection? Section,
+    IReadOnlyList<CodexThreadSpawnEdge> SpawnEdges,
+    IReadOnlyList<CodexThreadDynamicTool> DynamicTools)
+{
+    public bool? ProjectCapabilityAvailable { get; init; }
+
+    public bool? ProjectRootsCapabilityAvailable { get; init; }
+
+    public bool? SectionCapabilityAvailable { get; init; }
+
+    public bool? DynamicToolsCapabilityAvailable { get; init; }
+
+    public bool? SpawnEdgesCapabilityAvailable { get; init; }
+
+    public bool ProjectRootsTruncated { get; init; }
+
+    public bool DynamicToolsTruncated { get; init; }
+
+    public bool SpawnEdgesTruncated { get; init; }
+}
+
+/// <summary>
+/// Deterministic presentation selected from all readable state observations. Alternatives and
+/// conflict flags are part of the provider-native read model; they are not discarded during
+/// source acquisition.
+/// </summary>
+public sealed record CodexThreadStateReadModel(
+    CodexThreadProject? PreferredProject,
+    IReadOnlyList<CodexThreadProject> ProjectAlternatives,
+    bool ProjectConflict,
+    IReadOnlyList<IReadOnlyList<string>> ProjectRootsAlternatives,
+    bool ProjectRootsConflict,
+    CodexThreadSection? PreferredSection,
+    IReadOnlyList<CodexThreadSection> SectionAlternatives,
+    bool SectionConflict,
+    IReadOnlyList<CodexThreadDynamicTool> PreferredDynamicTools,
+    IReadOnlyList<IReadOnlyList<CodexThreadDynamicTool>> DynamicToolsAlternatives,
+    bool DynamicToolsConflict,
+    IReadOnlyList<CodexThreadSpawnEdge> PreferredSpawnEdges,
+    IReadOnlyList<IReadOnlyList<CodexThreadSpawnEdge>> SpawnEdgesAlternatives,
+    bool SpawnEdgesConflict,
+    string SelectionRationale);
 
 /// <summary>
 /// A provider-native, on-demand thread view assembled from the Codex state and thread-history
@@ -266,6 +325,11 @@ public sealed record CodexThreadReadResult(
     public string StateReconciliationPolicy { get; init; } = string.Empty;
 
     public string? StateSourceSelectionRationale { get; init; }
+
+    public IReadOnlyList<CodexThreadStateSourceObservation> StateSources { get; init; } =
+        Array.Empty<CodexThreadStateSourceObservation>();
+
+    public CodexThreadStateReadModel? StateReadModel { get; init; }
 
     public string? HistorySourceDescription { get; init; }
 

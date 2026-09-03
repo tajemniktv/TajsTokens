@@ -275,6 +275,20 @@ The first thread observability slice therefore treats state metadata, project/ro
 spawn edges, dynamic-tool registrations, and history turns/items as provider-native read data. It
 retains source paths and capability absence, keeps realtime rows in a separate lane, and leaves
 unresolved field meaning visible rather than manufacturing cross-source relationships.
+Presentation assumptions are limited to bounded catalog ordering, source-selection rationale, and
+the explicit history-mode display-name policy; they are read-model policy and are not persisted as
+Codex facts. Missing or older columns remain unavailable rather than being promoted to zero/false
+values.
+
+The production UI exposes this slice through the `ICodexThreadReadModel` provider-native query
+boundary. Its bounded catalog can select a thread from state-backed rows (so a thread does not
+need a normalized rollout session to be selectable), while SQLite discovery and source acquisition
+remain behind Infrastructure. The on-demand detail view renders source-native metadata, project
+roots, section and pin state, directional spawn edges, dynamic tools, turn/item lanes, realtime
+items, source paths, reconciliation policy, and capability/truncation diagnostics. Every readable
+state source is retained as a source-qualified observation; `CodexThreadReadModelPolicy` chooses
+the presentation value and exposes alternatives and conflicts with its rationale. Content-bearing
+item JSON is not rendered into the summary and is never written to TajsTokens durable storage.
 
 ## Auxiliary Codex source observability
 
