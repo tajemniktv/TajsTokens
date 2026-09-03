@@ -182,6 +182,41 @@ public sealed class CodexThreadObservabilityServiceTests
     }
 
     [Fact]
+    public async Task ReadThread_UsesLaterStateSourceWhenPreferredRowLacksOptionalTables()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-thread-state-sources-");
+        try
+        {
+            // The newer row wins metadata presentation, but this rotated source has not yet
+            // materialized the optional relationship tables. The older source still provides
+            // demonstrated project/section/tool/topology data for the same native thread ID.
+            var newerPath = Path.Combine(directory.FullName, "state_2.sqlite");
+            var olderPath = Path.Combine(directory.FullName, "state_1.sqlite");
+            await CreatePartialStateAsync(newerPath);
+            await CreateStateAsync(olderPath);
+
+            var result = await new CodexThreadObservabilityService(directory.FullName)
+                .ReadThreadAsync("thread-1", CancellationToken.None);
+
+            Assert.Equal(Path.GetFullPath(newerPath), result.StateSourcePath);
+            Assert.True(result.ProjectCapabilityAvailable);
+            Assert.True(result.ProjectRootsCapabilityAvailable);
+            Assert.Equal("Project One", result.Project!.Name);
+            Assert.True(result.SectionCapabilityAvailable);
+            Assert.Equal("Tools", result.Section!.Name);
+            Assert.True(result.DynamicToolsCapabilityAvailable);
+            Assert.Single(result.DynamicTools);
+            Assert.True(result.SpawnEdgesCapabilityAvailable);
+            Assert.Equal(2, result.SpawnEdges.Count);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ReadThread_ExposesSourceTruncationForEveryHistoryLane()
     {
         var directory = Directory.CreateTempSubdirectory("tajstokens-thread-history-truncation-");
@@ -301,6 +336,48 @@ public sealed class CodexThreadObservabilityServiceTests
         }
     }
 
+    [Fact]
+    public async Task ReadThread_HandlesOlderHistoryTablesWithoutOrderingColumns()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-thread-history-older-");
+        try
+        {
+            var path = Path.Combine(directory.FullName, "thread_history_1.sqlite");
+            await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path }.ToString()))
+            {
+                await connection.OpenAsync();
+                var command = connection.CreateCommand();
+                command.CommandText = """
+                    CREATE TABLE thread_turns(thread_id TEXT, turn_id TEXT, status TEXT);
+                    CREATE TABLE thread_items(thread_id TEXT, turn_id TEXT, item_id TEXT, item_type TEXT, item_json TEXT);
+                    CREATE TABLE thread_realtime_items(thread_id TEXT, item_id TEXT, item_type TEXT, item_json TEXT);
+                    INSERT INTO thread_turns VALUES ('thread-1','turn-1','completed');
+                    INSERT INTO thread_items VALUES ('thread-1','turn-1','item-1','userMessage','{}');
+                    INSERT INTO thread_realtime_items VALUES ('thread-1','rt-1','realtime_session_started','{}');
+                    """;
+                await command.ExecuteNonQueryAsync();
+            }
+
+            var result = await new CodexThreadObservabilityService(directory.FullName)
+                .ReadThreadAsync("thread-1", CancellationToken.None);
+
+            Assert.True(result.TurnsCapabilityAvailable);
+            Assert.True(result.ItemsCapabilityAvailable);
+            Assert.True(result.RealtimeCapabilityAvailable);
+            Assert.Equal("completed", Assert.Single(result.Turns).Status);
+            Assert.False(result.Turns[0].RolloutOrdinalAvailable);
+            Assert.Equal("userMessage", Assert.Single(result.Items).ItemType);
+            Assert.False(result.Items[0].RolloutOrdinalAvailable);
+            Assert.Equal("realtime_session_started", Assert.Single(result.RealtimeItems).ItemType);
+            Assert.False(result.RealtimeItems[0].RolloutOrdinalAvailable);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
     private static async Task CreateStateAsync(string path)
     {
         await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path }.ToString());
@@ -330,6 +407,15 @@ public sealed class CodexThreadObservabilityServiceTests
             INSERT INTO thread_dynamic_tools VALUES ('thread-1',0,'search','Search files','{"type":"object"}',1,'fs');
             INSERT INTO thread_spawn_edges VALUES ('thread-1','thread-2','open'), ('thread-2','thread-3','closed');
             """;
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private static async Task CreatePartialStateAsync(string path)
+    {
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path }.ToString());
+        await connection.OpenAsync();
+        var command = connection.CreateCommand();
+        command.CommandText = "CREATE TABLE threads(id TEXT PRIMARY KEY, project_id TEXT, thread_section_id TEXT); INSERT INTO threads VALUES ('thread-1', 'project-1', 'section-1');";
         await command.ExecuteNonQueryAsync();
     }
 

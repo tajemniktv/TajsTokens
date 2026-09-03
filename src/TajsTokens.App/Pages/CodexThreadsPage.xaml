@@ -1,0 +1,89 @@
+<Page
+    x:Class="TajsTokens.App.Pages.CodexThreadsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+    mc:Ignorable="d">
+
+    <Grid Padding="24" RowSpacing="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <Grid Grid.Row="0" ColumnSpacing="12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+            <StackPanel Spacing="4">
+                <TextBlock Text="Codex Threads" FontSize="28" FontWeight="SemiBold" />
+                <TextBlock Text="Provider-native, read-only thread metadata, projects, spawned-thread topology and materialized history from the local Codex sources. Source paths and capability boundaries stay visible; transcript payloads are not copied into TajsTokens storage."
+                           Opacity="0.72" TextWrapping="Wrap" />
+                <TextBlock x:Name="StatusText" Text="Discovering Codex threads…" Opacity="0.72" Margin="0,8,0,0" TextWrapping="Wrap" />
+            </StackPanel>
+            <Button Grid.Column="1" Content="Refresh" Click="OnRefreshClicked" VerticalAlignment="Top" />
+        </Grid>
+
+        <Grid Grid.Row="1" ColumnSpacing="14">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="380" MinWidth="300" />
+                <ColumnDefinition Width="*" MinWidth="480" />
+            </Grid.ColumnDefinitions>
+
+            <Border Padding="12" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                <Grid RowSpacing="10">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <StackPanel Spacing="2">
+                        <TextBlock Text="Thread catalog" FontSize="18" FontWeight="SemiBold" />
+                        <TextBlock Text="Searches discovered state sources; duplicate source observations remain attached to each result."
+                                   Opacity="0.68" TextWrapping="Wrap" />
+                    </StackPanel>
+                    <TextBox x:Name="SearchTextBox"
+                             Grid.Row="1"
+                             PlaceholderText="Search ID, title, cwd, model, project or branch"
+                             TextChanged="OnSearchChanged" />
+                    <ListView x:Name="ThreadList"
+                              Grid.Row="2"
+                              SelectionMode="Single"
+                              SelectionChanged="OnThreadSelectionChanged"
+                              ScrollViewer.IsDeferredScrollingEnabled="True">
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Padding="4,7" Spacing="3">
+                                    <TextBlock Text="{Binding Preferred.DisplayName}"
+                                               FontWeight="SemiBold"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding Preferred.ThreadId}"
+                                               Opacity="0.68"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding Preferred.SourceDescription}"
+                                               Opacity="0.62"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Text="{Binding Preferred.Model}"
+                                               Opacity="0.72"
+                                               TextTrimming="CharacterEllipsis" />
+                                </StackPanel>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Grid>
+            </Border>
+
+            <Border Grid.Column="1" Padding="12" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                <ScrollViewer Padding="8"
+                              HorizontalScrollBarVisibility="Auto"
+                              VerticalScrollBarVisibility="Auto">
+                    <TextBlock x:Name="DetailText"
+                               Text="Select a Codex thread to inspect its source-native metadata and history."
+                               TextWrapping="Wrap" />
+                </ScrollViewer>
+            </Border>
+        </Grid>
+    </Grid>
+</Page>

@@ -18,6 +18,7 @@
                 <NavigationViewItem Content="Overview" Tag="overview" Icon="View" IsSelected="True" />
                 <NavigationViewItem Content="Usage" Tag="usage" Icon="AllApps" />
                 <NavigationViewItem Content="Codex Observatory" Tag="observatory" Icon="People" />
+                <NavigationViewItem Content="Codex Threads" Tag="codex-threads" Icon="ContactInfo" />
                 <NavigationViewItem Content="Codex Sources" Tag="codex-sources" Icon="ViewAll" />
                 <NavigationViewItem Content="State DB Explorer" Tag="state-db" Icon="ViewAll" />
                 <NavigationViewItem Content="Forecasts" Tag="forecasts" Icon="Preview" />

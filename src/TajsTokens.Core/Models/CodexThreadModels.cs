@@ -151,6 +151,8 @@ public sealed record CodexThreadTurn(
     public string SourcePath { get; init; } = string.Empty;
 
     public string SourceDescription { get; init; } = string.Empty;
+
+    public bool RolloutOrdinalAvailable { get; init; } = true;
 }
 
 /// <summary>
@@ -170,6 +172,8 @@ public sealed record CodexThreadItem(
 
     public string SourceDescription { get; init; } = string.Empty;
 
+    public bool RolloutOrdinalAvailable { get; init; } = true;
+
     public string DisplaySummary => string.IsNullOrWhiteSpace(ItemType)
         ? ItemId
         : $"{ItemType} · {ItemId}";
@@ -185,6 +189,8 @@ public sealed record CodexThreadRealtimeItem(
     public string SourcePath { get; init; } = string.Empty;
 
     public string SourceDescription { get; init; } = string.Empty;
+
+    public bool RolloutOrdinalAvailable { get; init; } = true;
 }
 
 /// <summary>

@@ -686,6 +686,7 @@ public sealed partial class ObservatoryPage : Page
             "Source-native Codex thread data (on-demand local inspection)",
             $"Captured: {result.CapturedAtUtc.ToLocalTime():g}",
             $"Thread ID: {thread?.ThreadId ?? "unknown"}",
+            $"Display name (history-mode policy): {thread?.DisplayName ?? "unknown"} · title={thread?.Title ?? "unavailable"} · name={thread?.Name ?? "unavailable"}",
             $"State source: {result.StateSourcePath ?? "unavailable"} · {result.StateSourceDescription ?? "unknown"}",
             $"State thread observations: {result.StateThreadObservations.Count:N0} · reconciliation: {result.StateReconciliationPolicy ?? "unknown"}",
             $"History source: {result.HistorySourcePath ?? "unavailable"} · {result.HistorySourceDescription ?? "unknown"}",
@@ -735,13 +736,13 @@ public sealed partial class ObservatoryPage : Page
             $"  [{tool.Position}] {tool.Name} · namespace={tool.Namespace ?? "unavailable"} · defer_loading={tool.DeferLoading}"));
         lines.Add($"Turns (rollout order): {result.Turns.Count:N0} · capability={FormatCapability(result.TurnsCapabilityAvailable)} · truncated={FormatTruncation(result.TurnsTruncated)}");
         lines.AddRange(result.Turns.Take(120).Select(turn =>
-            $"  [{turn.RolloutOrdinal}] {turn.TurnId} · status={turn.Status} · duration={FormatDuration(turn.DurationMs)}"));
+            $"  [{FormatOrdinal(turn.RolloutOrdinal, turn.RolloutOrdinalAvailable)}] {turn.TurnId} · status={turn.Status} · duration={FormatDuration(turn.DurationMs)}"));
         lines.Add($"Normal history items (rollout order): {result.Items.Count:N0} · capability={FormatCapability(result.ItemsCapabilityAvailable)} · truncated={FormatTruncation(result.ItemsTruncated)}");
         lines.AddRange(result.Items.Take(160).Select(item =>
-            $"  [{item.RolloutOrdinal}] {item.DisplaySummary}"));
+            $"  [{FormatOrdinal(item.RolloutOrdinal, item.RolloutOrdinalAvailable)}] {item.DisplaySummary}"));
         lines.Add($"Realtime timeline items (separate source lane): {result.RealtimeItems.Count:N0} · capability={FormatCapability(result.RealtimeCapabilityAvailable)} · truncated={FormatTruncation(result.RealtimeItemsTruncated)}");
         lines.AddRange(result.RealtimeItems.Take(160).Select(item =>
-            $"  [{item.RolloutOrdinal}] {item.ItemType} · {item.ItemId}"));
+            $"  [{FormatOrdinal(item.RolloutOrdinal, item.RolloutOrdinalAvailable)}] {item.ItemType} · {item.ItemId}"));
 
         if (result.Items.Count > 160 || result.RealtimeItems.Count > 160 || result.Turns.Count > 120)
         {
@@ -766,6 +767,7 @@ public sealed partial class ObservatoryPage : Page
         static string FormatBool(bool? value) => value is null ? "unavailable" : value.Value ? "yes" : "no";
         static string FormatCapability(bool? value) => value is null ? "unknown" : value.Value ? "present" : "absent";
         static string FormatTruncation(bool? value) => value is null ? "unknown" : value.Value ? "truncated" : "complete";
+        static string FormatOrdinal(long value, bool available) => available ? value.ToString() : "unknown";
         static string FormatDuration(long? value) => value is long milliseconds ? $"{milliseconds:N0} ms" : "unavailable";
     }
 }
