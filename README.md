@@ -28,6 +28,8 @@ There is deliberately no universal provider schema between acquisition and the U
 
 The application includes a read-only Codex State DB Explorer for inspecting Codex-owned SQLite state without assigning domain meaning to fields merely because they exist. It supports the evidence-first source-contract work described in `PROJECT.md` and is not itself a semantic model.
 
+Source-derived implementation notes live under `docs/source-notes/` when they save repeated archaeology without becoming architecture authority. The current [`Codex upstream SQLite schema reference`](docs/source-notes/CODEX_SQLITE_SCHEMA.md) maps a pinned public Codex source snapshot and remains subordinate to `PROJECT.md` and installed-runtime evidence.
+
 ## Repository layout
 
 - `src/TajsTokens.App` - WinUI 3 desktop application

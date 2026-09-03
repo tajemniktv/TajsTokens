@@ -1,355 +1,518 @@
 # Codex upstream SQLite schema reference
 
-> **Status: pinned source-reference note, not an architectural specification.**
+> **Status: source-derived reference, not TajsTokens architecture authority.**
 >
-> `PROJECT.md` remains the sole authority for TajsTokens product/data architecture. This document records what the public `openai/codex` source currently says about its SQLite runtime so we do not keep rediscovering the same schema by hand, a cherished software tradition that deserves less encouragement.
+> [`PROJECT.md`](../../PROJECT.md) remains the sole authority for TajsTokens product/data architecture during the foundation reset. This document records implementation evidence from a pinned upstream Codex source snapshot so that agents and reviewers do not have to rediscover the physical schema from scratch.
 >
-> Installed/local Codex data remains authoritative for what a particular build actually emits. Upstream source is corroborating evidence for intended structure and semantics. A mismatch must be recorded as a mismatch, not edited away.
+> **Evidence snapshot:** `openai/codex` commit `eb078b4f44b0c8099d376440d63ce5bbb11675bd`.
+>
+> Inspected 2026-09-02. Migration heads at this pin: `state/migrations` `0052_projects_recency.sql`; `thread_history_migrations` `0006_thread_turn_ends.sql`.
+>
+> The installed Codex runtime wins if it disagrees with this reference. A filename, table, column, migration, or upstream implementation detail is not permission to pretend that every local Codex Desktop build exposes the same source or lifecycle.
 
-## Evidence pin
+## Purpose and evidence labels
 
-This note is based on public upstream source at:
+This reference answers a deliberately narrow question: **what SQLite stores and structures does the pinned public Codex source define, and what does the same source explicitly say about their role?**
 
-- repository: `openai/codex`
-- commit: `eb078b4f44b0c8099d376440d63ce5bbb11675bd`
-- inspected: 2026-09-02
-- state migration head: `0052_projects_recency.sql`
-- thread-history migration head: `0006_thread_turn_ends.sql`
+It uses three evidence labels:
 
-This PR does **not** claim that the user's installed Codex/Desktop build is byte-for-byte aligned with that commit. Local parity should be checked with the read-only source explorer or a direct read-only SQLite inspection when it matters.
+- **DDL** — established directly by Codex migrations or SQLite configuration.
+- **Runtime-supported** — the pinned Codex implementation or tests explicitly read, write, join, project, or describe the structure in a way that supports more than its suggestive name.
+- **TajsTokens handling note** — a local product/privacy consequence for inspection. This is not a claim that Codex itself assigns that classification.
+
+Anything not supported at one of those levels stays unknown. This document is intentionally a reference map rather than another architecture specification.
 
 ## Scope
 
-This note covers the SQLite databases managed by `codex-rs/state` and the source-backed relationships that are explicit enough to describe without product inference.
+This note covers the SQLite databases managed by `codex-rs/state` and source-backed relationships explicit enough to describe without product inference. It does not define quota or rate-limit semantics, the complete rollout JSONL schema, app-server RPC contracts, authentication or credential storage, desktop-only/private subsystems absent from public upstream, or TajsTokens normalized observations/durable evidence tables. Absence from these SQLite stores is not evidence that Codex lacks a capability elsewhere.
 
-It does not define:
+## Runtime database set
 
-- quota or rate-limit semantics;
-- the complete rollout JSONL schema;
-- app-server RPC contracts;
-- authentication or credential storage;
-- desktop-only/private subsystems absent from the public repository;
-- TajsTokens normalized observations or durable evidence tables.
+At the pinned snapshot, `codex-rs/state/src/sqlite.rs` defines six SQLite databases managed by the Codex state runtime:
 
-The fact that something is absent from these SQLite databases is not evidence that Codex lacks it elsewhere.
-
-## Current upstream runtime database set
-
-`codex-rs/state/src/sqlite.rs` currently declares six runtime SQLite databases:
-
-| File | Upstream role | Migration set | Current head |
+| Runtime kind | Filename | Migration set | Upstream role that is explicit in code |
 | --- | --- | --- | --- |
-| `state_5.sqlite` | primary state database | `state/migrations` | `0052` |
-| `logs_2.sqlite` | logs database | `state/logs_migrations` | `0002` |
-| `goals_1.sqlite` | goals database | `state/goals_migrations` | `0002` |
-| `memories_1.sqlite` | memories database | `state/memory_migrations` | `0001` |
-| `queue_1.sqlite` | durable user-message queue | `state/queue_migrations` | `0002` |
-| `thread_history_1.sqlite` | paginated thread-history projection | `state/thread_history_migrations` | `0006` |
+| State | `state_5.sqlite` | `codex-rs/state/migrations` | Primary state database |
+| Logs | `logs_2.sqlite` | `codex-rs/state/logs_migrations` | Log database |
+| Goals | `goals_1.sqlite` | `codex-rs/state/goals_migrations` | Goals database |
+| Memories | `memories_1.sqlite` | `codex-rs/state/memory_migrations` | Memories database |
+| Queue | `queue_1.sqlite` | `codex-rs/state/queue_migrations` | Durable user-message queue database |
+| Thread history | `thread_history_1.sqlite` | `codex-rs/state/thread_history_migrations` | Paginated thread-history database |
 
-The shared writable connection configuration uses WAL mode, `NORMAL` synchronous mode, incremental auto-vacuum, a five-second busy timeout, and a pool of up to five connections. The same source also exposes an explicit read-only pool that refuses to create a missing database and uses one connection.
+These filenames are **current upstream implementation constants**, not semantic version contracts for TajsTokens. `SqliteConfig::runtime_db_paths()` treats the six as separate runtime stores, and `migrations.rs` assigns each an independent SQLx migrator.
 
-Each SQLx-managed database also contains framework migration bookkeeping such as `_sqlx_migrations`; those rows are migration metadata, not Codex domain evidence.
+Codex opens writable runtime stores in WAL mode with `synchronous=NORMAL`, incremental auto-vacuum, a five-second busy timeout, and up to five pooled connections. Its dedicated read-only path uses `read_only=true`, does not create missing files, and uses a single connection. TajsTokens still applies its own stricter read-only acquisition policy when inspecting Codex-owned files.
+
+The runtime migrators use `ignore_missing=true` so an older Codex binary can open a database already migrated by a newer concurrent binary. Known migrations are still checksum-validated. Therefore, **database-ahead-of-binary states are deliberately supported upstream**, another reason not to infer capabilities only from a filename.
+
+## High-level relationship map
+
+```mermaid
+flowchart TD
+    R[durable rollout JSONL]
+    S[state_5.sqlite]
+    H[thread_history_1.sqlite]
+    L[logs_2.sqlite]
+    M[memories_1.sqlite]
+    G[goals_1.sqlite]
+    Q[queue_1.sqlite]
+
+    ST[state.threads]
+    HT[history turns/items/realtime]
+
+    R -->|metadata extraction / backfill| ST
+    R -->|paginated history projection| HT
+    ST --> S
+    HT --> H
+
+    ST -. thread_id-like correlation, no cross-DB SQL FK .-> L
+    ST -. thread_id-like correlation, no cross-DB SQL FK .-> M
+    ST -. thread_id-like correlation, no cross-DB SQL FK .-> G
+    ST -. thread_id-like correlation, no cross-DB SQL FK .-> Q
+```
+
+The solid arrows above are supported by upstream implementation. The dotted edges deliberately say less: separate SQLite files cannot enforce ordinary SQLite foreign keys across one another, even where they carry a field named `thread_id`. Product joins still need the relevant source contract/runtime evidence.
 
 ---
 
 # `state_5.sqlite`
 
-## Current upstream tables
+## Current table inventory
 
-After applying the current migration chain, the Codex-owned application tables retained in `state_5.sqlite` are:
+Reconstructing migrations `0001` through `0052` at the pinned commit gives these current application tables, excluding SQLx's `_sqlx_migrations` bookkeeping table:
 
-- `threads`
-- `thread_dynamic_tools`
-- `backfill_state`
-- `thread_spawn_edges`
-- `remote_control_enrollments`
-- `external_agent_config_imports`
-- `thread_sections`
-- `rollout_migration_state`
-- `rollout_migration_skipped_rollouts`
-- `projects`
-- `project_roots`
-- `project_idempotency_keys`
-- `thread_artifacts`
+| Table | Evidence | What the upstream source safely establishes |
+| --- | --- | --- |
+| `threads` | DDL + Runtime-supported | Canonical persisted thread metadata used by Codex state runtime |
+| `thread_dynamic_tools` | DDL + Runtime-supported | Ordered dynamic-tool definitions associated with a thread |
+| `backfill_state` | DDL + Runtime-supported | Singleton progress/checkpoint state for rollout-to-state backfill |
+| `thread_spawn_edges` | DDL + Runtime-supported | Directional parent/child spawned-thread edges with native edge status |
+| `remote_control_enrollments` | DDL | Persisted remote-control enrollment records |
+| `external_agent_config_imports` | DDL | Results/metadata for external agent-config imports |
+| `thread_sections` | DDL + Runtime-supported | Independently persisted user-facing thread sections and appearance metadata |
+| `rollout_migration_state` | DDL | Checkpoint state for named rollout migrations |
+| `rollout_migration_skipped_rollouts` | DDL | Rollouts skipped by a named rollout migration, including reason and file metadata |
+| `projects` | DDL + Runtime-supported | Persisted projects with ordering and metadata |
+| `project_roots` | DDL + Runtime-supported | Ordered filesystem roots owned by a project |
+| `project_idempotency_keys` | DDL + Runtime-supported | Idempotency-key-to-project mapping used by project creation |
+| `thread_artifacts` | DDL | Thread-associated typed artifact payload records |
 
-Historical `CREATE TABLE` statements are **not** enough to determine the current schema. Several old state tables were deliberately dropped or moved into separate databases later in the chain; see [Schema evolution that matters](#schema-evolution-that-matters).
+Older migrations also created structures that are **not part of the current state DB schema** at this snapshot. See [Tables moved or removed from state](#tables-moved-or-removed-from-state).
 
 ## `threads`
 
-`threads` is the central persisted thread-metadata table. The final shape is reconstructed from `0001_threads.sql` plus later `ALTER TABLE` migrations and corroborated by the current `ThreadMetadata` runtime model.
+`threads` is the center of the upstream state model. The current physical shape is the original table plus later additive migrations.
 
-### Identity and physical storage
+### Current columns
 
-| Column | Upstream-backed meaning |
-| --- | --- |
-| `id` | thread identifier; primary key |
-| `rollout_path` | absolute rollout path on disk |
+| Column | SQLite shape | Upstream evidence / caution |
+| --- | --- | --- |
+| `id` | `TEXT PRIMARY KEY` | `ThreadMetadata.id`; runtime queries use it as the thread identifier |
+| `rollout_path` | `TEXT NOT NULL` | Absolute rollout path in `ThreadMetadata`; physical path can change while logical thread ID remains stable |
+| `created_at` | `INTEGER NOT NULL` | Legacy timestamp representation retained in schema |
+| `updated_at` | `INTEGER NOT NULL` | Legacy timestamp representation retained in schema |
+| `source` | `TEXT NOT NULL` | Session source, stored as a stringified enum |
+| `model_provider` | `TEXT NOT NULL` | Model-provider identifier |
+| `cwd` | `TEXT NOT NULL` | Thread working directory |
+| `title` | `TEXT NOT NULL` | Best-effort title; not interchangeable with `name` for every history mode |
+| `sandbox_policy` | `TEXT NOT NULL` | Stringified sandbox policy |
+| `approval_mode` | `TEXT NOT NULL` | Stringified approval mode |
+| `tokens_used` | `INTEGER NOT NULL DEFAULT 0` | Upstream `ThreadMetadata` calls this the last observed token usage; do not reinterpret it as an account total |
 
-The runtime source treats the logical thread ID and physical rollout path as distinct. There is an explicit operation that can replace the rollout path while keeping metadata attached to the stable thread ID.
+`state/src/extract.rs` updates this field from `token_count.info.total_token_usage.total_tokens` when that telemetry is present. It is therefore a latest-observed cumulative thread snapshot, not an append-only accounting event or per-turn delta.
+| `has_user_event` | `INTEGER NOT NULL DEFAULT 0` | Legacy/indexing-era field still physically present |
+| `archived` | `INTEGER NOT NULL DEFAULT 0` | Used by state-runtime filters and indexes |
+| `archived_at` | `INTEGER` | Archive timestamp when present |
+| `git_sha` | `TEXT` | Git commit SHA when known |
+| `git_branch` | `TEXT` | Git branch when known |
+| `git_origin_url` | `TEXT` | Sanitized Git origin URL when known |
+| `cli_version` | `TEXT NOT NULL DEFAULT ''` | CLI version that created the thread |
+| `first_user_message` | `TEXT NOT NULL DEFAULT ''` | First user message observed for the thread; content-bearing |
+| `agent_nickname` | `TEXT` | Optional nickname for an AgentControl-spawned sub-agent |
+| `agent_role` | `TEXT` | Optional role for an AgentControl-spawned sub-agent |
+| `memory_mode` | `TEXT NOT NULL DEFAULT 'enabled'` | Persisted thread memory mode; runtime has explicit get/set operations |
+| `model` | `TEXT` | Latest observed model |
+| `reasoning_effort` | `TEXT` | Latest observed reasoning effort |
+| `agent_path` | `TEXT` | Optional canonical agent path for an AgentControl-spawned sub-agent |
+| `created_at_ms` | `INTEGER` | Millisecond timestamp added/backfilled by migration 0025 |
+| `updated_at_ms` | `INTEGER` | Millisecond timestamp added/backfilled by migration 0025 |
+| `thread_source` | `TEXT` | Optional analytics source classification |
+| `preview` | `TEXT NOT NULL DEFAULT ''` | Best available user-facing discovery/list preview; content-bearing |
+| `recency_at` | `INTEGER NOT NULL DEFAULT 0` | Legacy product-recency representation |
+| `recency_at_ms` | `INTEGER NOT NULL DEFAULT 0` | Product recency timestamp used by current state sorting/indexes |
+| `history_mode` | `TEXT NOT NULL DEFAULT 'legacy'` | Persisted thread-history contract |
+| `name` | `TEXT` | Explicit user-facing thread name when one is set |
+| `is_pinned` | `INTEGER NOT NULL DEFAULT 0` | Pin flag retained alongside the newer section model |
+| `thread_section_id` | `TEXT` FK -> `thread_sections(id)` | User-selected section, `ON DELETE SET NULL` |
+| `section_position` | `INTEGER` | Stable sparse ordering rank within a section |
+| `section_entered_at_ms` | `INTEGER` | Time the thread most recently entered its current section |
+| `project_id` | `TEXT` FK -> `projects(id)` | Canonical project assignment, `ON DELETE SET NULL` |
 
-### Time and recency
+### Semantics explicitly supported by runtime code
 
-| Column | Notes |
-| --- | --- |
-| `created_at` | legacy timestamp column retained for compatibility |
-| `updated_at` | legacy timestamp column retained for compatibility |
-| `created_at_ms` | millisecond creation timestamp added by migration `0025` |
-| `updated_at_ms` | millisecond update timestamp added by migration `0025` |
-| `recency_at` | product-recency timestamp introduced by `0039` |
-| `recency_at_ms` | millisecond product-recency timestamp introduced by `0039` |
-| `archived_at` | archive timestamp when present |
-| `section_entered_at_ms` | time the thread most recently entered its current section |
+`codex-rs/state/src/model/thread_metadata.rs` calls `ThreadMetadata` the **canonical persisted thread metadata** and documents many of the fields above directly. `codex-rs/state/src/runtime/threads.rs` reads the current fields into that model rather than treating `threads` as an arbitrary cache blob.
 
-Migration `0025` backfills the millisecond columns and installs compatibility triggers so older writers that only update the legacy timestamp columns still populate/update `*_ms`. Current runtime reads use the millisecond columns as the canonical `created_at` and `updated_at` values.
+Several details matter to TajsTokens:
 
-`recency_at` is deliberately separate from `updated_at`; the runtime model calls it the **product recency timestamp**. Migration `0039` initially seeds it from `updated_at` and adds a compatibility trigger for older writers.
-
-### Source, model, and execution metadata
-
-| Column | Upstream-backed meaning |
-| --- | --- |
-| `source` | stringified session source |
-| `thread_source` | optional analytics source classification |
-| `model_provider` | model-provider identifier |
-| `model` | latest observed model for the thread |
-| `reasoning_effort` | latest observed reasoning effort |
-| `cwd` | working directory |
-| `cli_version` | CLI version associated with the thread |
-| `sandbox_policy` | stringified sandbox policy |
-| `approval_mode` | stringified approval mode |
-| `history_mode` | persisted thread-history contract, default `legacy` |
-| `memory_mode` | memory-mode string, default `enabled` |
-
-The runtime model explicitly distinguishes `history_mode` from ordinary display metadata. Current source includes a permanent promotion path that changes a thread to `paginated` history and preserves a suitable display name during that transition.
-
-### Agent/sub-agent metadata
-
-| Column | Upstream-backed meaning |
-| --- | --- |
-| `agent_nickname` | optional random nickname for an AgentControl-spawned sub-agent |
-| `agent_role` | optional role assigned to a spawned sub-agent |
-| `agent_path` | optional canonical agent path |
-
-Spawn relationships themselves are not encoded by guessing from these strings; Codex has a separate `thread_spawn_edges` table.
-
-### Display/discovery state
-
-| Column | Upstream-backed meaning |
-| --- | --- |
-| `title` | best-effort thread title |
-| `name` | explicit user-facing thread name when set |
-| `preview` | best available preview for discovery/list display |
-| `first_user_message` | first observed user message when present |
-| `has_user_event` | legacy/inventory flag retained in the physical schema |
-| `is_pinned` | pin flag introduced before the later section model |
-| `thread_section_id` | optional FK to `thread_sections(id)` |
-| `section_position` | sparse stable ordering position inside a section |
-
-The migrations show that `preview` was initially backfilled from `first_user_message` and, where that was empty, from a goal objective that existed at that point in schema history. That backfill history should not be mistaken for a guarantee about every future preview value.
-
-### Archive, project, VCS, and usage state
-
-| Column | Upstream-backed meaning |
-| --- | --- |
-| `archived` | integer archive flag |
-| `project_id` | optional FK to `projects(id)` |
-| `git_sha` | git commit SHA when known |
-| `git_branch` | git branch when known |
-| `git_origin_url` | sanitized git origin URL when known |
-| `tokens_used` | **last observed token usage**, not an event ledger |
-
-The `tokens_used` label deserves a warning sticker. Current upstream `ThreadMetadata` documents it as **“The last observed token usage.”** In `state/src/extract.rs`, token-count events update the field from `token_count.info.total_token_usage.total_tokens` when that information is present.
-
-Therefore, for TajsTokens purposes:
-
-> `threads.tokens_used` is source-backed thread metadata containing the latest observed total from Codex's extraction path. It must not be treated merely from its name as an append-only token accounting event, a per-turn delta, or proof of complete lifetime accounting.
-
-That distinction is exactly the kind of thing the architecture reset is meant to preserve.
+- `created_at`, `updated_at`, and `recency_at` are distinct concepts in the runtime model. `recency_at` is explicitly the product recency timestamp, not a synonym TajsTokens should silently replace with `updated_at`.
+  Migration `0025` backfills `created_at_ms`/`updated_at_ms` and installs compatibility triggers for older writers; current runtime reads use the millisecond columns as canonical creation/update values. Migration `0039` initially seeds product recency from `updated_at` and adds the corresponding compatibility trigger.
+- `history_mode` changes display behavior. Upstream code notes that legacy threads display `title` with a fallback, whereas paginated threads display `name`; `title` remains derived metadata used for search. A generic `display_name = title ?? name` rule would therefore be made-up behavior.
+- For paginated threads, some metadata updates are SQLite-owned. The metadata reconciliation code deliberately preserves the current SQLite Git tuple rather than restoring stale rollout values.
+- `rollout_path` is physical location, not logical identity. `replace_rollout_path_if_current` can swap the path while keeping metadata attached to the same thread ID.
+- `first_user_message`, `preview`, and potentially `title`/`name` can contain user-facing content. **TajsTokens handling note:** local inspection is fine under `PROJECT.md`; durable duplication/export needs its own retention/privacy decision.
+  The migrations initially backfilled `preview` from `first_user_message`, falling back to the then-present goal objective when needed. That migration history is not a guarantee about every future preview value.
 
 ## `thread_dynamic_tools`
 
 Current columns:
 
-- `thread_id`
-- `position`
-- `name`
-- `description`
-- `input_schema`
-- `defer_loading` with default `0`
-- `namespace`
+| Column | Shape |
+| --- | --- |
+| `thread_id` | `TEXT NOT NULL`, FK -> `threads(id)` `ON DELETE CASCADE` |
+| `position` | `INTEGER NOT NULL` |
+| `name` | `TEXT NOT NULL` |
+| `description` | `TEXT NOT NULL` |
+| `input_schema` | `TEXT NOT NULL` |
+| `defer_loading` | `INTEGER NOT NULL DEFAULT 0` |
+| `namespace` | `TEXT` |
 
 Primary key: `(thread_id, position)`.
 
-`thread_id` references `threads(id)` with `ON DELETE CASCADE`. This table is ordered tool-definition state for a thread. `defer_loading` and `namespace` were added after the original table, so a schema snapshot from an older Codex build may legitimately lack them.
+The thread-store type describes these as dynamic tools available to the thread at startup. The schema preserves source-native ordering, description, input schema, deferred-loading flag, and namespace rather than collapsing the tools into a generic boolean capability list.
+
+**TajsTokens handling note:** `input_schema` and descriptions can be large or descriptive. Their presence is useful for local observability but is not by itself a reason to duplicate them durably.
 
 ## `thread_spawn_edges`
 
-Columns:
+```text
+parent_thread_id TEXT NOT NULL
+child_thread_id  TEXT NOT NULL PRIMARY KEY
+status           TEXT NOT NULL
+```
 
-- `parent_thread_id`
-- `child_thread_id`
-- `status`
+Index: `(parent_thread_id, status)`.
 
-`child_thread_id` is the primary key. Current runtime code calls this a **directional thread-spawn edge**, exposes statuses `open` and `closed`, and joins `child_thread_id` to `threads.id` when resolving agent paths. Direct children and transitive descendants are queried explicitly from this graph.
+This is stronger than a suggestive schema name. The state runtime explicitly calls these **directional parent-child edges**, joins `child_thread_id` to `threads.id`, lists direct children, recursively traverses descendants, and looks up descendants by canonical `agent_path`.
 
-This is considerably stronger evidence than inferring parentage from filenames, titles, or similar-looking IDs.
+The native status enum at the pinned commit has exactly two values serialized in snake case:
+
+- `open`
+- `closed`
+
+There is no SQL foreign-key declaration on the edge table itself. The relationship is nevertheless explicit in runtime code. TajsTokens should preserve that distinction: **runtime-supported relationship, not schema-enforced referential integrity**.
+
+Because `child_thread_id` is the primary key, the physical schema permits at most one stored incoming spawn edge per child row.
 
 ## `thread_sections`
 
-Columns:
+Current columns:
 
-- `id` primary key
-- `name`
-- `appearance` nullable JSON text
+```text
+id         TEXT PRIMARY KEY
+name       TEXT NOT NULL
+appearance TEXT
+```
 
-The migration seeds a `Pinned` section with a fixed UUID and later adds `appearance`. Threads may reference a section through `threads.thread_section_id`; section ordering is represented separately by `threads.section_position` and `section_entered_at_ms`.
+Migration 0045 seeds a `Pinned` section and adds `threads.thread_section_id`. Migration 0046 adds per-thread section ordering and entry time. Migration 0048 adds `appearance`.
+
+The runtime model describes a section as independently persisted and user-facing. `appearance` is parsed as optional JSON containing optional `icon` and `color` fields. Section IDs are opaque identifiers; the runtime documentation describes them as UUIDv7.
+
+An older `threads.is_pinned` field and the newer section mechanism both exist in the current schema. Their coexistence is a source fact. TajsTokens should not invent a precedence rule merely because humans apparently cannot resist representing pinning twice.
 
 ## Projects
 
 ### `projects`
 
-- `id` primary key
-- `name`
-- `metadata` JSON text, default `{}`
-- `position`
-- `created_at_ms`
-- `updated_at_ms`
+```text
+id            TEXT PRIMARY KEY
+name          TEXT NOT NULL
+metadata      TEXT NOT NULL DEFAULT '{}'
+position      INTEGER NOT NULL
+created_at_ms INTEGER NOT NULL
+updated_at_ms INTEGER NOT NULL
+```
 
 ### `project_roots`
 
-- `project_id` FK to `projects(id)` with `ON DELETE CASCADE`
-- `position`
-- `path`
-
-Primary key: `(project_id, position)`.
+```text
+project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE
+position   INTEGER NOT NULL
+path       TEXT NOT NULL
+PRIMARY KEY (project_id, position)
+```
 
 ### `project_idempotency_keys`
 
-- `key` primary key
-- `project_id`
-- `created_at_ms`
+```text
+key           TEXT PRIMARY KEY
+project_id    TEXT NOT NULL
+created_at_ms INTEGER NOT NULL
+```
 
-Current project runtime code hydrates roots ordered by `position`, assigns threads by writing `threads.project_id`, and computes project recency from the maximum `threads.recency_at_ms` of non-archived member threads. The current schema also has a partial index for active project-thread recency.
+`threads.project_id` references `projects(id)` with `ON DELETE SET NULL`.
+
+Runtime support is unusually explicit here:
+
+- project creation uses UUIDv7 IDs;
+- roots are hydrated in `position` order;
+- thread assignment writes `threads.project_id` after verifying the project exists;
+- project list/read models compute member recency as `MAX(threads.recency_at_ms)` among non-archived assigned threads;
+- deletion unassigns matching threads before deleting the project;
+- `project_idempotency_keys` is actively consulted during create and an orphaned mapping is treated as an error.
+
+Notice that `project_idempotency_keys.project_id` is **not declared as a SQL foreign key** even though runtime code treats it as a project reference. Again, implementation semantics and physical integrity constraints are related but not identical evidence.
 
 ## `thread_artifacts`
 
-Columns:
+```text
+id            TEXT PRIMARY KEY
+thread_id     TEXT NOT NULL REFERENCES threads(id) ON DELETE CASCADE
+artifact_type TEXT NOT NULL
+identity_key  TEXT NOT NULL
+payload       TEXT NOT NULL
+created_at    INTEGER NOT NULL
+UNIQUE (thread_id, artifact_type, identity_key)
+```
 
-- `id` primary key
-- `thread_id` FK to `threads(id)` with `ON DELETE CASCADE`
-- `artifact_type`
-- `identity_key`
-- `payload`
-- `created_at`
+The DDL proves thread ownership, typed identity, uniqueness, payload storage, and creation ordering. This reference does **not** assign product meaning to particular `artifact_type` or payload variants without additional runtime evidence.
 
-Unique constraint: `(thread_id, artifact_type, identity_key)`.
+**TajsTokens handling note:** `payload` is potentially content-bearing. Treat it accordingly until a narrower contract proves otherwise.
 
-`payload` is deliberately left as source-native text by the schema. Its existence does not authorize TajsTokens to durably duplicate it without a separate privacy/retention decision.
-
-## Runtime/support tables
+## Backfill and rollout-migration bookkeeping
 
 ### `backfill_state`
 
-Singleton table (`id = 1`) tracking backfill status, watermark, last success time, and update time. Upstream rollout code uses it to coordinate metadata backfill from rollout files into state.
+Singleton row enforced by `CHECK (id = 1)`:
+
+```text
+id              INTEGER PRIMARY KEY
+status          TEXT NOT NULL
+last_watermark  TEXT
+last_success_at INTEGER
+updated_at      INTEGER NOT NULL
+```
+
+It is initialized as `pending`. Upstream rollout metadata code uses this state while scanning rollout files and upserting extracted thread metadata into the state DB.
 
 ### `rollout_migration_state`
 
-Tracks per-migration progress through rollout migration with a last checked thread creation timestamp/ID and update time.
+```text
+migration_id                    TEXT PRIMARY KEY
+last_checked_thread_created_at INTEGER
+last_checked_thread_id         TEXT
+updated_at                      INTEGER NOT NULL
+```
 
 ### `rollout_migration_skipped_rollouts`
 
-Records rollout paths skipped by a migration together with size, modification timestamp, skip reason, and skip time. Primary key: `(migration_id, rollout_path)`.
+```text
+migration_id          TEXT NOT NULL
+rollout_path          TEXT NOT NULL
+rollout_size_bytes    INTEGER NOT NULL
+rollout_modified_at_ns INTEGER NOT NULL
+skip_reason           TEXT NOT NULL
+skipped_at            INTEGER NOT NULL
+PRIMARY KEY (migration_id, rollout_path)
+```
+
+These are migration/checkpoint mechanics. Their timestamps and watermarks should not be repackaged as thread activity merely because they happen to mention threads or rollout files.
+
+## Remote-control and external-import state
 
 ### `remote_control_enrollments`
 
-Current columns:
+```text
+websocket_url          TEXT NOT NULL
+account_id             TEXT NOT NULL
+app_server_client_name TEXT NOT NULL
+server_id              TEXT NOT NULL
+environment_id         TEXT NOT NULL
+server_name            TEXT NOT NULL
+updated_at             INTEGER NOT NULL
+remote_control_enabled INTEGER
+PRIMARY KEY (websocket_url, account_id, app_server_client_name)
+```
 
-- `websocket_url`
-- `account_id`
-- `app_server_client_name`
-- `server_id`
-- `environment_id`
-- `server_name`
-- `updated_at`
-- `remote_control_enabled`
-
-Primary key: `(websocket_url, account_id, app_server_client_name)`.
-
-This document records the schema only. It does not infer account identity or remote-control product semantics beyond what the source names and runtime code establish.
+**TajsTokens handling note:** this is identity/network/environment metadata. Local diagnostics may legitimately inspect it, but exports should not casually ship account IDs, endpoints, environment IDs, or server names into bug reports.
 
 ### `external_agent_config_imports`
 
+```text
+import_id       TEXT PRIMARY KEY
+completed_at_ms INTEGER NOT NULL
+successes       TEXT NOT NULL
+failures        TEXT NOT NULL
+provider_id     TEXT
+```
+
+The DDL establishes storage shape only here. `successes` and `failures` are opaque `TEXT` at the schema level; this document does not guess their payload contract.
+
+---
+
+# `thread_history_1.sqlite`
+
+This database has one of the strongest upstream contracts because migrations, projector implementation, read APIs, and tests all describe how it is produced.
+
+## Projection model
+
+Upstream implementation treats thread-history SQLite as a **materialized projection of durable rollout JSONL** for paginated history.
+
+A projected rollout line carries:
+
+- an ordinal;
+- absolute start and end byte offsets in durable JSONL;
+- a fallback timestamp;
+- a thread-history change set;
+- optionally a realtime item.
+
+The projector writes projected rows and advances `thread_history_projection_state` in the **same SQLite transaction**. The source comment is explicit about the invariant: if SQLite projection fails, the database stays behind the durable rollout instead of claiming a prefix it did not materialize.
+
+This makes the relationship important:
+
+```text
+rollout JSONL = durable replay/source history
+        |
+        v
+thread-history projector
+        |
+        +--> thread_turns
+        +--> thread_items
+        +--> thread_realtime_items
+        +--> thread_history_projection_state
+```
+
+That does not mean TajsTokens should blindly persist both copies. It means the SQLite history tables can be understood as Codex-owned materialized structures rather than mysterious unrelated telemetry.
+
+## `thread_turns`
+
 Current columns:
 
-- `import_id` primary key
-- `completed_at_ms`
-- `successes`
-- `failures`
-- `provider_id`
+```text
+thread_id               TEXT NOT NULL
+turn_id                 TEXT NOT NULL
+rollout_ordinal         INTEGER NOT NULL
+status                  TEXT NOT NULL
+error_json              TEXT
+started_at              INTEGER
+completed_at            INTEGER
+duration_ms             INTEGER
+first_user_item_id      TEXT
+final_agent_item_id     TEXT
+rollout_byte_offset     INTEGER
+rollout_end_ordinal     INTEGER
+rollout_end_byte_offset INTEGER
+PRIMARY KEY (thread_id, turn_id)
+```
 
-`successes` and `failures` are stored as text. Their inner format should be treated as opaque until the producing/consuming source is inspected.
+The projector supports source-native states corresponding to:
+
+- `inProgress`
+- `completed`
+- `interrupted`
+- `failed`
+
+For a turn that appears again as its lifecycle advances, the implementation updates status/error/timestamps and terminal rollout position **while keeping the rollout ordinal from the first record that created the turn**. Terminal statuses receive `rollout_end_ordinal` and `rollout_end_byte_offset`; an in-progress turn does not.
+
+The projector also fills `first_user_item_id` and `final_agent_item_id` from projected item rows when possible. Upstream logic explicitly handles review turns where completed items can exist before the turn lifecycle record.
+
+## `thread_items`
+
+Current columns:
+
+```text
+thread_id          TEXT NOT NULL
+turn_id            TEXT NOT NULL
+item_id            TEXT NOT NULL
+rollout_ordinal    INTEGER NOT NULL
+created_at_ms      INTEGER NOT NULL
+item_json          TEXT NOT NULL
+item_type          TEXT NOT NULL DEFAULT ''
+updated_at_ordinal INTEGER NOT NULL DEFAULT 0
+PRIMARY KEY (thread_id, turn_id, item_id)
+```
+
+Important runtime-supported details:
+
+- `item_type` is extracted from `item_json.$.type` and separately indexed for some reads.
+- `rollout_ordinal` is the original projected position.
+- `updated_at_ordinal` was introduced to represent the latest projection update position independently from creation position.
+- Upstream comments describe completed items as immutable under normal local producers: an `ItemCompleted` is expected once per item. Duplicate completion is tolerated defensively and updates the snapshot while preserving original creation ordinal/timestamp.
+
+**TajsTokens handling note:** `item_json` is explicitly content-bearing structured payload. It is highly useful for local inspection and highly unsuitable for accidental wholesale export or unexamined durable duplication.
+
+## `thread_realtime_items`
+
+```text
+thread_id       TEXT NOT NULL
+item_id         TEXT NOT NULL
+rollout_ordinal INTEGER NOT NULL
+created_at_ms   INTEGER NOT NULL
+item_type       TEXT NOT NULL
+item_json       TEXT NOT NULL
+PRIMARY KEY (thread_id, item_id)
+```
+
+The table has a unique page index on `(thread_id, rollout_ordinal)` and a partial boundary index for:
+
+- `realtime_session_started`
+- `realtime_session_closed`
+
+This is **not** generic temporary/in-progress staging. The timeline reader deliberately merges four ordered entry kinds:
+
+```text
+0 turn started
+1 normal thread item
+2 realtime item
+3 turn completed
+```
+
+It also searches realtime start/close boundary items to reconstruct whether a realtime session was active at the beginning of a timeline page.
+
+A trigger removes a thread's realtime rows when its projection-state row is deleted.
+
+## `thread_history_projection_state`
+
+```text
+thread_id                TEXT PRIMARY KEY
+next_rollout_byte_offset INTEGER NOT NULL
+next_rollout_ordinal     INTEGER NOT NULL
+```
+
+The two checkpoint values describe the same durable rollout prefix. Projector code rejects an unexpected start offset and advances both only after ordered projection steps have been applied successfully.
+
+There are no SQL foreign keys from thread-history tables into `state_5.sqlite`; they live in a different database. Their relationship is supported by Codex's thread-store implementation rather than by cross-file SQLite constraints.
 
 ---
 
 # `logs_2.sqlite`
 
-Current application table: `logs`.
+Current `logs` shape after the `0002_logs_feedback_log_body` migration:
 
-Final columns after migration `0002_logs_feedback_log_body.sql`:
+```text
+id                INTEGER PRIMARY KEY AUTOINCREMENT
+ts                INTEGER NOT NULL
+ts_nanos          INTEGER NOT NULL
+level             TEXT NOT NULL
+target            TEXT NOT NULL
+feedback_log_body TEXT
+module_path       TEXT
+file              TEXT
+line              INTEGER
+thread_id         TEXT
+process_uuid      TEXT
+estimated_bytes   INTEGER NOT NULL DEFAULT 0
+```
 
-- `id` integer autoincrement primary key
-- `ts`
-- `ts_nanos`
-- `level`
-- `target`
-- `feedback_log_body`
-- `module_path`
-- `file`
-- `line`
-- `thread_id`
-- `process_uuid`
-- `estimated_bytes`
+Indexes support:
 
-The first logs migration used a `message` column. Migration `0002` rebuilds the table and copies `message` into `feedback_log_body`, then drops the old table. Therefore `message` is historical migration shape, not the current upstream column name.
+- descending timestamp reads;
+- lookup by `thread_id`;
+- thread-specific time ordering;
+- process-specific time ordering for rows where `thread_id IS NULL`.
 
-Indexes support global time order, thread lookup/time order, and threadless process-specific time order.
+Migration 0002 renamed the earlier `message` payload into `feedback_log_body` while copying existing rows into the replacement table.
 
----
-
-# `goals_1.sqlite`
-
-## `thread_goals`
-
-Current columns:
-
-- `thread_id` primary key
-- `goal_id`
-- `objective`
-- `status`
-- `token_budget`
-- `tokens_used`
-- `time_used_seconds`
-- `created_at_ms`
-- `updated_at_ms`
-
-The schema constrains `status` to:
-
-- `active`
-- `paused`
-- `blocked`
-- `usage_limited`
-- `budget_limited`
-- `complete`
-
-These goal-specific `tokens_used` values belong to the goal subsystem and should not be silently conflated with `state_5.threads.tokens_used` merely because human civilization reused the same column name.
-
-## `thread_goal_continuation_deferrals`
-
-Single column:
-
-- `thread_id` primary key and FK to `thread_goals(thread_id)` with `ON DELETE CASCADE`
-
-Presence represents persisted continuation-deferral state. This table's existence is source evidence; any higher-level product interpretation still belongs in a contract/read model.
+**TajsTokens handling note:** `feedback_log_body`, paths, module/file metadata, thread IDs, and process IDs can expose content or operational context. Treat them as local diagnostic evidence first.
 
 ---
 
@@ -357,190 +520,191 @@ Presence represents persisted continuation-deferral state. This table's existenc
 
 ## `stage1_outputs`
 
-Columns:
+```text
+thread_id                             TEXT PRIMARY KEY
+source_updated_at                     INTEGER NOT NULL
+raw_memory                            TEXT NOT NULL
+rollout_summary                       TEXT NOT NULL
+rollout_slug                          TEXT
+generated_at                          INTEGER NOT NULL
+usage_count                           INTEGER
+last_usage                            INTEGER
+selected_for_phase2                   INTEGER NOT NULL DEFAULT 0
+selected_for_phase2_source_updated_at INTEGER
+```
 
-- `thread_id` primary key
-- `source_updated_at`
-- `raw_memory`
-- `rollout_summary`
-- `rollout_slug`
-- `generated_at`
-- `usage_count`
-- `last_usage`
-- `selected_for_phase2`
-- `selected_for_phase2_source_updated_at`
+Index: `(source_updated_at DESC, thread_id DESC)`.
 
-This table contains content-bearing values (`raw_memory`, `rollout_summary`). TajsTokens may inspect locally where useful, but durable duplication/export is a separate privacy decision.
+The schema itself clearly stores memory and rollout-summary payloads keyed by thread ID, but this reference does not infer every memory lifecycle from those names alone.
+
+**TajsTokens handling note:** `raw_memory` and `rollout_summary` are overtly content-bearing. They may be valuable for a future local memory-observability view while still being poor candidates for automatic duplication/export.
 
 ## `jobs`
 
-Columns:
+```text
+kind                   TEXT NOT NULL
+job_key                TEXT NOT NULL
+status                 TEXT NOT NULL
+worker_id              TEXT
+ownership_token        TEXT
+started_at             INTEGER
+finished_at            INTEGER
+lease_until            INTEGER
+retry_at               INTEGER
+retry_remaining        INTEGER NOT NULL
+last_error             TEXT
+input_watermark        INTEGER
+last_success_watermark INTEGER
+PRIMARY KEY (kind, job_key)
+```
 
-- `kind`
-- `job_key`
-- `status`
-- `worker_id`
-- `ownership_token`
-- `started_at`
-- `finished_at`
-- `lease_until`
-- `retry_at`
-- `retry_remaining`
-- `last_error`
-- `input_watermark`
-- `last_success_watermark`
+The schema exposes worker/lease/retry/checkpoint machinery. Status meanings and job-kind semantics should come from the relevant runtime code before becoming friendly TajsTokens labels.
 
-Primary key: `(kind, job_key)`.
+---
 
-The associated index is shaped around `kind`, `status`, retry time, and lease time, supporting a leased/retryable background-job model.
+# `goals_1.sqlite`
+
+## `thread_goals`
+
+```text
+thread_id         TEXT PRIMARY KEY NOT NULL
+goal_id           TEXT NOT NULL
+objective         TEXT NOT NULL
+status            TEXT NOT NULL
+token_budget      INTEGER
+tokens_used       INTEGER NOT NULL DEFAULT 0
+time_used_seconds INTEGER NOT NULL DEFAULT 0
+created_at_ms     INTEGER NOT NULL
+updated_at_ms     INTEGER NOT NULL
+```
+
+The DDL constrains `status` to exactly:
+
+```text
+active
+paused
+blocked
+usage_limited
+budget_limited
+complete
+```
+
+These are therefore source-native values, not a TajsTokens classification.
+
+**TajsTokens handling note:** `objective` is content-bearing. `token_budget`, `tokens_used`, and `time_used_seconds` belong to this goal source's contract; they must not be silently merged with account quota, rollout token accounting, or other token concepts merely because the units sound familiar.
+
+## `thread_goal_continuation_deferrals`
+
+```text
+thread_id TEXT PRIMARY KEY NOT NULL
+          REFERENCES thread_goals(thread_id) ON DELETE CASCADE
+```
+
+The DDL establishes membership/ownership relative to `thread_goals`. A richer explanation of what constitutes a continuation deferral should come from the goals runtime, not from inventing prose around the table name.
 
 ---
 
 # `queue_1.sqlite`
 
+`SqliteConfig` explicitly calls this the **durable user-message queue database**.
+
 ## `queued_items`
 
-Columns:
-
-- `id` primary key
-- `thread_id`
-- `payload_json`
-- `queue_order`
-- `created_at_ms`
-- `updated_at_ms`
+```text
+id            TEXT PRIMARY KEY NOT NULL
+thread_id     TEXT NOT NULL
+payload_json  TEXT NOT NULL
+queue_order   INTEGER NOT NULL
+created_at_ms INTEGER NOT NULL
+updated_at_ms INTEGER NOT NULL
+```
 
 Unique index: `(thread_id, queue_order)`.
 
-`payload_json` is source-native content. Its inner schema is not established by the SQLite DDL alone.
+**TajsTokens handling note:** `payload_json` is potentially content-bearing and remains source-native opaque JSON until its payload variants are contracted.
 
 ## `queued_thread_revisions`
 
-Columns:
+```text
+revision  INTEGER PRIMARY KEY AUTOINCREMENT
+thread_id TEXT NOT NULL UNIQUE
+```
 
-- `revision` integer autoincrement primary key
-- `thread_id` unique
+Triggers fire after insert, update, and delete on `queued_items`. They upsert the affected thread and assign a new revision using the next value above the current maximum. This gives the queue a thread-scoped change/revision signal without TajsTokens having to fabricate one from timestamps.
 
-Insert/update/delete triggers on `queued_items` advance the affected thread's revision. This provides a persisted change token for queue state without requiring consumers to infer change from row counts or timestamps.
-
----
-
-# `thread_history_1.sqlite`
-
-This database is especially important because upstream source makes the projection relationship explicit rather than leaving us to perform divination on similarly named columns.
-
-The current migration set contains four application tables:
-
-- `thread_turns`
-- `thread_items`
-- `thread_realtime_items`
-- `thread_history_projection_state`
-
-## `thread_turns`
-
-Current columns:
-
-- `thread_id`
-- `turn_id`
-- `rollout_ordinal`
-- `rollout_byte_offset`
-- `rollout_end_ordinal`
-- `rollout_end_byte_offset`
-- `status`
-- `error_json`
-- `started_at`
-- `completed_at`
-- `duration_ms`
-- `first_user_item_id`
-- `final_agent_item_id`
-
-Primary key: `(thread_id, turn_id)`.
-
-The projection writer deliberately keeps the `rollout_ordinal` that first created a turn. When an in-progress turn later reaches a terminal state, it updates terminal position/status fields such as `rollout_end_ordinal` and `rollout_end_byte_offset` rather than rewriting the original creation position.
-
-## `thread_items`
-
-Current columns:
-
-- `thread_id`
-- `turn_id`
-- `item_id`
-- `rollout_ordinal`
-- `updated_at_ordinal`
-- `created_at_ms`
-- `item_type`
-- `item_json`
-
-Primary key: `(thread_id, turn_id, item_id)`.
-
-`item_type` was added after the original table and backfilled from `json_extract(item_json, '$.type')`. `updated_at_ordinal` was later added to separate initial creation position from the latest projection update position.
-
-Current writer comments state that completed items are expected to be immutable and emitted once, while still defensively tolerating a duplicate by preserving original creation position/time and updating the stored snapshot plus `updated_at_ordinal`.
-
-`item_json` is content-bearing source data. The SQLite schema proves storage shape, not permission to mirror its contents into TajsTokens durable evidence.
-
-## `thread_realtime_items`
-
-Columns:
-
-- `thread_id`
-- `item_id`
-- `rollout_ordinal`
-- `created_at_ms`
-- `item_type`
-- `item_json`
-
-Primary key: `(thread_id, item_id)`.
-
-The table is a separate realtime timeline lane. A partial index targets boundary item types `realtime_session_started` and `realtime_session_closed`. Deleting a thread's projection-state row triggers cleanup of its realtime rows.
-
-This is evidence against interpreting realtime rows as ordinary `thread_items` merely because both contain IDs, ordinals, and JSON.
-
-## `thread_history_projection_state`
-
-Columns:
-
-- `thread_id` primary key
-- `next_rollout_byte_offset`
-- `next_rollout_ordinal`
-
-The projection writer applies projected turn/item/realtime changes and advances the JSONL byte/ordinal checkpoint in the **same SQLite transaction**. Its own comment states the invariant: if SQLite fails, the projection must remain behind the durable rollout rather than claiming data it did not materialize.
-
-That establishes a useful source relationship:
-
-> The thread-history database is a materialized projection of durable rollout history with an explicit progress checkpoint. The SQLite projection is not, by itself, evidence that the underlying rollout record can be discarded or that every historical relationship should be re-inferred from projection rows.
-
-Timeline reads also resolve rollout lineage before querying projected segments. Accordingly, consumers should preserve the source IDs/ordinals they observe rather than casually assuming every `thread_id`-shaped value across every store has identical identity semantics in every revert/fork case.
+A revision proves that the queue representation for that thread changed according to Codex's trigger policy. It does **not** by itself say what product event occurred.
 
 ---
 
-# Schema evolution that matters
+# Rollout JSONL and SQLite
 
-The state migration directory contains historical tables that are **not current `state_5.sqlite` tables**. Reading migrations as a union of every `CREATE TABLE` would manufacture a schema Codex does not currently have.
+Rollout JSONL is not another SQLite table, but omitting it from a schema reference would leave the most important relationship looking like wizardry.
 
-Important moves/removals:
+`codex-rs/rollout/src/metadata.rs` and the thread-store implementation establish several useful facts:
 
-| Historical state table(s) | What current migrations do | Current upstream location/status |
-| --- | --- | --- |
-| `logs` | dropped by state migration `0023` | `logs_2.sqlite` |
-| `thread_goals` | created in state, then dropped by `0034` | `goals_1.sqlite` |
-| `stage1_outputs`, `jobs` | old state copies dropped by `0035` | `memories_1.sqlite` |
-| `device_key_bindings` | created then dropped by `0031` | not in current six-DB schema |
-| `agent_jobs`, `agent_job_items` | created then dropped by `0042` | not in current six-DB schema |
+- state metadata can be extracted/backfilled from rollout files;
+- normal rollout filenames use a thread ID as both thread and rollout identity;
+- after `thread/revert`, the logical thread ID can stay stable while Codex switches to a new immutable rollout file with a distinct rollout ID;
+- therefore `thread_id`, `rollout_id`, and `rollout_path` are **not universally interchangeable identities**;
+- paginated thread history materializes ordered rollout content into `thread_history_1.sqlite`;
+- history inheritance/forking can refer to a bounded rollout prefix rather than requiring a copied flat history.
 
-This split is also why a local directory can legitimately contain several versioned SQLite files rather than one monolithic state database.
+For TajsTokens this suggests a very useful diagnostic principle without dictating the eventual durable schema:
 
-# What this means for TajsTokens source work
+```text
+logical thread identity
+    != physical rollout path
+    != rollout-file identity in every lifecycle state
+```
 
-This upstream snapshot is strong enough to mark several things as **source-backed upstream structure**, while still keeping installed-runtime verification separate:
+That distinction is already upstream behavior, not a hypothetical edge case invented for architectural purity.
 
-1. Codex currently manages multiple purpose-specific SQLite databases, not just one `state_*.sqlite` file.
-2. `threads` is metadata/inventory state, and `threads.tokens_used` is a latest-observed total snapshot in the extraction path rather than an event ledger.
-3. spawned-thread relationships have an explicit directional graph table.
-4. projects, ordered roots, thread sections, dynamic tools, artifacts, queue revisions, goals, memories, logs, and thread-history projection all have distinct persisted structures.
-5. thread history has an explicit transactional projection/checkpoint model over rollout data.
-6. historical migration tables must not be reported as current simply because they once existed.
+---
 
-None of those statements automatically defines TajsTokens normalization or storage. They are evidence inputs to source contracts.
+# Tables moved or removed from state
+
+Reading only early `state_5.sqlite` migrations would produce a hilariously incorrect "current schema" because Codex has split responsibilities into dedicated databases over time.
+
+At the pinned snapshot:
+
+| Earlier state table(s) | Current status in state migration history |
+| --- | --- |
+| `logs` | dropped by state migration 0023; logs have their own `logs_2.sqlite` migrator |
+| `device_key_bindings` | dropped by migration 0031 |
+| `thread_goals` | dropped by migration 0034; goals have their own `goals_1.sqlite` migrator |
+| `jobs`, `stage1_outputs` | dropped by migration 0035; memories have their own `memories_1.sqlite` migrator |
+| `agent_jobs`, `agent_job_items` | dropped by migration 0042 |
+
+Consequently, a historical snapshot, an older local installation, and the current upstream migration target can all legitimately expose different object sets. TajsTokens' schema fingerprinting is the correct acquisition behavior: **inspect actual capabilities, do not turn `state_5.sqlite` into a magical schema promise.**
+
+# Sources not covered by this reference
+
+This file maps the public Rust state runtime's six SQLite stores and their relationship to rollout JSONL. It is **not a declaration that these are every database Codex Desktop can own**.
+
+The installed application can expose additional Desktop/app-local stores. If TajsTokens observes a catalog/app database or another source whose implementation is absent from public `openai/codex`, that source remains valid runtime evidence. Its contract must be based on local observation and whatever matching implementation evidence is actually available.
+
+Likewise, app-server protocol surfaces are not SQLite and are outside this file's physical-schema scope.
+
+# What this reference establishes
+
+Safe conclusions from the pinned upstream source include:
+
+- Codex intentionally splits runtime state across six independently migrated SQLite databases.
+- `state_5.sqlite` contains rich canonical persisted thread metadata plus project, section, spawn, dynamic-tool, artifact, migration, remote-control, and import structures.
+- project/root assignment and spawned-thread topology have explicit runtime semantics beyond their names.
+- paginated thread-history SQLite is a transactional materialized projection of durable rollout JSONL.
+- normal items and realtime items are distinct source-native history lanes.
+- logs, memories, goals, and queue state are intentionally separate stores, not tables that TajsTokens should expect inside current state DB.
+- several payload-bearing fields are locally inspectable but require separate TajsTokens retention/export decisions.
+
+This reference does **not** establish:
+
+- that the user's installed Codex build has byte-for-byte identical schema;
+- that every same-looking `thread_id` in every store has identical lifecycle/coverage guarantees;
+- source precedence when two stores appear to describe the same fact;
+- a universal TajsTokens provider schema;
+- permission to durably copy content-bearing JSON/text;
+- user-facing meaning for opaque payloads, statuses, or table names not corroborated by runtime code.
 
 # Local verification checklist
 
@@ -558,21 +722,30 @@ When comparing this note to an installed Codex build, record the comparison rath
 
 A future update to this note should change the upstream commit pin and record the delta. Do not silently rewrite old observations to make a newer Codex tree look retroactively inevitable.
 
-# Upstream source map
+# Upstream source pointers
 
-Pinned to `openai/codex@eb078b4f44b0c8099d376440d63ce5bbb11675bd`:
+Pinned commit: `eb078b4f44b0c8099d376440d63ce5bbb11675bd`
 
-- `codex-rs/state/src/sqlite.rs` - runtime DB filenames and connection posture
-- `codex-rs/state/src/migrations.rs` - migration sets and compatibility behavior
-- `codex-rs/state/migrations/` - `state_5.sqlite` schema history
-- `codex-rs/state/logs_migrations/` - `logs_2.sqlite`
-- `codex-rs/state/goals_migrations/` - `goals_1.sqlite`
-- `codex-rs/state/memory_migrations/` - `memories_1.sqlite`
-- `codex-rs/state/queue_migrations/` - `queue_1.sqlite`
-- `codex-rs/state/thread_history_migrations/` - `thread_history_1.sqlite`
-- `codex-rs/state/src/model/thread_metadata.rs` - canonical persisted thread metadata model/comments
-- `codex-rs/state/src/extract.rs` - rollout-to-thread metadata extraction, including `tokens_used`
-- `codex-rs/state/src/runtime/threads.rs` - thread queries, graph lookups, persisted metadata behavior
-- `codex-rs/state/src/runtime/projects.rs` - project assignment/root/recency behavior
-- `codex-rs/state/src/model/graph.rs` - spawn-edge status model
-- `codex-rs/thread-store/src/local/thread_history.rs` and related thread-history modules - projection/checkpoint and paginated history behavior
+Primary files used for this reference:
+
+```text
+codex-rs/state/src/sqlite.rs
+codex-rs/state/src/migrations.rs
+codex-rs/state/src/extract.rs
+codex-rs/state/src/model/thread_metadata.rs
+codex-rs/state/src/model/graph.rs
+codex-rs/state/src/runtime/threads.rs
+codex-rs/state/src/runtime/projects.rs
+codex-rs/state/migrations/*.sql
+codex-rs/state/thread_history_migrations/*.sql
+codex-rs/state/logs_migrations/*.sql
+codex-rs/state/memory_migrations/*.sql
+codex-rs/state/goals_migrations/*.sql
+codex-rs/state/queue_migrations/*.sql
+codex-rs/thread-store/src/local/thread_history.rs
+codex-rs/thread-store/src/local/thread_history/realtime.rs
+codex-rs/thread-store/src/types.rs
+codex-rs/rollout/src/metadata.rs
+```
+
+The local read-only reference checkout documented in `AGENTS.md` can be used to inspect the same paths at a matching commit. When updating this document, pin the new upstream commit and separate schema changes from newly inferred semantics rather than casually editing the reference to whatever `main` happens to contain that afternoon.
