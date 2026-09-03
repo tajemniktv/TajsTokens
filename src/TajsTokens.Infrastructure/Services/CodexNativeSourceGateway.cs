@@ -175,10 +175,10 @@ public sealed class CodexNativeSourceGateway
         }
 
         var jobs = context.Tables.Contains("jobs", StringComparer.OrdinalIgnoreCase)
-            ? await ReadOrderedRowsAsync(candidate!.Path, "jobs", [("started_at", true), ("kind", false), ("job_key", false)], cancellationToken)
+            ? await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.Jobs, cancellationToken)
             : ReadRowsResult.Empty;
         var outputs = context.Tables.Contains("stage1_outputs", StringComparer.OrdinalIgnoreCase)
-            ? await ReadOrderedRowsAsync(candidate!.Path, "stage1_outputs", [("source_updated_at", true), ("thread_id", false)], cancellationToken)
+            ? await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.Stage1Outputs, cancellationToken)
             : ReadRowsResult.Empty;
 
         return new CodexMemorySource(
@@ -205,7 +205,7 @@ public sealed class CodexNativeSourceGateway
         }
 
         var goals = context.Tables.Contains("thread_goals", StringComparer.OrdinalIgnoreCase)
-            ? await ReadOrderedRowsAsync(candidate!.Path, "thread_goals", [("updated_at_ms", true), ("thread_id", false)], cancellationToken)
+            ? await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.ThreadGoals, cancellationToken)
             : ReadRowsResult.Empty;
         var goalThreadIds = goals.Rows
             .Select(row => Text(row.Page, row.Row, "thread_id"))
@@ -214,7 +214,7 @@ public sealed class CodexNativeSourceGateway
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var deferrals = context.Tables.Contains("thread_goal_continuation_deferrals", StringComparer.OrdinalIgnoreCase) && goalThreadIds.Length > 0
-            ? await ReadRowsByTextValuesAsync(candidate!.Path, "thread_goal_continuation_deferrals", "thread_id", goalThreadIds)
+            ? await ReadRowsByTextValuesAsync(candidate!.Path, CodexRelationSourceTable.ThreadGoalContinuationDeferrals, goalThreadIds, cancellationToken)
             : ReadRowsResult.Empty;
         var deferralIds = deferrals.Rows
             .Select(row => Text(row.Page, row.Row, "thread_id"))
@@ -248,7 +248,7 @@ public sealed class CodexNativeSourceGateway
         }
 
         var items = context.Tables.Contains("queued_items", StringComparer.OrdinalIgnoreCase)
-            ? await ReadOrderedRowsAsync(candidate!.Path, "queued_items", [("thread_id", false), ("queue_order", false), ("id", false)], cancellationToken)
+            ? await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.QueuedItems, cancellationToken)
             : ReadRowsResult.Empty;
         var itemThreadIds = items.Rows
             .Select(row => Text(row.Page, row.Row, "thread_id"))
@@ -257,7 +257,7 @@ public sealed class CodexNativeSourceGateway
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
         var revisions = context.Tables.Contains("queued_thread_revisions", StringComparer.OrdinalIgnoreCase) && itemThreadIds.Length > 0
-            ? await ReadRowsByTextValuesAsync(candidate!.Path, "queued_thread_revisions", "thread_id", itemThreadIds, [("revision", true)])
+            ? await ReadRowsByTextValuesAsync(candidate!.Path, CodexRelationSourceTable.QueuedThreadRevisions, itemThreadIds, cancellationToken)
             : ReadRowsResult.Empty;
         var revisionByThread = revisions.Rows
             .Select(row => (ThreadId: Text(row.Page, row.Row, "thread_id"), Revision: Int64(row.Page, row.Row, "revision")))
@@ -289,7 +289,7 @@ public sealed class CodexNativeSourceGateway
             return new CodexArtifactsSource(context.Info, []);
         }
 
-        var rows = await ReadOrderedRowsAsync(candidate!.Path, "thread_artifacts", [("thread_id", false), ("created_at", false), ("id", false)], cancellationToken);
+        var rows = await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.ThreadArtifacts, cancellationToken);
         return new CodexArtifactsSource(
             context.Info with { HasMoreRows = rows.IsTruncated },
             rows.Rows.Select(MapArtifact).Where(artifact => artifact is not null).Select(artifact => artifact!).ToArray());
@@ -312,7 +312,7 @@ public sealed class CodexNativeSourceGateway
             return new CodexDesktopCatalogSource(context.Info, []);
         }
 
-        var rows = await ReadOrderedRowsAsync(candidate!.Path, "local_thread_catalog", [("source_recency_at", true), ("source_created_at", true), ("host_id", false), ("thread_id", false)], cancellationToken);
+        var rows = await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.LocalThreadCatalog, cancellationToken);
         return new CodexDesktopCatalogSource(
             context.Info with { HasMoreRows = rows.IsTruncated },
             rows.Rows.Select(MapCatalogEntry).Where(entry => entry is not null).Select(entry => entry!).ToArray());
@@ -335,7 +335,7 @@ public sealed class CodexNativeSourceGateway
             return new CodexThreadSummariesSource(context.Info, []);
         }
 
-        var rows = await ReadOrderedRowsAsync(candidate!.Path, "thread_turn_summaries", [("updated_at", true), ("thread_id", false)], cancellationToken);
+        var rows = await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.ThreadTurnSummaries, cancellationToken);
         return new CodexThreadSummariesSource(
             context.Info with { HasMoreRows = rows.IsTruncated },
             rows.Rows.Select(MapSummary).Where(summary => summary is not null).Select(summary => summary!).ToArray());
@@ -405,14 +405,12 @@ public sealed class CodexNativeSourceGateway
 
     private async Task<ReadRowsResult> ReadOrderedRowsAsync(
         string databasePath,
-        string tableName,
-        IReadOnlyList<(string Column, bool Descending)> orderBy,
+        CodexOrderedSourceTable sourceTable,
         CancellationToken cancellationToken)
     {
         var page = await _explorer.ReadOrderedPageAsync(
             databasePath,
-            tableName,
-            orderBy,
+            sourceTable,
             pageSize: MaxRowsPerTable + 1,
             cancellationToken: cancellationToken);
         return new ReadRowsResult(
@@ -422,17 +420,15 @@ public sealed class CodexNativeSourceGateway
 
     private async Task<ReadRowsResult> ReadRowsByTextValuesAsync(
         string databasePath,
-        string tableName,
-        string keyColumn,
+        CodexRelationSourceTable sourceTable,
         IReadOnlyList<string> values,
-        IReadOnlyList<(string Column, bool Descending)>? orderBy = null)
+        CancellationToken cancellationToken)
     {
         var page = await _explorer.ReadRowsByTextValuesAsync(
             databasePath,
-            tableName,
-            keyColumn,
+            sourceTable,
             values,
-            orderBy);
+            cancellationToken);
         return new ReadRowsResult(
             page.Rows.Select(row => new RawRow(page, row)).ToArray(),
             page.TotalRows > page.PageSize || page.Rows.Count > page.PageSize);

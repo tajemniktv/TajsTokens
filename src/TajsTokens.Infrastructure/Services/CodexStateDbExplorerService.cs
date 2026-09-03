@@ -5,6 +5,23 @@ using Microsoft.Data.Sqlite;
 
 namespace TajsTokens.Infrastructure.Services;
 
+internal enum CodexOrderedSourceTable
+{
+    Jobs,
+    Stage1Outputs,
+    ThreadGoals,
+    QueuedItems,
+    ThreadArtifacts,
+    LocalThreadCatalog,
+    ThreadTurnSummaries
+}
+
+internal enum CodexRelationSourceTable
+{
+    ThreadGoalContinuationDeferrals,
+    QueuedThreadRevisions
+}
+
 /// <summary>
 /// Read-only inspection boundary for Codex's private SQLite databases and captured snapshots.
 ///
@@ -15,11 +32,25 @@ public sealed class CodexStateDbExplorerService
 {
     private const int DefaultPageSize = 50;
     private const int MaxPageSize = 500;
+    private const int MaxRelationKeys = 250;
+    private static readonly string RelationParameterList = string.Join(", ", Enumerable.Range(0, MaxRelationKeys).Select(static index => string.Concat("$value", index.ToString(CultureInfo.InvariantCulture))));
     private const int MaxFingerprintRows = 100_000;
     private const long MaxFingerprintDatabaseBytes = 64L * 1024 * 1024;
 
     private readonly string _codexHome;
     private readonly string? _snapshotDirectory;
+
+    private sealed record OrderedSourceSpecification(
+        string TableName,
+        string OrderedQuery,
+        string UnorderedQuery,
+        IReadOnlyList<string> RequiredOrderColumns);
+
+    private sealed record RelationSourceSpecification(
+        string TableName,
+        string OrderedQuery,
+        string UnorderedQuery,
+        string RequiredOrderColumn);
 
     private sealed record RowFingerprintResult(
         string Fingerprint,
@@ -294,45 +325,51 @@ public sealed class CodexStateDbExplorerService
     /// boundary so a table larger than the page cannot hide its newest/highest-ranked rows.
     /// Unknown order columns are ignored to keep schema variants inspectable.
     /// </summary>
-    public async Task<CodexStateRawPage> ReadOrderedPageAsync(
+    internal async Task<CodexStateRawPage> ReadOrderedPageAsync(
         string databasePath,
-        string tableName,
-        IReadOnlyList<(string Column, bool Descending)> orderBy,
+        CodexOrderedSourceTable sourceTable,
         int pageIndex = 0,
         int pageSize = DefaultPageSize,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(tableName);
-        ArgumentNullException.ThrowIfNull(orderBy);
         pageIndex = Math.Max(0, pageIndex);
         pageSize = Math.Clamp(pageSize, 1, MaxPageSize);
+        var specification = sourceTable switch
+        {
+            CodexOrderedSourceTable.Jobs => new OrderedSourceSpecification("jobs", "SELECT * FROM jobs ORDER BY started_at DESC, kind ASC, job_key ASC LIMIT $limit OFFSET $offset;", "SELECT * FROM jobs LIMIT $limit OFFSET $offset;", ["started_at", "kind", "job_key"]),
+            CodexOrderedSourceTable.Stage1Outputs => new OrderedSourceSpecification("stage1_outputs", "SELECT * FROM stage1_outputs ORDER BY source_updated_at DESC, thread_id ASC LIMIT $limit OFFSET $offset;", "SELECT * FROM stage1_outputs LIMIT $limit OFFSET $offset;", ["source_updated_at", "thread_id"]),
+            CodexOrderedSourceTable.ThreadGoals => new OrderedSourceSpecification("thread_goals", "SELECT * FROM thread_goals ORDER BY updated_at_ms DESC, thread_id ASC LIMIT $limit OFFSET $offset;", "SELECT * FROM thread_goals LIMIT $limit OFFSET $offset;", ["updated_at_ms", "thread_id"]),
+            CodexOrderedSourceTable.QueuedItems => new OrderedSourceSpecification("queued_items", "SELECT * FROM queued_items ORDER BY thread_id ASC, queue_order ASC, id ASC LIMIT $limit OFFSET $offset;", "SELECT * FROM queued_items LIMIT $limit OFFSET $offset;", ["thread_id", "queue_order", "id"]),
+            CodexOrderedSourceTable.ThreadArtifacts => new OrderedSourceSpecification("thread_artifacts", "SELECT * FROM thread_artifacts ORDER BY thread_id ASC, created_at ASC, id ASC LIMIT $limit OFFSET $offset;", "SELECT * FROM thread_artifacts LIMIT $limit OFFSET $offset;", ["thread_id", "created_at", "id"]),
+            CodexOrderedSourceTable.LocalThreadCatalog => new OrderedSourceSpecification("local_thread_catalog", "SELECT * FROM local_thread_catalog ORDER BY source_recency_at DESC, source_created_at DESC, host_id ASC, thread_id ASC LIMIT $limit OFFSET $offset;", "SELECT * FROM local_thread_catalog LIMIT $limit OFFSET $offset;", ["source_recency_at", "source_created_at", "host_id", "thread_id"]),
+            CodexOrderedSourceTable.ThreadTurnSummaries => new OrderedSourceSpecification("thread_turn_summaries", "SELECT * FROM thread_turn_summaries ORDER BY updated_at DESC, thread_id ASC LIMIT $limit OFFSET $offset;", "SELECT * FROM thread_turn_summaries LIMIT $limit OFFSET $offset;", ["updated_at", "thread_id"]),
+            _ => throw new ArgumentOutOfRangeException(nameof(sourceTable), sourceTable, "Unknown ordered Codex source table.")
+        };
 
         var candidate = CreateCandidateForPath(databasePath);
         await using var connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
-        var objectType = await ReadObjectTypeAsync(connection, tableName, cancellationToken);
+        var objectType = await ReadObjectTypeAsync(connection, specification.TableName, cancellationToken);
         if (objectType is null)
         {
-            throw new KeyNotFoundException($"The source database does not contain a table or view named '{tableName}'.");
+            throw new KeyNotFoundException($"The source database does not contain a table or view named '{specification.TableName}'.");
         }
 
-        var availableColumns = (await ReadColumnsAsync(connection, tableName, cancellationToken))
+        var availableColumns = (await ReadColumnsAsync(connection, specification.TableName, cancellationToken))
             .Select(column => column.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var ordering = orderBy
-            .Where(order => !string.IsNullOrWhiteSpace(order.Column) && availableColumns.Contains(order.Column))
-            .Select(order => $"{QuoteIdentifier(order.Column)} {(order.Descending ? "DESC" : "ASC")}")
-            .ToArray();
-        var orderClause = ordering.Length == 0 ? string.Empty : $" ORDER BY {string.Join(", ", ordering)}";
-        var totalRows = await TryReadRowCountAsync(connection, tableName, cancellationToken);
+        var totalRows = await TryReadRowCountAsync(connection, specification.TableName, cancellationToken);
         var offset = checked((long)pageIndex * pageSize);
+        var query = specification.RequiredOrderColumns.All(availableColumns.Contains)
+            ? specification.OrderedQuery
+            : specification.UnorderedQuery;
         return await ReadRawPageAsync(
             connection,
             candidate.Path,
-            tableName,
+            specification.TableName,
             pageIndex,
             pageSize,
             totalRows,
-            $"SELECT * FROM {QuoteIdentifier(tableName)}{orderClause} LIMIT $limit OFFSET $offset;",
+            query,
             command =>
             {
                 command.Parameters.AddWithValue("$limit", pageSize);
@@ -341,33 +378,44 @@ public sealed class CodexStateDbExplorerService
             cancellationToken);
     }
 
-    /// <summary>Reads rows whose source-native key is one of the supplied values.</summary>
-    public async Task<CodexStateRawPage> ReadRowsByTextValuesAsync(
+    /// <summary>Reads rows whose source-native relation key is one of the supplied values.</summary>
+    internal async Task<CodexStateRawPage> ReadRowsByTextValuesAsync(
         string databasePath,
-        string tableName,
-        string keyColumn,
+        CodexRelationSourceTable sourceTable,
         IReadOnlyList<string> values,
-        IReadOnlyList<(string Column, bool Descending)>? orderBy = null,
         CancellationToken cancellationToken = default)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(tableName);
-        ArgumentException.ThrowIfNullOrWhiteSpace(keyColumn);
         ArgumentNullException.ThrowIfNull(values);
+        ArgumentOutOfRangeException.ThrowIfGreaterThan(values.Count, MaxRelationKeys);
+        var specification = sourceTable switch
+        {
+            CodexRelationSourceTable.ThreadGoalContinuationDeferrals => new RelationSourceSpecification(
+                "thread_goal_continuation_deferrals",
+                BuildRelationQuery("thread_goal_continuation_deferrals", ordered: false),
+                BuildRelationQuery("thread_goal_continuation_deferrals", ordered: false),
+                string.Empty),
+            CodexRelationSourceTable.QueuedThreadRevisions => new RelationSourceSpecification(
+                "queued_thread_revisions",
+                BuildRelationQuery("queued_thread_revisions", ordered: true),
+                BuildRelationQuery("queued_thread_revisions", ordered: false),
+                "revision"),
+            _ => throw new ArgumentOutOfRangeException(nameof(sourceTable), sourceTable, "Unknown Codex relation table.")
+        };
 
         var candidate = CreateCandidateForPath(databasePath);
         await using var connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
-        var objectType = await ReadObjectTypeAsync(connection, tableName, cancellationToken);
+        var objectType = await ReadObjectTypeAsync(connection, specification.TableName, cancellationToken);
         if (objectType is null)
         {
-            throw new KeyNotFoundException($"The source database does not contain a table or view named '{tableName}'.");
+            throw new KeyNotFoundException($"The source database does not contain a table or view named '{specification.TableName}'.");
         }
 
-        var availableColumns = (await ReadColumnsAsync(connection, tableName, cancellationToken))
+        var availableColumns = (await ReadColumnsAsync(connection, specification.TableName, cancellationToken))
             .Select(column => column.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (!availableColumns.Contains(keyColumn))
+        if (!availableColumns.Contains("thread_id"))
         {
-            return new CodexStateRawPage(candidate.Path, tableName, 0, values.Count, 0, [], []);
+            return new CodexStateRawPage(candidate.Path, specification.TableName, 0, 1, 0, [], []);
         }
 
         var distinctValues = values
@@ -376,37 +424,51 @@ public sealed class CodexStateDbExplorerService
             .ToArray();
         if (distinctValues.Length == 0)
         {
-            return new CodexStateRawPage(candidate.Path, tableName, 0, 1, 0, [], []);
+            return new CodexStateRawPage(candidate.Path, specification.TableName, 0, 1, 0, [], []);
         }
 
-        var parameters = distinctValues.Select((_, index) => $"$value{index}").ToArray();
-        var predicate = $"{QuoteIdentifier(keyColumn)} IN ({string.Join(", ", parameters)})";
-        var ordering = (orderBy ?? Array.Empty<(string Column, bool Descending)>())
-            .Where(order => !string.IsNullOrWhiteSpace(order.Column) && availableColumns.Contains(order.Column))
-            .Select(order => $"{QuoteIdentifier(order.Column)} {(order.Descending ? "DESC" : "ASC")}")
-            .ToArray();
-        var orderClause = ordering.Length == 0 ? string.Empty : $" ORDER BY {string.Join(", ", ordering)}";
-        var totalRows = await ReadCountWhereAsync(connection, tableName, predicate, distinctValues, cancellationToken);
         // The key set is already bounded by the gateway's visible base page. Do not apply a
         // second arbitrary row limit here: relation rows must remain complete for those keys.
-        var relationPageSize = checked((int)Math.Min(int.MaxValue, Math.Max(1, totalRows)));
+        var query = specification.RequiredOrderColumn.Length > 0 && availableColumns.Contains(specification.RequiredOrderColumn)
+            ? specification.OrderedQuery
+            : specification.UnorderedQuery;
         return await ReadRawPageAsync(
             connection,
             candidate.Path,
-            tableName,
+            specification.TableName,
             0,
-            relationPageSize,
-            totalRows,
-            $"SELECT * FROM {QuoteIdentifier(tableName)} WHERE {predicate}{orderClause};",
+            MaxPageSize,
+            -1,
+            query,
             command =>
             {
-                for (var index = 0; index < distinctValues.Length; index++)
+                for (var index = 0; index < MaxRelationKeys; index++)
                 {
-                    command.Parameters.AddWithValue(parameters[index], distinctValues[index]);
+                    command.Parameters.AddWithValue(
+                        string.Concat("$value", index.ToString(CultureInfo.InvariantCulture)),
+                        index < distinctValues.Length ? distinctValues[index] : DBNull.Value);
                 }
             },
             cancellationToken);
     }
+
+    private static string BuildRelationQuery(string tableName, bool ordered) =>
+        tableName switch
+        {
+            "thread_goal_continuation_deferrals" => string.Concat(
+                "SELECT * FROM thread_goal_continuation_deferrals WHERE thread_id IN (",
+                RelationParameterList,
+                ");"),
+            "queued_thread_revisions" when ordered => string.Concat(
+                "SELECT * FROM queued_thread_revisions WHERE thread_id IN (",
+                RelationParameterList,
+                ") ORDER BY revision DESC;"),
+            "queued_thread_revisions" => string.Concat(
+                "SELECT * FROM queued_thread_revisions WHERE thread_id IN (",
+                RelationParameterList,
+                ");"),
+            _ => throw new ArgumentOutOfRangeException(nameof(tableName), tableName, "Unknown Codex relation table.")
+        };
 
     /// <summary>Reads a source-native integer aggregate without applying a bounded row page.</summary>
     public async Task<long?> ReadMaxInt64Async(
@@ -480,24 +542,6 @@ public sealed class CodexStateDbExplorerService
         }
 
         return new CodexStateRawPage(databasePath, tableName, pageIndex, pageSize, totalRows, columns, rows);
-    }
-
-    private static async Task<long> ReadCountWhereAsync(
-        SqliteConnection connection,
-        string tableName,
-        string predicate,
-        IReadOnlyList<string> values,
-        CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = $"SELECT COUNT(*) FROM {QuoteIdentifier(tableName)} WHERE {predicate};";
-        for (var index = 0; index < values.Count; index++)
-        {
-            command.Parameters.AddWithValue($"$value{index}", values[index]);
-        }
-
-        var result = await command.ExecuteScalarAsync(cancellationToken);
-        return Convert.ToInt64(result, CultureInfo.InvariantCulture);
     }
 
     /// <summary>
