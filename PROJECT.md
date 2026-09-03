@@ -108,7 +108,11 @@ A source contract records:
 - relationships between fields that are demonstrated by evidence;
 - known limitations and coverage boundaries;
 - unresolved questions and hypotheses, explicitly labelled as such;
-- sanitized fixtures or reproducible probes supporting the contract.
+- sanitized fixtures, reproducible probes, or matching implementation evidence supporting the contract.
+
+For Codex sources, evidence should be **evidence-first, not research-first**. Installed runtime/source data is authoritative for what the selected build actually emits. Matching or near-matching `openai/codex` implementation, migrations, protocol types, and tests are first-class corroborating evidence for intended semantics and may support a source-contract relationship when they are explicit and consistent with observed runtime data. Record the upstream commit/tag/version used and whether it is known to match the installed build.
+
+Targeted experiments remain required when behavior is version-sensitive, Desktop-only, ambiguous, contradictory, or when source coverage is uncertain enough that a user-facing label would otherwise overclaim. Absence of a Desktop/app-local subsystem from the public Codex repository is not evidence that an observed local source is invalid.
 
 A source contract must distinguish **known**, **observed but unexplained**, and **hypothesized**. Hypotheses do not become normalization rules merely because they are convenient.
 
