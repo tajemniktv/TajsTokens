@@ -11,6 +11,7 @@ namespace TajsTokens.Infrastructure.Services;
 public sealed class CodexNativeSourceGateway
 {
     private const int MaxRowsPerTable = 250;
+    private const int MaxLogPageSize = 250;
     private const string UpstreamCorroborationCommit = "8e3b180d49";
 
     private readonly CodexStateDbExplorerService _explorer;
@@ -30,6 +31,11 @@ public sealed class CodexNativeSourceGateway
         var capturedAtUtc = DateTimeOffset.UtcNow;
         var candidates = _explorer.DiscoverCandidates();
 
+        var logsTask = ReadLogsSafelyAsync(
+            SelectCandidate(candidates, "logs_"),
+            new CodexLogsQuery { PageSize = MaxRowsPerTable },
+            capturedAtUtc,
+            cancellationToken);
         var memoryTask = ReadMemorySafelyAsync(SelectCandidate(candidates, "memories_"), capturedAtUtc, cancellationToken);
         var goalsTask = ReadGoalsSafelyAsync(SelectCandidate(candidates, "goals_"), capturedAtUtc, cancellationToken);
         var queueTask = ReadQueueSafelyAsync(SelectCandidate(candidates, "queue_"), capturedAtUtc, cancellationToken);
@@ -37,9 +43,10 @@ public sealed class CodexNativeSourceGateway
         var catalogTask = ReadDesktopCatalogSafelyAsync(SelectCandidate(candidates, "codex-dev"), capturedAtUtc, cancellationToken);
         var summariesTask = ReadThreadSummariesSafelyAsync(SelectCandidate(candidates, "codex-thread-summaries"), capturedAtUtc, cancellationToken);
 
-        await Task.WhenAll(memoryTask, goalsTask, queueTask, artifactsTask, catalogTask, summariesTask);
+        await Task.WhenAll(logsTask, memoryTask, goalsTask, queueTask, artifactsTask, catalogTask, summariesTask);
         return new CodexNativeSourcesSnapshot(
             capturedAtUtc,
+            await logsTask,
             await memoryTask,
             await goalsTask,
             await queueTask,
@@ -55,6 +62,16 @@ public sealed class CodexNativeSourceGateway
     public Task<CodexMemorySource> ReadMemoryAsync(CancellationToken cancellationToken = default) =>
         ReadMemorySafelyAsync(
             SelectCandidate(_explorer.DiscoverCandidates(), "memories_"),
+            DateTimeOffset.UtcNow,
+            cancellationToken);
+
+    /// <summary>Reads a bounded page of source-native Codex logs without writing to either database.</summary>
+    public Task<CodexLogsSource> ReadLogsAsync(
+        CodexLogsQuery? query = null,
+        CancellationToken cancellationToken = default) =>
+        ReadLogsSafelyAsync(
+            SelectCandidate(_explorer.DiscoverCandidates(), "logs_"),
+            query ?? new CodexLogsQuery(),
             DateTimeOffset.UtcNow,
             cancellationToken);
 
@@ -98,6 +115,27 @@ public sealed class CodexNativeSourceGateway
         try { return await ReadMemoryAsync(candidate, capturedAtUtc, cancellationToken); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception exception) when (IsSourceFailure(exception)) { return new CodexMemorySource(ErrorInfo(CodexNativeSourceKind.Memory, "Codex memory", candidate, capturedAtUtc, exception), [], []); }
+    }
+
+    private async Task<CodexLogsSource> ReadLogsSafelyAsync(
+        CodexStateDatabaseCandidate? candidate,
+        CodexLogsQuery query,
+        DateTimeOffset capturedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        try { return await ReadLogsAsync(candidate, query, capturedAtUtc, cancellationToken); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception) when (IsSourceFailure(exception))
+        {
+            return new CodexLogsSource(
+                ErrorInfo(CodexNativeSourceKind.Logs, "Codex logs", candidate, capturedAtUtc, exception),
+                [],
+                NormalizeLogsQuery(query),
+                CodexLogsCapabilities.None,
+                null,
+                false,
+                []);
+        }
     }
 
     private async Task<CodexGoalsSource> ReadGoalsSafelyAsync(CodexStateDatabaseCandidate? candidate, DateTimeOffset capturedAtUtc, CancellationToken cancellationToken)
@@ -186,6 +224,175 @@ public sealed class CodexNativeSourceGateway
             jobs.Rows.Select(MapMemoryJob).Where(job => job is not null).Select(job => job!).ToArray(),
             outputs.Rows.Select(MapMemoryOutput).Where(output => output is not null).Select(output => output!).ToArray());
     }
+
+    private async Task<CodexLogsSource> ReadLogsAsync(
+        CodexStateDatabaseCandidate? candidate,
+        CodexLogsQuery query,
+        DateTimeOffset capturedAtUtc,
+        CancellationToken cancellationToken)
+    {
+        var normalizedQuery = NormalizeLogsQuery(query);
+        var context = await PrepareAsync(
+            CodexNativeSourceKind.Logs,
+            "Codex logs",
+            candidate,
+            ["logs"],
+            capturedAtUtc,
+            cancellationToken);
+        if (!context.Info.IsInspectable)
+        {
+            return new CodexLogsSource(
+                context.Info with { UpstreamCorroborationCommit = UpstreamCorroborationCommit },
+                [],
+                normalizedQuery,
+                CodexLogsCapabilities.None,
+                null,
+                false,
+                []);
+        }
+
+        var capabilities = GetLogsCapabilities(context.Inspection);
+        if (!capabilities.HasRequiredSchema)
+        {
+            var unsupportedInfo = context.Info with
+            {
+                Availability = CodexNativeSourceAvailability.Unsupported,
+                SupportedTables = []
+            };
+            return new CodexLogsSource(
+                unsupportedInfo,
+                [],
+                normalizedQuery,
+                capabilities,
+                null,
+                false,
+                ["The logs table is present but is missing one or more required columns: id, ts, ts_nanos, level or target."]);
+        }
+
+        var warnings = GetLogQueryWarnings(normalizedQuery, capabilities);
+        var page = await _explorer.ReadLogsPageAsync(
+            candidate!.Path,
+            normalizedQuery,
+            capabilities,
+            cancellationToken);
+        var entries = page.Rows
+            .Take(normalizedQuery.PageSize)
+            .Select(row => MapLog(new RawRow(page, row)))
+            .Where(entry => entry is not null)
+            .Select(entry => entry!)
+            .ToArray();
+        var offset = checked((long)normalizedQuery.PageIndex * normalizedQuery.PageSize);
+        var hasMoreRows = page.TotalRows > offset + normalizedQuery.PageSize;
+
+        return new CodexLogsSource(
+            context.Info with { HasMoreRows = hasMoreRows },
+            entries,
+            normalizedQuery,
+            capabilities,
+            page.TotalRows,
+            hasMoreRows,
+            warnings);
+    }
+
+    private static CodexLogsQuery NormalizeLogsQuery(CodexLogsQuery query) =>
+        query with
+        {
+            PageIndex = Math.Max(0, query.PageIndex),
+            PageSize = Math.Clamp(query.PageSize, 1, MaxLogPageSize),
+            Levels = (query.Levels ?? Array.Empty<string>())
+                .Where(level => !string.IsNullOrWhiteSpace(level))
+                .Select(level => level.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Take(32)
+                .ToArray(),
+            TargetContains = TrimToNull(query.TargetContains),
+            ModulePathContains = TrimToNull(query.ModulePathContains),
+            FileContains = TrimToNull(query.FileContains),
+            ThreadId = TrimToNull(query.ThreadId),
+            ProcessUuid = TrimToNull(query.ProcessUuid)
+        };
+
+    private static CodexLogsCapabilities GetLogsCapabilities(CodexStateInspectionResult? inspection)
+    {
+        var table = inspection?.Tables.FirstOrDefault(table =>
+            string.Equals(table.Name, "logs", StringComparison.OrdinalIgnoreCase));
+        if (table is null)
+        {
+            return CodexLogsCapabilities.None;
+        }
+
+        var columns = table.Columns.Select(column => column.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var messageColumn = columns.Contains("feedback_log_body")
+            ? "feedback_log_body"
+            : columns.Contains("message") ? "message" : null;
+        return new CodexLogsCapabilities(
+            messageColumn,
+            columns.Contains("module_path"),
+            columns.Contains("file"),
+            columns.Contains("line"),
+            columns.Contains("thread_id"),
+            columns.Contains("process_uuid"),
+            columns.Contains("estimated_bytes"))
+        {
+            HasRequiredSchema = new[] { "id", "ts", "ts_nanos", "level", "target" }.All(columns.Contains)
+        };
+    }
+
+    private static IReadOnlyList<string> GetLogQueryWarnings(
+        CodexLogsQuery query,
+        CodexLogsCapabilities capabilities)
+    {
+        var warnings = new List<string>();
+        if (query.FromUtc is { } fromUtc && query.ToUtcExclusive is { } toUtc && fromUtc >= toUtc)
+        {
+            warnings.Add("The time range is empty because the end must be later than the start.");
+        }
+
+        AddUnavailableFilterWarning(warnings, query.ModulePathContains, capabilities.HasModulePath, "module_path");
+        AddUnavailableFilterWarning(warnings, query.FileContains, capabilities.HasFile, "file");
+        AddUnavailableFilterWarning(warnings, query.ThreadId, capabilities.HasThreadId, "thread_id");
+        AddUnavailableFilterWarning(warnings, query.ProcessUuid, capabilities.HasProcessUuid, "process_uuid");
+        if (!query.IncludeThreadless && !capabilities.HasThreadId)
+        {
+            warnings.Add("The source has no thread_id column, so thread-associated rows cannot be selected.");
+        }
+
+        return warnings;
+    }
+
+    private static void AddUnavailableFilterWarning(
+        ICollection<string> warnings,
+        string? value,
+        bool available,
+        string columnName)
+    {
+        if (!string.IsNullOrWhiteSpace(value) && !available)
+        {
+            warnings.Add($"The {columnName} filter is unavailable in this logs schema.");
+        }
+    }
+
+    private static CodexLogEntry? MapLog(RawRow row) =>
+        Int64(row.Page, row.Row, "id") is long id &&
+        Int64(row.Page, row.Row, "ts") is long timestamp &&
+        Int64(row.Page, row.Row, "ts_nanos") is long timestampNanoseconds &&
+        RequiredText(row, "level") is { } level &&
+        RequiredText(row, "target") is { } target
+            ? new CodexLogEntry(
+                id,
+                timestamp,
+                timestampNanoseconds,
+                level,
+                target,
+                Text(row.Page, row.Row, "module_path"),
+                Text(row.Page, row.Row, "file"),
+                Int64(row.Page, row.Row, "line"),
+                Text(row.Page, row.Row, "thread_id"),
+                Text(row.Page, row.Row, "process_uuid"),
+                Bool(row.Page, row.Row, "has_message"),
+                Text(row.Page, row.Row, "message"),
+                Int64(row.Page, row.Row, "estimated_bytes"))
+            : null;
 
     private async Task<CodexGoalsSource> ReadGoalsAsync(
         CodexStateDatabaseCandidate? candidate,
@@ -586,6 +793,9 @@ public sealed class CodexNativeSourceGateway
 
     private static string? RequiredText(RawRow row, string column) =>
         Text(row.Page, row.Row, column) is { Length: > 0 } value ? value : null;
+
+    private static string? TrimToNull(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
 
     private static string? Text(CodexStateRawPage page, CodexStateRawRow row, string column)
     {

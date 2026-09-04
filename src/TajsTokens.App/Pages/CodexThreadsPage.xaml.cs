@@ -158,9 +158,9 @@ public sealed partial class CodexThreadsPage : Page
 
                 if (result.Entries.Count == 0)
                 {
-                    DetailText.Text = search.Length == 0
+                    SetDetailMessage(search.Length == 0
                         ? "No source-native Codex thread is available to inspect."
-                        : "No matching source-native Codex thread is available to inspect.";
+                        : "No matching source-native Codex thread is available to inspect.");
                 }
 
                 var diagnostics = result.Warnings.Count == 0
@@ -200,13 +200,13 @@ public sealed partial class CodexThreadsPage : Page
         {
             if (entry is null)
             {
-                DetailText.Text = "Select a Codex thread to inspect its source-native metadata and history.";
+                SetDetailMessage("Select a Codex thread to inspect its source-native metadata and history.");
             }
 
             return;
         }
 
-        DetailText.Text = "Loading source-native thread metadata and history…";
+        SetDetailMessage("Loading source-native thread metadata and history…");
         try
         {
             var result = await Task.Run(
@@ -221,7 +221,7 @@ public sealed partial class CodexThreadsPage : Page
                 return;
             }
 
-            DetailText.Text = RenderDetail(result);
+            RenderDetail(result);
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
@@ -230,109 +230,573 @@ public sealed partial class CodexThreadsPage : Page
         {
             if (_loaded && generation == Volatile.Read(ref _selectionGeneration))
             {
-                DetailText.Text = $"Thread detail unavailable: {Summarize(exception.Message)}";
+                SetDetailMessage($"Thread detail unavailable: {Summarize(exception.Message)}");
             }
         }
     }
 
-    private static string RenderDetail(CodexThreadReadResult result)
+    private void RenderDetail(CodexThreadReadResult result)
     {
+        DetailPanel.Children.Clear();
         if (!result.HasThread && result.Turns.Count == 0 && result.Items.Count == 0 && result.RealtimeItems.Count == 0)
         {
-            return string.Join("\n", result.Warnings.DefaultIfEmpty(
-                "No source-native state/history row is available for this thread."));
+            AddNotice(DetailPanel, string.Join("\n", result.Warnings.DefaultIfEmpty(
+                "No source-native state/history row is available for this thread.")));
+            return;
         }
 
         var thread = result.Thread;
-        var lines = new List<string>
+        var overview = AddSection(DetailPanel, "Thread overview",
+            "Source-native values are shown as observed. Missing fields remain unavailable.");
+        AddFields(overview,
+            ("Captured", FormatDate(result.CapturedAtUtc)),
+            ("Thread ID", Value(thread?.ThreadId)),
+            ("Display name", Value(thread?.DisplayName)),
+            ("Title", Value(thread?.Title)),
+            ("Name", Value(thread?.Name)),
+            ("Source", Value(thread?.Source)),
+            ("Thread source", Value(thread?.ThreadSource)),
+            ("Model provider", Value(thread?.ModelProvider)),
+            ("Model", Value(thread?.Model)),
+            ("Reasoning effort", Value(thread?.ReasoningEffort)),
+            ("History mode", Value(thread?.HistoryMode)),
+            ("Memory mode", Value(thread?.MemoryMode)),
+            ("Created", FormatDate(thread?.CreatedAtUtc)),
+            ("Updated", FormatDate(thread?.UpdatedAtUtc)),
+            ("Recency", FormatDate(thread?.RecencyAtUtc)),
+            ("Archived", FormatBool(thread?.Archived)),
+            ("Pinned", FormatBool(thread?.IsPinned)));
+
+        var workspace = AddSection(DetailPanel, "Workspace, policies and agent");
+        AddFields(workspace,
+            ("Working directory", Value(thread?.Cwd)),
+            ("Git branch", Value(thread?.GitBranch)),
+            ("Git SHA", Value(thread?.GitSha)),
+            ("Git origin URL", Value(thread?.GitOriginUrl)),
+            ("Sandbox policy", Value(thread?.SandboxPolicy)),
+            ("Approval mode", Value(thread?.ApprovalMode)),
+            ("Agent nickname", Value(thread?.AgentNickname)),
+            ("Agent role", Value(thread?.AgentRole)),
+            ("Agent path", Value(thread?.AgentPath)),
+            ("Project ID", Value(thread?.ProjectId)),
+            ("Section ID", Value(thread?.SectionId)),
+            ("Section position", FormatInt(thread?.SectionPosition)),
+            ("Discovery kind", Value(thread?.DiscoveryKind)),
+            ("Source generation", FormatInt(thread?.SourceGeneration)),
+            ("Source last write", FormatDate(thread?.SourceLastWriteTimeUtc)));
+
+        var provenance = AddSection(DetailPanel, "Source provenance and read-model policy");
+        AddFields(provenance,
+            ("State source", Value(result.StateSourcePath)),
+            ("State source description", Value(result.StateSourceDescription)),
+            ("History source", Value(result.HistorySourcePath)),
+            ("History source description", Value(result.HistorySourceDescription)),
+            ("State observations", result.StateThreadObservations.Count.ToString("N0")),
+            ("State sources retained", result.StateSources.Count.ToString("N0")),
+            ("State reconciliation", Value(result.StateReconciliationPolicy)),
+            ("State selection rationale", Value(result.StateSourceSelectionRationale)),
+            ("History sources retained", result.HistorySources.Count.ToString("N0")),
+            ("History reconciliation", Value(result.HistoryReconciliationPolicy)),
+            ("History selection rationale", Value(result.HistorySourceSelectionRationale)));
+
+        var coverage = AddSection(DetailPanel, "Capabilities and coverage");
+        AddFields(coverage,
+            ("Project capability", FormatCapability(result.ProjectCapabilityAvailable)),
+            ("Project roots capability", FormatCapability(result.ProjectRootsCapabilityAvailable)),
+            ("Section capability", FormatCapability(result.SectionCapabilityAvailable)),
+            ("Dynamic tools capability", FormatCapability(result.DynamicToolsCapabilityAvailable)),
+            ("Spawn edges capability", FormatCapability(result.SpawnEdgesCapabilityAvailable)),
+            ("Turns capability", FormatCapability(result.TurnsCapabilityAvailable)),
+            ("Normal items capability", FormatCapability(result.ItemsCapabilityAvailable)),
+            ("Realtime capability", FormatCapability(result.RealtimeCapabilityAvailable)),
+            ("Project roots coverage", FormatTruncation(result.ProjectRootsTruncated)),
+            ("Dynamic tools coverage", FormatTruncation(result.DynamicToolsTruncated)),
+            ("Spawn edges coverage", FormatTruncation(result.SpawnEdgesTruncated)),
+            ("Turns coverage", FormatTruncation(result.TurnsTruncated)),
+            ("Normal items coverage", FormatTruncation(result.ItemsTruncated)),
+            ("Realtime coverage", FormatTruncation(result.RealtimeItemsTruncated)));
+
+        var projectSection = AddSection(DetailPanel, "Project");
+        if (result.Project is { } project)
         {
-            "Source-native Codex thread (on-demand local inspection)",
-            $"Captured: {FormatDate(result.CapturedAtUtc)}",
-            $"Thread ID: {thread?.ThreadId ?? "unknown"}",
-            $"Display name (history-mode policy): {thread?.DisplayName ?? "unknown"} · title={thread?.Title ?? "unavailable"} · name={thread?.Name ?? "unavailable"}",
-            $"State source: {result.StateSourcePath ?? "unavailable"} · {result.StateSourceDescription ?? "unknown"}",
-            $"History source: {result.HistorySourcePath ?? "unavailable"} · {result.HistorySourceDescription ?? "unknown"}",
-            $"Source: {thread?.Source ?? "unavailable"} · thread source: {thread?.ThreadSource ?? "unavailable"} · provider: {thread?.ModelProvider ?? "unavailable"}",
-            $"Model: {thread?.Model ?? "unavailable"} · reasoning: {thread?.ReasoningEffort ?? "unavailable"}",
-            $"Created: {FormatDate(thread?.CreatedAtUtc)} · updated: {FormatDate(thread?.UpdatedAtUtc)} · recency: {FormatDate(thread?.RecencyAtUtc)}",
-            $"CWD: {thread?.Cwd ?? "unavailable"}",
-            $"Git: {thread?.GitBranch ?? "unavailable"} · {thread?.GitSha ?? "unavailable"} · {thread?.GitOriginUrl ?? "unavailable"}",
-            $"Sandbox: {thread?.SandboxPolicy ?? "unavailable"} · approval: {thread?.ApprovalMode ?? "unavailable"}",
-            $"History mode: {thread?.HistoryMode ?? "unavailable"} · memory: {thread?.MemoryMode ?? "unavailable"} · archived: {FormatBool(thread?.Archived)} · pinned: {FormatBool(thread?.IsPinned)}",
-            $"Agent: {thread?.AgentNickname ?? "unavailable"} · role: {thread?.AgentRole ?? "unavailable"} · path: {thread?.AgentPath ?? "unavailable"}",
-            $"State observations: {result.StateThreadObservations.Count:N0} · source-qualified optional observations: {result.StateSources.Count:N0} · policy: {result.StateReconciliationPolicy}",
-            $"History sources: {result.HistorySources.Count:N0} · policy: {result.HistoryReconciliationPolicy}"
-        };
+            AddProjectFields(projectSection, project, result);
+        }
+        else
+        {
+            AddFields(projectSection,
+                ("Value", "unavailable"),
+                ("Capability", FormatCapability(result.ProjectCapabilityAvailable)));
+        }
+
+        var sectionSection = AddSection(DetailPanel, "Section");
+        if (result.Section is { } section)
+        {
+            AddFields(sectionSection,
+                ("Section ID", Value(section.SectionId)),
+                ("Name", Value(section.Name)),
+                ("Position", FormatInt(thread?.SectionPosition)),
+                ("Appearance", Value(section.Appearance)),
+                ("Capability", FormatCapability(result.SectionCapabilityAvailable)));
+        }
+        else
+        {
+            AddFields(sectionSection,
+                ("Value", "unavailable"),
+                ("Capability", FormatCapability(result.SectionCapabilityAvailable)));
+        }
+
+        var stateObservations = AddSection(DetailPanel,
+            $"State observations ({result.StateSources.Count:N0})",
+            "Each readable state database is retained separately; expand a row to inspect its source-qualified metadata.",
+            expanded: false);
+        if (result.StateSources.Count == 0)
+        {
+            AddNotice(stateObservations, "No matching state-source observation was available.");
+        }
+        else
+        {
+            for (var index = 0; index < result.StateSources.Count; index++)
+            {
+                var source = result.StateSources[index];
+                var sourceBody = AddRecord(stateObservations,
+                    $"{index + 1}. {source.SourceDescription}",
+                    ("Source path", Value(source.SourcePath)),
+                    ("Project capability", FormatCapability(source.ProjectCapabilityAvailable)),
+                    ("Project roots capability", FormatCapability(source.ProjectRootsCapabilityAvailable)),
+                    ("Section capability", FormatCapability(source.SectionCapabilityAvailable)),
+                    ("Dynamic tools capability", FormatCapability(source.DynamicToolsCapabilityAvailable)),
+                    ("Spawn edges capability", FormatCapability(source.SpawnEdgesCapabilityAvailable)),
+                    ("Project roots coverage", FormatTruncation(source.ProjectRootsTruncated)),
+                    ("Dynamic tools coverage", FormatTruncation(source.DynamicToolsTruncated)),
+                    ("Spawn edges coverage", FormatTruncation(source.SpawnEdgesTruncated)));
+                AddNotice(sourceBody, "Thread row in this source");
+                AddCatalogFields(sourceBody, source.Thread);
+            }
+        }
 
         if (result.StateReadModel is { } stateReadModel)
         {
-            lines.Add($"Optional state read-model policy: {stateReadModel.SelectionRationale}");
-            lines.Add($"Alternatives retained: project={stateReadModel.ProjectAlternatives.Count:N0} (conflict={stateReadModel.ProjectConflict}), roots={stateReadModel.ProjectRootsAlternatives.Count:N0} (conflict={stateReadModel.ProjectRootsConflict}), section={stateReadModel.SectionAlternatives.Count:N0} (conflict={stateReadModel.SectionConflict}), dynamic tools={stateReadModel.DynamicToolsAlternatives.Count:N0} (conflict={stateReadModel.DynamicToolsConflict}), spawn edges={stateReadModel.SpawnEdgesAlternatives.Count:N0} (conflict={stateReadModel.SpawnEdgesConflict})");
-            lines.AddRange(result.StateSources.Select(source =>
-                $"  state source: {source.SourceDescription} · {source.SourcePath} · project={FormatCapability(source.ProjectCapabilityAvailable)} · section={FormatCapability(source.SectionCapabilityAvailable)} · tools={FormatCapability(source.DynamicToolsCapabilityAvailable)} · edges={FormatCapability(source.SpawnEdgesCapabilityAvailable)}"));
+            var reconciliation = AddSection(DetailPanel, "Retained alternatives and conflicts",
+                "The preferred value is a presentation choice. Alternatives remain visible so conflicting source observations are not silently lost.",
+                expanded: false);
+            AddFields(reconciliation,
+                ("Selection rationale", Value(stateReadModel.SelectionRationale)),
+                ("Project alternatives", stateReadModel.ProjectAlternatives.Count.ToString("N0") +
+                 $" · conflict={FormatBool(stateReadModel.ProjectConflict)}"),
+                ("Project-roots alternatives", stateReadModel.ProjectRootsAlternatives.Count.ToString("N0") +
+                 $" · conflict={FormatBool(stateReadModel.ProjectRootsConflict)}"),
+                ("Section alternatives", stateReadModel.SectionAlternatives.Count.ToString("N0") +
+                 $" · conflict={FormatBool(stateReadModel.SectionConflict)}"),
+                ("Dynamic-tool alternatives", stateReadModel.DynamicToolsAlternatives.Count.ToString("N0") +
+                 $" · conflict={FormatBool(stateReadModel.DynamicToolsConflict)}"),
+                ("Spawn-edge alternatives", stateReadModel.SpawnEdgesAlternatives.Count.ToString("N0") +
+                 $" · conflict={FormatBool(stateReadModel.SpawnEdgesConflict)}"));
+
+            foreach (var (alternative, index) in stateReadModel.ProjectAlternatives.Select((value, index) => (value, index)))
+            {
+                var alternativeBody = AddRecord(reconciliation, $"Project alternative {index + 1}");
+                AddProjectFields(alternativeBody, alternative, result);
+            }
+
+            foreach (var (roots, index) in stateReadModel.ProjectRootsAlternatives.Select((value, index) => (value, index)))
+            {
+                AddRecord(reconciliation, $"Project roots alternative {index + 1}",
+                    ("Roots", roots.Count == 0 ? "empty" : string.Join(Environment.NewLine, roots)));
+            }
+
+            foreach (var (alternative, index) in stateReadModel.SectionAlternatives.Select((value, index) => (value, index)))
+            {
+                AddRecord(reconciliation, $"Section alternative {index + 1}",
+                    ("Section ID", Value(alternative.SectionId)),
+                    ("Name", Value(alternative.Name)),
+                    ("Appearance", Value(alternative.Appearance)));
+            }
+
+            AddAlternativeTools(reconciliation, stateReadModel.DynamicToolsAlternatives);
+            AddAlternativeEdges(reconciliation, stateReadModel.SpawnEdgesAlternatives);
         }
 
-        if (result.Project is { } project)
+        var topology = AddSection(DetailPanel, $"Spawn edges ({result.SpawnEdges.Count:N0})",
+            "Directional parent → child relationships from the source-native topology table.",
+            expanded: false);
+        AddFields(topology,
+            ("Capability", FormatCapability(result.SpawnEdgesCapabilityAvailable)),
+            ("Coverage", FormatTruncation(result.SpawnEdgesTruncated)));
+        foreach (var edge in result.SpawnEdges.Take(160))
         {
-            lines.Add($"Project: {project.Name} ({project.ProjectId}) · capability: {FormatCapability(result.ProjectCapabilityAvailable)} · position: {project.Position?.ToString() ?? "unavailable"} · metadata: {(project.Metadata is null ? "unavailable" : Summarize(project.Metadata))} · roots capability: {FormatCapability(result.ProjectRootsCapabilityAvailable)}");
-            lines.AddRange(project.OrderedRoots.Select((root, index) => $"  root[{index}]: {root}"));
+            AddRecord(topology, $"{edge.ParentThreadId} → {edge.ChildThreadId}",
+                ("Parent thread ID", edge.ParentThreadId),
+                ("Child thread ID", edge.ChildThreadId),
+                ("Status", Value(edge.Status)),
+                ("Depth", edge.Depth.ToString()));
+        }
+        AddLimitNotice(topology, result.SpawnEdges.Count, 160);
+
+        var tools = AddSection(DetailPanel, $"Dynamic tools ({result.DynamicTools.Count:N0})",
+            "Tool definitions are source metadata; input schemas are shown locally and are not persisted by TajsTokens.",
+            expanded: false);
+        AddFields(tools,
+            ("Capability", FormatCapability(result.DynamicToolsCapabilityAvailable)),
+            ("Coverage", FormatTruncation(result.DynamicToolsTruncated)));
+        foreach (var tool in result.DynamicTools.Take(160))
+        {
+            AddRecord(tools, $"[{tool.Position}] {Value(tool.Name)}",
+                ("Position", tool.Position.ToString()),
+                ("Name", Value(tool.Name)),
+                ("Namespace", Value(tool.Namespace)),
+                ("Description", Value(tool.Description)),
+                ("Input schema", Value(tool.InputSchema)),
+                ("Defer loading", tool.DeferLoading ? "yes" : "no"));
+        }
+        AddLimitNotice(tools, result.DynamicTools.Count, 160);
+
+        var historySources = AddSection(DetailPanel, $"History sources ({result.HistorySources.Count:N0})",
+            "History stores remain separate observations. The flat lanes below are a deterministic union for reading.",
+            expanded: false);
+        if (result.HistorySources.Count == 0)
+        {
+            AddNotice(historySources, "No history-source observation was available.");
         }
         else
         {
-            lines.Add($"Project: unavailable · capability: {FormatCapability(result.ProjectCapabilityAvailable)}");
+            for (var index = 0; index < result.HistorySources.Count; index++)
+            {
+                var source = result.HistorySources[index];
+                AddRecord(historySources, $"{index + 1}. {source.SourceDescription}",
+                    ("Source path", Value(source.SourcePath)),
+                    ("Turns", source.Turns.Count.ToString("N0")),
+                    ("Turns capability", FormatCapability(source.TurnsCapabilityAvailable)),
+                    ("Turns coverage", FormatTruncation(source.TurnsTruncated)),
+                    ("Normal items", source.Items.Count.ToString("N0")),
+                    ("Items capability", FormatCapability(source.ItemsCapabilityAvailable)),
+                    ("Items coverage", FormatTruncation(source.ItemsTruncated)),
+                    ("Realtime items", source.RealtimeItems.Count.ToString("N0")),
+                    ("Realtime capability", FormatCapability(source.RealtimeCapabilityAvailable)),
+                    ("Realtime coverage", FormatTruncation(source.RealtimeItemsTruncated)));
+            }
         }
 
-        if (result.Section is { } section)
+        var turns = AddSection(DetailPanel, $"Turns ({result.Turns.Count:N0})",
+            "Materialized turn metadata in rollout order. Error payloads are represented as presence so the detail view does not become a transcript dump.",
+            expanded: false);
+        AddFields(turns,
+            ("Capability", FormatCapability(result.TurnsCapabilityAvailable)),
+            ("Coverage", FormatTruncation(result.TurnsTruncated)));
+        foreach (var turn in result.Turns.Take(160))
         {
-            lines.Add($"Section: {section.Name} ({section.SectionId}) · position: {thread?.SectionPosition?.ToString() ?? "unavailable"} · appearance: {section.Appearance ?? "unavailable"}");
+            AddRecord(turns, $"[{FormatOrdinal(turn.RolloutOrdinal, turn.RolloutOrdinalAvailable)}] {turn.TurnId}",
+                ("Turn ID", turn.TurnId),
+                ("Rollout ordinal", FormatOrdinal(turn.RolloutOrdinal, turn.RolloutOrdinalAvailable)),
+                ("Status", Value(turn.Status)),
+                ("Started", FormatDate(turn.StartedAtUtc)),
+                ("Completed", FormatDate(turn.CompletedAtUtc)),
+                ("Duration", FormatDuration(turn.DurationMs)),
+                ("First user item ID", Value(turn.FirstUserItemId)),
+                ("Final agent item ID", Value(turn.FinalAgentItemId)),
+                ("Rollout byte offset", FormatLong(turn.RolloutByteOffset)),
+                ("Rollout end ordinal", FormatLong(turn.RolloutEndOrdinal)),
+                ("Rollout end byte offset", FormatLong(turn.RolloutEndByteOffset)),
+                ("Error JSON", FormatPayloadPresence(turn.ErrorJson)),
+                ("Source", Value(turn.SourceDescription)),
+                ("Source path", Value(turn.SourcePath)));
         }
-        else
+        AddLimitNotice(turns, result.Turns.Count, 160);
+
+        var items = AddSection(DetailPanel, $"Normal history items ({result.Items.Count:N0})",
+            "Item metadata is readable here. Content-bearing item JSON remains outside the summary and is not copied into TajsTokens storage.",
+            expanded: false);
+        AddFields(items,
+            ("Capability", FormatCapability(result.ItemsCapabilityAvailable)),
+            ("Coverage", FormatTruncation(result.ItemsTruncated)));
+        foreach (var item in result.Items.Take(200))
         {
-            lines.Add($"Section: unavailable · capability: {FormatCapability(result.SectionCapabilityAvailable)}");
+            AddRecord(items, $"[{FormatOrdinal(item.RolloutOrdinal, item.RolloutOrdinalAvailable)}] {Value(item.ItemType)} · {item.ItemId}",
+                ("Item ID", item.ItemId),
+                ("Item type", Value(item.ItemType)),
+                ("Turn ID", Value(item.TurnId)),
+                ("Rollout ordinal", FormatOrdinal(item.RolloutOrdinal, item.RolloutOrdinalAvailable)),
+                ("Created", FormatDate(item.CreatedAtUtc)),
+                ("Updated-at ordinal", FormatLong(item.UpdatedAtOrdinal)),
+                ("Source", Value(item.SourceDescription)),
+                ("Source path", Value(item.SourcePath)),
+                ("Item payload", FormatPayloadPresence(item.ItemJson)));
         }
+        AddLimitNotice(items, result.Items.Count, 200);
 
-        lines.Add($"Spawn edges (directional): {result.SpawnEdges.Count:N0} · capability: {FormatCapability(result.SpawnEdgesCapabilityAvailable)} · {FormatTruncation(result.SpawnEdgesTruncated)}");
-        lines.AddRange(result.SpawnEdges.Take(80).Select(edge =>
-            $"  {edge.ParentThreadId} → {edge.ChildThreadId} · status={edge.Status} · depth={edge.Depth}"));
-        lines.Add($"Dynamic tools: {result.DynamicTools.Count:N0} · capability: {FormatCapability(result.DynamicToolsCapabilityAvailable)} · {FormatTruncation(result.DynamicToolsTruncated)}");
-        lines.AddRange(result.DynamicTools.Take(80).Select(tool =>
-            $"  [{tool.Position}] {tool.Name} · namespace={tool.Namespace ?? "unavailable"} · defer_loading={tool.DeferLoading} · description={Summarize(tool.Description)} · input_schema={Summarize(tool.InputSchema)}"));
-        lines.Add($"Turns (rollout order): {result.Turns.Count:N0} · capability: {FormatCapability(result.TurnsCapabilityAvailable)} · {FormatTruncation(result.TurnsTruncated)}");
-        lines.AddRange(result.Turns.Take(120).Select(turn =>
-            $"  [{FormatOrdinal(turn.RolloutOrdinal, turn.RolloutOrdinalAvailable)}] {turn.TurnId} · status={turn.Status} · started={FormatDate(turn.StartedAtUtc)} · completed={FormatDate(turn.CompletedAtUtc)} · duration={FormatDuration(turn.DurationMs)} · first_user={turn.FirstUserItemId ?? "unavailable"} · final_agent={turn.FinalAgentItemId ?? "unavailable"}"));
-        lines.Add($"Normal history items: {result.Items.Count:N0} · capability: {FormatCapability(result.ItemsCapabilityAvailable)} · {FormatTruncation(result.ItemsTruncated)}");
-        lines.AddRange(result.Items.Take(160).Select(item =>
-            $"  [{FormatOrdinal(item.RolloutOrdinal, item.RolloutOrdinalAvailable)}] {item.ItemType} · {item.ItemId} · turn={item.TurnId}"));
-        lines.Add($"Realtime timeline (separate lane): {result.RealtimeItems.Count:N0} · capability: {FormatCapability(result.RealtimeCapabilityAvailable)} · {FormatTruncation(result.RealtimeItemsTruncated)}");
-        lines.AddRange(result.RealtimeItems.Take(160).Select(item =>
-            $"  [{FormatOrdinal(item.RolloutOrdinal, item.RolloutOrdinalAvailable)}] {item.ItemType} · {item.ItemId}"));
-
-        if (result.CoverageWarnings.Count > 0)
+        var realtime = AddSection(DetailPanel, $"Realtime timeline ({result.RealtimeItems.Count:N0})",
+            "Realtime items remain a separate source-native lane rather than being merged into normal history.",
+            expanded: false);
+        AddFields(realtime,
+            ("Capability", FormatCapability(result.RealtimeCapabilityAvailable)),
+            ("Coverage", FormatTruncation(result.RealtimeItemsTruncated)));
+        foreach (var item in result.RealtimeItems.Take(200))
         {
-            lines.Add("Coverage warnings:");
-            lines.AddRange(result.CoverageWarnings.Select(warning => $"  {warning}"));
+            AddRecord(realtime, $"[{FormatOrdinal(item.RolloutOrdinal, item.RolloutOrdinalAvailable)}] {Value(item.ItemType)} · {item.ItemId}",
+                ("Item ID", item.ItemId),
+                ("Item type", Value(item.ItemType)),
+                ("Rollout ordinal", FormatOrdinal(item.RolloutOrdinal, item.RolloutOrdinalAvailable)),
+                ("Created", FormatDate(item.CreatedAtUtc)),
+                ("Source", Value(item.SourceDescription)),
+                ("Source path", Value(item.SourcePath)),
+                ("Item payload", FormatPayloadPresence(item.ItemJson)));
         }
+        AddLimitNotice(realtime, result.RealtimeItems.Count, 200);
 
-        if (result.Warnings.Count > 0)
-        {
-            lines.Add("Source read warnings:");
-            lines.AddRange(result.Warnings.Select(warning => $"  {warning}"));
-        }
-
-        if (result.Items.Count > 160 || result.RealtimeItems.Count > 160 || result.Turns.Count > 120)
-        {
-            lines.Add("UI summary abbreviation: content-bearing item JSON remains available only through deliberate local raw inspection.");
-        }
-
-        return string.Join("\n", lines);
-
-        static string FormatDate(DateTimeOffset? value) => value?.ToLocalTime().ToString("g") ?? "unavailable";
-        static string FormatBool(bool? value) => value is null ? "unavailable" : value.Value ? "yes" : "no";
-        static string FormatCapability(bool? value) => value is null ? "unknown" : value.Value ? "present" : "absent";
-        static string FormatTruncation(bool? value) => value is null ? "coverage unknown" : value.Value ? "truncated" : "complete";
-        static string FormatOrdinal(long value, bool available) => available ? value.ToString() : "unknown";
-        static string FormatDuration(long? value) => value is long milliseconds ? $"{milliseconds:N0} ms" : "unavailable";
+        AddWarnings(DetailPanel, "Coverage warnings", result.CoverageWarnings);
+        AddWarnings(DetailPanel, "Source read warnings", result.Warnings);
     }
+
+    private void SetDetailMessage(string message)
+    {
+        DetailPanel.Children.Clear();
+        AddNotice(DetailPanel, message);
+    }
+
+    private static StackPanel AddSection(
+        StackPanel parent,
+        string title,
+        string? description = null,
+        bool expanded = true)
+    {
+        var body = new StackPanel
+        {
+            Spacing = 8,
+            Margin = new Thickness(4, 0, 4, 4)
+        };
+        if (!string.IsNullOrWhiteSpace(description))
+        {
+            AddNotice(body, description);
+        }
+
+        parent.Children.Add(new Expander
+        {
+            Header = title,
+            IsExpanded = expanded,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Content = body
+        });
+        return body;
+    }
+
+    private static StackPanel AddRecord(
+        StackPanel parent,
+        string title,
+        params (string Label, string Value)[] fields)
+    {
+        var body = new StackPanel { Spacing = 8, Margin = new Thickness(4, 0, 0, 4) };
+        AddFields(body, fields);
+        parent.Children.Add(new Expander
+        {
+            Header = title,
+            IsExpanded = false,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            Content = body
+        });
+        return body;
+    }
+
+    private static void AddFields(StackPanel parent, params (string Label, string Value)[] fields)
+    {
+        var grid = new Grid { ColumnSpacing = 12, RowSpacing = 5 };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        for (var index = 0; index < fields.Length; index++)
+        {
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            var label = new TextBlock
+            {
+                Text = fields[index].Label,
+                Opacity = 0.66,
+                TextWrapping = TextWrapping.Wrap,
+                VerticalAlignment = VerticalAlignment.Top
+            };
+            var value = new TextBlock
+            {
+                Text = fields[index].Value,
+                TextWrapping = TextWrapping.Wrap,
+                IsTextSelectionEnabled = true,
+                VerticalAlignment = VerticalAlignment.Top
+            };
+            Grid.SetRow(label, index);
+            Grid.SetColumn(label, 0);
+            Grid.SetRow(value, index);
+            Grid.SetColumn(value, 1);
+            grid.Children.Add(label);
+            grid.Children.Add(value);
+        }
+
+        parent.Children.Add(grid);
+    }
+
+    private static void AddCatalogFields(StackPanel parent, CodexThreadCatalogEntry entry)
+    {
+        AddFields(parent,
+            ("Thread ID", Value(entry.ThreadId)),
+            ("Display name", Value(entry.DisplayName)),
+            ("Title", Value(entry.Title)),
+            ("Name", Value(entry.Name)),
+            ("Source", Value(entry.Source)),
+            ("Thread source", Value(entry.ThreadSource)),
+            ("Model provider", Value(entry.ModelProvider)),
+            ("Model", Value(entry.Model)),
+            ("Reasoning effort", Value(entry.ReasoningEffort)),
+            ("Created", FormatDate(entry.CreatedAtUtc)),
+            ("Updated", FormatDate(entry.UpdatedAtUtc)),
+            ("Recency", FormatDate(entry.RecencyAtUtc)),
+            ("Working directory", Value(entry.Cwd)),
+            ("Git branch", Value(entry.GitBranch)),
+            ("Git SHA", Value(entry.GitSha)),
+            ("Git origin URL", Value(entry.GitOriginUrl)),
+            ("Sandbox policy", Value(entry.SandboxPolicy)),
+            ("Approval mode", Value(entry.ApprovalMode)),
+            ("History mode", Value(entry.HistoryMode)),
+            ("Memory mode", Value(entry.MemoryMode)),
+            ("Archived", FormatBool(entry.Archived)),
+            ("Pinned", FormatBool(entry.IsPinned)),
+            ("Agent nickname", Value(entry.AgentNickname)),
+            ("Agent role", Value(entry.AgentRole)),
+            ("Agent path", Value(entry.AgentPath)),
+            ("Project ID", Value(entry.ProjectId)),
+            ("Section ID", Value(entry.SectionId)),
+            ("Section position", FormatInt(entry.SectionPosition)),
+            ("Source path", Value(entry.SourcePath)),
+            ("Source description", Value(entry.SourceDescription)),
+            ("Discovery kind", Value(entry.DiscoveryKind)),
+            ("Source generation", FormatInt(entry.SourceGeneration)),
+            ("Source last write", FormatDate(entry.SourceLastWriteTimeUtc)),
+            ("Preview", FormatPayloadPresence(entry.Preview)),
+            ("First user message", FormatPayloadPresence(entry.FirstUserMessage)));
+    }
+
+    private static void AddProjectFields(
+        StackPanel parent,
+        CodexThreadProject project,
+        CodexThreadReadResult result)
+    {
+        AddFields(parent,
+            ("Project ID", Value(project.ProjectId)),
+            ("Name", Value(project.Name)),
+            ("Metadata", Value(project.Metadata)),
+            ("Position", FormatInt(project.Position)),
+            ("Created", FormatDate(project.CreatedAtUtc)),
+            ("Updated", FormatDate(project.UpdatedAtUtc)),
+            ("Roots capability", FormatBool(project.RootsCapabilityAvailable)),
+            ("Result roots capability", FormatCapability(result.ProjectRootsCapabilityAvailable)));
+        if (project.OrderedRoots.Count == 0)
+        {
+            AddNotice(parent, "Roots: empty");
+        }
+        else
+        {
+            AddFields(parent, ("Ordered roots", string.Join(Environment.NewLine, project.OrderedRoots)));
+        }
+    }
+
+    private static void AddAlternativeTools(
+        StackPanel parent,
+        IReadOnlyList<IReadOnlyList<CodexThreadDynamicTool>> alternatives)
+    {
+        foreach (var (alternative, index) in alternatives.Select((value, index) => (value, index)))
+        {
+            var body = AddRecord(parent, $"Dynamic-tool set alternative {index + 1}",
+                ("Tool count", alternative.Count.ToString("N0")));
+            foreach (var tool in alternative)
+            {
+                AddRecord(body, $"[{tool.Position}] {Value(tool.Name)}",
+                    ("Position", tool.Position.ToString()),
+                    ("Name", Value(tool.Name)),
+                    ("Namespace", Value(tool.Namespace)),
+                    ("Description", Value(tool.Description)),
+                    ("Input schema", Value(tool.InputSchema)),
+                    ("Defer loading", tool.DeferLoading ? "yes" : "no"));
+            }
+        }
+    }
+
+    private static void AddAlternativeEdges(
+        StackPanel parent,
+        IReadOnlyList<IReadOnlyList<CodexThreadSpawnEdge>> alternatives)
+    {
+        foreach (var (alternative, index) in alternatives.Select((value, index) => (value, index)))
+        {
+            var body = AddRecord(parent, $"Spawn-edge set alternative {index + 1}",
+                ("Edge count", alternative.Count.ToString("N0")));
+            foreach (var edge in alternative)
+            {
+                AddRecord(body, $"{edge.ParentThreadId} → {edge.ChildThreadId}",
+                    ("Parent thread ID", edge.ParentThreadId),
+                    ("Child thread ID", edge.ChildThreadId),
+                    ("Status", Value(edge.Status)),
+                    ("Depth", edge.Depth.ToString()));
+            }
+        }
+    }
+
+    private static void AddWarnings(StackPanel parent, string title, IReadOnlyList<string> warnings)
+    {
+        if (warnings.Count == 0)
+        {
+            return;
+        }
+
+        var section = AddSection(parent, $"{title} ({warnings.Count:N0})", expanded: false);
+        foreach (var warning in warnings)
+        {
+            AddNotice(section, warning);
+        }
+    }
+
+    private static void AddLimitNotice(StackPanel parent, int total, int shown)
+    {
+        if (total > shown)
+        {
+            AddNotice(parent, $"Showing the first {shown:N0} of {total:N0} rows in this lane. Source coverage is reported above; item payloads remain available only through deliberate local inspection.");
+        }
+    }
+
+    private static void AddNotice(StackPanel parent, string message)
+    {
+        parent.Children.Add(new TextBlock
+        {
+            Text = message,
+            Opacity = 0.68,
+            TextWrapping = TextWrapping.Wrap,
+            IsTextSelectionEnabled = true
+        });
+    }
+
+    private static string Value(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "unavailable" : value;
+
+    private static string FormatDate(DateTimeOffset? value) =>
+        value?.ToLocalTime().ToString("g") ?? "unavailable";
+
+    private static string FormatBool(bool? value) =>
+        value is null ? "unavailable" : value.Value ? "yes" : "no";
+
+    private static string FormatCapability(bool? value) =>
+        value is null ? "unknown" : value.Value ? "present" : "absent";
+
+    private static string FormatTruncation(bool? value) =>
+        value is null ? "coverage unknown" : value.Value ? "truncated" : "complete";
+
+    private static string FormatInt(int? value) =>
+        value?.ToString() ?? "unavailable";
+
+    private static string FormatLong(long? value) =>
+        value?.ToString("N0") ?? "unavailable";
+
+    private static string FormatOrdinal(long value, bool available) =>
+        available ? value.ToString() : "unknown";
+
+    private static string FormatDuration(long? value) =>
+        value is long milliseconds ? $"{milliseconds:N0} ms" : "unavailable";
+
+    private static string FormatPayloadPresence(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? "absent" : "present · content not rendered here";
 
     private static string Summarize(string message)
     {

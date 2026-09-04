@@ -27,6 +27,11 @@ public sealed class CodexNativeSourcesService
     public Task<CodexNativeSourcesSnapshot> InspectAsync(CancellationToken cancellationToken = default) =>
         _gateway.InspectAsync(cancellationToken);
 
+    public Task<CodexLogsSource> ReadLogsAsync(
+        CodexLogsQuery? query = null,
+        CancellationToken cancellationToken = default) =>
+        _gateway.ReadLogsAsync(query, cancellationToken);
+
     public Task<CodexMemorySource> ReadMemoryAsync(CancellationToken cancellationToken = default) =>
         _gateway.ReadMemoryAsync(cancellationToken);
 

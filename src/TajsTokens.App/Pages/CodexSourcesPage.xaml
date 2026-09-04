@@ -20,7 +20,7 @@
             </Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="Codex Sources" FontSize="28" FontWeight="SemiBold" />
-                <TextBlock Text="Provider-native, read-only views of Codex memory, goals, queue, artifacts and Desktop stores. Content-bearing values stay local to this inspection session; choose the shown path in State DB Explorer for deliberate raw inspection."
+                <TextBlock Text="Provider-native, read-only views of Codex logs, memory, goals, queue, artifacts and Desktop stores. Content-bearing values stay local to this inspection session; choose the shown path in State DB Explorer for deliberate raw inspection."
                            Opacity="0.72" TextWrapping="Wrap" Margin="0,4,0,0" />
                 <TextBlock x:Name="StatusText" Text="Loading Codex source capabilities…" Opacity="0.72" Margin="0,8,0,0" TextWrapping="Wrap" />
             </StackPanel>
@@ -51,6 +51,51 @@
         </StackPanel>
 
         <TabView x:Name="SourceTabs" Grid.Row="2" IsAddTabButtonVisible="False">
+            <TabViewItem Header="Logs">
+                <Grid RowSpacing="8">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <TextBlock x:Name="LogsSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                    <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBox x:Name="LogLevelsTextBox" Width="170" PlaceholderText="Levels: ERROR,WARN" />
+                            <TextBox x:Name="LogTargetTextBox" Width="220" PlaceholderText="Target contains" />
+                            <TextBox x:Name="LogModuleTextBox" Width="220" PlaceholderText="Module path contains" />
+                            <TextBox x:Name="LogThreadTextBox" Width="220" PlaceholderText="Thread ID" />
+                        </StackPanel>
+                    </ScrollViewer>
+                    <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBox x:Name="LogFromTextBox" Width="250" PlaceholderText="From UTC: ISO-8601 or Unix seconds" />
+                            <TextBox x:Name="LogToTextBox" Width="250" PlaceholderText="To UTC (exclusive)" />
+                            <TextBox x:Name="LogProcessTextBox" Width="250" PlaceholderText="Process UUID" />
+                            <CheckBox x:Name="LogIncludeThreadlessCheckBox" Content="Include threadless" IsChecked="True" VerticalAlignment="Center" />
+                            <CheckBox x:Name="LogIncludeMessagesCheckBox" Content="Show log bodies" VerticalAlignment="Center" />
+                            <Button Content="Apply" Click="OnLogApplyClicked" />
+                            <Button x:Name="LogPreviousButton" Content="Previous" Click="OnLogPreviousClicked" IsEnabled="False" />
+                            <Button x:Name="LogNextButton" Content="Next" Click="OnLogNextClicked" IsEnabled="False" />
+                        </StackPanel>
+                    </ScrollViewer>
+                    <Grid Grid.Row="3" RowSpacing="6">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+                        <TextBlock x:Name="LogsQueryStatus" TextWrapping="Wrap" Opacity="0.72" />
+                        <ListView x:Name="LogsList" Grid.Row="1" SelectionMode="None" ScrollViewer.IsDeferredScrollingEnabled="True">
+                            <ListView.ItemTemplate>
+                                <DataTemplate>
+                                    <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,4" />
+                                </DataTemplate>
+                            </ListView.ItemTemplate>
+                        </ListView>
+                    </Grid>
+                </Grid>
+            </TabViewItem>
             <TabViewItem Header="Memory">
                 <Grid RowSpacing="8">
                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>

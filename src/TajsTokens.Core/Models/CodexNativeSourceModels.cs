@@ -3,6 +3,7 @@ namespace TajsTokens.Core.Models;
 /// <summary>Codex-owned SQLite source families surfaced by the local observability boundary.</summary>
 public enum CodexNativeSourceKind
 {
+    Logs,
     Memory,
     Goals,
     Queue,
@@ -10,6 +11,119 @@ public enum CodexNativeSourceKind
     DesktopCatalog,
     ThreadSummaries
 }
+
+/// <summary>
+/// Bounded, read-only query options for the source-native Codex logs store.
+/// Timestamps are expressed as UTC instants while the returned entries retain Codex's raw
+/// Unix-second and nanosecond fields.
+/// </summary>
+public sealed record CodexLogsQuery
+{
+    public int PageIndex { get; init; }
+
+    public int PageSize { get; init; } = 100;
+
+    public DateTimeOffset? FromUtc { get; init; }
+
+    /// <summary>Exclusive upper bound for the source timestamp.</summary>
+    public DateTimeOffset? ToUtcExclusive { get; init; }
+
+    /// <summary>Source-native log levels. Matching is case-insensitive.</summary>
+    public IReadOnlyList<string> Levels { get; init; } = Array.Empty<string>();
+
+    public string? TargetContains { get; init; }
+
+    public string? ModulePathContains { get; init; }
+
+    public string? FileContains { get; init; }
+
+    public string? ThreadId { get; init; }
+
+    public string? ProcessUuid { get; init; }
+
+    /// <summary>
+    /// Whether rows without a source-provided thread ID remain eligible. A missing thread_id
+    /// column is not treated as evidence that every row is threadless.
+    /// </summary>
+    public bool IncludeThreadless { get; init; } = true;
+
+    /// <summary>Opt in to transferring content-bearing log bodies into the local read model.</summary>
+    public bool IncludeMessages { get; init; }
+}
+
+/// <summary>Observed optional columns in one Codex logs source instance.</summary>
+public sealed record CodexLogsCapabilities(
+    string? MessageColumn,
+    bool HasModulePath,
+    bool HasFile,
+    bool HasLine,
+    bool HasThreadId,
+    bool HasProcessUuid,
+    bool HasEstimatedBytes)
+{
+    public bool HasMessages => MessageColumn is not null;
+
+    public bool HasRequiredSchema { get; init; }
+
+    public IReadOnlyList<string> AvailableOptionalColumns =>
+    [
+        .. (HasMessages ? [MessageColumn!] : Array.Empty<string>()),
+        .. (HasModulePath ? ["module_path"] : Array.Empty<string>()),
+        .. (HasFile ? ["file"] : Array.Empty<string>()),
+        .. (HasLine ? ["line"] : Array.Empty<string>()),
+        .. (HasThreadId ? ["thread_id"] : Array.Empty<string>()),
+        .. (HasProcessUuid ? ["process_uuid"] : Array.Empty<string>()),
+        .. (HasEstimatedBytes ? ["estimated_bytes"] : Array.Empty<string>())
+    ];
+
+    public static CodexLogsCapabilities None { get; } = new(null, false, false, false, false, false, false);
+}
+
+/// <summary>
+/// A source-native log row. Message text is present only when the query explicitly requested it;
+/// HasMessage remains available without transferring the content-bearing value.
+/// </summary>
+public sealed record CodexLogEntry(
+    long Id,
+    long TimestampUnixSeconds,
+    long TimestampNanoseconds,
+    string Level,
+    string Target,
+    string? ModulePath,
+    string? File,
+    long? Line,
+    string? ThreadId,
+    string? ProcessUuid,
+    bool HasMessage,
+    string? Message,
+    long? EstimatedBytes)
+{
+    public DateTimeOffset? TimestampUtc
+    {
+        get
+        {
+            try
+            {
+                return DateTimeOffset.FromUnixTimeSeconds(TimestampUnixSeconds)
+                    .AddTicks(TimestampNanoseconds / 100);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return null;
+            }
+        }
+    }
+}
+
+/// <summary>One bounded query result from the dedicated Codex logs source.</summary>
+public sealed record CodexLogsSource(
+    CodexNativeSourceInfo Source,
+    IReadOnlyList<CodexLogEntry> Entries,
+    CodexLogsQuery Query,
+    CodexLogsCapabilities Capabilities,
+    long? TotalMatchingRows,
+    bool HasMoreRows,
+    IReadOnlyList<string> Warnings);
 
 /// <summary>Availability of a source/capability at one inspection point.</summary>
 public enum CodexNativeSourceAvailability
@@ -179,6 +293,7 @@ public sealed record CodexThreadSummariesSource(
 
 public sealed record CodexNativeSourcesSnapshot(
     DateTimeOffset CapturedAtUtc,
+    CodexLogsSource Logs,
     CodexMemorySource Memory,
     CodexGoalsSource Goals,
     CodexQueueSource Queue,
@@ -188,6 +303,7 @@ public sealed record CodexNativeSourcesSnapshot(
 {
     public IReadOnlyList<CodexNativeSourceInfo> Sources =>
     [
+        Logs.Source,
         Memory.Source,
         Goals.Source,
         Queue.Source,

@@ -293,14 +293,15 @@ item JSON is not rendered into the summary and is never written to TajsTokens du
 ## Auxiliary Codex source observability
 
 The auxiliary Codex source read model is intentionally provider-native and read-only. It discovers
-the current `memories_*`, `goals_*`, `queue_*`, `state_*`, `codex-dev.db`, and
+the current `logs_*`, `memories_*`, `goals_*`, `queue_*`, `state_*`, `codex-dev.db`, and
 `codex-thread-summaries-dev.db` instances through the same explorer boundary used for raw SQLite
 inspection. Each source result retains its selected path and discovery provenance, capture time,
 schema fingerprint, supported table names, the latest `_sqlx_migrations.version` when exposed, and
 the corroborating upstream reference commit (`8e3b180d49`). The installed source
 remains authoritative; the commit is not treated as a version guarantee.
 
-The model currently exposes bounded (250-row) metadata reads for the observed `jobs` and
+The model currently exposes bounded (250-row) source-native log reads from the observed `logs`
+table, plus bounded metadata reads for the observed `jobs` and
 `stage1_outputs` memory tables, `thread_goals` and continuation-deferral rows, `queued_items` and
 `queued_thread_revisions`, `thread_artifacts`, `local_thread_catalog`, and
 `thread_turn_summaries`. Native status, revision, ordering, nullable fields, and source identities
@@ -309,6 +310,14 @@ rows is reported as empty; a missing file is unavailable; and open/query failure
 Content-bearing memory, goal, queue, artifact, catalog, and summary values are never written to the
 TajsTokens database by this surface. The UI shows metadata and content-presence flags while raw
 values remain available only through deliberate local inspection.
+
+The logs view preserves the source-native `id`, `ts`, `ts_nanos`, `level`, `target`, optional
+`module_path`, `file`, `line`, `thread_id`, `process_uuid`, and `estimated_bytes` fields. It applies level, target,
+time-range, and available optional-column filters in SQLite before returning a bounded page ordered
+by timestamp and ID. Log body text (`feedback_log_body` in the current schema, or legacy `message`)
+is not selected by default; the user must explicitly enable local body inspection, and the body is
+never written to TajsTokens durable storage. A missing optional column remains unavailable rather
+than being inferred from another field; in particular, `target` is not relabelled as a category.
 
 Artifacts remain an explicit empty/unsupported capability when no rows are observed. No rows are
 manufactured and no artifact lifecycle or relationship is inferred from the table name alone.

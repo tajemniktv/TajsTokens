@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using TajsTokens.Core.Models;
 
 namespace TajsTokens.Infrastructure.Services;
 
@@ -378,6 +379,230 @@ public sealed class CodexStateDbExplorerService
             },
             cancellationToken);
     }
+
+    /// <summary>
+    /// Reads a bounded, source-ordered page from the dedicated logs table. The query text is built
+    /// only from fixed source-native column names; all user filters, limits and offsets are bound
+    /// parameters. Log bodies are selected only when the caller explicitly opts in.
+    /// </summary>
+    internal async Task<CodexStateRawPage> ReadLogsPageAsync(
+        string databasePath,
+        CodexLogsQuery query,
+        CodexLogsCapabilities capabilities,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        ArgumentNullException.ThrowIfNull(capabilities);
+
+        var pageIndex = Math.Max(0, query.PageIndex);
+        var pageSize = Math.Clamp(query.PageSize, 1, MaxPageSize - 1);
+        var offset = checked((long)pageIndex * pageSize);
+        var filters = BuildLogFilters(query, capabilities, out var parameters);
+        var candidate = CreateCandidateForPath(databasePath);
+        await using var connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
+
+        await using var countCommand = connection.CreateCommand();
+        countCommand.CommandText = $"SELECT COUNT(*) FROM logs{filters};";
+        AddLogParameters(countCommand, parameters);
+        var scalar = await countCommand.ExecuteScalarAsync(cancellationToken);
+        var totalRows = scalar is null or DBNull ? 0L : Convert.ToInt64(scalar, CultureInfo.InvariantCulture);
+
+        var messageColumn = capabilities.MessageColumn;
+        var messageExpression = query.IncludeMessages && messageColumn is not null
+            ? QuoteIdentifier(messageColumn)
+            : "NULL";
+        var messagePresentExpression = messageColumn is null
+            ? "0"
+            : $"{QuoteIdentifier(messageColumn)} IS NOT NULL";
+        var select = $"""
+            SELECT
+                id AS id,
+                ts AS ts,
+                ts_nanos AS ts_nanos,
+                level AS level,
+                target AS target,
+                {messageExpression} AS message,
+                {messagePresentExpression} AS has_message,
+                {SelectLogColumn(capabilities.HasModulePath, "module_path")} AS module_path,
+                {SelectLogColumn(capabilities.HasFile, "file")} AS file,
+                {SelectLogColumn(capabilities.HasLine, "line")} AS line,
+                {SelectLogColumn(capabilities.HasThreadId, "thread_id")} AS thread_id,
+                {SelectLogColumn(capabilities.HasProcessUuid, "process_uuid")} AS process_uuid,
+                {SelectLogColumn(capabilities.HasEstimatedBytes, "estimated_bytes")} AS estimated_bytes
+            FROM logs
+            {filters}
+            ORDER BY ts DESC, ts_nanos DESC, id DESC
+            LIMIT $limit OFFSET $offset;
+            """;
+
+        return await ReadRawPageAsync(
+            connection,
+            candidate.Path,
+            "logs",
+            pageIndex,
+            pageSize,
+            totalRows,
+            () =>
+            {
+                var command = new SqliteCommand(select, connection);
+                AddLogParameters(command, parameters);
+                command.Parameters.AddWithValue("$limit", pageSize + 1);
+                command.Parameters.AddWithValue("$offset", offset);
+                return command;
+            },
+            cancellationToken);
+    }
+
+    private static string SelectLogColumn(bool available, string columnName) =>
+        available ? QuoteIdentifier(columnName) : "NULL";
+
+    private static string BuildLogFilters(
+        CodexLogsQuery query,
+        CodexLogsCapabilities capabilities,
+        out IReadOnlyList<(string Name, object Value)> parameters)
+    {
+        var clauses = new List<string>();
+        var values = new List<(string Name, object Value)>();
+
+        var levels = (query.Levels ?? Array.Empty<string>())
+            .Select(level => level?.Trim())
+            .Where(level => !string.IsNullOrWhiteSpace(level))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(32)
+            .ToArray();
+        if (levels.Length > 0)
+        {
+            var names = new List<string>(levels.Length);
+            for (var index = 0; index < levels.Length; index++)
+            {
+                var name = $"$level{index.ToString(CultureInfo.InvariantCulture)}";
+                names.Add(name);
+                values.Add((name, levels[index]!));
+            }
+
+            clauses.Add($"level COLLATE NOCASE IN ({string.Join(", ", names)})");
+        }
+
+        if (query.FromUtc is { } fromUtc)
+        {
+            var name = "$from_ts";
+            clauses.Add("ts >= $from_ts");
+            values.Add((name, ToSourceTimestampBound(fromUtc)));
+        }
+
+        if (query.ToUtcExclusive is { } toUtcExclusive)
+        {
+            var name = "$to_ts";
+            clauses.Add("ts < $to_ts");
+            values.Add((name, ToSourceTimestampBound(toUtcExclusive)));
+        }
+
+        AddContainsFilter(clauses, values, "target", query.TargetContains, "$target");
+        AddOptionalContainsFilter(clauses, values, capabilities.HasModulePath, "module_path", query.ModulePathContains, "$module_path");
+        AddOptionalContainsFilter(clauses, values, capabilities.HasFile, "file", query.FileContains, "$file");
+
+        AddOptionalExactFilter(clauses, values, capabilities.HasThreadId, "thread_id", query.ThreadId, "$thread_id");
+        AddOptionalExactFilter(clauses, values, capabilities.HasProcessUuid, "process_uuid", query.ProcessUuid, "$process_uuid");
+
+        if (!query.IncludeThreadless)
+        {
+            clauses.Add(capabilities.HasThreadId ? "thread_id IS NOT NULL" : "1 = 0");
+        }
+
+        parameters = values;
+        return clauses.Count == 0
+            ? string.Empty
+            : $" WHERE {string.Join(" AND ", clauses)}";
+    }
+
+    private static void AddContainsFilter(
+        ICollection<string> clauses,
+        ICollection<(string Name, object Value)> parameters,
+        string columnName,
+        string? value,
+        string parameterName)
+    {
+        var normalized = TrimToNull(value);
+        if (normalized is null)
+        {
+            return;
+        }
+
+        clauses.Add($"{QuoteIdentifier(columnName)} LIKE {parameterName} ESCAPE '\\' COLLATE NOCASE");
+        parameters.Add((parameterName, $"%{EscapeLikePattern(normalized)}%"));
+    }
+
+    private static void AddOptionalContainsFilter(
+        ICollection<string> clauses,
+        ICollection<(string Name, object Value)> parameters,
+        bool available,
+        string columnName,
+        string? value,
+        string parameterName)
+    {
+        if (TrimToNull(value) is null)
+        {
+            return;
+        }
+
+        if (!available)
+        {
+            clauses.Add("1 = 0");
+            return;
+        }
+
+        AddContainsFilter(clauses, parameters, columnName, value, parameterName);
+    }
+
+    private static void AddOptionalExactFilter(
+        ICollection<string> clauses,
+        ICollection<(string Name, object Value)> parameters,
+        bool available,
+        string columnName,
+        string? value,
+        string parameterName)
+    {
+        var normalized = TrimToNull(value);
+        if (normalized is null)
+        {
+            return;
+        }
+
+        if (!available)
+        {
+            clauses.Add("1 = 0");
+            return;
+        }
+
+        clauses.Add($"{QuoteIdentifier(columnName)} = {parameterName}");
+        parameters.Add((parameterName, normalized));
+    }
+
+    private static void AddLogParameters(
+        SqliteCommand command,
+        IReadOnlyList<(string Name, object Value)> parameters)
+    {
+        foreach (var (name, value) in parameters)
+        {
+            command.Parameters.AddWithValue(name, value);
+        }
+    }
+
+    private static string? TrimToNull(string? value) =>
+        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static long ToSourceTimestampBound(DateTimeOffset value)
+    {
+        var seconds = value.ToUnixTimeSeconds();
+        return value > DateTimeOffset.FromUnixTimeSeconds(seconds)
+            ? checked(seconds + 1)
+            : seconds;
+    }
+
+    private static string EscapeLikePattern(string value) =>
+        value.Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("%", "\\%", StringComparison.Ordinal)
+            .Replace("_", "\\_", StringComparison.Ordinal);
 
     /// <summary>Reads rows whose source-native relation key is one of the supplied values.</summary>
     internal async Task<CodexStateRawPage> ReadRowsByTextValuesAsync(

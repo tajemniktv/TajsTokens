@@ -275,6 +275,230 @@ public sealed class CodexNativeSourcesServiceTests
     }
 
     [Fact]
+    public async Task ReadLogsAsync_MapsCurrentSchemaAndKeepsBodiesOptIn()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-native-logs-");
+        try
+        {
+            await CreateDatabaseAsync(Path.Combine(directory.FullName, "logs_2.sqlite"), """
+                CREATE TABLE logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts INTEGER NOT NULL,
+                    ts_nanos INTEGER NOT NULL,
+                    level TEXT NOT NULL,
+                    target TEXT NOT NULL,
+                    feedback_log_body TEXT,
+                    module_path TEXT,
+                    file TEXT,
+                    line INTEGER,
+                    thread_id TEXT,
+                    process_uuid TEXT,
+                    estimated_bytes INTEGER NOT NULL DEFAULT 0
+                );
+                INSERT INTO logs VALUES (1, 100, 20, 'INFO', 'codex::old', 'older body', 'module::old', 'old.rs', 10, NULL, 'process-1', 11);
+                INSERT INTO logs VALUES (2, 200, 30, 'ERROR', 'codex::new', 'new body', 'module::new', 'new.rs', 20, 'thread-1', 'process-1', 9);
+                """);
+
+            var service = new CodexNativeSourcesService(directory.FullName);
+            var withoutBodies = await service.ReadLogsAsync(new CodexLogsQuery { PageSize = 10 });
+
+            Assert.Equal(CodexNativeSourceAvailability.Available, withoutBodies.Source.Availability);
+            Assert.Equal("8e3b180d49", withoutBodies.Source.UpstreamCorroborationCommit);
+            Assert.Equal("feedback_log_body", withoutBodies.Capabilities.MessageColumn);
+            Assert.True(withoutBodies.Capabilities.HasThreadId);
+            Assert.Equal(2, withoutBodies.TotalMatchingRows);
+            Assert.Equal(2, withoutBodies.Entries.Count);
+            var newest = withoutBodies.Entries[0];
+            Assert.Equal(2, newest.Id);
+            Assert.Equal(200, newest.TimestampUnixSeconds);
+            Assert.Equal("ERROR", newest.Level);
+            Assert.Equal("thread-1", newest.ThreadId);
+            Assert.Equal(9, newest.EstimatedBytes);
+            Assert.True(newest.HasMessage);
+            Assert.Null(newest.Message);
+
+            var withBodies = await service.ReadLogsAsync(new CodexLogsQuery
+            {
+                PageSize = 10,
+                IncludeMessages = true
+            });
+
+            Assert.Equal("new body", withBodies.Entries[0].Message);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ReadLogsAsync_FiltersAndBoundsAtTheSourceBoundary()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-native-logs-bounds-");
+        try
+        {
+            var rows = string.Join(Environment.NewLine, Enumerable.Range(1, 300).Select(index =>
+                $"INSERT INTO logs VALUES ({index}, {1000 + index}, {index * 1000}, '{(index % 2 == 0 ? "ERROR" : "INFO")}', 'target-{index % 3}', 'body-{index}', 'module-{index % 2}', 'source-{index}.rs', {index}, '{(index % 2 == 0 ? "thread-1" : "")}', 'process-1', 1);"));
+            await CreateDatabaseAsync(Path.Combine(directory.FullName, "logs_2.sqlite"), $"""
+                CREATE TABLE logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts INTEGER NOT NULL,
+                    ts_nanos INTEGER NOT NULL,
+                    level TEXT NOT NULL,
+                    target TEXT NOT NULL,
+                    feedback_log_body TEXT,
+                    module_path TEXT,
+                    file TEXT,
+                    line INTEGER,
+                    thread_id TEXT,
+                    process_uuid TEXT,
+                    estimated_bytes INTEGER NOT NULL DEFAULT 0
+                );
+                {rows}
+                """);
+
+            var service = new CodexNativeSourcesService(directory.FullName);
+            var firstPage = await service.ReadLogsAsync(new CodexLogsQuery { PageSize = 25 });
+
+            Assert.Equal(25, firstPage.Entries.Count);
+            Assert.True(firstPage.HasMoreRows);
+            Assert.Equal(300, firstPage.TotalMatchingRows);
+            Assert.Equal(300, firstPage.Entries[0].Id);
+            Assert.Equal(276, firstPage.Entries[^1].Id);
+
+            var filtered = await service.ReadLogsAsync(new CodexLogsQuery
+            {
+                PageSize = 100,
+                Levels = ["error"],
+                TargetContains = "target-1",
+                ModulePathContains = "module-0",
+                FromUtc = DateTimeOffset.FromUnixTimeSeconds(1100),
+                ToUtcExclusive = DateTimeOffset.FromUnixTimeSeconds(1300),
+                IncludeThreadless = false
+            });
+
+            Assert.NotEmpty(filtered.Entries);
+            Assert.All(filtered.Entries, entry =>
+            {
+                Assert.Equal("ERROR", entry.Level);
+                Assert.Contains("target-1", entry.Target, StringComparison.Ordinal);
+                Assert.Equal("module-0", entry.ModulePath);
+                Assert.Equal("thread-1", entry.ThreadId);
+                Assert.InRange(entry.TimestampUnixSeconds, 1100, 1299);
+            });
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ReadLogsAsync_DistinguishesEmptyUnsupportedAndUnavailableSchemas()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-native-logs-states-");
+        try
+        {
+            await CreateDatabaseAsync(Path.Combine(directory.FullName, "logs_2.sqlite"), """
+                CREATE TABLE logs (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, ts_nanos INTEGER NOT NULL, level TEXT NOT NULL, target TEXT NOT NULL);
+                """);
+
+            var empty = await new CodexNativeSourcesService(directory.FullName).ReadLogsAsync();
+            Assert.Equal(CodexNativeSourceAvailability.Empty, empty.Source.Availability);
+            Assert.Empty(empty.Entries);
+            Assert.Equal(0, empty.TotalMatchingRows);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+
+        var legacyDirectory = Directory.CreateTempSubdirectory("tajstokens-native-logs-legacy-");
+        try
+        {
+            await CreateDatabaseAsync(Path.Combine(legacyDirectory.FullName, "logs_1.sqlite"), """
+                CREATE TABLE logs (id INTEGER PRIMARY KEY, ts INTEGER NOT NULL, ts_nanos INTEGER NOT NULL, level TEXT NOT NULL, target TEXT NOT NULL, message TEXT);
+                INSERT INTO logs VALUES (1, 100, 0, 'WARN', 'legacy-target', 'legacy body');
+                """);
+
+            var legacy = await new CodexNativeSourcesService(legacyDirectory.FullName).ReadLogsAsync(new CodexLogsQuery
+            {
+                IncludeMessages = true,
+                ThreadId = "thread-that-cannot-exist"
+            });
+            Assert.Equal(CodexNativeSourceAvailability.Available, legacy.Source.Availability);
+            Assert.Equal("message", legacy.Capabilities.MessageColumn);
+            Assert.False(legacy.Capabilities.HasThreadId);
+            Assert.Empty(legacy.Entries);
+            Assert.Contains(legacy.Warnings, warning =>
+                warning.Contains("thread_id filter is unavailable", StringComparison.OrdinalIgnoreCase));
+
+            var legacyWithoutThreadFilter = await new CodexNativeSourcesService(legacyDirectory.FullName).ReadLogsAsync(new CodexLogsQuery
+            {
+                IncludeMessages = true
+            });
+            Assert.Equal("legacy body", Assert.Single(legacyWithoutThreadFilter.Entries).Message);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            legacyDirectory.Delete(recursive: true);
+        }
+
+        var unsupportedDirectory = Directory.CreateTempSubdirectory("tajstokens-native-logs-unsupported-");
+        try
+        {
+            await CreateDatabaseAsync(Path.Combine(unsupportedDirectory.FullName, "logs_2.sqlite"), "CREATE TABLE logs (id INTEGER PRIMARY KEY, message TEXT);");
+
+            var unsupported = await new CodexNativeSourcesService(unsupportedDirectory.FullName).ReadLogsAsync();
+            Assert.Equal(CodexNativeSourceAvailability.Unsupported, unsupported.Source.Availability);
+            Assert.Contains("required columns", unsupported.Warnings.Single(), StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            unsupportedDirectory.Delete(recursive: true);
+        }
+
+        var unavailableDirectory = Directory.CreateTempSubdirectory("tajstokens-native-logs-unavailable-");
+        try
+        {
+            var unavailable = await new CodexNativeSourcesService(unavailableDirectory.FullName).ReadLogsAsync();
+            Assert.Equal(CodexNativeSourceAvailability.Unavailable, unavailable.Source.Availability);
+            Assert.Equal("8e3b180d49", unavailable.Source.UpstreamCorroborationCommit);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            unavailableDirectory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task ReadLogsAsync_ReportsInvalidSourceAsAnError()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-native-logs-error-");
+        try
+        {
+            File.WriteAllText(Path.Combine(directory.FullName, "logs_2.sqlite"), "not a sqlite database");
+
+            var result = await new CodexNativeSourcesService(directory.FullName).ReadLogsAsync();
+
+            Assert.Equal(CodexNativeSourceAvailability.Error, result.Source.Availability);
+            Assert.Equal(directory.FullName + Path.DirectorySeparatorChar + "logs_2.sqlite", result.Source.DatabasePath);
+            Assert.Equal("codex-home", result.Source.DiscoveryKind);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task ReadAsync_CheckedInCodexSnapshotsRemainInspectable()
     {
         var snapshotDirectory = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "private"));
