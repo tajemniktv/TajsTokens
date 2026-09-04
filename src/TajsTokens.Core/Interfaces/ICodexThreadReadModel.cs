@@ -8,6 +8,10 @@ namespace TajsTokens.Core.Interfaces;
 /// </summary>
 public interface ICodexThreadReadModel
 {
+    Task<CodexThreadNavigationResult> BrowseThreadsAsync(
+        CodexThreadNavigationQuery query,
+        CancellationToken cancellationToken);
+
     Task<CodexThreadSearchResult> SearchThreadsAsync(
         string? search,
         int take,

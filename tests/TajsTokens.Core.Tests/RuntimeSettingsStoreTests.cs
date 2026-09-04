@@ -1,4 +1,5 @@
 using System.Text.Json;
+using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 using TajsTokens.Infrastructure.Persistence;
 
@@ -23,6 +24,10 @@ public sealed class RuntimeSettingsStoreTests
             Assert.Equal([30, 20, 10, 5], settings.LowQuotaThresholds);
             Assert.False(settings.TokscaleReconciliationEnabled);
             Assert.False(settings.TokscaleFallbackEnabled);
+            Assert.Equal("codex", settings.CodexCliCommand);
+            Assert.Equal("exec" + Environment.NewLine + "--json", settings.CodexCliArguments);
+            Assert.Equal(CodexCliPromptMode.StandardInput, settings.CodexCliPromptMode);
+            Assert.Equal(300, settings.CodexCliTimeoutSeconds);
             Assert.Equal(RuntimeSettings.CurrentSchemaVersion, settings.SchemaVersion);
             Assert.True(File.Exists(path));
 
@@ -53,6 +58,8 @@ public sealed class RuntimeSettingsStoreTests
             Assert.True(settings.RunInBackground);
             Assert.False(settings.TokscaleReconciliationEnabled);
             Assert.False(settings.TokscaleFallbackEnabled);
+            Assert.Equal("codex", settings.CodexCliCommand);
+            Assert.Equal(300, settings.CodexCliTimeoutSeconds);
             Assert.Equal(RuntimeSettings.CurrentSchemaVersion, settings.SchemaVersion);
         }
         finally
@@ -86,6 +93,8 @@ public sealed class RuntimeSettingsStoreTests
             Assert.Equal([20, 10], settings.LowQuotaThresholds);
             Assert.False(settings.TokscaleReconciliationEnabled);
             Assert.False(settings.TokscaleFallbackEnabled);
+            Assert.Equal("codex", settings.CodexCliCommand);
+            Assert.Equal(CodexCliPromptMode.StandardInput, settings.CodexCliPromptMode);
         }
         finally
         {
@@ -143,7 +152,12 @@ public sealed class RuntimeSettingsStoreTests
                 LowQuotaThresholds = [10, 30, 10, -1, 500],
                 NotificationsEnabled = false,
                 TokscaleReconciliationEnabled = true,
-                TokscaleFallbackEnabled = true
+                TokscaleFallbackEnabled = true,
+                CodexCliCommand = "  custom-codex  ",
+                CodexCliArguments = " exec \r\n\r\n --json ",
+                CodexCliWorkingDirectory = "  C:\\repo  ",
+                CodexCliPromptMode = CodexCliPromptMode.LastArgument,
+                CodexCliTimeoutSeconds = 99999
             });
 
             var settings = store.Load();
@@ -153,6 +167,11 @@ public sealed class RuntimeSettingsStoreTests
             Assert.False(settings.NotificationsEnabled);
             Assert.True(settings.TokscaleReconciliationEnabled);
             Assert.True(settings.TokscaleFallbackEnabled);
+            Assert.Equal("custom-codex", settings.CodexCliCommand);
+            Assert.Equal("exec" + Environment.NewLine + "--json", settings.CodexCliArguments);
+            Assert.Equal("C:\\repo", settings.CodexCliWorkingDirectory);
+            Assert.Equal(CodexCliPromptMode.LastArgument, settings.CodexCliPromptMode);
+            Assert.Equal(3600, settings.CodexCliTimeoutSeconds);
         }
         finally
         {

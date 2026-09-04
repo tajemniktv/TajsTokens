@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 
 namespace TajsTokens.App.Pages;
@@ -33,6 +34,18 @@ public sealed partial class SettingsPage : Page
             return;
         }
 
+        if (string.IsNullOrWhiteSpace(CodexCliCommandBox.Text))
+        {
+            ShowStatus(InfoBarSeverity.Error, "Invalid Codex CLI", "Enter an executable path or a command available on PATH.");
+            return;
+        }
+
+        if (double.IsNaN(CodexCliTimeoutBox.Value) || CodexCliTimeoutBox.Value is < 5 or > 3600)
+        {
+            ShowStatus(InfoBarSeverity.Error, "Invalid harness timeout", "Choose a timeout between 5 and 3600 seconds.");
+            return;
+        }
+
         if (!TryParseThresholds(ThresholdsTextBox.Text, out var thresholds, out var thresholdError))
         {
             ShowStatus(InfoBarSeverity.Error, "Invalid notification thresholds", thresholdError!);
@@ -48,7 +61,12 @@ public sealed partial class SettingsPage : Page
             NotificationsEnabled = NotificationsToggle.IsOn,
             LowQuotaThresholds = thresholds,
             TokscaleReconciliationEnabled = TokscaleReconciliationToggle.IsOn,
-            TokscaleFallbackEnabled = TokscaleFallbackToggle.IsOn
+            TokscaleFallbackEnabled = TokscaleFallbackToggle.IsOn,
+            CodexCliCommand = CodexCliCommandBox.Text,
+            CodexCliArguments = CodexCliArgumentsBox.Text,
+            CodexCliWorkingDirectory = CodexCliWorkingDirectoryBox.Text,
+            CodexCliPromptMode = ParsePromptMode(),
+            CodexCliTimeoutSeconds = (int)Math.Round(CodexCliTimeoutBox.Value, MidpointRounding.AwayFromZero)
         };
 
         SaveButton.IsEnabled = false;
@@ -82,6 +100,16 @@ public sealed partial class SettingsPage : Page
         ThresholdsTextBox.Text = string.Join(", ", settings.LowQuotaThresholds);
         TokscaleReconciliationToggle.IsOn = settings.TokscaleReconciliationEnabled;
         TokscaleFallbackToggle.IsOn = settings.TokscaleFallbackEnabled;
+        CodexCliCommandBox.Text = settings.CodexCliCommand;
+        CodexCliArgumentsBox.Text = settings.CodexCliArguments;
+        CodexCliWorkingDirectoryBox.Text = settings.CodexCliWorkingDirectory;
+        CodexCliPromptModeCombo.SelectedIndex = settings.CodexCliPromptMode switch
+        {
+            CodexCliPromptMode.StandardInput => 0,
+            CodexCliPromptMode.LastArgument => 1,
+            _ => 2
+        };
+        CodexCliTimeoutBox.Value = settings.CodexCliTimeoutSeconds;
         DataFolderText.Text = App.Services.DataFolder;
         DatabasePathText.Text = App.Services.DatabasePath;
         SettingsSchemaText.Text = $"Settings schema v{settings.SchemaVersion} · poll range 15–3600 s";
@@ -121,4 +149,12 @@ public sealed partial class SettingsPage : Page
         StatusInfoBar.Message = message;
         StatusInfoBar.IsOpen = true;
     }
+
+    private CodexCliPromptMode ParsePromptMode() =>
+        (CodexCliPromptModeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() switch
+        {
+            "LastArgument" => CodexCliPromptMode.LastArgument,
+            "None" => CodexCliPromptMode.None,
+            _ => CodexCliPromptMode.StandardInput
+        };
 }

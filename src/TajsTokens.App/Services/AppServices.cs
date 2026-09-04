@@ -37,6 +37,7 @@ public sealed class AppServices
         CodexNativeSources = new CodexNativeSourcesService(explorer: CodexStateExplorer);
         CodexThreadObservability = new CodexThreadObservabilityService();
         CodexThreadReadModel = new CodexThreadReadModel(CodexThreadObservability);
+        CodexCliHarness = new CodexCliHarnessService();
         TokscaleProvider = new TokscaleProvider();
         NativeCodexAccountingProvider = new SqliteNativeCodexAccountingProvider(DatabasePath);
         CodexTokenAccountingProvider = new NativeFirstCodexAccountingProvider(
@@ -75,6 +76,7 @@ public sealed class AppServices
 
     /// <summary>Product-facing provider-native Codex thread query boundary.</summary>
     public ICodexThreadReadModel CodexThreadReadModel { get; }
+    public ICodexCliHarness CodexCliHarness { get; }
     public ITokscaleProvider TokscaleProvider { get; }
     public ICodexTokenAccountingProvider NativeCodexAccountingProvider { get; }
     public ICodexTokenAccountingProvider CodexTokenAccountingProvider { get; }

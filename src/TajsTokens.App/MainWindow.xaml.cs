@@ -9,7 +9,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        ContentFrame.Navigate(typeof(OverviewPage));
+        ContentFrame.Navigate(typeof(CodexCliHarnessPage));
     }
 
     private void OnNavigationSelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
@@ -28,11 +28,9 @@ public sealed partial class MainWindow : Window
         var pageType = page switch
         {
             "overview" => typeof(OverviewPage),
-            "usage" => typeof(UsagePage),
-            "observatory" => typeof(ObservatoryPage),
-            "codex-threads" => typeof(CodexThreadsPage),
-            "codex-sources" => typeof(CodexSourcesPage),
-            "state-db" => typeof(CodexStateDbExplorerPage),
+            "codex-cli" => typeof(CodexCliHarnessPage),
+            "codex" => typeof(CodexPage),
+            "codex-data" => typeof(CodexDataExplorerPage),
             "forecasts" => typeof(ForecastsPage),
             "analytics" => typeof(AnalyticsPage),
             "diagnostics" => typeof(PlaceholderPage),
@@ -42,11 +40,9 @@ public sealed partial class MainWindow : Window
 
         var parameter = page switch
         {
-            "usage" => "Usage",
-            "observatory" => "Codex Observatory",
-            "codex-threads" => "Codex Threads",
-            "codex-sources" => "Codex Sources",
-            "state-db" => "State DB Explorer",
+            "codex-cli" => "Codex CLI Harness",
+            "codex" => "Codex",
+            "codex-data" => "Codex Data Explorer",
             "forecasts" => "Forecasts",
             "analytics" => "Analytics",
             "diagnostics" => "Diagnostics",

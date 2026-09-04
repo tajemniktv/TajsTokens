@@ -46,9 +46,11 @@ public sealed class CodexThreadObservabilityService
         int take,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var observations = new List<CodexThreadCatalogEntry>();
         var warnings = new List<string>();
         var coverageWarnings = new List<string>();
+        var catalogCapabilityAvailable = false;
         var normalizedSearch = search?.Trim() ?? string.Empty;
 
         foreach (var candidate in OrderCandidates())
@@ -61,6 +63,7 @@ public sealed class CodexThreadObservabilityService
                 {
                     continue;
                 }
+                catalogCapabilityAvailable = true;
 
                 var read = await ReadRowsAsync(
                     connection,
@@ -117,8 +120,337 @@ public sealed class CodexThreadObservabilityService
         {
             ReconciliationPolicy = CatalogReconciliationPolicy,
             SourceRowsTruncated = coverageWarnings.Count > 0,
+            CoverageWarnings = coverageWarnings,
+            SourceCapabilityAvailable = catalogCapabilityAvailable
+        };
+    }
+
+    /// <summary>
+    /// Builds the bounded navigation tree used by the Codex browser. Catalog rows and spawn
+    /// edges are acquired independently from every readable state source; the resulting tree is
+    /// only a presentation projection and keeps source-qualified observations beside it.
+    /// </summary>
+    public async Task<CodexThreadNavigationResult> BrowseThreadsAsync(
+        CodexThreadNavigationQuery query,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        // Read the complete bounded catalog before filtering so a matching child can retain its
+        // parent chain. SearchThreadsAsync already applies the catalog reconciliation policy.
+        var catalog = await SearchThreadsAsync(string.Empty, MaxCatalogRows, cancellationToken);
+        var warnings = new List<string>(catalog.Warnings);
+        var coverageWarnings = new List<string>(catalog.CoverageWarnings);
+        var allEntries = catalog.Entries
+            .ToDictionary(entry => entry.Preferred.ThreadId, StringComparer.OrdinalIgnoreCase);
+        var entries = allEntries.Values
+            .Where(entry => query.IncludeArchived || entry.Preferred.Archived != true)
+            .ToDictionary(entry => entry.Preferred.ThreadId, StringComparer.OrdinalIgnoreCase);
+
+        var edgeObservations = new List<CodexThreadSpawnEdgeObservation>();
+        var projects = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var edgesTruncated = false;
+        var spawnEdgesCapabilityAvailable = false;
+        foreach (var candidate in OrderCandidates())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                await using var connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
+                if (await HasTableAsync(connection, "projects", cancellationToken))
+                {
+                    var projectRows = await ReadRowsAsync(connection, "projects", null, null, null, MaxCatalogRows, cancellationToken);
+                    foreach (var values in projectRows.Rows)
+                    {
+                        var id = ReadOptionalString(values, "id");
+                        if (string.IsNullOrWhiteSpace(id)) continue;
+                        var name = ReadOptionalString(values, "name");
+                        if (!string.IsNullOrWhiteSpace(name))
+                        {
+                            if (projects.TryGetValue(id, out var previousName) &&
+                                !string.Equals(previousName, name, StringComparison.Ordinal))
+                            {
+                                warnings.Add($"Project {id} has conflicting source names: {previousName} and {name}.");
+                            }
+                            else if (!projects.ContainsKey(id))
+                            {
+                                projects[id] = name;
+                            }
+                        }
+                    }
+                }
+
+                if (!await HasTableAsync(connection, "thread_spawn_edges", cancellationToken)) continue;
+                spawnEdgesCapabilityAvailable = true;
+                var read = await ReadRowsAsync(connection, "thread_spawn_edges", null, null, null, MaxHistoryRows, cancellationToken);
+                edgesTruncated |= read.IsTruncated;
+                if (read.IsTruncated)
+                {
+                    coverageWarnings.Add($"{candidate.Path}: thread_spawn_edges was truncated at {MaxHistoryRows:N0} rows.");
+                }
+
+                foreach (var values in read.Rows)
+                {
+                    var parent = ReadOptionalString(values, "parent_thread_id");
+                    var child = ReadOptionalString(values, "child_thread_id");
+                    if (string.IsNullOrWhiteSpace(parent) || string.IsNullOrWhiteSpace(child)) continue;
+                    edgeObservations.Add(new CodexThreadSpawnEdgeObservation(
+                        candidate.Path,
+                        candidate.SourceDescription,
+                        new CodexThreadSpawnEdge(parent, child, ReadOptionalString(values, "status") ?? "unknown", 0)));
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception exception) when (IsSourceFailure(exception))
+            {
+                warnings.Add($"{candidate.Path}: {Summarize(exception.Message)}");
+            }
+        }
+
+        var preferredEdges = edgeObservations
+            .GroupBy(observation => $"{observation.Edge.ParentThreadId}\u001f{observation.Edge.ChildThreadId}", StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                var ordered = group.OrderBy(observation => observation.SourcePath, StringComparer.OrdinalIgnoreCase).ToArray();
+                var statuses = ordered.Select(observation => observation.Edge.Status).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+                if (statuses.Length > 1)
+                {
+                    warnings.Add($"Spawn edge {ordered[0].Edge.ParentThreadId} → {ordered[0].Edge.ChildThreadId} has conflicting source statuses: {string.Join(", ", statuses)}.");
+                }
+                return ordered[0].Edge;
+            })
+            .ToArray();
+
+        var parentByChild = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var missingParentIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var edge in preferredEdges)
+        {
+            if (!entries.ContainsKey(edge.ChildThreadId)) continue;
+            if (!entries.ContainsKey(edge.ParentThreadId) && !allEntries.ContainsKey(edge.ParentThreadId))
+            {
+                missingParentIds.Add(edge.ChildThreadId);
+                warnings.Add($"Spawn edge from missing parent {edge.ParentThreadId} references thread {edge.ChildThreadId}.");
+            }
+            if (parentByChild.TryGetValue(edge.ChildThreadId, out var previousParent) &&
+                !string.Equals(previousParent, edge.ParentThreadId, StringComparison.OrdinalIgnoreCase))
+            {
+                warnings.Add($"Thread {edge.ChildThreadId} has multiple parents ({previousParent}, {edge.ParentThreadId}); the first edge is used for navigation.");
+                continue;
+            }
+            parentByChild[edge.ChildThreadId] = edge.ParentThreadId;
+        }
+
+        var normalizedSearch = query.Search?.Trim() ?? string.Empty;
+        var visibleIds = new HashSet<string>(
+            entries.Values
+                .Where(entry => string.IsNullOrWhiteSpace(normalizedSearch) || Matches(entry.Preferred, normalizedSearch))
+                .Select(entry => entry.Preferred.ThreadId),
+            StringComparer.OrdinalIgnoreCase);
+        foreach (var matchingId in visibleIds.ToArray())
+        {
+            var current = matchingId;
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            while (parentByChild.TryGetValue(current, out var parent) && visited.Add(current))
+            {
+                if (entries.ContainsKey(parent)) visibleIds.Add(parent);
+                current = parent;
+            }
+        }
+
+        var limitedIds = visibleIds
+            .Select(id => entries.TryGetValue(id, out var entry) ? entry : null)
+            .Where(entry => entry is not null)
+            .OrderByDescending(entry => entry!.Preferred.IsPinned)
+            .ThenByDescending(entry => Activity(entry!.Preferred))
+            .ThenBy(entry => entry!.Preferred.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .Take(Math.Clamp(query.Take, 1, MaxCatalogRows))
+            .Select(entry => entry!.Preferred.ThreadId)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // Ancestors are always retained even when the presentation cap is reached.
+        foreach (var id in limitedIds.ToArray())
+        {
+            var current = id;
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            while (parentByChild.TryGetValue(current, out var parent) && visited.Add(current))
+            {
+                if (entries.ContainsKey(parent)) limitedIds.Add(parent);
+                current = parent;
+            }
+        }
+
+        var childIds = new HashSet<string>(
+            parentByChild.Where(pair => limitedIds.Contains(pair.Key) && limitedIds.Contains(pair.Value)).Select(pair => pair.Key),
+            StringComparer.OrdinalIgnoreCase);
+        var roots = limitedIds.Where(id => !childIds.Contains(id)).ToList();
+        var edgeByParent = preferredEdges
+            .Where(edge => limitedIds.Contains(edge.ParentThreadId) && limitedIds.Contains(edge.ChildThreadId))
+            .GroupBy(edge => edge.ParentThreadId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.Select(edge => edge.ChildThreadId).Distinct(StringComparer.OrdinalIgnoreCase)
+                .OrderByDescending(child => Activity(entries[child].Preferred))
+                .ThenBy(child => child, StringComparer.OrdinalIgnoreCase)
+                .ToArray(), StringComparer.OrdinalIgnoreCase);
+
+        // A pure cycle has no node that qualifies as a root. Retain one deterministic entry point
+        // per disconnected component so the cycle warning is visible instead of dropping data.
+        var covered = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var rootId in roots)
+        {
+            CollectReachable(rootId, edgeByParent, covered);
+        }
+        foreach (var id in limitedIds.OrderBy(id => id, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!covered.Contains(id))
+            {
+                roots.Add(id);
+                CollectReachable(id, edgeByParent, covered);
+            }
+        }
+
+        var nodesByGroup = new Dictionary<string, List<CodexThreadNavigationNode>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var rootId in roots)
+        {
+            var node = BuildNavigationNode(rootId, entries, edgeByParent, missingParentIds, warnings, new HashSet<string>(StringComparer.OrdinalIgnoreCase));
+            var preferred = node.Thread.Preferred;
+            var key = GroupKey(preferred);
+            if (!nodesByGroup.TryGetValue(key, out var list)) nodesByGroup[key] = list = [];
+            list.Add(node);
+        }
+
+        var groups = nodesByGroup
+            .Select(pair =>
+            {
+                var first = pair.Value[0].Thread.Preferred;
+                var kind = !string.IsNullOrWhiteSpace(first.ProjectId)
+                    ? CodexThreadNavigationGroupKind.Project
+                    : string.IsNullOrWhiteSpace(first.Cwd)
+                        ? CodexThreadNavigationGroupKind.Unassigned
+                        : CodexThreadNavigationGroupKind.Workspace;
+                var workspace = kind == CodexThreadNavigationGroupKind.Workspace ? first.Cwd : null;
+                var projectId = kind == CodexThreadNavigationGroupKind.Project ? first.ProjectId : null;
+                var displayName = kind switch
+                {
+                    CodexThreadNavigationGroupKind.Project => $"Project · {(projects.TryGetValue(projectId!, out var name) ? name : projectId)}",
+                    CodexThreadNavigationGroupKind.Workspace => $"Workspace · {WorkspaceName(workspace!)}",
+                    _ => "Unassigned"
+                };
+                var orderedNodes = pair.Value.OrderByDescending(node => node.Thread.Preferred.IsPinned)
+                    .ThenByDescending(node => Activity(node.Thread.Preferred)).ToArray();
+                return new CodexThreadNavigationGroup(
+                    pair.Key,
+                    displayName,
+                    kind,
+                    projectId,
+                    workspace,
+                    orderedNodes,
+                    CountNodes(orderedNodes),
+                    orderedNodes.Select(node => Activity(node.Thread.Preferred)).Max());
+            })
+            .OrderByDescending(group => group.RootThreads.Any(ContainsPinned))
+            .ThenByDescending(group => group.LatestActivityAtUtc ?? DateTimeOffset.MinValue)
+            .ThenBy(group => group.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (catalog.SourceRowsTruncated)
+        {
+            coverageWarnings.Add("The thread catalog reached its bounded source-row limit; navigation may be incomplete.");
+        }
+        if (visibleIds.Count > limitedIds.Count)
+        {
+            coverageWarnings.Add($"Navigation presentation is bounded to {query.Take:N0} thread entries; matching rows beyond the bound are omitted.");
+        }
+
+        return new CodexThreadNavigationResult(groups, catalog, preferredEdges, edgeObservations, warnings)
+        {
+            GroupingPolicy = "Group each root thread by explicit project_id; otherwise use its source-native cwd as a Workspace fallback; descendants remain with their root family.",
+            SpawnEdgesTruncated = edgesTruncated,
+            SpawnEdgesCapabilityAvailable = spawnEdgesCapabilityAvailable,
+            ConflictWarnings = warnings.Where(warning => warning.Contains("conflict", StringComparison.OrdinalIgnoreCase) || warning.Contains("multiple parents", StringComparison.OrdinalIgnoreCase)).ToArray(),
             CoverageWarnings = coverageWarnings
         };
+    }
+
+    private static CodexThreadNavigationNode BuildNavigationNode(
+        string id,
+        IReadOnlyDictionary<string, CodexThreadCatalogSearchEntry> entries,
+        IReadOnlyDictionary<string, string[]> children,
+        IReadOnlySet<string> missingParentIds,
+        ICollection<string> warnings,
+        ISet<string> path)
+    {
+        if (!entries.TryGetValue(id, out var entry))
+        {
+            throw new InvalidOperationException($"Navigation edge referenced missing thread {id}.");
+        }
+        if (!path.Add(id))
+        {
+            warnings.Add($"Spawn topology cycle detected at thread {id}; the cycle edge was not expanded.");
+            return new CodexThreadNavigationNode(entry, Array.Empty<CodexThreadNavigationNode>(), CycleDetected: true);
+        }
+
+        var childNodes = new List<CodexThreadNavigationNode>();
+        if (children.TryGetValue(id, out var childIds))
+        {
+            foreach (var childId in childIds)
+            {
+                if (!entries.ContainsKey(childId))
+                {
+                    warnings.Add($"Spawn edge from {id} references missing child {childId}.");
+                    continue;
+                }
+                childNodes.Add(BuildNavigationNode(childId, entries, children, missingParentIds, warnings, new HashSet<string>(path, StringComparer.OrdinalIgnoreCase)));
+            }
+        }
+        return new CodexThreadNavigationNode(entry, childNodes, MissingParent: missingParentIds.Contains(id));
+    }
+
+    private static void CollectReachable(
+        string start,
+        IReadOnlyDictionary<string, string[]> children,
+        ISet<string> covered)
+    {
+        var pending = new Stack<string>();
+        pending.Push(start);
+        while (pending.Count > 0)
+        {
+            var id = pending.Pop();
+            if (!covered.Add(id)) continue;
+            if (!children.TryGetValue(id, out var descendants)) continue;
+            foreach (var child in descendants) pending.Push(child);
+        }
+    }
+
+    private static bool ContainsPinned(CodexThreadNavigationNode node) =>
+        node.Thread.Preferred.IsPinned == true || node.Children.Any(ContainsPinned);
+
+    private static string GroupKey(CodexThreadCatalogEntry entry) =>
+        !string.IsNullOrWhiteSpace(entry.ProjectId) ? "project:" + entry.ProjectId :
+        !string.IsNullOrWhiteSpace(entry.Cwd) ? "workspace:" + entry.Cwd : "unassigned";
+
+    private static DateTimeOffset Activity(CodexThreadCatalogEntry entry) =>
+        entry.RecencyAtUtc ?? entry.UpdatedAtUtc ?? entry.CreatedAtUtc ?? DateTimeOffset.MinValue;
+
+    private static int CountNodes(IEnumerable<CodexThreadNavigationNode> nodes)
+    {
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pending = new Stack<CodexThreadNavigationNode>(nodes.Reverse());
+        while (pending.Count > 0)
+        {
+            var node = pending.Pop();
+            if (!seen.Add(node.ThreadId)) continue;
+            foreach (var child in node.Children.Reverse()) pending.Push(child);
+        }
+        return seen.Count;
+    }
+
+    private static string WorkspaceName(string path)
+    {
+        var trimmed = path.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var name = Path.GetFileName(trimmed);
+        return string.IsNullOrWhiteSpace(name) ? path : name;
     }
 
     public async Task<CodexThreadReadResult> ReadThreadAsync(
@@ -497,7 +829,7 @@ public sealed class CodexThreadObservabilityService
             {
                 entry.ThreadId, entry.Title, entry.Name, entry.Preview, entry.Cwd,
                 entry.Model, entry.ModelProvider, entry.Source, entry.ThreadSource,
-                entry.ProjectId, entry.GitBranch
+                entry.ProjectId, entry.GitBranch, entry.AgentNickname, entry.AgentRole, entry.AgentPath
             }
             .Any(value => value?.Contains(search, StringComparison.OrdinalIgnoreCase) == true);
     }

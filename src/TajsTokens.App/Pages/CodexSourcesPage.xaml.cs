@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Navigation;
 using TajsTokens.Core.Models;
 
 namespace TajsTokens.App.Pages;
@@ -16,6 +17,7 @@ public sealed partial class CodexSourcesPage : Page
     private bool _logsReloadRequested;
     private int _requestedLogsPageIndex;
     private CodexLogsSource? _logs;
+    private string? _initialThreadId;
 
     public CodexSourcesPage()
     {
@@ -24,15 +26,36 @@ public sealed partial class CodexSourcesPage : Page
         Unloaded += OnUnloaded;
     }
 
+    protected override void OnNavigatedTo(NavigationEventArgs e)
+    {
+        base.OnNavigatedTo(e);
+        _initialThreadId = e.Parameter switch
+        {
+            CodexDataExplorerRequest request => request.ThreadId,
+            string text when text.StartsWith("thread:", StringComparison.OrdinalIgnoreCase) => text[7..],
+            string text when !string.IsNullOrWhiteSpace(text) => text,
+            _ => null
+        };
+    }
+
     private App App => (App)Application.Current;
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         _loaded = true;
+        if (!string.IsNullOrWhiteSpace(_initialThreadId))
+        {
+            FilterTextBox.Text = _initialThreadId;
+            LogThreadTextBox.Text = _initialThreadId;
+        }
         var previous = Interlocked.Exchange(ref _cancellation, new CancellationTokenSource());
         previous?.Cancel();
         previous?.Dispose();
         await LoadAsync(_cancellation.Token);
+        if (!string.IsNullOrWhiteSpace(_initialThreadId))
+        {
+            await LoadLogsForPageAsync(0);
+        }
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -78,6 +101,14 @@ public sealed partial class CodexSourcesPage : Page
         }
 
         await LoadLogsForPageAsync(_logs.Query.PageIndex + 1);
+    }
+
+    private void OnSourceSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (SourceList.SelectedItem is SourceRow row)
+        {
+            ShowSourcePane(row.Key);
+        }
     }
 
     private void OnFilterChanged(object sender, TextChangedEventArgs e)
@@ -202,6 +233,12 @@ public sealed partial class CodexSourcesPage : Page
             source.DisplayName,
             source.StatusText)).ToArray();
 
+        SourceList.ItemsSource = BuildSourceRows(snapshot);
+        if (SourceList.SelectedItem is not SourceRow)
+        {
+            SourceList.SelectedItem = ((IEnumerable<SourceRow>)SourceList.ItemsSource).FirstOrDefault();
+        }
+
         ApplySource(MemorySourceText, snapshot.Memory.Source);
         ApplySource(GoalsSourceText, snapshot.Goals.Source);
         ApplySource(QueueSourceText, snapshot.Queue.Source);
@@ -250,6 +287,7 @@ public sealed partial class CodexSourcesPage : Page
             SourceStatusList.ItemsSource = _snapshot.Sources.Select(source => new SourceStatusRow(
                 source.DisplayName,
                 source.StatusText)).ToArray();
+            SourceList.ItemsSource = BuildSourceRows(_snapshot);
         }
 
         ApplySource(LogsSourceText, logs.Source);
@@ -282,6 +320,48 @@ public sealed partial class CodexSourcesPage : Page
         LogPreviousButton.IsEnabled = logs.Query.PageIndex > 0 && logs.Source.IsInspectable;
         LogNextButton.IsEnabled = logs.HasMoreRows && logs.Source.IsInspectable;
     }
+
+    private void ShowSourcePane(string key)
+    {
+        LogsPane.Visibility = Visibility.Collapsed;
+        MemoryPane.Visibility = Visibility.Collapsed;
+        GoalsPane.Visibility = Visibility.Collapsed;
+        QueuePane.Visibility = Visibility.Collapsed;
+        ArtifactsPane.Visibility = Visibility.Collapsed;
+        CatalogPane.Visibility = Visibility.Collapsed;
+        SummariesPane.Visibility = Visibility.Collapsed;
+        SourceDetailEmptyText.Visibility = Visibility.Collapsed;
+        var pane = key switch
+        {
+            "logs" => LogsPane,
+            "memory" => MemoryPane,
+            "goals" => GoalsPane,
+            "queue" => QueuePane,
+            "artifacts" => ArtifactsPane,
+            "catalog" => CatalogPane,
+            "summaries" => SummariesPane,
+            _ => null
+        };
+        if (pane is null)
+        {
+            SourceDetailEmptyText.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            pane.Visibility = Visibility.Visible;
+        }
+    }
+
+    private static IReadOnlyList<SourceRow> BuildSourceRows(CodexNativeSourcesSnapshot snapshot) =>
+    [
+        new("logs", "Logs", snapshot.Logs.Source.StatusText),
+        new("memory", "Memory", snapshot.Memory.Source.StatusText),
+        new("goals", "Goals", snapshot.Goals.Source.StatusText),
+        new("queue", "Queue", snapshot.Queue.Source.StatusText),
+        new("artifacts", "Artifacts", snapshot.Artifacts.Source.StatusText),
+        new("catalog", "Desktop catalog", snapshot.DesktopCatalog.Source.StatusText),
+        new("summaries", "Thread summaries", snapshot.ThreadSummaries.Source.StatusText)
+    ];
 
     private bool TryBuildLogsQuery(
         int pageIndex,
@@ -408,4 +488,6 @@ public sealed partial class CodexSourcesPage : Page
         filter.Length == 0 || value.Contains(filter, StringComparison.OrdinalIgnoreCase);
 
     private sealed record SourceStatusRow(string Name, string Status);
+
+    private sealed record SourceRow(string Key, string Name, string Status);
 }

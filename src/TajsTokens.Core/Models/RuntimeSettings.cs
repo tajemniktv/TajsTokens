@@ -1,10 +1,12 @@
+using TajsTokens.Core.Enums;
+
 namespace TajsTokens.Core.Models;
 
 public sealed record RuntimeSettings
 {
     private static readonly int[] s_defaultThresholdValues = [30, 20, 10, 5];
 
-    public const int CurrentSchemaVersion = 2;
+    public const int CurrentSchemaVersion = 3;
     public static IReadOnlyList<int> DefaultLowQuotaThresholds { get; } = Array.AsReadOnly(s_defaultThresholdValues);
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;
@@ -25,6 +27,22 @@ public sealed record RuntimeSettings
     /// This is explicitly opt-in because Tokscale is no longer a mandatory runtime dependency.
     /// </summary>
     public bool TokscaleFallbackEnabled { get; init; }
+
+    /// <summary>
+    /// User-configured executable or PATH command used only when the Codex CLI harness is run.
+    /// </summary>
+    public string CodexCliCommand { get; init; } = "codex";
+
+    /// <summary>
+    /// One argument per line. Arguments are passed as values, never as a shell command string.
+    /// </summary>
+    public string CodexCliArguments { get; init; } = "exec\n--json";
+
+    public string CodexCliWorkingDirectory { get; init; } = string.Empty;
+
+    public CodexCliPromptMode CodexCliPromptMode { get; init; } = CodexCliPromptMode.StandardInput;
+
+    public int CodexCliTimeoutSeconds { get; init; } = 300;
 
     public static int[] NormalizeLowQuotaThresholds(IEnumerable<int>? thresholds)
     {

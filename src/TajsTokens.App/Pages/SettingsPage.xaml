@@ -124,6 +124,46 @@
                     BorderThickness="1"
                     CornerRadius="14"
                     Padding="20">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Codex CLI harness"
+                               FontSize="20"
+                               FontWeight="SemiBold" />
+                    <TextBox x:Name="CodexCliCommandBox"
+                             Header="Executable or PATH command"
+                             PlaceholderText="codex or C:\Tools\custom-codex.exe" />
+                    <TextBox x:Name="CodexCliArgumentsBox"
+                             Header="Arguments (one per line)"
+                             AcceptsReturn="True"
+                             TextWrapping="Wrap"
+                             MinHeight="90"
+                             PlaceholderText="exec&#xA;--json" />
+                    <TextBox x:Name="CodexCliWorkingDirectoryBox"
+                             Header="Working directory (optional)"
+                             PlaceholderText="Leave empty to inherit TajsTokens' working directory" />
+                    <ComboBox x:Name="CodexCliPromptModeCombo"
+                              Header="Prompt transport"
+                              SelectedIndex="0">
+                        <ComboBoxItem Content="Standard input" Tag="StandardInput" />
+                        <ComboBoxItem Content="Final argument" Tag="LastArgument" />
+                        <ComboBoxItem Content="Do not send a prompt" Tag="None" />
+                    </ComboBox>
+                    <NumberBox x:Name="CodexCliTimeoutBox"
+                               Header="Harness timeout (seconds)"
+                               Minimum="5"
+                               Maximum="3600"
+                               SmallChange="15"
+                               SpinButtonPlacementMode="Compact" />
+                    <TextBlock Text="The harness runs only when you press Run. Prompt text, stdout, and stderr remain in the current app session and are not written to the telemetry database. Keep credentials out of persisted arguments; use the CLI's normal secure authentication flow."
+                               Opacity="0.75"
+                               TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1"
+                    CornerRadius="14"
+                    Padding="20">
                 <StackPanel Spacing="8">
                     <TextBlock Text="Privacy &amp; storage"
                                FontSize="20"

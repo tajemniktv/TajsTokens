@@ -88,6 +88,9 @@ public sealed record CodexThreadSearchResult(
 
     public bool SourceRowsTruncated { get; init; }
 
+    /// <summary>Whether at least one readable source exposed the thread catalog table.</summary>
+    public bool SourceCapabilityAvailable { get; init; }
+
     public IReadOnlyList<string> CoverageWarnings { get; init; } = Array.Empty<string>();
 
     public IReadOnlyList<CodexThreadCatalogEntry> PreferredEntries =>

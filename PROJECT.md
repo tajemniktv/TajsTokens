@@ -1,23 +1,17 @@
 # TajsTokens foundation
 
 > **Status: authoritative working document.**
->
-> During the architecture reset, this file is the sole authority for product/data architecture and planning. Existing code describes what the application currently does, not what it is required to mean. Documents under `docs/archive/` are historical context only.
 
 ## Why this reset exists
 
 TajsTokens reached a point where implementation, UI, and derived metrics moved faster than our understanding of the underlying data. A polished result is not useful if the source semantics are uncertain.
-
 The reset therefore starts from evidence. We will study each source empirically, record what it actually exposes, preserve uncertainty, and only then define normalized data and read models.
-
 If current code conflicts with this document or with newly established source evidence, that conflict is a finding. We do not bend the evidence to preserve an existing implementation.
 
 ## Product direction: Codex-first observability
 
 TajsTokens is currently a **Codex-first observability application**. The immediate goal is not broad provider support, a generic AI telemetry platform, or a lowest-common-denominator usage dashboard. The goal is to make Codex richly inspectable from trustworthy local evidence.
-
 Codex exposes a large and evolving set of source-native concepts. Where source contracts establish their semantics, TajsTokens should preserve and use that richness rather than flattening it into generic `session`, `event`, or `usage` records merely because those names might also fit another provider later.
-
 At the same time, TajsTokens should not become permanently shaped like Codex. Possible future providers influence the architecture through clean boundaries, not through premature genericization.
 
 The guiding rule is:
@@ -77,9 +71,7 @@ There is deliberately no universal provider schema in the middle of this pipelin
 ## 1. Raw source acquisition
 
 Work one source at a time. For each source, first establish how TajsTokens can read it and collect representative examples across normal and awkward states.
-
 Local inspection may expose raw source values to the user. Fixtures, bug reports, documentation examples, and other artifacts intended to leave the user's machine must be sanitized or deliberately reviewed before sharing.
-
 At this layer we record what the source emitted. We do not calculate product metrics, reconcile it with other sources, or decide which source is "right".
 
 Source acquisition must document at least:
@@ -111,9 +103,7 @@ A source contract records:
 - sanitized fixtures, reproducible probes, or matching implementation evidence supporting the contract.
 
 For Codex sources, evidence should be **evidence-first, not research-first**. Installed runtime/source data is authoritative for what the selected build actually emits. Matching or near-matching `openai/codex` implementation, migrations, protocol types, and tests are first-class corroborating evidence for intended semantics and may support a source-contract relationship when they are explicit and consistent with observed runtime data. Record the upstream commit/tag/version used and whether it is known to match the installed build.
-
 Targeted experiments remain required when behavior is version-sensitive, Desktop-only, ambiguous, contradictory, or when source coverage is uncertain enough that a user-facing label would otherwise overclaim. Absence of a Desktop/app-local subsystem from the public Codex repository is not evidence that an observed local source is invalid.
-
 A source contract must distinguish **known**, **observed but unexplained**, and **hypothesized**. Hypotheses do not become normalization rules merely because they are convenient.
 
 ### Source-contract template
@@ -143,9 +133,7 @@ Open questions:
 ## 3. Normalized observations
 
 Normalization converts source-specific evidence into stable TajsTokens observations only where the source contract justifies the conversion.
-
 **Normalized does not mean generic.** The preferred normalized form is usually provider-native and source-aware. A Codex state-thread observation, Codex turn observation, rollout observation, or app-server observation may remain explicitly Codex-specific if that is the honest semantic model.
-
 Every normalized observation must retain enough provenance to answer:
 
 - which provider/source produced it;
@@ -156,9 +144,7 @@ Every normalized observation must retain enough provenance to answer:
 - which source contract and normalization version produced the normalized form.
 
 Shared observation infrastructure may provide a common envelope for provenance, timing, identity, and versioning. It must not require unrelated providers to share the same payload schema.
-
 Normalization must preserve meaningful distinctions between sources and between provider-native concepts. We will not force unrelated concepts into a universal schema merely because they look similar in a dashboard.
-
 Two conflicting source observations may normalize into two conflicting observations. Resolving that conflict is not the normalizer's job.
 
 ## 4. Durable evidence store
@@ -177,11 +163,8 @@ Its design must support:
 - conservative handling of content-bearing or credential-bearing source material.
 
 The evidence store may contain provider-specific tables or structures when that preserves contracted semantics cleanly. A single generic table is not inherently more architectural than several honest provider-native structures.
-
 Fact/evidence tables must not contain values whose only justification is a current UI formula, cross-source selection policy, inferred classification, or other derived interpretation.
-
 A source field being useful for local inspection does not automatically make it appropriate for durable duplication. Durable retention of content-bearing values must be justified independently from the ability to display those values from the source on demand.
-
 If an existing database table cannot satisfy these constraints cleanly, compatibility with that table is not more important than getting the evidence model right. Migration, rebuild, or replacement remain valid options.
 
 ## 5. Read models
@@ -194,9 +177,7 @@ TajsTokens may have two kinds of read models:
 2. **Shared observability projections.** These may project multiple provider-native models into a common answer such as current activity or recent failures, but only where the required semantics genuinely overlap.
 
 A provider-native read model may combine multiple contracted sources for the same provider. Any source selection, reconciliation, grouping, or field precedence is read-model policy and must be explicit and inspectable. Conflicting evidence remains preserved underneath the selected view.
-
 A shared projection is never a storage requirement. For example, a future Codex thread and a future local inference run might both project into a broad activity summary while remaining completely different first-class models in evidence and provider-specific views.
-
 Where relevant, a read-model result should carry or expose:
 
 - evidence/source provenance;
@@ -208,15 +189,12 @@ Where relevant, a read-model result should carry or expose:
 - the policy/version used to choose among, classify, or combine observations.
 
 A read model must never make a derived selection or broad presentation classification look like a raw provider fact.
-
 Provider-specific UI is allowed to be substantially richer than shared UI. TajsTokens should exploit Codex data where it is trustworthy instead of hiding useful information because another provider may not expose an equivalent.
-
 The first goal is trustworthy current facts and inspectable history. Predictive, inferential, cross-signal, and presentation work is outside the current design scope and must not constrain these five layers.
 
 ## Current work
 
 There is deliberately no phase roadmap during the reset. Work proceeds by establishing source contracts and only then promoting proven semantics upward through the five layers above.
-
 The current product focus is **rich Codex observability**. We are inventorying and studying Codex-owned sources such as state SQLite, rollout JSONL, and app-server surfaces one source at a time. The recently added Codex State DB Explorer is acquisition/investigation tooling for that work, not a semantic shortcut around source contracts.
 
 Current work should therefore favor:
@@ -290,6 +268,19 @@ state source is retained as a source-qualified observation; `CodexThreadReadMode
 the presentation value and exposes alternatives and conflicts with its rationale. Content-bearing
 item JSON is not rendered into the summary and is never written to TajsTokens durable storage.
 
+The consolidated Codex browser adds a separate presentation layer over this boundary. It groups
+root thread families by explicit `project_id`, falling back to the observed root `cwd` as a
+clearly-labelled Workspace group and retaining an Unassigned group only when both are absent.
+Directional spawn edges are rendered recursively as nested subagent thread nodes; missing parents,
+cycles, conflicting statuses, and bounded results remain visible as navigation warnings. A selected
+thread may render a local, on-demand conversation projection from the named preferred history
+source. The projection recognizes observed Codex `ThreadItem` variants, keeps reasoning/tool/raw
+JSON behind explicit expansion, and retains the complete source item and source identity beneath
+every presentation row. Rotated or alternate history sources remain available as evidence rather
+than being silently merged into the readable narrative. This local presentation does not add
+durable transcript, reasoning, command output, or tool payload storage, and it does not change the
+explicit export/sanitization boundary.
+
 ## Auxiliary Codex source observability
 
 The auxiliary Codex source read model is intentionally provider-native and read-only. It discovers
@@ -343,6 +334,20 @@ description, and path without one store overriding another. Candidate generation
 both `state_*` and `thread_history_*` filenames, but generation remains discovery provenance only.
 All bounded source reads request one extra row and expose per-category truncation flags/warnings;
 absence of a capability remains distinct from an empty result and from an unreadable source.
+
+## Codex CLI harness boundary
+
+TajsTokens also includes a user-invoked **Codex CLI Harness** for running a custom local Codex
+CLI alongside the observability surfaces. The command/executable, working directory, one-argument-
+per-line argument list, prompt transport, and timeout are explicit runtime settings. The harness
+passes arguments as process values rather than accepting a shell script, and it does not run during
+ordinary telemetry collection. A prompt may be sent on standard input or as one final argument;
+TajsTokens makes no claim that custom CLIs share a universal protocol.
+
+Harness stdout, stderr, prompt text, and exit metadata are local session inspection only. They are
+not automatically normalized or copied into the TajsTokens durable evidence store, and there is no
+automatic export or upload path. The harness is therefore an execution aid, not a new source
+contract or a replacement for the read-only Codex source boundaries above.
 
 ## Documentation rule
 

@@ -96,7 +96,14 @@ public sealed class RuntimeSettingsStore
         {
             SchemaVersion = RuntimeSettings.CurrentSchemaVersion,
             PollIntervalSeconds = Math.Clamp(settings.PollIntervalSeconds, 15, 3600),
-            LowQuotaThresholds = RuntimeSettings.NormalizeLowQuotaThresholds(settings.LowQuotaThresholds)
+            LowQuotaThresholds = RuntimeSettings.NormalizeLowQuotaThresholds(settings.LowQuotaThresholds),
+            CodexCliCommand = string.IsNullOrWhiteSpace(settings.CodexCliCommand)
+                ? "codex"
+                : settings.CodexCliCommand.Trim(),
+            CodexCliArguments = TajsTokens.Core.Models.CodexCliArguments.ToLines(
+                TajsTokens.Core.Models.CodexCliArguments.ParseLines(settings.CodexCliArguments)),
+            CodexCliWorkingDirectory = settings.CodexCliWorkingDirectory?.Trim() ?? string.Empty,
+            CodexCliTimeoutSeconds = Math.Clamp(settings.CodexCliTimeoutSeconds, 5, 3600)
         };
     }
 }

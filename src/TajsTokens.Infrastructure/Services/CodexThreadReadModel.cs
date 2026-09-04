@@ -17,6 +17,11 @@ public sealed class CodexThreadReadModel : ICodexThreadReadModel
         _sourceReader = sourceReader ?? throw new ArgumentNullException(nameof(sourceReader));
     }
 
+    public Task<CodexThreadNavigationResult> BrowseThreadsAsync(
+        CodexThreadNavigationQuery query,
+        CancellationToken cancellationToken) =>
+        _sourceReader.BrowseThreadsAsync(query, cancellationToken);
+
     public Task<CodexThreadSearchResult> SearchThreadsAsync(
         string? search,
         int take,

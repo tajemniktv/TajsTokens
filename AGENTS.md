@@ -93,3 +93,4 @@ For focused changes, run the narrowest relevant tests first, then the full Core 
 ## References
 
 The local read-only clone of the Codex CLI source is at `E:\dev\codex`. Use it as a first-class corroborating reference for Codex semantics, together with the installed runtime evidence. Do not add it as a TajsTokens dependency or submodule.
+Documented SQLite schema for Codex's CLI is at docs\source-notes\CODEX_SQLITE_SCHEMA.md
