@@ -6,7 +6,7 @@ namespace TajsTokens.Infrastructure.Services;
 /// Read-model facade for Codex-native observations. Source-specific acquisition and row parsing
 /// live in <see cref="CodexNativeSourceGateway"/> so this type remains a presentation boundary.
 /// </summary>
-public sealed class CodexNativeSourcesService
+public sealed class CodexNativeSourcesService : TajsTokens.Core.Interfaces.ICodexNativeSourcesReadModel
 {
     private readonly CodexNativeSourceGateway _gateway;
 
@@ -23,6 +23,9 @@ public sealed class CodexNativeSourcesService
 
     public Task<CodexNativeSourcesSnapshot> ReadAsync(CancellationToken cancellationToken = default) =>
         _gateway.ReadAsync(cancellationToken);
+
+    public Task<CodexNativeSourcesSnapshot> ReadAsync(CodexNativeSourcesQuery query, CancellationToken cancellationToken = default) =>
+        _gateway.ReadAsync(query, cancellationToken);
 
     public Task<CodexNativeSourcesSnapshot> InspectAsync(CancellationToken cancellationToken = default) =>
         _gateway.InspectAsync(cancellationToken);

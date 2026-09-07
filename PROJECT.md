@@ -335,6 +335,36 @@ both `state_*` and `thread_history_*` filenames, but generation remains discover
 All bounded source reads request one extra row and expose per-category truncation flags/warnings;
 absence of a capability remains distinct from an empty result and from an unreadable source.
 
+### Auxiliary source selection and compatibility policy
+
+The auxiliary product UI now consumes `ICodexNativeSourcesReadModel`, not the SQLite explorer
+implementation. Requests may explicitly select a discovered database independently for each
+Codex source family. Every snapshot exposes all discovered alternatives and the named
+`codex-native-source-selection/v1` policy: Codex-home before sqlite-folder before snapshots,
+then descending filename generation and source write time, with ordinal path as a deterministic
+tie-breaker. This is discovery preference, not semantic authority or a version guarantee.
+Sources are not merged. An explicit choice that disappears is unavailable; an unreadable choice
+is an error, never a silent fallback to a different database. Selection is inspection-session
+state only. Returned log queries retain the actual database path so paging does not switch
+instances when another generation appears; offset paging is still a live read, not a stable
+transactional snapshot across pages.
+
+Auxiliary scalar metadata now retains unknown instead of substituting zero, false or Unix epoch
+for absent, null or undecodable values. Presence flags distinguish an absent column (unknown)
+from a present column containing NULL (false). Only source boolean encodings 0 and 1 decode as
+false and true; other values remain unknown. These are conservative decoding rules, not claims
+about new native state semantics. Missing table/column capabilities and omitted undecodable
+identity rows are reported with source-qualified warnings. A source containing only rejected
+rows is not relabelled empty. Raw values remain available for deliberate local inspection.
+Queue revision observations for the loaded item threads are retained rather than reduced to
+the maximum revision; a conflicting set leaves the item's revision unknown. A missing goal
+deferral capability is unknown, not evidence of no deferral. This changes only the on-demand
+read model: no schema migration, durable content collection or export is introduced.
+
+The source UI preserves the chosen family and applied log filters through refresh. Its general
+text filter is explicitly limited to loaded rows; it is not a complete database search. Broader
+auxiliary pagination/thread-scoped querying and snapshot-consistent log paging remain unfinished.
+
 ## Codex CLI harness boundary
 
 TajsTokens also includes a user-invoked **Codex CLI Harness** for running a custom local Codex

@@ -646,7 +646,7 @@ public sealed class CodexStateDbExplorerService
 
         var distinctValues = values
             .Where(value => !string.IsNullOrWhiteSpace(value))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(StringComparer.Ordinal)
             .ToArray();
         if (distinctValues.Length == 0)
         {

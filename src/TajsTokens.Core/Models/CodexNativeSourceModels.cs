@@ -19,6 +19,9 @@ public enum CodexNativeSourceKind
 /// </summary>
 public sealed record CodexLogsQuery
 {
+    /// <summary>Explicit discovered instance; null uses the documented discovery policy.</summary>
+    public string? DatabasePath { get; init; }
+
     public int PageIndex { get; init; }
 
     public int PageSize { get; init; } = 100;
@@ -102,6 +105,7 @@ public sealed record CodexLogEntry(
     {
         get
         {
+            if (TimestampNanoseconds is < 0 or >= 1_000_000_000) return null;
             try
             {
                 return DateTimeOffset.FromUnixTimeSeconds(TimestampUnixSeconds)
@@ -145,6 +149,8 @@ public sealed record CodexNativeSourceInfo(
     IReadOnlyList<string> SupportedTables,
     string? Error)
 {
+    public IReadOnlyList<string> Warnings { get; init; } = [];
+
     /// <summary>Commit used only as corroborating reference; installed runtime remains authoritative.</summary>
     public string? UpstreamCorroborationCommit { get; init; }
 
@@ -161,7 +167,7 @@ public sealed record CodexNativeSourceInfo(
 
     public string StatusText => Availability switch
     {
-        CodexNativeSourceAvailability.Available => $"Available · {SupportedTables.Count:N0} supported table(s)" + (HasMoreRows ? " · more rows available" : string.Empty),
+        CodexNativeSourceAvailability.Available => $"Available · {SupportedTables.Count:N0} supported table(s)" + (HasMoreRows ? " · more rows available" : string.Empty) + (Warnings.Count > 0 ? $" · {Warnings.Count} warning(s)" : string.Empty),
         CodexNativeSourceAvailability.Empty => "Supported · no rows observed",
         CodexNativeSourceAvailability.Unsupported => "Source found · capability unsupported",
         CodexNativeSourceAvailability.Unavailable => "Source not discovered",
@@ -179,7 +185,7 @@ public sealed record CodexMemoryJob(
     long? FinishedAt,
     long? LeaseUntil,
     long? RetryAt,
-    int RetryRemaining,
+    int? RetryRemaining,
     string? LastError,
     long? InputWatermark,
     long? LastSuccessWatermark);
@@ -191,15 +197,15 @@ public sealed record CodexMemoryJob(
 /// </summary>
 public sealed record CodexMemoryStage1Output(
     string ThreadId,
-    long SourceUpdatedAt,
+    long? SourceUpdatedAt,
     string? RolloutSlug,
-    long GeneratedAt,
+    long? GeneratedAt,
     int? UsageCount,
     int? LastUsage,
-    bool SelectedForPhase2,
+    bool? SelectedForPhase2,
     long? SelectedForPhase2SourceUpdatedAt,
-    bool HasRawMemory,
-    bool HasRolloutSummary);
+    bool? HasRawMemory,
+    bool? HasRolloutSummary);
 
 public sealed record CodexMemorySource(
     CodexNativeSourceInfo Source,
@@ -212,11 +218,11 @@ public sealed record CodexGoal(
     string? Objective,
     string Status,
     long? TokenBudget,
-    long TokensUsed,
-    long TimeUsedSeconds,
-    long CreatedAtMs,
-    long UpdatedAtMs,
-    bool HasContinuationDeferral);
+    long? TokensUsed,
+    long? TimeUsedSeconds,
+    long? CreatedAtMs,
+    long? UpdatedAtMs,
+    bool? HasContinuationDeferral);
 
 public sealed record CodexGoalsSource(
     CodexNativeSourceInfo Source,
@@ -226,11 +232,11 @@ public sealed record CodexGoalsSource(
 public sealed record CodexQueueItem(
     string Id,
     string ThreadId,
-    long QueueOrder,
-    long CreatedAtMs,
-    long UpdatedAtMs,
+    long? QueueOrder,
+    long? CreatedAtMs,
+    long? UpdatedAtMs,
     long? Revision,
-    bool HasPayload);
+    bool? HasPayload);
 
 public sealed record CodexQueueRevision(string ThreadId, long Revision);
 
@@ -245,8 +251,8 @@ public sealed record CodexThreadArtifact(
     string ThreadId,
     string ArtifactType,
     string IdentityKey,
-    long CreatedAt,
-    bool HasPayload);
+    long? CreatedAt,
+    bool? HasPayload);
 
 public sealed record CodexArtifactsSource(
     CodexNativeSourceInfo Source,
@@ -257,18 +263,18 @@ public sealed record CodexDesktopCatalogEntry(
     string HostId,
     string ThreadId,
     string DisplayTitle,
-    double SourceCreatedAt,
-    double SourceUpdatedAt,
+    double? SourceCreatedAt,
+    double? SourceUpdatedAt,
     string? Cwd,
     string SourceKind,
     string? SourceDetail,
     string? ModelProvider,
     string? GitBranch,
-    long ObservationSequence,
-    bool MissingCandidate,
+    long? ObservationSequence,
+    bool? MissingCandidate,
     string? ThreadSource,
-    double SourceRecencyAt,
-    bool PendingObservedTitle,
+    double? SourceRecencyAt,
+    bool? PendingObservedTitle,
     string? ProjectId,
     string? ConversationOrigin);
 
@@ -284,8 +290,25 @@ public sealed record CodexThreadSummary(
     string Summary,
     string? CompactSummary,
     string? CompactSummaryTurnKey,
-    long Revision,
-    long UpdatedAt);
+    long? Revision,
+    long? UpdatedAt);
+
+/// <summary>Discovery provenance only, not a guarantee of schema compatibility or authority.</summary>
+public sealed record CodexNativeSourceInstance(
+    CodexNativeSourceKind Kind, string DatabasePath, string DiscoveryKind,
+    int? Generation, DateTimeOffset LastWriteTimeUtc);
+
+public sealed record CodexNativeSourceSelection(
+    CodexNativeSourceKind Kind, string? SelectedPath,
+    IReadOnlyList<CodexNativeSourceInstance> Candidates, string Policy, string Rationale);
+
+/// <summary>Per-request choices. Never changes the Codex installation or global discovery state.</summary>
+public sealed record CodexNativeSourcesQuery
+{
+    public IReadOnlyDictionary<CodexNativeSourceKind, string> SelectedPaths { get; init; } =
+        new Dictionary<CodexNativeSourceKind, string>();
+    public CodexLogsQuery Logs { get; init; } = new();
+}
 
 public sealed record CodexThreadSummariesSource(
     CodexNativeSourceInfo Source,
@@ -301,6 +324,8 @@ public sealed record CodexNativeSourcesSnapshot(
     CodexDesktopCatalogSource DesktopCatalog,
     CodexThreadSummariesSource ThreadSummaries)
 {
+    public IReadOnlyList<CodexNativeSourceSelection> Selections { get; init; } = [];
+
     public IReadOnlyList<CodexNativeSourceInfo> Sources =>
     [
         Logs.Source,

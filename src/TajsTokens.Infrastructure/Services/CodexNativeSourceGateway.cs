@@ -26,22 +26,33 @@ public sealed class CodexNativeSourceGateway
 
     public CodexStateDbExplorerService Explorer => _explorer;
 
-    public async Task<CodexNativeSourcesSnapshot> ReadAsync(CancellationToken cancellationToken = default)
+    public Task<CodexNativeSourcesSnapshot> ReadAsync(CancellationToken cancellationToken = default) =>
+        ReadAsync(new CodexNativeSourcesQuery(), cancellationToken);
+
+    public async Task<CodexNativeSourcesSnapshot> ReadAsync(
+        CodexNativeSourcesQuery query, CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var capturedAtUtc = DateTimeOffset.UtcNow;
         var candidates = _explorer.DiscoverCandidates();
+        var selections = Enum.GetValues<CodexNativeSourceKind>()
+            .Select(kind => SelectSource(candidates, kind, query.SelectedPaths.GetValueOrDefault(kind) ??
+                (kind == CodexNativeSourceKind.Logs ? query.Logs.DatabasePath : null)))
+            .ToArray();
+        CodexStateDatabaseCandidate? Selected(CodexNativeSourceKind kind) =>
+            ResolveCandidate(candidates, kind, selections.Single(selection => selection.Kind == kind).SelectedPath);
 
         var logsTask = ReadLogsSafelyAsync(
-            SelectCandidate(candidates, "logs_"),
-            new CodexLogsQuery { PageSize = MaxRowsPerTable },
+            Selected(CodexNativeSourceKind.Logs),
+            query.Logs with { DatabasePath = selections.Single(selection => selection.Kind == CodexNativeSourceKind.Logs).SelectedPath },
             capturedAtUtc,
             cancellationToken);
-        var memoryTask = ReadMemorySafelyAsync(SelectCandidate(candidates, "memories_"), capturedAtUtc, cancellationToken);
-        var goalsTask = ReadGoalsSafelyAsync(SelectCandidate(candidates, "goals_"), capturedAtUtc, cancellationToken);
-        var queueTask = ReadQueueSafelyAsync(SelectCandidate(candidates, "queue_"), capturedAtUtc, cancellationToken);
-        var artifactsTask = ReadArtifactsSafelyAsync(SelectCandidate(candidates, "state_"), capturedAtUtc, cancellationToken);
-        var catalogTask = ReadDesktopCatalogSafelyAsync(SelectCandidate(candidates, "codex-dev"), capturedAtUtc, cancellationToken);
-        var summariesTask = ReadThreadSummariesSafelyAsync(SelectCandidate(candidates, "codex-thread-summaries"), capturedAtUtc, cancellationToken);
+        var memoryTask = ReadMemorySafelyAsync(Selected(CodexNativeSourceKind.Memory), capturedAtUtc, cancellationToken);
+        var goalsTask = ReadGoalsSafelyAsync(Selected(CodexNativeSourceKind.Goals), capturedAtUtc, cancellationToken);
+        var queueTask = ReadQueueSafelyAsync(Selected(CodexNativeSourceKind.Queue), capturedAtUtc, cancellationToken);
+        var artifactsTask = ReadArtifactsSafelyAsync(Selected(CodexNativeSourceKind.Artifacts), capturedAtUtc, cancellationToken);
+        var catalogTask = ReadDesktopCatalogSafelyAsync(Selected(CodexNativeSourceKind.DesktopCatalog), capturedAtUtc, cancellationToken);
+        var summariesTask = ReadThreadSummariesSafelyAsync(Selected(CodexNativeSourceKind.ThreadSummaries), capturedAtUtc, cancellationToken);
 
         await Task.WhenAll(logsTask, memoryTask, goalsTask, queueTask, artifactsTask, catalogTask, summariesTask);
         return new CodexNativeSourcesSnapshot(
@@ -52,7 +63,7 @@ public sealed class CodexNativeSourceGateway
             await queueTask,
             await artifactsTask,
             await catalogTask,
-            await summariesTask);
+            await summariesTask) { Selections = selections };
     }
 
     public Task<CodexNativeSourcesSnapshot> InspectAsync(CancellationToken cancellationToken = default) =>
@@ -70,7 +81,7 @@ public sealed class CodexNativeSourceGateway
         CodexLogsQuery? query = null,
         CancellationToken cancellationToken = default) =>
         ReadLogsSafelyAsync(
-            SelectCandidate(_explorer.DiscoverCandidates(), "logs_"),
+            ResolveCandidate(_explorer.DiscoverCandidates(), CodexNativeSourceKind.Logs, query?.DatabasePath),
             query ?? new CodexLogsQuery(),
             DateTimeOffset.UtcNow,
             cancellationToken);
@@ -219,10 +230,11 @@ public sealed class CodexNativeSourceGateway
             ? await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.Stage1Outputs, cancellationToken)
             : ReadRowsResult.Empty;
 
+        var mappedJobs = jobs.Rows.Select(MapMemoryJob).OfType<CodexMemoryJob>().ToArray();
+        var mappedOutputs = outputs.Rows.Select(MapMemoryOutput).OfType<CodexMemoryStage1Output>().ToArray();
         return new CodexMemorySource(
-            context.Info with { HasMoreRows = jobs.IsTruncated || outputs.IsTruncated },
-            jobs.Rows.Select(MapMemoryJob).Where(job => job is not null).Select(job => job!).ToArray(),
-            outputs.Rows.Select(MapMemoryOutput).Where(output => output is not null).Select(output => output!).ToArray());
+            WithCoverage(context.Info, ("jobs", jobs, mappedJobs.Length), ("stage1_outputs", outputs, mappedOutputs.Length)),
+            mappedJobs, mappedOutputs);
     }
 
     private async Task<CodexLogsSource> ReadLogsAsync(
@@ -231,7 +243,7 @@ public sealed class CodexNativeSourceGateway
         DateTimeOffset capturedAtUtc,
         CancellationToken cancellationToken)
     {
-        var normalizedQuery = NormalizeLogsQuery(query);
+        var normalizedQuery = NormalizeLogsQuery(query) with { DatabasePath = candidate?.Path ?? query.DatabasePath };
         var context = await PrepareAsync(
             CodexNativeSourceKind.Logs,
             "Codex logs",
@@ -284,8 +296,14 @@ public sealed class CodexNativeSourceGateway
         var offset = checked((long)normalizedQuery.PageIndex * normalizedQuery.PageSize);
         var hasMoreRows = page.TotalRows > offset + normalizedQuery.PageSize;
 
+        var skipped = Math.Min(page.Rows.Count, normalizedQuery.PageSize) - entries.Length;
         return new CodexLogsSource(
-            context.Info with { HasMoreRows = hasMoreRows },
+            context.Info with
+            {
+                HasMoreRows = hasMoreRows,
+                Warnings = skipped == 0 ? context.Info.Warnings :
+                    [.. context.Info.Warnings, $"logs: {skipped} row(s) omitted because required identity/value fields could not be decoded."]
+            },
             entries,
             normalizedQuery,
             capabilities,
@@ -389,7 +407,7 @@ public sealed class CodexNativeSourceGateway
                 Int64(row.Page, row.Row, "line"),
                 Text(row.Page, row.Row, "thread_id"),
                 Text(row.Page, row.Row, "process_uuid"),
-                Bool(row.Page, row.Row, "has_message"),
+                Bool(row.Page, row.Row, "has_message") == true,
                 Text(row.Page, row.Row, "message"),
                 Int64(row.Page, row.Row, "estimated_bytes"))
             : null;
@@ -418,7 +436,7 @@ public sealed class CodexNativeSourceGateway
             .Select(row => Text(row.Page, row.Row, "thread_id"))
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Select(id => id!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(StringComparer.Ordinal)
             .ToArray();
         var deferrals = context.Tables.Contains("thread_goal_continuation_deferrals", StringComparer.OrdinalIgnoreCase) && goalThreadIds.Length > 0
             ? await ReadRowsByTextValuesAsync(candidate!.Path, CodexRelationSourceTable.ThreadGoalContinuationDeferrals, goalThreadIds, cancellationToken)
@@ -427,13 +445,17 @@ public sealed class CodexNativeSourceGateway
             .Select(row => Text(row.Page, row.Row, "thread_id"))
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Select(id => id!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(StringComparer.Ordinal)
             .ToArray();
 
-        var deferralSet = new HashSet<string>(deferralIds, StringComparer.OrdinalIgnoreCase);
+        var deferralSet = new HashSet<string>(deferralIds, StringComparer.Ordinal);
+        var deferralsComplete = context.Inspection?.Tables.Any(table =>
+            string.Equals(table.Name, "thread_goal_continuation_deferrals", StringComparison.OrdinalIgnoreCase) &&
+            table.Columns.Any(column => string.Equals(column.Name, "thread_id", StringComparison.OrdinalIgnoreCase))) == true && !deferrals.IsTruncated;
+        var mappedGoals = goals.Rows.Select(row => MapGoal(row, deferralSet, deferralsComplete)).OfType<CodexGoal>().ToArray();
         return new CodexGoalsSource(
-            context.Info with { HasMoreRows = goals.IsTruncated },
-            goals.Rows.Select(row => MapGoal(row, deferralSet)).Where(goal => goal is not null).Select(goal => goal!).ToArray(),
+            WithCoverage(context.Info, ("thread_goals", goals, mappedGoals.Length), ("thread_goal_continuation_deferrals", deferrals, deferralIds.Length)),
+            mappedGoals,
             deferralIds);
     }
 
@@ -461,22 +483,27 @@ public sealed class CodexNativeSourceGateway
             .Select(row => Text(row.Page, row.Row, "thread_id"))
             .Where(id => !string.IsNullOrWhiteSpace(id))
             .Select(id => id!)
-            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Distinct(StringComparer.Ordinal)
             .ToArray();
         var revisions = context.Tables.Contains("queued_thread_revisions", StringComparer.OrdinalIgnoreCase) && itemThreadIds.Length > 0
             ? await ReadRowsByTextValuesAsync(candidate!.Path, CodexRelationSourceTable.QueuedThreadRevisions, itemThreadIds, cancellationToken)
             : ReadRowsResult.Empty;
-        var revisionByThread = revisions.Rows
+        var mappedRevisions = revisions.Rows
             .Select(row => (ThreadId: Text(row.Page, row.Row, "thread_id"), Revision: Int64(row.Page, row.Row, "revision")))
             .Where(value => !string.IsNullOrWhiteSpace(value.ThreadId) && value.Revision is not null)
-            .GroupBy(value => value.ThreadId!, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.Max(value => value.Revision!.Value), StringComparer.OrdinalIgnoreCase);
+            .Select(value => new CodexQueueRevision(value.ThreadId!, value.Revision!.Value)).ToArray();
+        var groups = mappedRevisions.GroupBy(value => value.ThreadId, StringComparer.Ordinal).ToArray();
+        var revisionByThread = groups.Where(group => !revisions.IsTruncated && group.Select(value => value.Revision).Distinct().Count() == 1)
+            .ToDictionary(group => group.Key, group => group.First().Revision, StringComparer.Ordinal);
+        var info = WithCoverage(context.Info, ("queued_thread_revisions", revisions, mappedRevisions.Length));
+        if (groups.Any(group => group.Select(value => value.Revision).Distinct().Count() > 1))
+            info = info with { Warnings = [.. info.Warnings, "queued_thread_revisions: conflicting revisions retained; item revision is unknown for ambiguous threads."] };
 
+        var mappedItems = items.Rows.Select(row => MapQueueItem(row, revisionByThread)).OfType<CodexQueueItem>().ToArray();
         return new CodexQueueSource(
-            context.Info with { HasMoreRows = items.IsTruncated },
-            items.Rows.Select(row => MapQueueItem(row, revisionByThread)).Where(item => item is not null).Select(item => item!).ToArray(),
-            revisionByThread.OrderBy(pair => pair.Key, StringComparer.Ordinal)
-                .Select(pair => new CodexQueueRevision(pair.Key, pair.Value)).ToArray());
+            WithCoverage(info, ("queued_items", items, mappedItems.Length)),
+            mappedItems,
+            mappedRevisions);
     }
 
     private async Task<CodexArtifactsSource> ReadArtifactsAsync(
@@ -497,9 +524,9 @@ public sealed class CodexNativeSourceGateway
         }
 
         var rows = await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.ThreadArtifacts, cancellationToken);
+        var mapped = rows.Rows.Select(MapArtifact).OfType<CodexThreadArtifact>().ToArray();
         return new CodexArtifactsSource(
-            context.Info with { HasMoreRows = rows.IsTruncated },
-            rows.Rows.Select(MapArtifact).Where(artifact => artifact is not null).Select(artifact => artifact!).ToArray());
+            WithCoverage(context.Info, ("thread_artifacts", rows, mapped.Length)), mapped);
     }
 
     private async Task<CodexDesktopCatalogSource> ReadDesktopCatalogAsync(
@@ -520,9 +547,9 @@ public sealed class CodexNativeSourceGateway
         }
 
         var rows = await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.LocalThreadCatalog, cancellationToken);
+        var mapped = rows.Rows.Select(MapCatalogEntry).OfType<CodexDesktopCatalogEntry>().ToArray();
         return new CodexDesktopCatalogSource(
-            context.Info with { HasMoreRows = rows.IsTruncated },
-            rows.Rows.Select(MapCatalogEntry).Where(entry => entry is not null).Select(entry => entry!).ToArray());
+            WithCoverage(context.Info, ("local_thread_catalog", rows, mapped.Length)), mapped);
     }
 
     private async Task<CodexThreadSummariesSource> ReadThreadSummariesAsync(
@@ -543,9 +570,9 @@ public sealed class CodexNativeSourceGateway
         }
 
         var rows = await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.ThreadTurnSummaries, cancellationToken);
+        var mapped = rows.Rows.Select(MapSummary).OfType<CodexThreadSummary>().ToArray();
         return new CodexThreadSummariesSource(
-            context.Info with { HasMoreRows = rows.IsTruncated },
-            rows.Rows.Select(MapSummary).Where(summary => summary is not null).Select(summary => summary!).ToArray());
+            WithCoverage(context.Info, ("thread_turn_summaries", rows, mapped.Length)), mapped);
     }
 
     private async Task<SourceContext> PrepareAsync(
@@ -587,7 +614,12 @@ public sealed class CodexNativeSourceGateway
             {
                 UpstreamCorroborationCommit = UpstreamCorroborationCommit,
                 SourceVersion = await ReadSourceVersionAsync(candidate.Path, inspection.Tables, cancellationToken),
-                DiscoveryKind = candidate.DiscoveryKind
+                DiscoveryKind = candidate.DiscoveryKind,
+                Warnings = expectedTables.Except(supportedNames, StringComparer.OrdinalIgnoreCase)
+                    .Select(table => $"{table}: capability unavailable (table not observed).")
+                    .Concat(tables.SelectMany(table => ExpectedColumns(table.Name)
+                        .Except(table.Columns.Select(column => column.Name), StringComparer.OrdinalIgnoreCase)
+                        .Select(column => $"{table.Name}.{column}: unavailable (column not observed)."))).ToArray()
             };
             return new SourceContext(info, supportedNames, inspection);
         }
@@ -662,7 +694,78 @@ public sealed class CodexNativeSourceGateway
         .OrderBy(candidate => DiscoveryPriority(candidate.DiscoveryKind))
         .ThenByDescending(candidate => candidate.Generation ?? -1)
         .ThenByDescending(candidate => candidate.LastWriteTimeUtc)
+        .ThenBy(candidate => candidate.Path, StringComparer.Ordinal)
         .FirstOrDefault();
+
+    private static string Prefix(CodexNativeSourceKind kind) => kind switch
+    {
+        CodexNativeSourceKind.Logs => "logs_",
+        CodexNativeSourceKind.Memory => "memories_",
+        CodexNativeSourceKind.Goals => "goals_",
+        CodexNativeSourceKind.Queue => "queue_",
+        CodexNativeSourceKind.Artifacts => "state_",
+        CodexNativeSourceKind.DesktopCatalog => "codex-dev",
+        CodexNativeSourceKind.ThreadSummaries => "codex-thread-summaries",
+        _ => throw new ArgumentOutOfRangeException(nameof(kind))
+    };
+
+    private static CodexNativeSourceSelection SelectSource(
+        IReadOnlyList<CodexStateDatabaseCandidate> candidates, CodexNativeSourceKind kind, string? requestedPath)
+    {
+        var matching = candidates.Where(candidate => candidate.FileName.StartsWith(Prefix(kind), StringComparison.OrdinalIgnoreCase))
+            .OrderBy(candidate => DiscoveryPriority(candidate.DiscoveryKind))
+            .ThenByDescending(candidate => candidate.Generation ?? -1)
+            .ThenByDescending(candidate => candidate.LastWriteTimeUtc)
+            .ThenBy(candidate => candidate.Path, StringComparer.Ordinal)
+            .ToArray();
+        var selected = requestedPath ?? matching.FirstOrDefault()?.Path;
+        return new CodexNativeSourceSelection(kind, selected,
+            matching.Select(candidate => new CodexNativeSourceInstance(kind, candidate.Path,
+                candidate.DiscoveryKind, candidate.Generation, candidate.LastWriteTimeUtc)).ToArray(),
+            "codex-native-source-selection/v1",
+            requestedPath is not null
+                ? "Explicit source choice; never falls back if the chosen instance disappears or fails."
+                : "Discovery preference: Codex home, sqlite folder, then snapshots; generation descending, write time descending, path ordinal. This is not semantic authority. Other instances are not merged.");
+    }
+
+    private static CodexNativeSourceInfo WithCoverage(CodexNativeSourceInfo info,
+        params (string Table, ReadRowsResult Read, int MappedCount)[] results) => info with
+    {
+        HasMoreRows = info.HasMoreRows || results.Any(result => result.Read.IsTruncated),
+        Warnings = [.. info.Warnings, .. results.SelectMany(result =>
+        {
+            var warnings = new List<string>();
+            if (result.Read.IsTruncated) warnings.Add($"{result.Table}: bounded result; more source rows exist.");
+            var skipped = result.Read.Rows.Count - result.MappedCount;
+            if (skipped > 0) warnings.Add($"{result.Table}: {skipped} row(s) omitted or collapsed because identity/value fields were missing, invalid or duplicated. Inspect the source for details.");
+            return warnings;
+        })]
+    };
+
+    private static string[] ExpectedColumns(string table) => table.ToLowerInvariant() switch
+    {
+        "jobs" => ["kind", "job_key", "status", "worker_id", "started_at", "finished_at", "lease_until", "retry_at", "retry_remaining", "last_error", "input_watermark", "last_success_watermark"],
+        "stage1_outputs" => ["thread_id", "source_updated_at", "generated_at", "usage_count", "last_usage", "selected_for_phase2", "selected_for_phase2_source_updated_at", "raw_memory", "rollout_summary"],
+        "thread_goals" => ["thread_id", "goal_id", "objective", "status", "token_budget", "tokens_used", "time_used_seconds", "created_at_ms", "updated_at_ms"],
+        "thread_goal_continuation_deferrals" => ["thread_id"],
+        "queued_items" => ["id", "thread_id", "queue_order", "created_at_ms", "updated_at_ms", "payload_json"],
+        "queued_thread_revisions" => ["thread_id", "revision"],
+        "thread_artifacts" => ["id", "thread_id", "artifact_type", "identity_key", "created_at", "payload"],
+        "local_thread_catalog" => ["host_id", "thread_id", "display_title", "source_kind", "source_created_at", "source_updated_at", "observation_sequence", "missing_candidate", "source_recency_at", "pending_observed_title"],
+        "thread_turn_summaries" => ["principal_key", "host_key", "thread_id", "summary", "revision", "updated_at"],
+        _ => []
+    };
+
+    private static CodexStateDatabaseCandidate? ResolveCandidate(
+        IReadOnlyList<CodexStateDatabaseCandidate> candidates, CodexNativeSourceKind kind, string? requestedPath)
+    {
+        if (requestedPath is null) return SelectCandidate(candidates, Prefix(kind));
+        // Only discovered files in this family can be selected. A vanished selection is unavailable,
+        // never permission to silently read another store or an arbitrary file.
+        return candidates.FirstOrDefault(candidate =>
+            candidate.FileName.StartsWith(Prefix(kind), StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(candidate.Path, requestedPath, StringComparison.OrdinalIgnoreCase));
+    }
 
     private static int DiscoveryPriority(string discoveryKind) => discoveryKind switch
     {
@@ -685,7 +788,7 @@ public sealed class CodexNativeSourceGateway
                 Int64(row.Page, row.Row, "finished_at"),
                 Int64(row.Page, row.Row, "lease_until"),
                 Int64(row.Page, row.Row, "retry_at"),
-                (int)(Int64(row.Page, row.Row, "retry_remaining") ?? 0),
+                NullableInt(row.Page, row.Row, "retry_remaining"),
                 Text(row.Page, row.Row, "last_error"),
                 Int64(row.Page, row.Row, "input_watermark"),
                 Int64(row.Page, row.Row, "last_success_watermark"))
@@ -695,9 +798,9 @@ public sealed class CodexNativeSourceGateway
         RequiredText(row, "thread_id") is { } threadId
             ? new CodexMemoryStage1Output(
                 threadId,
-                Int64(row.Page, row.Row, "source_updated_at") ?? 0,
+                Int64(row.Page, row.Row, "source_updated_at"),
                 Text(row.Page, row.Row, "rollout_slug"),
-                Int64(row.Page, row.Row, "generated_at") ?? 0,
+                Int64(row.Page, row.Row, "generated_at"),
                 NullableInt(row.Page, row.Row, "usage_count"),
                 NullableInt(row.Page, row.Row, "last_usage"),
                 Bool(row.Page, row.Row, "selected_for_phase2"),
@@ -706,7 +809,7 @@ public sealed class CodexNativeSourceGateway
                 HasValue(row.Page, row.Row, "rollout_summary"))
             : null;
 
-    private static CodexGoal? MapGoal(RawRow row, ISet<string> deferrals) =>
+    private static CodexGoal? MapGoal(RawRow row, ISet<string> deferrals, bool deferralsComplete) =>
         RequiredText(row, "thread_id") is { } threadId &&
         RequiredText(row, "goal_id") is { } goalId &&
         RequiredText(row, "status") is { } status
@@ -716,11 +819,11 @@ public sealed class CodexNativeSourceGateway
                 Text(row.Page, row.Row, "objective"),
                 status,
                 Int64(row.Page, row.Row, "token_budget"),
-                Int64(row.Page, row.Row, "tokens_used") ?? 0,
-                Int64(row.Page, row.Row, "time_used_seconds") ?? 0,
-                Int64(row.Page, row.Row, "created_at_ms") ?? 0,
-                Int64(row.Page, row.Row, "updated_at_ms") ?? 0,
-                deferrals.Contains(threadId))
+                Int64(row.Page, row.Row, "tokens_used"),
+                Int64(row.Page, row.Row, "time_used_seconds"),
+                Int64(row.Page, row.Row, "created_at_ms"),
+                Int64(row.Page, row.Row, "updated_at_ms"),
+                deferrals.Contains(threadId) ? true : deferralsComplete ? false : null)
             : null;
 
     private static CodexQueueItem? MapQueueItem(RawRow row, IReadOnlyDictionary<string, long> revisions) =>
@@ -729,9 +832,9 @@ public sealed class CodexNativeSourceGateway
             ? new CodexQueueItem(
                 id,
                 threadId,
-                Int64(row.Page, row.Row, "queue_order") ?? 0,
-                Int64(row.Page, row.Row, "created_at_ms") ?? 0,
-                Int64(row.Page, row.Row, "updated_at_ms") ?? 0,
+                Int64(row.Page, row.Row, "queue_order"),
+                Int64(row.Page, row.Row, "created_at_ms"),
+                Int64(row.Page, row.Row, "updated_at_ms"),
                 revisions.TryGetValue(threadId, out var revision) ? revision : null,
                 HasValue(row.Page, row.Row, "payload_json"))
             : null;
@@ -746,7 +849,7 @@ public sealed class CodexNativeSourceGateway
                 threadId,
                 artifactType,
                 identityKey,
-                Int64(row.Page, row.Row, "created_at") ?? 0,
+                Int64(row.Page, row.Row, "created_at"),
                 HasValue(row.Page, row.Row, "payload"))
             : null;
 
@@ -766,7 +869,7 @@ public sealed class CodexNativeSourceGateway
                 Text(row.Page, row.Row, "source_detail"),
                 Text(row.Page, row.Row, "model_provider"),
                 Text(row.Page, row.Row, "git_branch"),
-                Int64(row.Page, row.Row, "observation_sequence") ?? 0,
+                Int64(row.Page, row.Row, "observation_sequence"),
                 Bool(row.Page, row.Row, "missing_candidate"),
                 Text(row.Page, row.Row, "thread_source"),
                 Double(row.Page, row.Row, "source_recency_at"),
@@ -787,8 +890,8 @@ public sealed class CodexNativeSourceGateway
                 summary,
                 Text(row.Page, row.Row, "compact_summary"),
                 Text(row.Page, row.Row, "compact_summary_turn_key"),
-                Int64(row.Page, row.Row, "revision") ?? 0,
-                Int64(row.Page, row.Row, "updated_at") ?? 0)
+                Int64(row.Page, row.Row, "revision"),
+                Int64(row.Page, row.Row, "updated_at"))
             : null;
 
     private static string? RequiredText(RawRow row, string column) =>
@@ -826,17 +929,17 @@ public sealed class CodexNativeSourceGateway
         return value is >= int.MinValue and <= int.MaxValue ? (int)value : null;
     }
 
-    private static bool Bool(CodexStateRawPage page, CodexStateRawRow row, string column) =>
-        Int64(page, row, column) is long value && value != 0;
+    private static bool? Bool(CodexStateRawPage page, CodexStateRawRow row, string column) =>
+        Int64(page, row, column) switch { 0 => false, 1 => true, _ => null };
 
-    private static double Double(CodexStateRawPage page, CodexStateRawRow row, string column)
+    private static double? Double(CodexStateRawPage page, CodexStateRawRow row, string column)
     {
         var text = Text(page, row, column);
-        return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) ? value : 0;
+        return double.TryParse(text, NumberStyles.Float, CultureInfo.InvariantCulture, out var value) && double.IsFinite(value) ? value : null;
     }
 
-    private static bool HasValue(CodexStateRawPage page, CodexStateRawRow row, string column) =>
-        Text(page, row, column) is not null;
+    private static bool? HasValue(CodexStateRawPage page, CodexStateRawRow row, string column) =>
+        page.Columns.Contains(column, StringComparer.OrdinalIgnoreCase) ? Text(page, row, column) is not null : null;
 
     private sealed record RawRow(CodexStateRawPage Page, CodexStateRawRow Row);
 

@@ -18,6 +18,10 @@ public sealed partial class CodexSourcesPage : Page
     private int _requestedLogsPageIndex;
     private CodexLogsSource? _logs;
     private string? _initialThreadId;
+    private readonly Dictionary<CodexNativeSourceKind, string> _selectedPaths = [];
+    private bool _updatingSourceSelection;
+    private long _sourceGeneration;
+    private long _logsGeneration;
 
     public CodexSourcesPage()
     {
@@ -108,7 +112,41 @@ public sealed partial class CodexSourcesPage : Page
         if (SourceList.SelectedItem is SourceRow row)
         {
             ShowSourcePane(row.Key);
+            UpdateSourceSelection(row.Kind);
         }
+    }
+
+    private void UpdateSourceSelection(CodexNativeSourceKind kind)
+    {
+        var selection = _snapshot?.Selections.FirstOrDefault(value => value.Kind == kind);
+        _updatingSourceSelection = true;
+        try
+        {
+            var choices = new List<SourceInstanceChoice> { new(null, "Automatic discovery preference") };
+            if (selection is not null)
+            {
+                choices.AddRange(selection.Candidates.Select(candidate => new SourceInstanceChoice(
+                    candidate.DatabasePath, $"{candidate.DiscoveryKind} · {candidate.DatabasePath}")));
+            }
+            _selectedPaths.TryGetValue(kind, out var selected);
+            if (selected is not null && choices.All(choice => choice.Path != selected))
+                choices.Add(new SourceInstanceChoice(selected, $"No longer discovered · {selected}"));
+            SourceInstanceComboBox.ItemsSource = choices;
+            SourceInstanceComboBox.SelectedItem = choices.First(choice => choice.Path == selected);
+            SourceSelectionText.Text = selection is null ? "No source selection evidence yet." :
+                $"{selection.Policy}: {selection.Rationale}\nSelected: {selection.SelectedPath ?? "none"} · {selection.Candidates.Count} discovered instance(s).";
+        }
+        finally { _updatingSourceSelection = false; }
+    }
+
+    private async void OnSourceInstanceChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_updatingSourceSelection || !_loaded || SourceList.SelectedItem is not SourceRow row ||
+            SourceInstanceComboBox.SelectedItem is not SourceInstanceChoice choice || _cancellation is null) return;
+        if (choice.Path is null) _selectedPaths.Remove(row.Kind);
+        else _selectedPaths[row.Kind] = choice.Path;
+        Interlocked.Increment(ref _sourceGeneration);
+        await LoadAsync(_cancellation.Token);
     }
 
     private void OnFilterChanged(object sender, TextChangedEventArgs e)
@@ -138,12 +176,26 @@ public sealed partial class CodexSourcesPage : Page
             do
             {
                 _reloadRequested = false;
+                var generation = Volatile.Read(ref _sourceGeneration);
+                Interlocked.Increment(ref _logsGeneration);
+                if (!TryBuildLogsQuery(0, out var logsQuery, out var queryError))
+                {
+                    // Invalid log controls must not prevent other source families from refreshing.
+                    logsQuery = _logs is { } previousLogs ? previousLogs.Query with { PageIndex = 0 } : new CodexLogsQuery();
+                }
+                var query = new CodexNativeSourcesQuery
+                {
+                    SelectedPaths = new Dictionary<CodexNativeSourceKind, string>(_selectedPaths),
+                    Logs = logsQuery with { DatabasePath = _selectedPaths.GetValueOrDefault(CodexNativeSourceKind.Logs) }
+                };
                 StatusText.Text = "Inspecting Codex source capabilities…";
                 var snapshot = await Task.Run(
-                    () => App.Services.CodexNativeSources.ReadAsync(cancellationToken),
+                    () => App.Services.CodexNativeSources.ReadAsync(query, cancellationToken),
                     cancellationToken);
                 cancellationToken.ThrowIfCancellationRequested();
+                if (generation != Volatile.Read(ref _sourceGeneration)) continue;
                 Apply(snapshot);
+                if (queryError is not null) LogsQueryStatus.Text = queryError + " Showing the last valid log query.";
             }
             while (_reloadRequested && _loaded && !cancellationToken.IsCancellationRequested);
         }
@@ -152,11 +204,16 @@ public sealed partial class CodexSourcesPage : Page
         }
         catch (Exception exception)
         {
-            StatusText.Text = $"Codex source inspection unavailable: {Summarize(exception.Message)}";
+            if (_loaded && !cancellationToken.IsCancellationRequested)
+                StatusText.Text = $"Codex source inspection unavailable: {Summarize(exception.Message)}";
         }
         finally
         {
             _loading = false;
+            if (_reloadRequested && _loaded && _cancellation is { IsCancellationRequested: false } current && current.Token != cancellationToken)
+                await LoadAsync(current.Token);
+            if (_logsReloadRequested && _loaded && !cancellationToken.IsCancellationRequested)
+                await LoadLogsForPageAsync(_requestedLogsPageIndex);
         }
     }
 
@@ -168,7 +225,7 @@ public sealed partial class CodexSourcesPage : Page
             return;
         }
 
-        if (_logsLoading)
+        if (_logsLoading || _loading)
         {
             _requestedLogsPageIndex = Math.Max(0, pageIndex);
             _logsReloadRequested = true;
@@ -187,6 +244,7 @@ public sealed partial class CodexSourcesPage : Page
             do
             {
                 _logsReloadRequested = false;
+                var generation = Interlocked.Increment(ref _logsGeneration);
                 LogsQueryStatus.Text = "Reading the bounded Codex logs page…";
                 var result = await Task.Run(
                     () => App.Services.CodexNativeSources.ReadLogsAsync(query, cancellation.Token),
@@ -197,7 +255,7 @@ public sealed partial class CodexSourcesPage : Page
                     return;
                 }
 
-                ApplyLogs(result);
+                if (generation == Volatile.Read(ref _logsGeneration)) ApplyLogs(result);
                 if (_logsReloadRequested)
                 {
                     if (!TryBuildLogsQuery(_requestedLogsPageIndex, out query, out validationError))
@@ -214,7 +272,7 @@ public sealed partial class CodexSourcesPage : Page
         }
         catch (Exception exception)
         {
-            if (_loaded)
+            if (_loaded && ReferenceEquals(_cancellation, cancellation) && !cancellation.IsCancellationRequested)
             {
                 LogsQueryStatus.Text = $"Codex logs query unavailable: {Summarize(exception.Message)}";
             }
@@ -233,11 +291,7 @@ public sealed partial class CodexSourcesPage : Page
             source.DisplayName,
             source.StatusText)).ToArray();
 
-        SourceList.ItemsSource = BuildSourceRows(snapshot);
-        if (SourceList.SelectedItem is not SourceRow)
-        {
-            SourceList.SelectedItem = ((IEnumerable<SourceRow>)SourceList.ItemsSource).FirstOrDefault();
-        }
+        UpdateSourceRows(snapshot);
 
         ApplySource(MemorySourceText, snapshot.Memory.Source);
         ApplySource(GoalsSourceText, snapshot.Goals.Source);
@@ -247,35 +301,36 @@ public sealed partial class CodexSourcesPage : Page
         ApplySource(SummariesSourceText, snapshot.ThreadSummaries.Source);
 
         MemoryList.ItemsSource = snapshot.Memory.Jobs
-            .Select(job => $"Job {job.Kind}/{job.JobKey} · status={job.Status} · retries remaining={job.RetryRemaining} · worker={job.WorkerId ?? "(null)"}")
+            .Select(job => $"Job {job.Kind}/{job.JobKey} · status={job.Status} · retries remaining={Known(job.RetryRemaining)} · worker={job.WorkerId ?? "(null)"}")
             .Concat(snapshot.Memory.Stage1Outputs.Select(output =>
-                $"Stage1 {output.ThreadId} · source_updated_at={output.SourceUpdatedAt} · generated_at={output.GeneratedAt} · selected_for_phase2={output.SelectedForPhase2} · content: raw_memory={output.HasRawMemory}, rollout_summary={output.HasRolloutSummary}"))
+                $"Stage1 {output.ThreadId} · source_updated_at={Known(output.SourceUpdatedAt)} · generated_at={Known(output.GeneratedAt)} · selected_for_phase2={Known(output.SelectedForPhase2)} · content: raw_memory={Known(output.HasRawMemory)}, rollout_summary={Known(output.HasRolloutSummary)}"))
             .Where(value => Matches(value, filter))
             .ToArray();
 
         GoalsList.ItemsSource = snapshot.Goals.Goals.Select(goal =>
-            $"{goal.GoalId} · thread={goal.ThreadId} · status={goal.Status} · tokens={goal.TokensUsed} · time_seconds={goal.TimeUsedSeconds} · deferral={goal.HasContinuationDeferral} · objective present={goal.Objective is not null}")
+            $"{goal.GoalId} · thread={goal.ThreadId} · status={goal.Status} · tokens={Known(goal.TokensUsed)} · time_seconds={Known(goal.TimeUsedSeconds)} · deferral={Known(goal.HasContinuationDeferral)} · objective present={goal.Objective is not null}")
             .Where(value => Matches(value, filter)).ToArray();
 
         QueueList.ItemsSource = snapshot.Queue.Items.Select(item =>
-            $"{item.Id} · thread={item.ThreadId} · order={item.QueueOrder} · revision={item.Revision?.ToString() ?? "(unknown)"} · payload present={item.HasPayload}")
+            $"{item.Id} · thread={item.ThreadId} · order={Known(item.QueueOrder)} · revision={item.Revision?.ToString() ?? "(unknown)"} · payload present={Known(item.HasPayload)}")
+            .Concat(snapshot.Queue.Revisions.Select(revision => $"Revision observation · thread={revision.ThreadId} · revision={revision.Revision}"))
             .Where(value => Matches(value, filter)).ToArray();
 
         ArtifactsList.ItemsSource = snapshot.Artifacts.Artifacts.Select(artifact =>
-            $"{artifact.Id} · thread={artifact.ThreadId} · type={artifact.ArtifactType} · identity={artifact.IdentityKey} · created_at={artifact.CreatedAt} · payload present={artifact.HasPayload}")
+            $"{artifact.Id} · thread={artifact.ThreadId} · type={artifact.ArtifactType} · identity={artifact.IdentityKey} · created_at={Known(artifact.CreatedAt)} · payload present={Known(artifact.HasPayload)}")
             .Where(value => Matches(value, filter)).ToArray();
 
         CatalogList.ItemsSource = snapshot.DesktopCatalog.Entries.Select(entry =>
-            $"{entry.HostId}/{entry.ThreadId} · {entry.DisplayTitle} · source={entry.SourceKind} · updated={entry.SourceUpdatedAt.ToString(CultureInfo.InvariantCulture)} · missing_candidate={entry.MissingCandidate} · observation={entry.ObservationSequence}")
+            $"{entry.HostId}/{entry.ThreadId} · {entry.DisplayTitle} · source={entry.SourceKind} · updated={Known(entry.SourceUpdatedAt)} · missing_candidate={Known(entry.MissingCandidate)} · observation={Known(entry.ObservationSequence)}")
             .Where(value => Matches(value, filter)).ToArray();
 
         SummariesList.ItemsSource = snapshot.ThreadSummaries.Summaries.Select(summary =>
-            $"{summary.PrincipalKey}/{summary.HostKey}/{summary.ThreadId} · revision={summary.Revision} · updated={summary.UpdatedAt} · summary present (local-only)")
+            $"{summary.PrincipalKey}/{summary.HostKey}/{summary.ThreadId} · revision={Known(summary.Revision)} · updated={Known(summary.UpdatedAt)} · summary present (local-only)")
             .Where(value => Matches(value, filter)).ToArray();
 
         ApplyLogs(snapshot.Logs);
 
-        StatusText.Text = $"Captured {snapshot.CapturedAtUtc.ToLocalTime():g}. Source rows are bounded to 250 per table; raw content remains available only through local inspection.";
+        StatusText.Text = $"Captured {snapshot.CapturedAtUtc.ToLocalTime():g}. Source rows are bounded to 250 per table. Text search filters only these loaded rows, not the complete source. Unknown means missing, null or undecodable; inspect source warnings for schema gaps.";
     }
 
     private void ApplyLogs(CodexLogsSource logs)
@@ -287,7 +342,7 @@ public sealed partial class CodexSourcesPage : Page
             SourceStatusList.ItemsSource = _snapshot.Sources.Select(source => new SourceStatusRow(
                 source.DisplayName,
                 source.StatusText)).ToArray();
-            SourceList.ItemsSource = BuildSourceRows(_snapshot);
+            UpdateSourceRows(_snapshot);
         }
 
         ApplySource(LogsSourceText, logs.Source);
@@ -385,6 +440,7 @@ public sealed partial class CodexSourcesPage : Page
 
         query = new CodexLogsQuery
         {
+            DatabasePath = _selectedPaths.GetValueOrDefault(CodexNativeSourceKind.Logs) ?? _snapshot?.Logs.Source.DatabasePath,
             PageIndex = Math.Max(0, pageIndex),
             PageSize = 100,
             Levels = LogLevelsTextBox.Text
@@ -478,8 +534,20 @@ public sealed partial class CodexSourcesPage : Page
 
     private static void ApplySource(TextBlock target, CodexNativeSourceInfo source)
     {
-        target.Text = $"{source.StatusText} · {source.DatabasePath ?? "No matching source file"} · schema={source.SchemaFingerprint?[..Math.Min(12, source.SchemaFingerprint.Length)] ?? "(unknown)"} · version={source.SourceVersion ?? "(unknown)"} · corroboration={source.UpstreamCorroborationCommit ?? "(none)"}";
+        target.Text = $"{source.StatusText} · {source.DatabasePath ?? "No matching source file"} · captured={source.CapturedAtUtc:O} · discovery={source.DiscoveryKind ?? "unknown"} · schema={source.SchemaFingerprint?[..Math.Min(12, source.SchemaFingerprint.Length)] ?? "(unknown)"} · version={source.SourceVersion ?? "(unknown)"} · corroboration={source.UpstreamCorroborationCommit ?? "(none)"}" +
+            (source.Warnings.Count == 0 ? string.Empty : "\n" + string.Join("\n", source.Warnings));
     }
+
+    private void UpdateSourceRows(CodexNativeSourcesSnapshot snapshot)
+    {
+        var key = (SourceList.SelectedItem as SourceRow)?.Key;
+        var rows = BuildSourceRows(snapshot);
+        SourceList.ItemsSource = rows;
+        SourceList.SelectedItem = rows.FirstOrDefault(row => row.Key == key) ?? rows.FirstOrDefault();
+    }
+
+    private static string Known(object? value) => value is null ? "unknown" : Convert.ToString(value, CultureInfo.InvariantCulture) ?? "unknown";
+    private sealed record SourceInstanceChoice(string? Path, string Label);
 
     private static string Summarize(string message) =>
         string.IsNullOrWhiteSpace(message) ? "unknown error" : message.Length <= 240 ? message : message[..240] + "…";
@@ -489,5 +557,17 @@ public sealed partial class CodexSourcesPage : Page
 
     private sealed record SourceStatusRow(string Name, string Status);
 
-    private sealed record SourceRow(string Key, string Name, string Status);
+    private sealed record SourceRow(string Key, string Name, string Status)
+    {
+        public CodexNativeSourceKind Kind => Key switch
+        {
+            "logs" => CodexNativeSourceKind.Logs,
+            "memory" => CodexNativeSourceKind.Memory,
+            "goals" => CodexNativeSourceKind.Goals,
+            "queue" => CodexNativeSourceKind.Queue,
+            "artifacts" => CodexNativeSourceKind.Artifacts,
+            "catalog" => CodexNativeSourceKind.DesktopCatalog,
+            _ => CodexNativeSourceKind.ThreadSummaries
+        };
+    }
 }

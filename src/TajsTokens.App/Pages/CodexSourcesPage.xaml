@@ -28,6 +28,10 @@
         </Grid>
 
         <StackPanel Grid.Row="1" Spacing="8">
+            <ComboBox x:Name="SourceInstanceComboBox" Header="Database instance for the selected family"
+                      HorizontalAlignment="Stretch" DisplayMemberPath="Label"
+                      SelectionChanged="OnSourceInstanceChanged" />
+            <TextBlock x:Name="SourceSelectionText" TextWrapping="Wrap" IsTextSelectionEnabled="True" Opacity="0.72" />
             <TextBox x:Name="FilterTextBox"
                      PlaceholderText="Filter source rows by thread, status, id or host"
                      TextChanged="OnFilterChanged" />
@@ -88,7 +92,9 @@
                         <RowDefinition Height="Auto" />
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
-                    <TextBlock x:Name="LogsSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                    <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                    <TextBlock IsTextSelectionEnabled="True" x:Name="LogsSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                    </ScrollViewer>
                     <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <TextBox x:Name="LogLevelsTextBox" Width="170" PlaceholderText="Levels: ERROR,WARN" />
@@ -128,7 +134,9 @@
                     <Grid x:Name="MemoryPane" Visibility="Collapsed">
                 <Grid RowSpacing="8">
                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                    <TextBlock x:Name="MemorySourceText" TextWrapping="Wrap" Opacity="0.72" />
+                    <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                    <TextBlock IsTextSelectionEnabled="True" x:Name="MemorySourceText" TextWrapping="Wrap" Opacity="0.72" />
+                    </ScrollViewer>
                     <ListView x:Name="MemoryList" Grid.Row="1" SelectionMode="None">
                         <ListView.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,4" /></DataTemplate></ListView.ItemTemplate>
                     </ListView>
@@ -137,7 +145,9 @@
                     <Grid x:Name="GoalsPane" Visibility="Collapsed">
                 <Grid RowSpacing="8">
                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                    <TextBlock x:Name="GoalsSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                    <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                    <TextBlock IsTextSelectionEnabled="True" x:Name="GoalsSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                    </ScrollViewer>
                     <ListView x:Name="GoalsList" Grid.Row="1" SelectionMode="None">
                         <ListView.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,4" /></DataTemplate></ListView.ItemTemplate>
                     </ListView>
@@ -146,7 +156,9 @@
                     <Grid x:Name="QueuePane" Visibility="Collapsed">
                 <Grid RowSpacing="8">
                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                    <TextBlock x:Name="QueueSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                    <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                    <TextBlock IsTextSelectionEnabled="True" x:Name="QueueSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                    </ScrollViewer>
                     <ListView x:Name="QueueList" Grid.Row="1" SelectionMode="None">
                         <ListView.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,4" /></DataTemplate></ListView.ItemTemplate>
                     </ListView>
@@ -155,7 +167,9 @@
                     <Grid x:Name="ArtifactsPane" Visibility="Collapsed">
                 <Grid RowSpacing="8">
                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                    <TextBlock x:Name="ArtifactsSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                    <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                    <TextBlock IsTextSelectionEnabled="True" x:Name="ArtifactsSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                    </ScrollViewer>
                     <ListView x:Name="ArtifactsList" Grid.Row="1" SelectionMode="None">
                         <ListView.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,4" /></DataTemplate></ListView.ItemTemplate>
                     </ListView>
@@ -164,7 +178,9 @@
                     <Grid x:Name="CatalogPane" Visibility="Collapsed">
                 <Grid RowSpacing="8">
                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                    <TextBlock x:Name="CatalogSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                    <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                    <TextBlock IsTextSelectionEnabled="True" x:Name="CatalogSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                    </ScrollViewer>
                     <ListView x:Name="CatalogList" Grid.Row="1" SelectionMode="None">
                         <ListView.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,4" /></DataTemplate></ListView.ItemTemplate>
                     </ListView>
@@ -173,7 +189,9 @@
                     <Grid x:Name="SummariesPane" Visibility="Collapsed">
                 <Grid RowSpacing="8">
                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                    <TextBlock x:Name="SummariesSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                    <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                    <TextBlock IsTextSelectionEnabled="True" x:Name="SummariesSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                    </ScrollViewer>
                     <ListView x:Name="SummariesList" Grid.Row="1" SelectionMode="None">
                         <ListView.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,4" /></DataTemplate></ListView.ItemTemplate>
                     </ListView>

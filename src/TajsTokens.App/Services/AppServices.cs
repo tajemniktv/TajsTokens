@@ -70,7 +70,7 @@ public sealed class AppServices
     public ICodexObservatoryStore ObservatoryStore { get; }
     public SqliteCodexObservatoryReadModel ObservatoryReadModel { get; }
     public CodexStateDbExplorerService CodexStateExplorer { get; }
-    public CodexNativeSourcesService CodexNativeSources { get; }
+    public ICodexNativeSourcesReadModel CodexNativeSources { get; }
     /// <summary>Source-reader access retained for compatibility with existing integrations.</summary>
     public CodexThreadObservabilityService CodexThreadObservability { get; }
 

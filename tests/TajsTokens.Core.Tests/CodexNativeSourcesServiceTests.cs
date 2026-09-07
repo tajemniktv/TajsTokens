@@ -6,6 +6,170 @@ namespace TajsTokens.Core.Tests;
 
 public sealed class CodexNativeSourcesServiceTests
 {
+    [Theory]
+    [InlineData(-1)]
+    [InlineData(1_000_000_000)]
+    public void LogTimestamp_InvalidNanosecondsDoNotBecomeAnotherInstant(long nanoseconds)
+    {
+        var entry = new CodexLogEntry(1, 10, nanoseconds, "WARN", "test", null, null, null, null, null, false, null, null);
+        Assert.Null(entry.TimestampUtc);
+        Assert.Equal(nanoseconds, entry.TimestampNanoseconds);
+    }
+
+    [Fact]
+    public async Task ReadAsync_ExposesAlternativesAndHonorsExplicitInstanceWithoutFallback()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-source-selection-");
+        try
+        {
+            var older = Path.Combine(directory.FullName, "queue_1.sqlite");
+            var newer = Path.Combine(directory.FullName, "queue_2.sqlite");
+            await CreateDatabaseAsync(older, "CREATE TABLE queued_items (id TEXT, thread_id TEXT); INSERT INTO queued_items VALUES ('older', 't');");
+            await CreateDatabaseAsync(newer, "CREATE TABLE queued_items (id TEXT, thread_id TEXT); INSERT INTO queued_items VALUES ('newer', 't');");
+            var service = new CodexNativeSourcesService(directory.FullName);
+            var automatic = await service.ReadAsync();
+            Assert.Equal("newer", Assert.Single(automatic.Queue.Items).Id);
+            var selection = Assert.Single(automatic.Selections, value => value.Kind == CodexNativeSourceKind.Queue);
+            Assert.Equal(2, selection.Candidates.Count);
+            Assert.Equal(newer, selection.SelectedPath);
+            Assert.Contains("not semantic authority", selection.Rationale);
+
+            var query = new CodexNativeSourcesQuery
+            {
+                SelectedPaths = new Dictionary<CodexNativeSourceKind, string> { [CodexNativeSourceKind.Queue] = older }
+            };
+            var chosen = await service.ReadAsync(query);
+            Assert.Equal("older", Assert.Single(chosen.Queue.Items).Id);
+            Assert.Equal(older, chosen.Queue.Source.DatabasePath);
+            // A disappeared explicit selection must not turn into a successful read from queue_2.
+            File.Delete(older);
+            var disappeared = await service.ReadAsync(query);
+            Assert.Equal(CodexNativeSourceAvailability.Unavailable, disappeared.Queue.Source.Availability);
+            Assert.Empty(disappeared.Queue.Items);
+            Assert.Equal(older, Assert.Single(disappeared.Selections, value => value.Kind == CodexNativeSourceKind.Queue).SelectedPath);
+        }
+        finally { directory.Delete(recursive: true); }
+    }
+
+    [Fact]
+    public async Task ReadAsync_DoesNotHideBrokenPreferredSourceBehindReadableAlternative()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-source-error-");
+        try
+        {
+            await CreateDatabaseAsync(Path.Combine(directory.FullName, "queue_1.sqlite"), "CREATE TABLE queued_items (id TEXT, thread_id TEXT);");
+            await File.WriteAllTextAsync(Path.Combine(directory.FullName, "queue_2.sqlite"), "not a SQLite database");
+            var result = await new CodexNativeSourcesService(directory.FullName).ReadAsync();
+            Assert.Equal(CodexNativeSourceAvailability.Error, result.Queue.Source.Availability);
+            Assert.Equal(2, Assert.Single(result.Selections, value => value.Kind == CodexNativeSourceKind.Queue).Candidates.Count);
+        }
+        finally { directory.Delete(recursive: true); }
+    }
+
+    [Fact]
+    public async Task ReadAsync_PreservesZeroFalseAndUnknownWithoutOverflowOrInventedDeferrals()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-source-values-");
+        try
+        {
+            await CreateDatabaseAsync(Path.Combine(directory.FullName, "memories_1.sqlite"), """
+                CREATE TABLE jobs (kind TEXT, job_key TEXT, status TEXT, retry_remaining INTEGER);
+                INSERT INTO jobs VALUES ('stage1', 't', 'future_status', 9223372036854775807);
+                CREATE TABLE stage1_outputs (thread_id TEXT, source_updated_at INTEGER, generated_at INTEGER, selected_for_phase2 INTEGER, raw_memory TEXT);
+                INSERT INTO stage1_outputs VALUES ('zero', 0, 0, 0, NULL);
+                INSERT INTO stage1_outputs VALUES ('unknown', NULL, 'not-an-integer', 9, NULL);
+                """);
+            await CreateDatabaseAsync(Path.Combine(directory.FullName, "goals_1.sqlite"), """
+                CREATE TABLE thread_goals (thread_id TEXT, goal_id TEXT, status TEXT);
+                INSERT INTO thread_goals VALUES ('t', 'g', 'future_status');
+                CREATE TABLE thread_goal_continuation_deferrals (future_key TEXT);
+                """);
+            var result = await new CodexNativeSourcesService(directory.FullName).ReadAsync();
+            Assert.Null(Assert.Single(result.Memory.Jobs).RetryRemaining);
+            var zero = Assert.Single(result.Memory.Stage1Outputs, value => value.ThreadId == "zero");
+            Assert.Equal(0L, zero.SourceUpdatedAt);
+            Assert.False(zero.SelectedForPhase2);
+            Assert.False(zero.HasRawMemory); // present column, NULL payload
+            Assert.Null(zero.HasRolloutSummary); // missing column is different
+            var unknown = Assert.Single(result.Memory.Stage1Outputs, value => value.ThreadId == "unknown");
+            Assert.Null(unknown.SourceUpdatedAt);
+            Assert.Null(unknown.GeneratedAt);
+            Assert.Null(unknown.SelectedForPhase2);
+            var goal = Assert.Single(result.Goals.Goals);
+            Assert.Equal("future_status", goal.Status);
+            Assert.Null(goal.TokensUsed);
+            Assert.Null(goal.HasContinuationDeferral);
+            Assert.Contains(result.Goals.Source.Warnings, value => value.Contains("thread_goal_continuation_deferrals"));
+        }
+        finally { directory.Delete(recursive: true); }
+    }
+
+    [Fact]
+    public async Task ReadAsync_ReportsRejectedRowsAndRetainsConflictingRevisionObservations()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-source-conflict-");
+        try
+        {
+            await CreateDatabaseAsync(Path.Combine(directory.FullName, "queue_1.sqlite"), """
+                CREATE TABLE queued_items (id TEXT, thread_id TEXT);
+                INSERT INTO queued_items VALUES ('item', 't');
+                INSERT INTO queued_items VALUES (NULL, 't');
+                CREATE TABLE queued_thread_revisions (thread_id TEXT, revision INTEGER);
+                INSERT INTO queued_thread_revisions VALUES ('t', 1), ('t', 2);
+                """);
+            var result = await new CodexNativeSourcesService(directory.FullName).ReadAsync();
+            Assert.Null(Assert.Single(result.Queue.Items).Revision);
+            Assert.Equal(2, result.Queue.Revisions.Count);
+            Assert.Contains(result.Queue.Source.Warnings, value => value.Contains("1 row(s) omitted"));
+            Assert.Contains(result.Queue.Source.Warnings, value => value.Contains("conflicting revisions"));
+            Assert.Equal(CodexNativeSourceAvailability.Available, result.Queue.Source.Availability);
+        }
+        finally { directory.Delete(recursive: true); }
+    }
+
+    [Fact]
+    public async Task ReadLogsAsync_PinsReturnedQueryToActualSourceAndKeepsBodiesOptIn()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-log-selection-");
+        try
+        {
+            var path = Path.Combine(directory.FullName, "logs_1.sqlite");
+            await CreateDatabaseAsync(path, """
+                CREATE TABLE logs (id INTEGER, ts INTEGER, ts_nanos INTEGER, level TEXT, target TEXT, feedback_log_body TEXT);
+                INSERT INTO logs VALUES (1, 10, 0, 'WARN', 'test', 'private fixture body');
+                """);
+            var service = new CodexNativeSourcesService(directory.FullName);
+            var first = await service.ReadLogsAsync();
+            Assert.Equal(path, first.Query.DatabasePath);
+            Assert.Null(Assert.Single(first.Entries).Message);
+            await CreateDatabaseAsync(Path.Combine(directory.FullName, "logs_2.sqlite"), "CREATE TABLE logs (id INTEGER, ts INTEGER, ts_nanos INTEGER, level TEXT, target TEXT);");
+            var pinned = await service.ReadLogsAsync(first.Query with { IncludeMessages = true });
+            Assert.Equal(path, pinned.Source.DatabasePath);
+            Assert.Equal("private fixture body", Assert.Single(pinned.Entries).Message);
+        }
+        finally { directory.Delete(recursive: true); }
+    }
+
+    [Fact]
+    public async Task ReadAsync_RelatedNativeKeysAreNotCollapsedByCase()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-native-key-case-");
+        try
+        {
+            await CreateDatabaseAsync(Path.Combine(directory.FullName, "queue_1.sqlite"), """
+                CREATE TABLE queued_items (id TEXT, thread_id TEXT);
+                INSERT INTO queued_items VALUES ('one', 't'), ('two', 'T');
+                CREATE TABLE queued_thread_revisions (thread_id TEXT, revision INTEGER);
+                INSERT INTO queued_thread_revisions VALUES ('t', 1), ('T', 2);
+                """);
+            var result = await new CodexNativeSourcesService(directory.FullName).ReadAsync();
+            Assert.Equal(1, Assert.Single(result.Queue.Items, value => value.ThreadId == "t").Revision);
+            Assert.Equal(2, Assert.Single(result.Queue.Items, value => value.ThreadId == "T").Revision);
+            Assert.Equal(2, result.Queue.Revisions.Count);
+        }
+        finally { directory.Delete(recursive: true); }
+    }
+
     [Fact]
     public async Task ReadAsync_MapsNativeSourcesAndPreservesContentBoundaries()
     {
@@ -64,7 +228,6 @@ public sealed class CodexNativeSourcesServiceTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
             directory.Delete(recursive: true);
         }
     }
@@ -90,7 +253,6 @@ public sealed class CodexNativeSourcesServiceTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
             directory.Delete(recursive: true);
         }
     }
@@ -111,18 +273,18 @@ public sealed class CodexNativeSourcesServiceTests
             Assert.Equal(CodexNativeSourceAvailability.Available, snapshot.Queue.Source.Availability);
             var item = Assert.Single(snapshot.Queue.Items);
             Assert.Equal("item-1", item.Id);
-            Assert.Equal(0, item.QueueOrder);
-            Assert.False(item.HasPayload);
+            Assert.Null(item.QueueOrder);
+            Assert.Null(item.HasPayload);
+            Assert.Contains(snapshot.Queue.Source.Warnings, warning => warning.Contains("queue_order"));
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
             directory.Delete(recursive: true);
         }
     }
 
     [Fact]
-    public async Task ReadAsync_NullOptionalBooleansRemainFalse()
+    public async Task ReadAsync_NullOptionalBooleansRemainUnknown()
     {
         var directory = Directory.CreateTempSubdirectory("tajstokens-native-source-null-flags-");
         try
@@ -138,14 +300,13 @@ public sealed class CodexNativeSourcesServiceTests
 
             var snapshot = await new CodexNativeSourcesService(directory.FullName).ReadAsync();
 
-            Assert.False(Assert.Single(snapshot.Memory.Stage1Outputs).SelectedForPhase2);
+            Assert.Null(Assert.Single(snapshot.Memory.Stage1Outputs).SelectedForPhase2);
             var entry = Assert.Single(snapshot.DesktopCatalog.Entries);
-            Assert.False(entry.MissingCandidate);
-            Assert.False(entry.PendingObservedTitle);
+            Assert.Null(entry.MissingCandidate);
+            Assert.Null(entry.PendingObservedTitle);
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
             directory.Delete(recursive: true);
         }
     }
@@ -202,7 +363,6 @@ public sealed class CodexNativeSourcesServiceTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
             directory.Delete(recursive: true);
         }
     }
@@ -225,7 +385,6 @@ public sealed class CodexNativeSourcesServiceTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
             directory.Delete(recursive: true);
         }
     }
@@ -248,7 +407,6 @@ public sealed class CodexNativeSourcesServiceTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
             directory.Delete(recursive: true);
         }
     }
@@ -269,7 +427,6 @@ public sealed class CodexNativeSourcesServiceTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
             directory.Delete(recursive: true);
         }
     }
@@ -327,7 +484,6 @@ public sealed class CodexNativeSourcesServiceTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
             directory.Delete(recursive: true);
         }
     }
@@ -390,7 +546,6 @@ public sealed class CodexNativeSourcesServiceTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
             directory.Delete(recursive: true);
         }
     }
@@ -412,7 +567,6 @@ public sealed class CodexNativeSourcesServiceTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
             directory.Delete(recursive: true);
         }
 
@@ -444,7 +598,6 @@ public sealed class CodexNativeSourcesServiceTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
             legacyDirectory.Delete(recursive: true);
         }
 
@@ -459,7 +612,6 @@ public sealed class CodexNativeSourcesServiceTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
             unsupportedDirectory.Delete(recursive: true);
         }
 
@@ -472,7 +624,6 @@ public sealed class CodexNativeSourcesServiceTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
             unavailableDirectory.Delete(recursive: true);
         }
     }
@@ -493,7 +644,6 @@ public sealed class CodexNativeSourcesServiceTests
         }
         finally
         {
-            SqliteConnection.ClearAllPools();
             directory.Delete(recursive: true);
         }
     }
