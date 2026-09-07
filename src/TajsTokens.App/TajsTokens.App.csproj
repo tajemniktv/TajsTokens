@@ -48,3 +48,4 @@
     <ProjectReference Include="..\TajsTokens.Infrastructure\TajsTokens.Infrastructure.csproj" />
   </ItemGroup>
 </Project>
+
