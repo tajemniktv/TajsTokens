@@ -10,7 +10,7 @@ If current code conflicts with this document or with newly established source ev
 
 ## Product direction: Codex-first observability
 
-TajsTokens is currently a **Codex-first observability application**. The immediate goal is not broad provider support, a generic AI telemetry platform, or a lowest-common-denominator usage dashboard. The goal is to make Codex richly inspectable from trustworthy local evidence.
+TajsTokens is currently a **Codex-first observability and intelligence application**. The immediate goal is not broad provider support, a generic AI telemetry platform, or a lowest-common-denominator usage dashboard. The goal is to make Codex richly inspectable from trustworthy local evidence and, where that evidence is strong enough, turn it into useful account-local predictions about quota usage and near-future behavior.
 Codex exposes a large and evolving set of source-native concepts. Where source contracts establish their semantics, TajsTokens should preserve and use that richness rather than flattening it into generic `session`, `event`, or `usage` records merely because those names might also fit another provider later.
 At the same time, TajsTokens should not become permanently shaped like Codex. Possible future providers influence the architecture through clean boundaries, not through premature genericization.
 
@@ -65,6 +65,8 @@ There is deliberately no universal provider schema in the middle of this pipelin
 - **Local visibility is not durable collection.** TajsTokens is local-first and should let a user inspect the data their local Codex installation exposes, including content-bearing values where appropriate. Showing a source value on-device does not by itself justify copying it into TajsTokens' durable evidence store.
 - **Export is a separate privacy boundary.** If TajsTokens exports source data, the export path must make the data leaving the local inspection boundary explicit and should support sanitization/redaction where appropriate. Raw and sanitized export modes, if both exist, must be distinguishable rather than silently changing the evidence.
 - **Privacy stays conservative for duplication and secrets.** Do not expand durable duplication of prompts, reasoning text, source bodies, credentials, authentication material, or other sensitive payloads merely to make analysis easier. Secret-bearing data requires explicit handling even when the source can be inspected locally.
+- **Predictions are policy, not evidence.** Forecasts, confidence scores, scenarios, inferred contributors, and classifications must remain rebuildable outputs with explicit inputs and policy/model versions. They never become source facts merely because they were persisted for history.
+- **Evaluation before sophistication.** A more complicated forecasting model earns its place only through leakage-safe historical evaluation against simpler baselines. False precision and uncalibrated confidence are product defects.
 - **Existing implementation has no grandfathered semantic authority.** Useful plumbing may survive; claims must earn their way back through source evidence.
 - **Do not design for hypothetical provider symmetry.** A clean provider boundary is valuable; forcing Codex into a lowest-common-denominator model is not.
 
@@ -190,25 +192,81 @@ Where relevant, a read-model result should carry or expose:
 
 A read model must never make a derived selection or broad presentation classification look like a raw provider fact.
 Provider-specific UI is allowed to be substantially richer than shared UI. TajsTokens should exploit Codex data where it is trustworthy instead of hiding useful information because another provider may not expose an equivalent.
-The first goal is trustworthy current facts and inspectable history. Predictive, inferential, cross-signal, and presentation work is outside the current design scope and must not constrain these five layers.
+Trustworthy current facts and inspectable history remain the foundation. Predictive, inferential, cross-signal, and presentation work is now active product scope, but it lives **above** the evidence/read-model boundary. Intelligence may consume contracted observations and read models; it must not reach backward and redefine what the sources mean.
+
+## 6. Intelligence, forecasting, and prediction
+
+TajsTokens should help answer not only **what Codex has done**, but also **what the current workload implies for the rest of the quota window**. This layer is explicitly derived, account-local, replaceable, and evaluation-driven.
+
+### Product goals
+
+For the 5-hour and weekly quota windows, the prediction system should aim to provide:
+
+- current burn regime and sustainable pace for the authoritative reset window;
+- probability/risk of exhausting the window before reset when the data supports a calibrated probability;
+- estimated exhaustion time when exhaustion before reset is plausible;
+- predicted remaining quota at reset;
+- meaningful uncertainty/ranges rather than a single falsely precise number;
+- clear learning/stale/insufficient-evidence states;
+- explanations tied to observed regime changes or workload signals without claiming causality that has not been established.
+
+The Overview should surface the compact decision-useful version. Deeper intelligence views may expose backtest performance, model/policy versions, uncertainty diagnostics, and historical forecast-versus-outcome comparisons.
+
+### Evidence and authority boundary
+
+Current forecasts must be anchored to the provider-authoritative current quota observation for the exact provider/profile/window/reset generation being forecast. Stale, non-authoritative, future-dated, or differently anchored observations may remain visible as history but must not silently become the current forecast anchor.
+
+Historical inputs must be bounded at forecast evaluation time. No walk-forward/backtest may see later quota observations, later reset outcomes, or future workload features. Reset/re-anchor generations are separate forecasting epochs; older epochs may be used only as prior training data by a deliberately evaluated model.
+
+Provider meters are quantized/limited-precision observations. A repeated percentage reading means no movement was visible at the meter's precision; it does **not** establish exact zero consumption. Forecasting methods must model or conservatively preserve that uncertainty.
+
+### Account-local learning
+
+There is no assumed universal conversion from tokens to subscription quota. Any relationship between quota movement and workload must be learned from the user's own observed history and remain conditional on available coverage.
+
+Potential predictors include only already-contracted observations such as recent quota movement, time within the reset epoch, root/subagent activity, concurrency, model/reasoning-effort mix, native token/accounting categories, cache behavior, active-session duration, and other provider-native signals established later. These are candidate predictors, not causal truths.
+
+### Evaluation contract
+
+Forecasting changes must be judged primarily by historical walk-forward/backtesting over completed observations/windows, preserving only information that would actually have been available at each historical prediction time.
+
+Evaluation should support sensible baselines and metrics appropriate to the output: remaining-quota and remaining-at-reset error, exhaustion-before-reset classification quality, probability calibration/proper scoring when probabilities are emitted, exhaustion ETA error where legitimate, prediction-interval coverage and width, and explicit sample counts/coverage. When sample size permits, report 5-hour versus weekly and workload/model/reasoning-regime performance separately.
+
+Model selection should prefer the simplest method whose out-of-sample performance is competitive. A fixed heuristic, robust local estimator, EWMA, regression, state-space model, ensemble, or another approach is acceptable if it wins on evidence. Complexity is not itself progress.
+
+Confidence has to mean something. Heuristic confidence scores may be labelled as heuristic, but a UI percentage that looks probabilistic must be calibrated/validated as such. Prediction intervals should state intended coverage and be checked empirically.
+
+### Current baseline and intended evolution
+
+The current production baseline is deliberately simple:
+
+- `ForecastingService` isolates the active reset epoch, derives observed quota-percent-per-hour intervals, uses a chronological EWMA with different fixed alphas for 5-hour and weekly windows, estimates sustainable pace/reset survival, and applies heuristic confidence.
+- Flat quantized histories produce `IdleWithinMeterPrecision` rather than a confident zero-burn forecast.
+- `SqliteIntelligenceService.BuildAndPersistCurrentForecastsAsync` owns current forecast generation, requires a fresh provider-authoritative anchor, excludes history newer than it, persists the exact forecast shown to the app, and prevents stale/non-authoritative lanes from borrowing a competing forecast.
+- `ScenarioPlannerService` currently fits a small account-local ridge model over quota-drop intervals using duration, root-agent-hours, and subagent-hours, with optional model/reasoning cohort selection and residual-derived uncertainty.
+
+These implementations are **baselines, not architecture**. Their formulas, coefficients, thresholds, confidence logic, and feature sets may be replaced when evaluation demonstrates a better production choice. Persisted forecast snapshots are derived historical outputs and should retain enough lineage to identify the anchor and policy/model used; they must remain rebuildable from durable evidence.
 
 ## Current work
 
-There is deliberately no phase roadmap during the reset. Work proceeds by establishing source contracts and only then promoting proven semantics upward through the five layers above.
-The current product focus is **rich Codex observability**. We are inventorying and studying Codex-owned sources such as state SQLite, rollout JSONL, and app-server surfaces one source at a time. The recently added Codex State DB Explorer is acquisition/investigation tooling for that work, not a semantic shortcut around source contracts.
+There is deliberately no phase roadmap during the foundation reset. Work is selected by product value and evidence readiness: establish or strengthen source contracts where semantics remain uncertain, then promote trustworthy observations into useful read models and intelligence.
+
+The current product focus is **rich Codex observability plus trustworthy account-local intelligence**. The major local Codex source families are already inspectable through raw and provider-native surfaces, and the application has working quota, token-accounting, thread/workspace/subagent, auxiliary-source, forecasting, and intelligence paths. Those existing paths are implementation evidence, not proof that every semantic or algorithm is finished.
 
 Current work should therefore favor:
 
-- discovering what Codex exposes directly;
-- capturing representative source states and changes over time;
-- documenting source-native identities, relationships, timing, lifecycle, and uncertainty;
-- preserving useful Codex richness when contracts justify it;
-- building durable Codex evidence only after those contracts are credible;
-- deriving rich Codex read models from that evidence without turning them into a compulsory schema for future providers.
+- closing concrete source-contract or compatibility gaps that still make product claims unsafe;
+- making normal Codex workflows useful through provider-native views rather than requiring raw SQLite/JSONL inspection;
+- preserving source selection, provenance, missing/ambiguous/conflicting evidence, and source evolution explicitly;
+- improving durable evidence/read-model boundaries where current code still duplicates policy or stores derived assumptions as facts;
+- developing quota forecasting and scenario intelligence through leakage-safe walk-forward evaluation, calibrated uncertainty, and account-local evidence;
+- using workload signals only when their semantics are established and they improve measured out-of-sample prediction;
+- improving Overview/intelligence UX so predictions are actionable without overstating certainty;
+- maintaining strong tests, bounded queries, cancellation/concurrency behavior, and Windows build quality.
 
-Possible future providers should be kept in mind by maintaining clean provider/source boundaries and avoiding Codex assumptions in shared infrastructure. We are not implementing hypothetical providers now, and we are not weakening the Codex model to make imaginary future mappings easier.
+Possible future providers should be kept in mind through clean provider/source boundaries. We are not implementing hypothetical providers now, and we are not weakening the Codex model to make imaginary future mappings easier.
 
-Quota is one Codex-observability domain among many rather than the organizing principle of the architecture.
+Quota remains one Codex-observability domain among many rather than the organizing principle of the architecture. It is currently a particularly valuable intelligence domain because it has an authoritative live meter, reset epochs, historical observations, and related workload evidence that make prediction measurable rather than purely speculative.
 
 ## Codex state SQLite inspection boundary
 

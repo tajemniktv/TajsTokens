@@ -8,13 +8,17 @@ Read [`PROJECT.md`](PROJECT.md) before making product, telemetry, persistence, p
 
 ## Current product direction
 
-TajsTokens is currently a **Codex-first observability application**. The near-term goal is to understand and expose Codex richly from trustworthy local evidence.
+TajsTokens is a **Codex-first observability and intelligence application**. The product goal is a coherent, trustworthy, production-quality local view of Codex: current quota and usage, source-native history, threads/workspaces/subagents, diagnostics, and evidence-backed predictions that help the user understand what is happening and what is likely to happen next.
 
-Keep possible future providers in mind when choosing boundaries, but do not turn current Codex work into a generic-provider framework unless a concrete Codex need requires that abstraction.
+The near-term priority is still to understand and expose Codex richly from trustworthy local evidence. Predictive or inferential features sit above that evidence; they must not weaken source contracts or turn guesses into stored facts.
+
+Keep possible future providers in mind when choosing boundaries, but do not turn current Codex work into a generic-provider framework unless a concrete need requires that abstraction.
 
 The architectural shorthand is:
 
 > **Codex-first, not Codex-shaped.** Preserve rich Codex-native semantics. Future providers get their own native models. Shared abstractions are projections only where semantics genuinely overlap.
+
+A useful product-level completion test is that normal Codex observability workflows should be useful without requiring raw SQLite/JSONL archaeology, while the raw explorers remain available for investigation and evidence work.
 
 ## Reset rules
 
@@ -44,9 +48,29 @@ The architectural shorthand is:
 - Do not discard a safe, understood source-native field merely because no current UI renders it. Also do not persist a field merely because it exists: its semantics and retention posture still need a contract.
 - Avoid speculative provider capability matrices, plugin systems, or generic base classes whose only justification is possible future breadth. Prefer small seams that keep provider ownership explicit.
 
+## Forecasting and intelligence rules
+
+Prediction is active product scope. For quota forecasting, scenario planning, intelligence, or Overview prediction UX:
+
+- Forecasts, confidence, classifications, attribution, and scenarios are **derived read-model policy**, never source evidence.
+- Anchor current quota forecasts to provider-authoritative current observations; never borrow a current forecast from stale, non-authoritative, future-dated, or different reset generations.
+- Keep reset epochs isolated. Historical evaluation must never use future observations or leak information across a reset/re-anchor boundary.
+- Treat unchanged quantized quota-meter readings as censored/precision-limited observations, not proof of exactly zero burn.
+- Prefer account-local learning from observed history. Do not invent a universal token-to-subscription-quota conversion.
+- Candidate workload signals belong in production only when their semantics are supported and they improve out-of-sample prediction.
+- Use walk-forward/backtesting for material algorithm changes. Compare sensible baselines and prefer the simplest approach that performs well.
+- Evaluate remaining-at-reset error, exhaustion classification/calibration, ETA error, interval coverage, and sparse/stale/quantized behavior where relevant.
+- Prediction intervals and probability/confidence labels must have a defined meaning. A heuristic score must not be presented as a calibrated probability.
+- Degrade gracefully to simpler models or explicit learning/unknown states when evidence is insufficient. False precision is worse than an unavailable forecast.
+- Persisted forecast history is derived and rebuildable; retain enough anchor, evaluation-time, model/policy-version, and provenance data to explain it.
+- Use evaluation results to improve the actual product. Do not stop at an analysis harness if evidence supports a better production model.
+- In Overview/intelligence UI, favor decision-useful outputs: reset survival/exhaustion risk, useful uncertainty, remaining-at-reset range, sustainable pace, regime context, freshness, and provenance.
+
+Current EWMA, confidence heuristics, and account-local ridge scenario estimation are baselines, not architectural commitments. Replace or ensemble them when measured historical performance justifies it.
+
 ## Working style
 
-Prefer small, source-focused changes that can be reviewed against captured evidence. New parsers or adapters should come with sanitized fixtures/probes covering observed variants and edge cases.
+Prefer coherent, evidence-backed changes that can be reviewed against captured evidence. Small source-focused changes are usually easiest to validate, but substantial refactors are appropriate when they remove duplicated policy, establish a cleaner ownership boundary, or materially improve a measured prediction path. New parsers or adapters should come with sanitized fixtures/probes covering observed variants and edge cases.
 
 When TajsTokens code, observed runtime data, and upstream Codex implementation disagree, report the disagreement rather than forcing them to agree. The installed runtime is authoritative for what the user's installation actually emits; matching upstream source is corroboration and explanation of intended semantics, not permission to overwrite contradictory observation.
 
@@ -88,7 +112,7 @@ dotnet test tests/TajsTokens.Core.Tests/TajsTokens.Core.Tests.csproj -c Debug
 dotnet build TajsTokens.sln -c Debug
 ```
 
-For focused changes, run the narrowest relevant tests first, then the full Core test suite and Windows application build before considering the change complete.
+For focused changes, use targeted tests while iterating when they answer a concrete question. Do not rerun the full suite after every small edit. At a sensible milestone and before completion, run the full Core test suite and Windows application build; algorithm work should also run its relevant backtests/evaluation.
 
 ## References
 
