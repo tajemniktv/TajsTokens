@@ -24,4 +24,8 @@ public interface IIntelligenceService
         ScenarioRequest request,
         DateTimeOffset historyFromUtc,
         CancellationToken cancellationToken);
+
+    Task<ForecastEvaluationReport> EvaluateForecastsAsync(
+        string provider, string profile, DateTimeOffset fromUtc, DateTimeOffset toUtc,
+        CancellationToken cancellationToken);
 }

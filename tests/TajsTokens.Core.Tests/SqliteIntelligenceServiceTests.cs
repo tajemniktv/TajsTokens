@@ -301,7 +301,7 @@ public sealed class SqliteIntelligenceServiceTests
             var repository = new SqliteTelemetryRepository(database);
             var intelligence = new SqliteIntelligenceService(database, repository);
             await repository.InitializeAsync(CancellationToken.None);
-            var first = Quota(QuotaWindowKind.FiveHour, start, 10, reset, "app-server");
+            var first = Quota(QuotaWindowKind.FiveHour, start, 10, reset, "codex-app-server:codex");
             var current = Quota(QuotaWindowKind.FiveHour, start.AddHours(1), 20, reset, "codex-app-server:codex");
             var newerEmbedded = Quota(QuotaWindowKind.FiveHour, start.AddHours(1).AddMinutes(5), 90, reset, "codex-rollout:primary");
             await repository.UpsertQuotaSnapshotAsync(first, CancellationToken.None);
@@ -429,7 +429,7 @@ public sealed class SqliteIntelligenceServiceTests
 
             var results = await intelligence.BuildAndPersistCurrentForecastsAsync(
                 [new QuotaLaneState(QuotaWindowKind.FiveHour, "codex", "default", current, TelemetryHealthState.Live, current.CapturedAtUtc)],
-                anchor.AddHours(10),
+                anchor.AddMinutes(10),
                 CancellationToken.None);
             var generation = Assert.Single(results);
             Assert.NotNull(generation.Forecast);

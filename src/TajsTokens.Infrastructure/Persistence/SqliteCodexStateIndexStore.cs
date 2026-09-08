@@ -34,7 +34,7 @@ internal sealed record CodexStateThreadFingerprint(
 /// </summary>
 internal sealed class SqliteCodexStateIndexStore
 {
-    private const int SchemaVersion = 1;
+    private const int SchemaVersion = 2;
     private const string Component = "codex-state-index";
     private readonly string _connectionString;
     private readonly SemaphoreSlim _initializeGate = new(1, 1);
@@ -119,6 +119,23 @@ internal sealed class SqliteCodexStateIndexStore
                     """;
                 await migration.ExecuteNonQueryAsync(cancellationToken);
                 version = 1;
+            }
+
+            if (version == 1)
+            {
+                // The indexed fast path must revisit unchanged historical files after the
+                // typed-v4 workload parser upgrade, not only files Codex happened to update.
+                using var transaction = connection.BeginTransaction();
+                using var migration = connection.CreateCommand();
+                migration.Transaction = transaction;
+                migration.CommandText = """
+                    DELETE FROM codex_state_thread_fingerprints;
+                    UPDATE codex_state_sync SET watermark_updated_at_ms = 0 WHERE component = 'codex-state-index';
+                    UPDATE codex_state_index_schema SET version = 2 WHERE component = 'codex-state-index';
+                    """;
+                await migration.ExecuteNonQueryAsync(cancellationToken);
+                transaction.Commit();
+                version = 2;
             }
 
             if (version != SchemaVersion)

@@ -14,4 +14,5 @@ public sealed record Forecast(
     double? BurnPressure = null,
     double? ProjectedRemainingAtResetPercent = null,
     string? Trend = null,
-    bool IsQuantizedFlat = false);
+    bool IsQuantizedFlat = false,
+    ForecastEvidence? Evidence = null);

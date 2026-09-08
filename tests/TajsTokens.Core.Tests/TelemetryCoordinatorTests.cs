@@ -193,6 +193,9 @@ public sealed class TelemetryCoordinatorTests : IDisposable
 
     private sealed class BlockingIntelligenceService : IIntelligenceService
     {
+        public Task<ForecastEvaluationReport> EvaluateForecastsAsync(string provider, string profile,
+            DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken cancellationToken) =>
+            throw new NotSupportedException("This coordinator test double does not run historical evaluation.");
         public TaskCompletionSource<bool> Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource<bool> Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
 

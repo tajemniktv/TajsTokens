@@ -18,6 +18,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
 {
     private const int MaxBurnIntervals = 80;
     private readonly string _connectionString;
+    private readonly string _databasePath;
     private readonly SqliteTelemetryRepository _telemetryRepository;
     private readonly ForecastingService _forecasting = new();
     private readonly QuotaResetDetector _resetDetector = new();
@@ -34,6 +35,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         SqliteTelemetryRepository telemetryRepository,
         Func<string, CancellationToken, Task>? queryStageObserver)
     {
+        _databasePath = databasePath;
         _connectionString = new SqliteConnectionStringBuilder
         {
             DataSource = databasePath,
@@ -109,9 +111,10 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 current.Kind,
                 current.Provider,
                 current.Profile,
-                512,
+                10000,
                 cancellationToken,
-                current.CapturedAtUtc);
+                current.CapturedAtUtc,
+                current.Source);
             var anchored = history
                 .Where(item => item.CapturedAtUtc <= current.CapturedAtUtc)
                 .GroupBy(item => item.CapturedAtUtc)
@@ -136,7 +139,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 await _telemetryRepository.UpsertForecastSnapshotAsync(persisted, cancellationToken);
                 results.Add(new CurrentQuotaForecast(
                     current, TelemetryHealthState.Live, forecast,
-                    "Provider-authoritative current quota plus compatible persisted history no newer than the current anchor."));
+                    "Provider-authoritative current quota plus same-source persisted history no newer than the current anchor. Model selection uses only previously observed outcomes."));
             }
             catch (ArgumentException exception)
             {
@@ -355,38 +358,22 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             historyFromUtc = now.AddDays(-30);
         }
 
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
-        var hasNativeEvents = await TableExistsAsync(connection, "codex_native_token_events", cancellationToken);
-        var hasContext = await TableExistsAsync(connection, "context_observations", cancellationToken);
-        var fiveHourIntervals = await LoadQuotaBurnIntervalsAsync(
-            connection,
-            historyFromUtc,
-            now,
-            400,
-            hasNativeEvents,
-            hasContext,
-            cancellationToken,
-            QuotaWindowKind.FiveHour);
-        var weeklyIntervals = await LoadQuotaBurnIntervalsAsync(
-            connection,
-            historyFromUtc,
-            now,
-            400,
-            hasNativeEvents,
-            hasContext,
-            cancellationToken,
-            QuotaWindowKind.Weekly);
-        var samples = fiveHourIntervals.Concat(weeklyIntervals).Select(interval => new ScenarioHistorySample(
-            interval.Kind,
-            interval.StartUtc,
-            interval.EndUtc,
-            interval.DeltaUsedPercent,
-            interval.RootSessions,
-            interval.SubagentSessions,
-            interval.DominantModel,
-            interval.DominantReasoningEffort)).ToArray();
+        using var observatory = new SqliteCodexObservatoryStore(_databasePath);
+        await observatory.InitializeAsync(cancellationToken);
+        var data = await new SqliteForecastDatasetReader(_databasePath).ReadAsync(
+            "codex", "default", historyFromUtc, now, cancellationToken);
+        var samples = CodexScenarioHistoryBuilder.Build(data);
         return _scenarioPlanner.Estimate(request, samples, now);
+    }
+
+    public async Task<ForecastEvaluationReport> EvaluateForecastsAsync(string provider, string profile,
+        DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken cancellationToken)
+    {
+        await EnsureInitializedAsync(cancellationToken);
+        using var observatory = new SqliteCodexObservatoryStore(_databasePath);
+        await observatory.InitializeAsync(cancellationToken);
+        var data = await new SqliteForecastDatasetReader(_databasePath).ReadAsync(provider, profile, fromUtc, toUtc, cancellationToken);
+        return await Task.Run(() => QuotaForecastEvaluation.Evaluate(data, cancellationToken), cancellationToken);
     }
 
     private Task EnsureInitializedAsync(CancellationToken cancellationToken) =>
@@ -905,7 +892,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             SELECT provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
                    estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence,
                    state, burn_pressure, projected_remaining_at_reset_percent, trend, is_quantized_flat,
-                   quota_source, quota_authority, quota_captured_at_utc, quota_window_minutes, quota_resets_at_utc
+                   quota_source, quota_authority, quota_captured_at_utc, quota_window_minutes, quota_resets_at_utc, evaluation_json
             FROM forecast_snapshots
             WHERE kind = $kind AND generated_at_utc >= $from AND generated_at_utc <= $to
             ORDER BY generated_at_utc DESC
@@ -937,7 +924,8 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                     reader.IsDBNull(10) ? null : reader.GetDouble(10),
                     reader.IsDBNull(11) ? null : reader.GetDouble(11),
                     reader.IsDBNull(12) ? null : reader.GetString(12),
-                    !reader.IsDBNull(13) && reader.GetInt32(13) != 0),
+                    !reader.IsDBNull(13) && reader.GetInt32(13) != 0,
+                    ForecastEvidenceJson.Deserialize(reader.IsDBNull(19) ? null : reader.GetString(19))),
                 reader.IsDBNull(14) ? null : reader.GetString(14),
                 reader.IsDBNull(15) || !Enum.TryParse<QuotaObservationAuthority>(reader.GetString(15), out var authority) ? QuotaObservationAuthority.Unknown : authority,
                 reader.IsDBNull(16) ? null : ParseUtc(reader.GetString(16)),

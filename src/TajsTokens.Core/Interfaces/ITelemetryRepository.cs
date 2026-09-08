@@ -23,7 +23,8 @@ public interface ITelemetryRepository
         string profile,
         int take,
         CancellationToken cancellationToken,
-        DateTimeOffset? capturedAtUpperBoundUtc = null);
+        DateTimeOffset? capturedAtUpperBoundUtc = null,
+        string? source = null);
 
     Task<IReadOnlyList<ForecastSnapshot>> GetRecentForecastSnapshotsAsync(
         QuotaWindowKind kind,

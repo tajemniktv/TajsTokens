@@ -6,251 +6,97 @@ namespace TajsTokens.Core.Services;
 
 public sealed class ForecastingService : IForecastingService
 {
-    private const double NearSustainablePressure = 0.85;
+    public const string PolicyVersion = "quota-walk-forward/v2";
 
     public Forecast BuildForecast(IReadOnlyList<QuotaSnapshot> snapshots, DateTimeOffset nowUtc)
     {
         ArgumentNullException.ThrowIfNull(snapshots);
-        if (snapshots.Count == 0)
-        {
-            throw new ArgumentException("At least one quota snapshot is required.", nameof(snapshots));
-        }
-
-        // Historical/backtest forecasts must never see observations from the future.
-        var eligible = snapshots
-            .Where(x => x.CapturedAtUtc <= nowUtc)
-            .OrderBy(x => x.CapturedAtUtc)
-            .ToArray();
-
+        var eligible = snapshots.Where(x => x.CapturedAtUtc <= nowUtc).OrderBy(x => x.CapturedAtUtc).ToArray();
         if (eligible.Length == 0)
-        {
             throw new ArgumentException("At least one snapshot must be captured at or before the forecast time.", nameof(snapshots));
-        }
-
         var latest = eligible[^1];
-        if (eligible.Any(x => x.Kind != latest.Kind ||
-                              !string.Equals(x.Provider, latest.Provider, StringComparison.Ordinal) ||
-                              !string.Equals(x.Profile, latest.Profile, StringComparison.Ordinal)))
-        {
+        if (eligible.Any(x => x.Kind != latest.Kind || x.Provider != latest.Provider || x.Profile != latest.Profile))
             throw new ArgumentException("Forecast snapshots must belong to one quota window/provider/profile.", nameof(snapshots));
-        }
+        var model = QuotaForecastBacktester.DefaultModel(latest);
+        ForecastEvidence Evidence(int count, double hours, string description) => new(PolicyVersion, model,
+            latest.Source, count, hours, 0, null, null, null, null, description);
+        Forecast Unknown(string reason, double? sustainable = null) => new(latest.Kind, nowUtc, null, null,
+            null, sustainable, 0, ForecastState.Learning, Evidence: Evidence(0, 0, reason));
+        if (latest.UsedPercent is not double used || !double.IsFinite(used) || used is < 0 or > 100)
+            return Unknown("The current meter is missing or invalid.");
+        if (latest.ResetsAtUtc is not DateTimeOffset reset || reset <= nowUtc)
+            return Unknown("A future authoritative reset is required; expired generations are not extended.");
+        if (nowUtc - latest.CapturedAtUtc > TimeSpan.FromHours(6))
+            return Unknown("The anchor is too old for a current pace projection.");
+        var remaining = latest.RemainingPercent!.Value;
+        var hoursToReset = (reset - nowUtc).TotalHours;
+        var sustainable = remaining / hoursToReset;
 
-        if (latest.UsedPercent is null || latest.RemainingPercent is null)
+        // A rate never bridges distinct source lanes. Drops/invalid values/metadata changes
+        // terminate the whole segment. Reused reset identities cannot resurrect old slopes.
+        var stream = eligible.Where(x => x.Source == latest.Source).ToArray();
+        var epoch = QuotaForecastBacktester.SplitEpochs(stream).LastOrDefault();
+        if (epoch is null || epoch[^1] != latest) return Unknown("No unambiguous current segment is available.", sustainable);
+        var observedHours = (latest.CapturedAtUtc - epoch[0].CapturedAtUtc).TotalHours;
+        var evidence = Evidence(epoch.Count, observedHours,
+            "Conditional pace projection, not an exhaustion probability. Too few completed same-source reset generations at comparable lead to calibrate uncertainty.");
+        if (remaining <= 0)
+            return new Forecast(latest.Kind, nowUtc, null, latest.CapturedAtUtc, false, 0, 0,
+                ForecastState.ExhaustionLikelyBeforeReset, ProjectedRemainingAtResetPercent: 0,
+                Evidence: evidence with { UncertaintyDescription = "The current provider meter is already exhausted; this is not a predicted future ETA." });
+        if (epoch.Count < 2 || observedHours < 0.25)
+            return new Forecast(latest.Kind, nowUtc, null, null, null, sustainable, 0, ForecastState.Learning,
+                Evidence: evidence with { UncertaintyDescription = "Learning: at least 15 minutes of compatible same-source observations are needed. Poll count alone is not independent evidence." });
+        var flat = epoch.All(x => Math.Abs(x.UsedPercent!.Value - used) < 0.000001);
+        if (flat)
+            return new Forecast(latest.Kind, nowUtc, null, null, null, sustainable, 0,
+                ForecastState.IdleWithinMeterPrecision, Trend: "flat within meter precision", IsQuantizedFlat: true,
+                Evidence: evidence with { UncertaintyDescription = "No movement is visible at meter precision. Neither exact zero burn nor survival until reset is established." });
+
+        var lead = (reset - latest.CapturedAtUtc).TotalHours;
+        var candidates = QuotaPaceModels.Candidates.ToDictionary(candidate => candidate,
+            candidate => QuotaForecastBacktester.Replay(stream, candidate, null));
+        model = QuotaForecastBacktester.SelectModel(candidates, latest.CapturedAtUtc, reset, lead, model);
+        var rate = QuotaPaceModels.Estimate(epoch, model);
+        var elapsed = Math.Max(0, (nowUtc - latest.CapturedAtUtc).TotalHours);
+        var remainingNow = QuotaPaceModels.ProjectRemaining(epoch, model, elapsed);
+        sustainable = remainingNow / hoursToReset;
+        var pressure = sustainable > 0 ? rate / sustainable : (double?)null;
+        var margin = QuotaPaceModels.ProjectRemaining(epoch, model, lead);
+        var survives = margin > 0 || rate <= 0;
+        DateTimeOffset? eta = null;
+        if (!survives && rate > 0)
         {
-            return UnknownForecast(latest, nowUtc);
+            var etaHours = remaining / rate;
+            var decay = model switch { "damped-2h" => 2d, "damped-6h" => 6d, _ => 0d };
+            if (decay > 0) etaHours = -decay * Math.Log(1 - etaHours / decay);
+            if (double.IsFinite(etaHours) && etaHours < lead) eta = latest.CapturedAtUtc.AddHours(etaHours);
+            else survives = true; // Exhaustion exactly at reset is not before reset.
         }
-
-        // The backend's reset identity defines the forecasting epoch. Never carry a terminal slope
-        // across a reset/re-anchor, even when percentages happen to keep increasing numerically.
-        var currentWindow = eligible
-            .Where(x => x.WindowMinutes == latest.WindowMinutes && x.ResetsAtUtc == latest.ResetsAtUtc)
-            .ToArray();
-
-        var resetAt = latest.ResetsAtUtc;
-        if (resetAt is not null && resetAt <= nowUtc)
+        // Calibrate the actual prequential selection policy, not its in-sample winning candidate.
+        var adaptiveTrials = QuotaForecastBacktester.ReplayAdaptive(candidates, QuotaForecastBacktester.DefaultModel(latest));
+        var errors = QuotaForecastBacktester.CalibrationErrors(adaptiveTrials, latest.CapturedAtUtc, reset, lead);
+        var radius = QuotaForecastBacktester.ErrorRadius(errors);
+        evidence = evidence with
         {
-            // The observed epoch has already ended. A new provider sample is required before a
-            // current-window forecast is meaningful.
-            return UnknownForecast(latest, nowUtc);
-        }
-
-        var observedRates = new List<double>(Math.Max(0, currentWindow.Length - 1));
-        var observedDeltas = new List<double>(Math.Max(0, currentWindow.Length - 1));
-        for (var index = 1; index < currentWindow.Length; index++)
-        {
-            var previous = currentWindow[index - 1];
-            var current = currentWindow[index];
-            if (previous.UsedPercent is null || current.UsedPercent is null)
-            {
-                continue;
-            }
-
-            var hours = (current.CapturedAtUtc - previous.CapturedAtUtc).TotalHours;
-            if (hours <= 0)
-            {
-                continue;
-            }
-
-            var delta = current.UsedPercent.Value - previous.UsedPercent.Value;
-            if (delta < 0)
-            {
-                // Defensive fallback for a provider that lags reset metadata.
-                continue;
-            }
-
-            observedDeltas.Add(delta);
-            observedRates.Add(delta / hours);
-        }
-
-        var projectedRemainingNow = latest.RemainingPercent.Value;
-        double? sustainable = null;
-        if (resetAt is not null)
-        {
-            var hoursToReset = (resetAt.Value - nowUtc).TotalHours;
-            if (hoursToReset > 0)
-            {
-                sustainable = projectedRemainingNow / hoursToReset;
-            }
-        }
-
-        if (observedRates.Count == 0)
-        {
-            return new Forecast(
-                latest.Kind,
-                nowUtc,
-                null,
-                null,
-                null,
-                sustainable,
-                0.15,
-                ForecastState.Learning,
-                null,
-                resetAt is null ? null : projectedRemainingNow,
-                null,
-                false);
-        }
-
-        // Subscription meters are commonly quantized to whole-ish percentage points. A series of
-        // unchanged samples means "no movement visible at this precision", not scientifically proven
-        // zero burn. Preserve that uncertainty instead of returning a confident 0.0 pp/h ETA.
-        var quantizedFlat = observedDeltas.All(delta => Math.Abs(delta) < 0.000_001);
-        if (quantizedFlat)
-        {
-            return new Forecast(
-                latest.Kind,
-                nowUtc,
-                null,
-                null,
-                null,
-                sustainable,
-                ComputeConfidence(observedRates, latest, nowUtc, quantized: true),
-                ForecastState.IdleWithinMeterPrecision,
-                null,
-                resetAt is null ? null : projectedRemainingNow,
-                "flat within meter precision",
-                true);
-        }
-
-        // Mixed histories must retain valid zero-rate intervals. Dropping flat samples would model
-        // only active-burn periods and systematically overstate burn, pressure and exhaustion risk.
-        // The all-flat quantized-meter case is handled above, so a mixed series is safe to feed to the
-        // chronological EWMA exactly as observed.
-        var ratesForForecast = observedRates.ToArray();
-        var alpha = latest.Kind == QuotaWindowKind.Weekly ? 0.25 : 0.45;
-        var burnRate = ComputeEwma(ratesForForecast, alpha);
-        var elapsedSinceLatestHours = Math.Max(0, (nowUtc - latest.CapturedAtUtc).TotalHours);
-        projectedRemainingNow = Math.Max(0, latest.RemainingPercent.Value - (burnRate * elapsedSinceLatestHours));
-
-        DateTimeOffset? exhaustionBeforeReset = null;
-        bool? survives = null;
-        double? projectedRemainingAtReset = null;
-        double? burnPressure = null;
-
-        if (resetAt is not null && resetAt > nowUtc)
-        {
-            var hoursToReset = (resetAt.Value - nowUtc).TotalHours;
-            sustainable = hoursToReset > 0 ? projectedRemainingNow / hoursToReset : null;
-            burnPressure = sustainable is > 0 ? burnRate / sustainable.Value : null;
-            projectedRemainingAtReset = Math.Max(0, projectedRemainingNow - (burnRate * hoursToReset));
-
-            var rawExhaustion = burnRate > 0
-                ? nowUtc.AddHours(projectedRemainingNow / burnRate)
-                : (DateTimeOffset?)null;
-
-            survives = rawExhaustion is null || rawExhaustion >= resetAt.Value;
-            if (survives == false)
-            {
-                // A current-window exhaustion ETA is useful only inside this current epoch. If the
-                // arithmetic lands after reset, suppress it and report margin-at-reset instead.
-                exhaustionBeforeReset = rawExhaustion;
-            }
-        }
-
-        var state = survives switch
-        {
-            false => ForecastState.ExhaustionLikelyBeforeReset,
-            true when burnPressure is >= NearSustainablePressure => ForecastState.NearSustainablePace,
-            true => ForecastState.SafeUntilReset,
-            _ => ForecastState.Learning
+            Model = model,
+            CalibrationEpochs = errors.Count,
+            HistoricalAbsoluteErrorPercent = errors.Count > 0 ? errors.Average() : null,
+            RemainingAtResetLowerPercent = radius is double r ? Math.Max(0, margin - r) : null,
+            RemainingAtResetUpperPercent = radius is double r2 ? Math.Min(100, margin + r2) : null,
+            NominalIntervalCoverage = radius is not null ? QuotaForecastBacktester.NominalCoverage : null,
+            UncertaintyDescription = radius is not null
+                ? "Empirical 80%-target band from prior completed same-source generations at similar lead; one error per generation. Outcomes are within 5 minutes of reset, not exact reset truth. Changing workload can change coverage. This is not an exhaustion probability."
+                : evidence.UncertaintyDescription
         };
-
-        return new Forecast(
-            latest.Kind,
-            nowUtc,
-            burnRate,
-            exhaustionBeforeReset,
-            survives,
-            sustainable,
-            ComputeConfidence(ratesForForecast, latest, nowUtc, quantized: false),
-            state,
-            burnPressure,
-            projectedRemainingAtReset,
-            ComputeTrend(ratesForForecast),
-            false);
-    }
-
-    private static Forecast UnknownForecast(QuotaSnapshot latest, DateTimeOffset nowUtc) =>
-        new(latest.Kind, nowUtc, null, null, null, null, 0.15, ForecastState.Learning);
-
-    private static double ComputeEwma(IReadOnlyList<double> values, double alpha)
-    {
-        var ewma = values[0];
-        for (var i = 1; i < values.Count; i++)
-        {
-            ewma = (alpha * values[i]) + ((1 - alpha) * ewma);
-        }
-
-        return ewma;
-    }
-
-    private static double ComputeConfidence(
-        IReadOnlyList<double> rates,
-        QuotaSnapshot latest,
-        DateTimeOffset nowUtc,
-        bool quantized)
-    {
-        var sampleConfidence = Math.Clamp(rates.Count / 12.0, 0.15, 0.85);
-        var freshnessHours = Math.Max(0, (nowUtc - latest.CapturedAtUtc).TotalHours);
-        var freshnessFactor = Math.Clamp(1.0 - (freshnessHours / 6.0), 0.2, 1.0);
-
-        if (rates.Count <= 1)
-        {
-            return sampleConfidence * freshnessFactor * (quantized ? 0.45 : 0.7);
-        }
-
-        var mean = rates.Average();
-        var variance = rates.Sum(rate => Math.Pow(rate - mean, 2)) / rates.Count;
-        var deviation = Math.Sqrt(variance);
-        var variabilityFactor = mean <= 0
-            ? 0.5
-            : Math.Clamp(1.0 - (deviation / Math.Max(mean, 0.0001)), 0.35, 1.0);
-
-        var quantizationFactor = quantized ? 0.45 : 1.0;
-        return Math.Clamp(sampleConfidence * freshnessFactor * variabilityFactor * quantizationFactor, 0.05, 0.95);
-    }
-
-    private static string ComputeTrend(IReadOnlyList<double> rates)
-    {
-        if (rates.Count < 3)
-        {
-            return "stable/insufficient trend history";
-        }
-
-        var split = Math.Max(1, rates.Count / 2);
-        var earlier = rates.Take(split).Average();
-        var recent = rates.Skip(split).DefaultIfEmpty(rates[^1]).Average();
-
-        if (earlier <= 0)
-        {
-            return recent > 0 ? "accelerating" : "stable";
-        }
-
-        var ratio = recent / earlier;
-        return ratio switch
-        {
-            >= 1.25 => "accelerating",
-            <= 0.75 => "slowing",
-            _ => "stable"
-        };
+        var state = !survives ? ForecastState.ExhaustionLikelyBeforeReset : pressure >= 0.85
+            ? ForecastState.NearSustainablePace : ForecastState.SafeUntilReset;
+        var split = Math.Max(1, epoch.Count / 2);
+        var earlier = QuotaPaceModels.Estimate(epoch.Take(split + 1).ToArray(), "epoch");
+        var recent = QuotaPaceModels.Estimate(epoch.Skip(split).ToArray(), "epoch");
+        var trend = epoch.Count < 4 ? "insufficient trend history" : recent > earlier * 1.25 ? "accelerating"
+            : recent < earlier * 0.75 ? "slowing" : "stable";
+        return new Forecast(latest.Kind, nowUtc, rate, eta, survives, sustainable, 0, state,
+            pressure, margin, trend, false, evidence);
     }
 }

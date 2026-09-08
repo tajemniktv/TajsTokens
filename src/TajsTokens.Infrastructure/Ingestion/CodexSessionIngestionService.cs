@@ -13,7 +13,7 @@ namespace TajsTokens.Infrastructure.Ingestion;
 public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
 {
     private const string BoundaryParserVersion = "boundary-v2";
-    private const string TypedParserVersion = "typed-v3";
+    private const string TypedParserVersion = "typed-v4-workload";
     private const int DurableBatchSize = 128;
     private readonly ICodexSessionEventProvider _sessionEventProvider;
     private readonly ISessionIngestionCheckpointStore _checkpointStore;
@@ -237,6 +237,10 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         if (parsed.ContextObservation is not null)
         {
             await _observatoryStore.UpsertContextObservationAsync(parsed.ContextObservation, cancellationToken);
+        }
+        if (parsed.WorkloadObservation is not null)
+        {
+            await _observatoryStore.UpsertWorkloadObservationAsync(parsed.WorkloadObservation, cancellationToken);
         }
 
         // Focused tests/alternate composition can omit the production batch writer. Preserve complete

@@ -127,7 +127,9 @@ public sealed record ScenarioHistorySample(
     int RootAgents,
     int Subagents,
     string? DominantModel,
-    string? DominantReasoningEffort);
+    string? DominantReasoningEffort,
+    DateTimeOffset? ResetUtc = null,
+    string Source = "");
 
 public sealed record ScenarioWindowEstimate(
     QuotaWindowKind Kind,

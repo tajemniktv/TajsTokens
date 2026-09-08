@@ -11,6 +11,7 @@ public sealed partial class ForecastsPage : Page
     private bool _isLoaded;
     private long _loadGeneration;
     private long _estimateGeneration;
+    private long _evaluationGeneration;
 
     public ForecastsPage()
     {
@@ -36,6 +37,7 @@ public sealed partial class ForecastsPage : Page
         _isLoaded = false;
         Interlocked.Increment(ref _loadGeneration);
         Interlocked.Increment(ref _estimateGeneration);
+        Interlocked.Increment(ref _evaluationGeneration);
         var cancellation = Interlocked.Exchange(ref _pageCancellation, null);
         cancellation?.Cancel();
         cancellation?.Dispose();
@@ -120,7 +122,10 @@ public sealed partial class ForecastsPage : Page
                     : " · legacy forecast without quota-anchor metadata";
                 return new ForecastRow(
                     $"{forecast.GeneratedAtUtc.ToLocalTime():g} · {FormatKind(forecast.Kind)} · {forecast.State}",
-                    $"{pace}{pressure} · {outcome} · confidence {forecast.Confidence:P0}" +
+                    $"{pace}{pressure} · conditional {outcome}" +
+                    (forecast.Evidence is { } evidence
+                        ? $" · {evidence.Model} ({evidence.PolicyVersion}) · {evidence.UncertaintyDescription}"
+                        : " · legacy heuristic estimate; no calibrated uncertainty") +
                     (string.IsNullOrWhiteSpace(forecast.Trend) ? string.Empty : $" · {forecast.Trend}") + anchor);
             })
             .ToArray();
@@ -132,6 +137,43 @@ public sealed partial class ForecastsPage : Page
         StatusText.Text =
             $"{dashboard.FiveHourForecasts.Count + dashboard.WeeklyForecasts.Count:N0} persisted forecast sample(s) in the selected range. " +
             "New samples preserve the provider-authoritative quota anchor used by Overview; legacy rows remain explicitly unattributed.";
+    }
+
+    private async void OnEvaluateClicked(object sender, RoutedEventArgs e)
+    {
+        var cancellation = _pageCancellation;
+        if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested) return;
+        var generation = Interlocked.Increment(ref _evaluationGeneration);
+        EvaluateButton.IsEnabled = false;
+        EvaluationStatusText.Text = "Replaying authoritative observations with chronological training and source-isolated reset epochs…";
+        try
+        {
+            var now = DateTimeOffset.UtcNow;
+            var from = now.AddDays(-ParseHistoryDays());
+            var report = await Task.Run(() => App.Services.Intelligence.EvaluateForecastsAsync(
+                "codex", "default", from, now, cancellation.Token), cancellation.Token);
+            if (!_isLoaded || cancellation.IsCancellationRequested || generation != Volatile.Read(ref _evaluationGeneration)) return;
+            EvaluationStatusText.Text = $"{report.AuthoritativeQuotaObservations:N0} authoritative quota observations · {report.WorkloadObservations:N0} native workload observations · {report.TokensWithEffort:N0}/{report.TokenObservations:N0} token records with effort. {report.Methodology}";
+            EvaluationList.ItemsSource = report.Scores.Select(score => new ForecastRow(
+                $"{FormatKind(score.Kind)} · {score.Target} · {score.Model} · {score.Source} · {score.Origins} origins / {score.ResetGenerations} reset generations",
+                score.Origins == 0 ? "No eligible outcomes in this range."
+                    : $"MAE {score.MeanAbsoluteError:0.##}pp · RMSE {score.RootMeanSquaredError:0.##}pp · {score.Availability}" +
+                      (score.Model.EndsWith("ridge", StringComparison.Ordinal) ? $" · {score.FittedOrigins} fitted origins (others use baseline)" : string.Empty) +
+                      (score.IntervalOrigins > 0 ? $" · band coverage {score.IntervalCoverage:P0} on {score.IntervalOrigins} origins; width {score.MeanIntervalWidth:0.#}pp" : " · insufficient interval calibration") +
+                      $" · {score.ExhaustionLabels} exhaustion labels ({score.ExhaustionPositiveLabels} positive)" +
+                      (score.ExhaustionClassificationAccuracy is double accuracy ? $" · classification accuracy {accuracy:P0}" : string.Empty) +
+                      (score.EtaBracketMeanAbsoluteHours is double etaError ? $" · ETA bracket error {etaError:0.##}h on {score.EtaOrigins} origins" : string.Empty))).ToArray();
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            if (_isLoaded && generation == Volatile.Read(ref _evaluationGeneration))
+                EvaluationStatusText.Text = $"Evaluation unavailable: {Summarize(exception.Message)}";
+        }
+        finally
+        {
+            if (_isLoaded && generation == Volatile.Read(ref _evaluationGeneration)) EvaluateButton.IsEnabled = true;
+        }
     }
 
     private async void OnEstimateClicked(object sender, RoutedEventArgs e)
@@ -212,9 +254,10 @@ public sealed partial class ForecastsPage : Page
             return $"not enough data ({estimate.SampleCount} samples) · {estimate.Explanation}";
         }
 
-        return $"{estimate.ExpectedQuotaDeltaPercent:0.#}pp expected " +
-               $"[{estimate.LowerQuotaDeltaPercent:0.#}–{estimate.UpperQuotaDeltaPercent:0.#}pp] · " +
-               $"confidence {estimate.Confidence:P0} · {estimate.SampleCount} samples";
+        var range = estimate.LowerQuotaDeltaPercent is not null && estimate.UpperQuotaDeltaPercent is not null
+            ? $"[{estimate.LowerQuotaDeltaPercent:0.#}–{estimate.UpperQuotaDeltaPercent:0.#}pp]"
+            : "uncertainty learning";
+        return $"{estimate.ExpectedQuotaDeltaPercent:0.#}pp conditional estimate · {range} · {estimate.SampleCount} samples";
     }
 
     private static string FormatSurvivalRate(IReadOnlyList<ForecastSnapshot> snapshots)

@@ -294,9 +294,9 @@ public sealed partial class OverviewViewModel : ObservableObject
         var windowForecast = forecast?.State switch
         {
             ForecastState.ExhaustionLikelyBeforeReset when forecast.EstimatedExhaustionAtUtc is DateTimeOffset exhaustion =>
-                $"Exhaustion likely {exhaustion.ToLocalTime():ddd HH:mm}",
+                snapshot.RemainingPercent <= 0 ? "Provider meter exhausted" : $"At this pace: exhausted {exhaustion.ToLocalTime():ddd HH:mm}",
             ForecastState.SafeUntilReset or ForecastState.NearSustainablePace when forecast.ProjectedRemainingAtResetPercent is double margin =>
-                $"Survives reset · ~{margin:0.#}% remaining at reset",
+                $"If pace continues: ~{margin:0}% left at reset",
             ForecastState.IdleWithinMeterPrecision => "No meter movement visible yet",
             _ => "Learning from this reset window"
         };
@@ -313,12 +313,18 @@ public sealed partial class OverviewViewModel : ObservableObject
         var severity = forecast?.State switch
         {
             ForecastState.ExhaustionLikelyBeforeReset => InfoBarSeverity.Warning,
-            ForecastState.SafeUntilReset => InfoBarSeverity.Success,
+            ForecastState.SafeUntilReset => InfoBarSeverity.Informational,
             ForecastState.NearSustainablePace => InfoBarSeverity.Informational,
             _ => InfoBarSeverity.Informational
         };
 
-        var confidence = forecast is null ? string.Empty : $" · confidence {forecast.Confidence:P0}";
+        var confidence = forecast?.Evidence is { } evidence
+            ? evidence.RemainingAtResetLowerPercent is double lower && evidence.RemainingAtResetUpperPercent is double upper
+                ? $" · 80%-target band {lower:0}–{upper:0}% ({evidence.CalibrationEpochs} past resets)"
+                : $" · uncertainty learning ({evidence.CalibrationEpochs} comparable past resets)"
+            : string.Empty;
+        if (forecast?.Evidence is { } diagnostics)
+            survivalMessage += $" {diagnostics.UncertaintyDescription} Model: {diagnostics.Model}; {diagnostics.ObservationCount} observations over {diagnostics.ObservedHours:0.#}h.";
         var trend = string.IsNullOrWhiteSpace(forecast?.Trend) ? string.Empty : $" · {forecast.Trend}";
         var freshness = $"live · {snapshot.Source}";
 

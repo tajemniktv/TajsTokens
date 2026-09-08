@@ -10,6 +10,7 @@
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -56,19 +57,36 @@
             </Border>
             <Border Grid.Column="2" Padding="14" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                 <StackPanel>
-                    <TextBlock Text="5h safe-window rate" Opacity="0.65" />
+                    <TextBlock Text="5h conditional survive projections" Opacity="0.65" TextWrapping="Wrap" />
                     <TextBlock x:Name="FiveHourSafeText" Text="—" FontSize="22" FontWeight="SemiBold" />
                 </StackPanel>
             </Border>
             <Border Grid.Column="3" Padding="14" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                 <StackPanel>
-                    <TextBlock Text="Weekly safe-window rate" Opacity="0.65" />
+                    <TextBlock Text="Weekly conditional survive projections" Opacity="0.65" TextWrapping="Wrap" />
                     <TextBlock x:Name="WeeklySafeText" Text="—" FontSize="22" FontWeight="SemiBold" />
                 </StackPanel>
             </Border>
         </Grid>
 
-        <Grid Grid.Row="2" ColumnSpacing="14">
+        <Expander Grid.Row="2" Header="Historical validation — authoritative quota targets" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+            <StackPanel Spacing="8">
+                <Button x:Name="EvaluateButton" Content="Run walk-forward evaluation" Click="OnEvaluateClicked" HorizontalAlignment="Left" />
+                <TextBlock x:Name="EvaluationStatusText" Text="Uses the selected history range and Codex/default profile. No source data is exported. Sparse evidence is reported, not converted to a confidence percentage." TextWrapping="Wrap" Opacity="0.72" />
+                <ListView x:Name="EvaluationList" MaxHeight="240" SelectionMode="None">
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
+                            <StackPanel Padding="4" Spacing="2">
+                                <TextBlock Text="{Binding Header}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" Opacity="0.72" />
+                            </StackPanel>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
+            </StackPanel>
+        </Expander>
+
+        <Grid Grid.Row="3" ColumnSpacing="14">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="3*" />
                 <ColumnDefinition Width="2*" />
@@ -98,16 +116,16 @@
                 <ScrollViewer>
                     <StackPanel Spacing="10">
                         <TextBlock Text="Workload scenario" FontSize="18" FontWeight="SemiBold" />
-                        <TextBlock Text="Uses your observed quota-drop intervals only. Model/reasoning filters are used when enough matching history exists; otherwise confidence is penalized." Opacity="0.68" TextWrapping="Wrap" />
+                        <TextBlock Text="Uses authoritative intervals, including unchanged meters. Requested model/effort and recent active-session counts require matching historical support. Unsupported scenarios stay unavailable; uncertainty requires held-out reset generations." Opacity="0.68" TextWrapping="Wrap" />
 
                         <TextBlock Text="Duration (hours)" />
                         <NumberBox x:Name="DurationBox" Value="2" Minimum="0.1" Maximum="168" SpinButtonPlacementMode="Compact" />
-                        <TextBlock Text="Root agents" />
+                        <TextBlock Text="Recently token-active root sessions" />
                         <NumberBox x:Name="RootAgentsBox" Value="1" Minimum="0" Maximum="32" SpinButtonPlacementMode="Compact" />
-                        <TextBlock Text="Subagents" />
+                        <TextBlock Text="Recently token-active subagent sessions" />
                         <NumberBox x:Name="SubagentsBox" Value="0" Minimum="0" Maximum="64" SpinButtonPlacementMode="Compact" />
-                        <TextBlock Text="Intensity multiplier" />
-                        <NumberBox x:Name="IntensityBox" Value="1" Minimum="0.1" Maximum="5" SmallChange="0.1" SpinButtonPlacementMode="Compact" />
+                        <TextBlock Text="Intensity (unvalidated scaling disabled)" />
+                        <NumberBox x:Name="IntensityBox" Value="1" Minimum="1" Maximum="1" IsEnabled="False" />
                         <TextBlock Text="Model (optional)" />
                         <TextBox x:Name="ModelBox" PlaceholderText="e.g. gpt-5.6-luna" />
                         <TextBlock Text="Reasoning effort (optional)" />

@@ -12,6 +12,7 @@ public interface ICodexObservatoryStore
     Task UpsertQuotaSnapshotAsync(QuotaSnapshot snapshot, CancellationToken cancellationToken);
     Task ApplyCumulativeTokenObservationAsync(CodexTokenCountObservation observation, CancellationToken cancellationToken);
     Task UpsertContextObservationAsync(CodexContextObservation observation, CancellationToken cancellationToken);
+    Task UpsertWorkloadObservationAsync(CodexWorkloadObservation observation, CancellationToken cancellationToken);
     Task<CodexParserResumeState?> GetParserResumeStateAsync(string sourceIdentity, CancellationToken cancellationToken);
     Task UpsertParserResumeStateAsync(CodexParserResumeState state, CancellationToken cancellationToken);
     Task UpsertRolloutFileAsync(

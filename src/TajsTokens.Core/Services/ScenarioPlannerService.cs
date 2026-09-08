@@ -3,285 +3,87 @@ using TajsTokens.Core.Models;
 
 namespace TajsTokens.Core.Services;
 
-/// <summary>
-/// Fits a small account-local ridge model to observed quota-drop intervals. It deliberately learns
-/// only from the user's own quota movement and concurrency history; it contains no universal
-/// token-to-subscription-quota conversion.
-/// </summary>
+/// <summary>Account-local conditional scenarios, selected using matured chronological outcomes.</summary>
 public sealed class ScenarioPlannerService
 {
-    private const int MinimumSamples = 6;
-    private const int MaximumSampleAgeDays = 30;
-    private const double Ridge = 0.15;
+    private const int MinimumSamples = 12;
 
-    public ScenarioEstimate Estimate(
-        ScenarioRequest request,
-        IReadOnlyList<ScenarioHistorySample> history,
+    public ScenarioEstimate Estimate(ScenarioRequest request, IReadOnlyList<ScenarioHistorySample> history,
         DateTimeOffset? evaluatedAtUtc = null)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(history);
+        if (!double.IsFinite(request.DurationHours) || request.DurationHours <= 0 || request.DurationHours > 168 ||
+            request.RootAgents < 0 || request.Subagents < 0 || (long)request.RootAgents + request.Subagents <= 0 ||
+            !double.IsFinite(request.IntensityMultiplier) || request.IntensityMultiplier <= 0 || request.IntensityMultiplier > 5)
+            throw new ArgumentOutOfRangeException(nameof(request));
+        var now = evaluatedAtUtc ?? DateTimeOffset.UtcNow;
+        return new ScenarioEstimate(request, Build(QuotaWindowKind.FiveHour), Build(QuotaWindowKind.Weekly),
+            "Account-local conditional estimates from authoritative meter intervals, including unchanged readings. " +
+            "Active-session counts describe recent observed activity, not simultaneous compute or a causal agent-cost conversion. " +
+            "A workload ridge candidate must beat the elapsed-time baseline on earlier chronological outcomes. " +
+            "No universal token-to-quota conversion or calibrated exhaustion probability is assumed.");
 
-        if (!double.IsFinite(request.DurationHours) || request.DurationHours <= 0 || request.DurationHours > 168)
+        ScenarioWindowEstimate Build(QuotaWindowKind kind)
         {
-            throw new ArgumentOutOfRangeException(nameof(request), "Scenario duration must be between 0 and 168 hours.");
-        }
+            var samples = history.Where(x => x.Kind == kind && x.EndUtc <= now && x.EndUtc > x.StartUtc &&
+                double.IsFinite(x.QuotaDeltaPercent) && x.QuotaDeltaPercent is >= 0 and <= 100 &&
+                x.RootAgents >= 0 && x.Subagents >= 0 &&
+                (x.ResetUtc is null || x.EndUtc <= x.ResetUtc)).OrderBy(x => x.StartUtc).ToArray();
+            ScenarioWindowEstimate Unknown(string reason, int count) => new(kind, false, count, null, null, null, 0, reason);
+            if (samples.Length > 0 && now - samples.Max(x => x.EndUtc) > TimeSpan.FromDays(30))
+                return Unknown("History is stale; a usable interval within 30 days is required.", samples.Length);
+            var source = samples.MaxBy(x => x.EndUtc)?.Source;
+            samples = samples.Where(x => x.Source == source).ToArray();
+            samples = samples.Where(x => x.EndUtc >= now.AddDays(-30) &&
+                (string.IsNullOrWhiteSpace(request.Model) || string.Equals(x.DominantModel, request.Model, StringComparison.Ordinal)) &&
+                (string.IsNullOrWhiteSpace(request.ReasoningEffort) || string.Equals(x.DominantReasoningEffort, request.ReasoningEffort, StringComparison.Ordinal))).ToArray();
+            if (samples.Length < MinimumSamples)
+                return Unknown($"Not enough matching history: need {MinimumSamples} intervals; have {samples.Length}. Requested model/effort cohorts are never replaced silently.", samples.Length);
+            if (request.IntensityMultiplier != 1)
+                return Unknown("Intensity multipliers have no observed source contract or validated response curve. Use intensity 1 for an evidence-backed conditional estimate.", samples.Length);
+            if (request.DurationHours < samples.Min(Hours) || request.DurationHours > samples.Max(Hours) ||
+                request.RootAgents < samples.Min(x => x.RootAgents) || request.RootAgents > samples.Max(x => x.RootAgents) ||
+                request.Subagents < samples.Min(x => x.Subagents) || request.Subagents > samples.Max(x => x.Subagents))
+                return Unknown("Requested duration or active-session counts are outside observed support; extrapolation is unavailable.", samples.Length);
 
-        if (request.RootAgents < 0 || request.Subagents < 0 || request.RootAgents + request.Subagents <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(request), "At least one root agent or subagent is required.");
+            var trials = new List<(ScenarioHistorySample Sample, double BaselineError, double RidgeError, double SelectedError)>();
+            foreach (var target in samples)
+            {
+                // No overlapping interval outcome may enter this prediction's training set.
+                var prefix = samples.Where(x => x.EndUtc <= target.StartUtc && x.StartUtc < target.StartUtc).ToArray();
+                if (prefix.Length < 6) continue;
+                var baseline = Baseline(prefix, Hours(target));
+                var fit = Fit(prefix);
+                if (fit is null) continue;
+                var ridge = Math.Clamp(fit.Predict(Features(target)), 0, 100);
+                var previous = trials.Where(x => x.Sample.EndUtc <= target.StartUtc).ToArray();
+                var useRidge = previous.Length >= 6 && previous.Average(x => x.RidgeError) + 0.1 < previous.Average(x => x.BaselineError) * 0.9;
+                trials.Add((target, Math.Abs(target.QuotaDeltaPercent - baseline), Math.Abs(target.QuotaDeltaPercent - ridge),
+                    Math.Abs(target.QuotaDeltaPercent - (useRidge ? ridge : baseline))));
+            }
+            var selectedRidge = trials.Count >= 6 && trials.Average(x => x.RidgeError) + 0.1 < trials.Average(x => x.BaselineError) * 0.9;
+            var prediction = selectedRidge && Fit(samples) is { } model
+                ? Math.Clamp(model.Predict([request.DurationHours, request.RootAgents, request.Subagents]), 0, 100)
+                : Baseline(samples, request.DurationHours);
+            // One comparable held-out error per reset generation, not thousands of correlated polls.
+            var errors = trials.Where(x => x.Sample.ResetUtc is not null && x.Sample.ResetUtc < now &&
+                    Hours(x.Sample) >= request.DurationHours / 2 && Hours(x.Sample) <= request.DurationHours * 2)
+                .GroupBy(x => x.Sample.ResetUtc).Select(g => g.Last().SelectedError).ToArray();
+            var radius = QuotaForecastBacktester.ErrorRadius(errors);
+            return new ScenarioWindowEstimate(kind, true, samples.Length, prediction,
+                radius is double r ? Math.Max(0, prediction - r) : null,
+                radius is double r2 ? Math.Min(100, prediction + r2) : null, 0,
+                $"Conditional {(selectedRidge ? "workload ridge" : "elapsed-time baseline")}; {trials.Count} chronological test outcomes. " +
+                (radius is null ? "Uncertainty is learning: fewer than 8 comparable held-out reset generations. " : "Empirical 80%-target band from earlier held-out reset generations; coverage can change with workload. ") +
+                "Unchanged meters are precision-limited, not exact zero burn. Session counts are not measured concurrency; no confidence probability is assigned.");
         }
-
-        if (!double.IsFinite(request.IntensityMultiplier) || request.IntensityMultiplier <= 0 || request.IntensityMultiplier > 5)
-        {
-            throw new ArgumentOutOfRangeException(nameof(request), "Intensity multiplier must be greater than 0 and at most 5.");
-        }
-
-        var evaluationTime = (evaluatedAtUtc ?? DateTimeOffset.UtcNow).ToUniversalTime();
-        var fiveHour = BuildEstimate(QuotaWindowKind.FiveHour, request, history, evaluationTime);
-        var weekly = BuildEstimate(QuotaWindowKind.Weekly, request, history, evaluationTime);
-        return new ScenarioEstimate(
-            request,
-            fiveHour,
-            weekly,
-            "Account-local ridge regression over observed quota-drop intervals. Features are elapsed hours, root-agent-hours and subagent-hours; requested intensity scales those workload features. Prediction ranges come from historical residual error. Estimates require a usable interval within the last 30 days. No universal token→quota conversion is assumed.");
     }
 
-    private static ScenarioWindowEstimate BuildEstimate(
-        QuotaWindowKind kind,
-        ScenarioRequest request,
-        IReadOnlyList<ScenarioHistorySample> history,
-        DateTimeOffset evaluationTime)
-    {
-        var baseSamples = history
-            .Where(sample => sample.Kind == kind &&
-                             sample.QuotaDeltaPercent > 0 &&
-                             sample.EndUtc > sample.StartUtc &&
-                             sample.RootAgents + sample.Subagents > 0 &&
-                             sample.EndUtc <= evaluationTime)
-            .ToArray();
-
-        if (baseSamples.Length > 0)
-        {
-            var newestSample = baseSamples.Max(sample => sample.EndUtc);
-            if (evaluationTime - newestSample > TimeSpan.FromDays(MaximumSampleAgeDays))
-            {
-                return new ScenarioWindowEstimate(
-                    kind,
-                    false,
-                    baseSamples.Length,
-                    null,
-                    null,
-                    null,
-                    0.05,
-                    $"{kind} history is stale. The newest usable interval ended {newestSample:yyyy-MM-dd}; a sample within the last {MaximumSampleAgeDays} days is required.");
-            }
-        }
-
-        var cohort = baseSamples;
-        var cohortLabel = "all observed workloads";
-        var cohortPenalty = 1d;
-        var fallbackNotes = new List<string>();
-
-        if (!string.IsNullOrWhiteSpace(request.Model))
-        {
-            var matching = cohort
-                .Where(sample => string.Equals(sample.DominantModel, request.Model, StringComparison.OrdinalIgnoreCase))
-                .ToArray();
-            if (matching.Length >= MinimumSamples)
-            {
-                cohort = matching;
-                cohortLabel = $"model {request.Model}";
-            }
-            else
-            {
-                cohortPenalty *= 0.85;
-                fallbackNotes.Add($"Model {request.Model} did not have enough matching history, so the broader account cohort was used.");
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(request.ReasoningEffort))
-        {
-            var matching = cohort
-                .Where(sample => string.Equals(sample.DominantReasoningEffort, request.ReasoningEffort, StringComparison.OrdinalIgnoreCase))
-                .ToArray();
-            if (matching.Length >= MinimumSamples)
-            {
-                cohort = matching;
-                cohortLabel += $", reasoning {request.ReasoningEffort}";
-            }
-            else
-            {
-                cohortPenalty *= 0.85;
-                fallbackNotes.Add(
-                    cohortLabel == "all observed workloads"
-                        ? $"Reasoning {request.ReasoningEffort} did not have enough matching history, so the broader account cohort was used."
-                        : $"Reasoning {request.ReasoningEffort} did not have enough matching history, so the {cohortLabel} cohort was retained.");
-            }
-        }
-
-        if (cohort.Length < MinimumSamples)
-        {
-            return new ScenarioWindowEstimate(
-                kind,
-                false,
-                cohort.Length,
-                null,
-                null,
-                null,
-                Math.Clamp(cohort.Length / (double)MinimumSamples * 0.25, 0, 0.25),
-                $"Not enough {kind} quota-drop intervals yet. Need at least {MinimumSamples}; have {cohort.Length} usable sample(s).");
-        }
-
-        var x = cohort.Select(Features).ToArray();
-        var y = cohort.Select(sample => sample.QuotaDeltaPercent).ToArray();
-        var coefficients = FitRidge(x, y);
-        var requestedFeatures = new[]
-        {
-            1d,
-            request.DurationHours * request.IntensityMultiplier,
-            request.DurationHours * request.RootAgents * request.IntensityMultiplier,
-            request.DurationHours * request.Subagents * request.IntensityMultiplier
-        };
-        var rawPrediction = Dot(coefficients, requestedFeatures);
-        var expected = Math.Clamp(rawPrediction, 0, 100);
-
-        var residuals = cohort
-            .Select((_, index) => y[index] - Dot(coefficients, x[index]))
-            .ToArray();
-        var residualVariance = residuals.Sum(value => value * value) / Math.Max(1, residuals.Length - coefficients.Length);
-        var residualSigma = Math.Sqrt(Math.Max(0, residualVariance));
-        var minimumUncertainty = Math.Max(0.5, expected * 0.1);
-        var uncertainty = Math.Max(minimumUncertainty, residualSigma * 1.28); // approximate central 80% empirical band
-        var lower = Math.Clamp(expected - uncertainty, 0, 100);
-        var upper = Math.Clamp(expected + uncertainty, 0, 100);
-
-        var mean = Math.Max(0.5, y.Average());
-        var fitFactor = 1d / (1d + residualSigma / mean);
-        var sampleFactor = Math.Clamp(cohort.Length / 24d, 0.25, 1);
-        var confidence = Math.Clamp(sampleFactor * fitFactor * cohortPenalty, 0.1, 0.92);
-
-        var fallbackNote = fallbackNotes.Count > 0
-            ? $" {string.Join(" ", fallbackNotes)} Confidence was reduced."
-            : string.Empty;
-
-        return new ScenarioWindowEstimate(
-            kind,
-            true,
-            cohort.Length,
-            expected,
-            lower,
-            upper,
-            confidence,
-            $"Estimated from {cohort.Length} {cohortLabel} interval(s). Historical residual σ ≈ {residualSigma:0.00} quota points.{fallbackNote}");
-    }
-
-    private static double[] Features(ScenarioHistorySample sample)
-    {
-        var hours = Math.Clamp((sample.EndUtc - sample.StartUtc).TotalHours, 1d / 3600d, 168d);
-        return [1d, hours, hours * sample.RootAgents, hours * sample.Subagents];
-    }
-
-    private static double[] FitRidge(IReadOnlyList<double[]> x, IReadOnlyList<double> y)
-    {
-        const int columns = 4;
-        var matrix = new double[columns, columns];
-        var vector = new double[columns];
-
-        for (var row = 0; row < x.Count; row++)
-        {
-            for (var i = 0; i < columns; i++)
-            {
-                vector[i] += x[row][i] * y[row];
-                for (var j = 0; j < columns; j++)
-                {
-                    matrix[i, j] += x[row][i] * x[row][j];
-                }
-            }
-        }
-
-        for (var i = 1; i < columns; i++)
-        {
-            matrix[i, i] += Ridge;
-        }
-
-        return Solve(matrix, vector);
-    }
-
-    private static double[] Solve(double[,] matrix, double[] vector)
-    {
-        var size = vector.Length;
-        var augmented = new double[size, size + 1];
-        for (var row = 0; row < size; row++)
-        {
-            for (var column = 0; column < size; column++)
-            {
-                augmented[row, column] = matrix[row, column];
-            }
-            augmented[row, size] = vector[row];
-        }
-
-        for (var pivot = 0; pivot < size; pivot++)
-        {
-            var best = pivot;
-            for (var row = pivot + 1; row < size; row++)
-            {
-                if (Math.Abs(augmented[row, pivot]) > Math.Abs(augmented[best, pivot]))
-                {
-                    best = row;
-                }
-            }
-
-            if (best != pivot)
-            {
-                for (var column = pivot; column <= size; column++)
-                {
-                    (augmented[pivot, column], augmented[best, column]) =
-                        (augmented[best, column], augmented[pivot, column]);
-                }
-            }
-
-            var divisor = augmented[pivot, pivot];
-            if (Math.Abs(divisor) < 1e-9)
-            {
-                divisor = divisor < 0 ? -1e-9 : 1e-9;
-            }
-
-            for (var column = pivot; column <= size; column++)
-            {
-                augmented[pivot, column] /= divisor;
-            }
-
-            for (var row = 0; row < size; row++)
-            {
-                if (row == pivot)
-                {
-                    continue;
-                }
-
-                var factor = augmented[row, pivot];
-                for (var column = pivot; column <= size; column++)
-                {
-                    augmented[row, column] -= factor * augmented[pivot, column];
-                }
-            }
-        }
-
-        var result = new double[size];
-        for (var row = 0; row < size; row++)
-        {
-            result[row] = augmented[row, size];
-        }
-        return result;
-    }
-
-    private static double Dot(IReadOnlyList<double> left, IReadOnlyList<double> right)
-    {
-        var result = 0d;
-        for (var index = 0; index < Math.Min(left.Count, right.Count); index++)
-        {
-            result += left[index] * right[index];
-        }
-        return result;
-    }
+    private static double Hours(ScenarioHistorySample x) => (x.EndUtc - x.StartUtc).TotalHours;
+    private static double[] Features(ScenarioHistorySample x) => [Hours(x), x.RootAgents, x.Subagents];
+    private static AccountLocalRidge? Fit(ScenarioHistorySample[] samples) =>
+        AccountLocalRidge.Fit(samples.Select(Features).ToArray(), samples.Select(x => x.QuotaDeltaPercent).ToArray(), 10);
+    private static double Baseline(ScenarioHistorySample[] samples, double hours) =>
+        Math.Clamp(samples.Sum(x => x.QuotaDeltaPercent) / samples.Sum(Hours) * hours, 0, 100);
 }

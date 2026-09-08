@@ -8,7 +8,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 
 public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryRepository, ISessionIngestionCheckpointStore
 {
-    private const int CurrentSchemaVersion = 7;
+    private const int CurrentSchemaVersion = 8;
     private const int IntelligenceSchemaVersion = 1;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _intelligenceInitializeGate = new(1, 1);
@@ -177,6 +177,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                     quota_captured_at_utc TEXT,
                     quota_window_minutes INTEGER,
                     quota_resets_at_utc TEXT,
+                    evaluation_json TEXT,
                     PRIMARY KEY(provider, profile, kind, generated_at_utc)
                 );
 
@@ -189,7 +190,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 CREATE INDEX IF NOT EXISTS idx_forecast_snapshots_lookup
                     ON forecast_snapshots(provider, profile, kind, generated_at_utc DESC);
 
-                PRAGMA user_version = 7;
+                PRAGMA user_version = 8;
                 """, cancellationToken);
             return;
         }
@@ -342,6 +343,13 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 ALTER TABLE forecast_snapshots ADD COLUMN quota_window_minutes INTEGER;
                 ALTER TABLE forecast_snapshots ADD COLUMN quota_resets_at_utc TEXT;
                 PRAGMA user_version = 7;
+                """, cancellationToken);
+        }
+        if (version < 8)
+        {
+            await ExecuteMigrationAsync(connection, """
+                ALTER TABLE forecast_snapshots ADD COLUMN evaluation_json TEXT;
+                PRAGMA user_version = 8;
                 """, cancellationToken);
         }
     }
@@ -690,10 +698,10 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
                 estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence,
                 state, burn_pressure, projected_remaining_at_reset_percent, trend, is_quantized_flat,
-                quota_source, quota_authority, quota_captured_at_utc, quota_window_minutes, quota_resets_at_utc)
+                quota_source, quota_authority, quota_captured_at_utc, quota_window_minutes, quota_resets_at_utc, evaluation_json)
             VALUES($provider, $profile, $kind, $generated, $burnRate, $exhaustion, $survives, $sustainable, $confidence,
                    $state, $pressure, $remainingAtReset, $trend, $quantizedFlat,
-                   $quotaSource, $quotaAuthority, $quotaCaptured, $quotaWindow, $quotaReset)
+                   $quotaSource, $quotaAuthority, $quotaCaptured, $quotaWindow, $quotaReset, $evaluation)
             ON CONFLICT(provider, profile, kind, generated_at_utc) DO UPDATE SET
               burn_rate_percent_per_hour = excluded.burn_rate_percent_per_hour,
               estimated_exhaustion_at_utc = excluded.estimated_exhaustion_at_utc,
@@ -709,7 +717,8 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
               quota_authority = excluded.quota_authority,
               quota_captured_at_utc = excluded.quota_captured_at_utc,
               quota_window_minutes = excluded.quota_window_minutes,
-              quota_resets_at_utc = excluded.quota_resets_at_utc;
+              quota_resets_at_utc = excluded.quota_resets_at_utc,
+              evaluation_json = excluded.evaluation_json;
             """,
             cmd =>
             {
@@ -733,6 +742,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 cmd.Parameters.AddWithValue("$quotaCaptured", snapshot.QuotaCapturedAtUtc is null ? DBNull.Value : SerializeUtc(snapshot.QuotaCapturedAtUtc.Value));
                 cmd.Parameters.AddWithValue("$quotaWindow", DbValue(snapshot.QuotaWindowMinutes));
                 cmd.Parameters.AddWithValue("$quotaReset", snapshot.QuotaResetsAtUtc is null ? DBNull.Value : SerializeUtc(snapshot.QuotaResetsAtUtc.Value));
+                cmd.Parameters.AddWithValue("$evaluation", forecast.Evidence is null ? DBNull.Value : ForecastEvidenceJson.Serialize(forecast.Evidence));
             },
             cancellationToken);
 
@@ -742,7 +752,8 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
         string profile,
         int take,
         CancellationToken cancellationToken,
-        DateTimeOffset? capturedAtUpperBoundUtc = null)
+        DateTimeOffset? capturedAtUpperBoundUtc = null,
+        string? source = null)
     {
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
@@ -753,6 +764,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
             FROM quota_snapshots
             WHERE kind = $kind AND provider = $provider AND profile = $profile
               AND ($capturedAtUpperBound IS NULL OR captured_at_utc <= $capturedAtUpperBound)
+              AND ($source IS NULL OR source = $source)
             ORDER BY captured_at_utc DESC
             LIMIT $take;
             """;
@@ -760,6 +772,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
         command.Parameters.AddWithValue("$provider", provider);
         command.Parameters.AddWithValue("$profile", profile);
         command.Parameters.AddWithValue("$take", Math.Max(0, take));
+        command.Parameters.AddWithValue("$source", DbValue(source));
         command.Parameters.AddWithValue(
             "$capturedAtUpperBound",
             capturedAtUpperBoundUtc is null ? DBNull.Value : SerializeUtc(capturedAtUpperBoundUtc.Value));
@@ -797,7 +810,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
             SELECT provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
                    estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence,
                    state, burn_pressure, projected_remaining_at_reset_percent, trend, is_quantized_flat,
-                   quota_source, quota_authority, quota_captured_at_utc, quota_window_minutes, quota_resets_at_utc
+                   quota_source, quota_authority, quota_captured_at_utc, quota_window_minutes, quota_resets_at_utc, evaluation_json
             FROM forecast_snapshots
             WHERE kind = $kind AND provider = $provider AND profile = $profile
             ORDER BY generated_at_utc DESC
@@ -831,7 +844,8 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                     reader.IsDBNull(10) ? null : reader.GetDouble(10),
                     reader.IsDBNull(11) ? null : reader.GetDouble(11),
                     reader.IsDBNull(12) ? null : reader.GetString(12),
-                    !reader.IsDBNull(13) && reader.GetInt32(13) != 0),
+                    !reader.IsDBNull(13) && reader.GetInt32(13) != 0,
+                    ForecastEvidenceJson.Deserialize(reader.IsDBNull(19) ? null : reader.GetString(19))),
                 reader.IsDBNull(14) ? null : reader.GetString(14),
                 reader.IsDBNull(15) || !Enum.TryParse<QuotaObservationAuthority>(reader.GetString(15), out var authority) ? QuotaObservationAuthority.Unknown : authority,
                 reader.IsDBNull(16) ? null : ParseUtc(reader.GetString(16)),

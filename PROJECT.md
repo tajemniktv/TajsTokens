@@ -226,7 +226,89 @@ There is no assumed universal conversion from tokens to subscription quota. Any 
 
 Potential predictors include only already-contracted observations such as recent quota movement, time within the reset epoch, root/subagent activity, concurrency, model/reasoning-effort mix, native token/accounting categories, cache behavior, active-session duration, and other provider-native signals established later. These are candidate predictors, not causal truths.
 
+### Predictive workload evidence audit (2026-09-08)
+
+The live `CODEX_HOME` inventory, not just TajsTokens' database, is the acquisition baseline.
+A read-only scan of 348 active/archived rollout JSONL files (about 2.26 GB) found 2,368 owned
+`turn_context` records, 62,570 owned `token_count` records, 1,864 `task_started`, 1,751
+`task_complete`, and 81 `turn_aborted` records spanning March through September 2026. Every
+observed turn context contained string `model`, string `effort`, and `turn_id`; 40 also contained
+`root_turn_id`. All owned token observations followed an effort-bearing context. Counts are a
+live inventory, not stable source guarantees. Inherited prefixes (32 non-owning session metadata
+records) must not be counted as the child's work. The reproducible read-only inventory is
+`tools/TajsTokens.ForecastEvaluation --inventory <CODEX_HOME> <telemetry.db>`; it prints aggregate
+counts and metadata coverage only, never transcript contents or source identifiers.
+
+In contrast, the inspected TajsTokens database had 62,246 normalized token events across 342
+sessions and **all reasoning-effort values were NULL**. The parser recognized `reasoning_effort`
+and nested `reasoning.effort`, but not the observed native `effort` field. Its existing usage-event
+projection retained lifecycle event names/timestamps but discarded native turn identities.
+This is an ingestion gap, not absence of predictive history. Current state SQLite has model and
+reasoning metadata for 345 of 346 threads, but these mutable current values must not be attached
+retroactively to past token events. The live thread-history SQLite has 323 turns across 127
+threads (319 completed/duration-bearing), beginning in August; JSONL has substantially longer
+turn lifecycle coverage. SQLite is useful corroboration, not a reason to replace the longer
+source-native event history with current thread snapshots.
+
+Corroboration: local `openai/codex` commit `a51608398d53b6d23ed98b8287de415b35f1eea5`,
+`codex-rs/protocol/src/protocol.rs::TurnContextItem`, explicitly persists turn context once per
+real user turn and again after mid-turn compaction. It declares optional `turn_id`, optional
+`root_turn_id` (root-turn attribution for subagents), `model`, and optional `effort`.
+The commit is not asserted to exactly match the installed desktop. Repeated turn contexts are
+observations, not additional user turns. The same protocol defines `RateLimitWindow.used_percent`
+as consumed percentage, `window_minutes` as duration, and `resets_at` as Unix seconds.
+
+Retention decision: extend the existing owned-rollout normalization path with typed, content-free
+workload observations for native context/lifecycle metadata. Retain source record/file identity,
+byte provenance, native session/turn/root-turn identity where present, event type, nullable source
+event time, actual collection time, contract/parser version, model/effort context, and supported
+context-window metadata. Native token categories continue through the existing accounting reducer.
+Do not duplicate prompts, reasoning bodies, tool arguments/results, instructions, code, or auth
+material. Parser replay may repair missing metadata without recounting token increments. Missing
+or conflicting native values must remain inspectable rather than being filled from current state.
+
+Features such as completed-turn duration, active-turn overlap, root/subagent mix, model/effort mix,
+and recent token/context behavior are derived from these observations at a bounded evaluation
+time. They are not stored as native facts. A task-start/completion interval measures observed turn
+wall time, not model-compute time; open or unmatched lifecycles remain incomplete. No future
+completion may retrospectively mark a historical turn inactive. Backfilled event-time replay must
+be labelled reconstructed history, distinct from a strict replay using collection-time availability.
+Current mutable SQLite metadata does not establish historical availability or historical effort.
+Authoritative quota targets remain app-server observations; embedded quota replays are exploratory
+source-separated diagnostics, not a substitute for authoritative-target validation.
+
+The follow-up live scan also observed numeric `started_at` on 1,244 task starts; 1,158 completions
+with `completed_at`/`duration_ms`; and 956 completions with `time_to_first_token_ms`. The inspected
+protocol explicitly defines native start/end as Unix seconds and durations as milliseconds. These
+optional scalars and the native session-source discriminator are retained without retaining the
+terminal message/error payload. Root/subagent classification is derived from the observed native
+source discriminator or explicit parent/root-turn relationship, not absence of a relationship in
+today's state graph. Unknown origin stays unknown. Notification-name-only app-server logs were
+also inspected: the outgoing quota notifications had no numeric quota payload and do not create
+additional authoritative training labels.
+
+Observatory schema 5 adds workload observations; schema 6 records collection time on new token
+and context rows. Existing rows retain NULL collection time rather than a fabricated original
+availability date. Replays preserve first collection time. `typed-v4-workload` forces safe parser
+replay, and state-index schema 2 invalidates the derived fast-path fingerprints once so unchanged
+historical rollouts are not skipped. The normalized store does not replace token increments during
+that metadata repair. Retired source generations remain provenance but are not mixed into the
+active-source forecasting feature query. No source-owned SQLite database is modified or mirrored.
+
 ### Evaluation contract
+
+The 2026-09-08 durable backfill/evaluation snapshot contains 1,772 authoritative quota observations,
+6,738 content-free workload observations, and 62,544 native token increments, all with historical
+effort restored (96 have actual collection timestamps; legacy availability stays unknown).
+Authoritative half-hour targets provide only 3 eligible five-hour origins across 2 reset generations
+and 14 weekly origins in 1 generation. Weekly ridge candidates can fit only 2 of those origins;
+the elapsed/pace ridge MAE is 0.168 points versus the incumbent's 0.163. This does not support
+promoting workload sophistication. There are no weekly near-reset targets and no supported
+eight-generation uncertainty calibration. The production incumbent is therefore retained with
+explicit learning/conditional states, while chronological model selection and empirical bands
+activate only with sufficient comparable completed generations. More embedded rollout history
+does not repair this authoritative-label limitation. The evaluation UI and local CLI expose sample,
+generation, actual-fit, and coverage counts so fallback predictions cannot masquerade as model proof.
 
 Forecasting changes must be judged primarily by historical walk-forward/backtesting over completed observations/windows, preserving only information that would actually have been available at each historical prediction time.
 
@@ -243,7 +325,7 @@ The current production baseline is deliberately simple:
 - `ForecastingService` isolates the active reset epoch, derives observed quota-percent-per-hour intervals, uses a chronological EWMA with different fixed alphas for 5-hour and weekly windows, estimates sustainable pace/reset survival, and applies heuristic confidence.
 - Flat quantized histories produce `IdleWithinMeterPrecision` rather than a confident zero-burn forecast.
 - `SqliteIntelligenceService.BuildAndPersistCurrentForecastsAsync` owns current forecast generation, requires a fresh provider-authoritative anchor, excludes history newer than it, persists the exact forecast shown to the app, and prevents stale/non-authoritative lanes from borrowing a competing forecast.
-- `ScenarioPlannerService` currently fits a small account-local ridge model over quota-drop intervals using duration, root-agent-hours, and subagent-hours, with optional model/reasoning cohort selection and residual-derived uncertainty.
+- `ScenarioPlannerService` uses non-overlapping, source-isolated authoritative intervals (including unchanged meters), with reconstructed workload evidence bounded at interval start. It compares an elapsed-time baseline with account-local ridge on matured chronological outcomes. Recent token-active session counts are not simultaneous compute or agent-hours. Exact requested model/effort cohorts require support; unsupported intensity scaling and extrapolation return unavailable. Uncertainty requires eight comparable held-out reset generations, never training residuals or heuristic confidence percentages. Reconstruction is not proof the app had collected those inputs at the historical origin.
 
 These implementations are **baselines, not architecture**. Their formulas, coefficients, thresholds, confidence logic, and feature sets may be replaced when evaluation demonstrates a better production choice. Persisted forecast snapshots are derived historical outputs and should retain enough lineage to identify the anchor and policy/model used; they must remain rebuildable from durable evidence.
 

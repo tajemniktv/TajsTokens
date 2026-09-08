@@ -38,7 +38,7 @@ public sealed class SqliteTelemetryRepositoryTests
             {
                 await connection.OpenAsync();
 
-                Assert.Equal(7, await ReadSchemaVersionAsync(connection));
+                Assert.Equal(8, await ReadSchemaVersionAsync(connection));
                 var tables = await ReadTableNamesAsync(connection);
                 foreach (var expected in s_foundationTables)
                 {
@@ -89,7 +89,7 @@ public sealed class SqliteTelemetryRepositoryTests
             await using (var migrated = new SqliteConnection($"Data Source={path}"))
             {
                 await migrated.OpenAsync();
-                Assert.Equal(7, await ReadSchemaVersionAsync(migrated));
+                Assert.Equal(8, await ReadSchemaVersionAsync(migrated));
                 Assert.Contains("repositories", await ReadTableNamesAsync(migrated));
                 Assert.Contains("workspaces", await ReadTableNamesAsync(migrated));
                 Assert.Contains("forecast_snapshots", await ReadTableNamesAsync(migrated));
@@ -174,7 +174,7 @@ public sealed class SqliteTelemetryRepositoryTests
 
             await using var migrated = new SqliteConnection($"Data Source={path}");
             await migrated.OpenAsync();
-            Assert.Equal(7, await ReadSchemaVersionAsync(migrated));
+            Assert.Equal(8, await ReadSchemaVersionAsync(migrated));
             var snapshots = await repository.GetRecentQuotaSnapshotsAsync(
                 QuotaWindowKind.FiveHour,
                 "codex",
@@ -184,6 +184,10 @@ public sealed class SqliteTelemetryRepositoryTests
             Assert.Equal(2, snapshots.Count);
             Assert.Contains(snapshots, item => item.Source == "codex-app-server:codex" && item.UsedPercent == 42);
             Assert.Contains(snapshots, item => item.Source == "codex-rollout:primary" && item.UsedPercent == 99);
+            var authoritativeOnly = await repository.GetRecentQuotaSnapshotsAsync(
+                QuotaWindowKind.FiveHour, "codex", "default", 1, CancellationToken.None,
+                captured, "codex-app-server:codex");
+            Assert.Equal(42, Assert.Single(authoritativeOnly).UsedPercent);
         }
         finally
         {
@@ -310,7 +314,9 @@ public sealed class SqliteTelemetryRepositoryTests
                     1.17,
                     22.5,
                     "accelerating",
-                    true),
+                    true,
+                    new ForecastEvidence("fixture/v1", "epoch", "codex-app-server:codex", 12, 2,
+                        8, 3, 19, 26, 0.8, "Held-out empirical band, not an exhaustion probability.")),
                 "codex-app-server:codex",
                 QuotaObservationAuthority.ProviderAuthoritative,
                 now.AddMinutes(-1),

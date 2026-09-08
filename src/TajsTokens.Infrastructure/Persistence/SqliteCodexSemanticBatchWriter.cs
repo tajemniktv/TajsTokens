@@ -279,7 +279,13 @@ internal sealed class SqliteCodexIngestionBatchWriter(
                 Set(context, "$window", DbValue(record.ContextObservation.ContextWindowTokens));
                 Set(context, "$compaction", record.ContextObservation.IsCompaction ? 1 : 0);
                 Set(context, "$bytes", DbValue(record.ContextObservation.RecordBytes));
+                Set(context, "$captured", SerializeUtc(record.ContextObservation.CapturedAtUtc ?? DateTimeOffset.UtcNow));
                 await context.ExecuteNonQueryAsync(cancellationToken);
+            }
+            if (record.WorkloadObservation is not null)
+            {
+                await SqliteCodexWorkloadEvidence.WriteAsync(connection, transaction,
+                    record.WorkloadObservation, safeFileLabel, cancellationToken);
             }
         }
     }
@@ -354,10 +360,10 @@ internal sealed class SqliteCodexIngestionBatchWriter(
         BuildCommand(connection, transaction, """
             INSERT INTO context_observations(
                 event_id, session_id, agent_id, observed_at_utc, model, input_tokens,
-                context_window_tokens, is_compaction, record_bytes)
-            VALUES($event, $session, $agent, $observed, $model, $input, $window, $compaction, $bytes)
+                context_window_tokens, is_compaction, record_bytes, captured_at_utc)
+            VALUES($event, $session, $agent, $observed, $model, $input, $window, $compaction, $bytes, $captured)
             ON CONFLICT(event_id) DO NOTHING;
-            """, "$event", "$session", "$agent", "$observed", "$model", "$input", "$window", "$compaction", "$bytes");
+            """, "$event", "$session", "$agent", "$observed", "$model", "$input", "$window", "$compaction", "$bytes", "$captured");
 
     private static SqliteCommand BuildCommand(
         SqliteConnection connection,

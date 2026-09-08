@@ -14,7 +14,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 /// </summary>
 public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObservatoryStore, IDisposable
 {
-    private const int ObservatorySchemaVersion = 4;
+    private const int ObservatorySchemaVersion = 6;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _initializeGate = new(1, 1);
     private volatile bool _initialized;
@@ -301,6 +301,24 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                 version = 4;
             }
 
+            if (version == 4)
+            {
+                await ExecuteMigrationAsync(connection, SqliteCodexWorkloadEvidence.Schema + """
+                    UPDATE observatory_schema SET version = 5 WHERE component = 'codex-observatory';
+                    """, cancellationToken);
+                version = 5;
+            }
+
+            if (version == 5)
+            {
+                await ExecuteMigrationAsync(connection, """
+                    ALTER TABLE codex_native_token_events ADD COLUMN captured_at_utc TEXT;
+                    ALTER TABLE context_observations ADD COLUMN captured_at_utc TEXT;
+                    UPDATE observatory_schema SET version = 6 WHERE component = 'codex-observatory';
+                    """, cancellationToken);
+                version = 6;
+            }
+
             // Scrub rows written by pre-hardening Phase 3 builds. typed-v3 forces one safe replay so
             // current sources regain basename+hash labels and repository names without retaining paths.
             var privacyScrub = connection.CreateCommand();
@@ -329,6 +347,15 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         {
             _initializeGate.Release();
         }
+    }
+
+    public async Task UpsertWorkloadObservationAsync(CodexWorkloadObservation observation, CancellationToken cancellationToken)
+    {
+        await EnsureInitializedAsync(cancellationToken);
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await SqliteCodexWorkloadEvidence.WriteAsync(connection, null, observation,
+            BuildSafeFileLabel(observation.SourceFile), cancellationToken);
     }
 
     public async Task UpsertSessionAsync(CodexSession session, CancellationToken cancellationToken)
@@ -506,6 +533,17 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         var decision = CodexTokenCounterReducer.Reduce(observation, previous, sourceEventAlreadyPersisted);
         if (decision.Kind is CodexTokenAccountingDecisionKind.Duplicate or CodexTokenAccountingDecisionKind.NoObservation)
         {
+            if (sourceEventAlreadyPersisted && observation.ReasoningEffort is not null)
+            {
+                // Parser-version replay repairs absent context metadata, never counters or
+                // existing conflicting values. Source-record identity makes this idempotent.
+                using var repair = connection.CreateCommand();
+                repair.Transaction = transaction;
+                repair.CommandText = "UPDATE codex_native_token_events SET reasoning_effort = $effort WHERE source_event_id = $id AND reasoning_effort IS NULL;";
+                repair.Parameters.AddWithValue("$effort", observation.ReasoningEffort);
+                repair.Parameters.AddWithValue("$id", observation.SourceEventId);
+                await repair.ExecuteNonQueryAsync(cancellationToken);
+            }
             transaction.Commit();
             return;
         }
@@ -582,8 +620,8 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             """
             INSERT INTO context_observations(
                 event_id, session_id, agent_id, observed_at_utc, model, input_tokens,
-                context_window_tokens, is_compaction, record_bytes)
-            VALUES($event, $session, $agent, $observed, $model, $input, $window, $compaction, $bytes)
+                context_window_tokens, is_compaction, record_bytes, captured_at_utc)
+            VALUES($event, $session, $agent, $observed, $model, $input, $window, $compaction, $bytes, $captured)
             ON CONFLICT(event_id) DO NOTHING;
             """,
             command =>
@@ -597,6 +635,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                 command.Parameters.AddWithValue("$window", DbValue(observation.ContextWindowTokens));
                 command.Parameters.AddWithValue("$compaction", observation.IsCompaction ? 1 : 0);
                 command.Parameters.AddWithValue("$bytes", DbValue(observation.RecordBytes));
+                command.Parameters.AddWithValue("$captured", SerializeUtc(observation.CapturedAtUtc ?? DateTimeOffset.UtcNow));
             },
             cancellationToken);
     }
@@ -999,9 +1038,9 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             INSERT INTO codex_native_token_events(
                 source_event_id, source_file, session_id, agent_id, observed_at_utc, model, reasoning_effort,
                 counter_epoch, uncached_input_tokens, cache_read_tokens, cache_write_tokens,
-                non_reasoning_output_tokens, reasoning_output_tokens, reported_total_tokens)
+                non_reasoning_output_tokens, reasoning_output_tokens, reported_total_tokens, captured_at_utc)
             VALUES($event, $file, $session, $agent, $observed, $model, $reasoning, $epoch,
-                   $uncached, $cached, $cacheWrite, $output, $reasoningOutput, $total)
+                   $uncached, $cached, $cacheWrite, $output, $reasoningOutput, $total, $captured)
             ON CONFLICT(source_event_id) DO NOTHING;
             """;
         insert.Parameters.AddWithValue("$event", observation.SourceEventId);
@@ -1018,6 +1057,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         insert.Parameters.AddWithValue("$output", nonReasoningOutput);
         insert.Parameters.AddWithValue("$reasoningOutput", reasoningOutput);
         insert.Parameters.AddWithValue("$total", reportedTotal);
+        insert.Parameters.AddWithValue("$captured", SerializeUtc(DateTimeOffset.UtcNow));
         return await insert.ExecuteNonQueryAsync(cancellationToken);
     }
 

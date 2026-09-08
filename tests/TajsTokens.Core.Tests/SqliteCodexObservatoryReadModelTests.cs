@@ -125,6 +125,9 @@ public sealed class SqliteCodexObservatoryReadModelTests
                 var downgrade = connection.CreateCommand();
                 downgrade.CommandText = """
                     DROP INDEX IF EXISTS idx_native_tokens_observed_time;
+                    DROP TABLE codex_workload_observations;
+                    ALTER TABLE codex_native_token_events DROP COLUMN captured_at_utc;
+                    ALTER TABLE context_observations DROP COLUMN captured_at_utc;
                     UPDATE observatory_schema
                     SET version = 2
                     WHERE component = 'codex-observatory';
@@ -140,7 +143,7 @@ public sealed class SqliteCodexObservatoryReadModelTests
 
             var versionCommand = verify.CreateCommand();
             versionCommand.CommandText = "SELECT version FROM observatory_schema WHERE component = 'codex-observatory';";
-            Assert.Equal(4L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
+            Assert.Equal(6L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
 
             var indexCommand = verify.CreateCommand();
             indexCommand.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_native_tokens_observed_time';";
@@ -154,7 +157,7 @@ public sealed class SqliteCodexObservatoryReadModelTests
     }
 
     [Fact]
-    public async Task Initialize_FreshDatabaseReopensWithSchemaVersion4()
+    public async Task Initialize_FreshDatabaseReopensWithSchemaVersion6()
     {
         var directory = Directory.CreateTempSubdirectory("tajstokens-observatory-reopen-");
         var databasePath = Path.Combine(directory.FullName, "telemetry.db");
@@ -176,7 +179,7 @@ public sealed class SqliteCodexObservatoryReadModelTests
             await connection.OpenAsync(CancellationToken.None);
             var version = connection.CreateCommand();
             version.CommandText = "SELECT version FROM observatory_schema WHERE component = 'codex-observatory';";
-            Assert.Equal(4L, (long)(await version.ExecuteScalarAsync(CancellationToken.None))!);
+            Assert.Equal(6L, (long)(await version.ExecuteScalarAsync(CancellationToken.None))!);
         }
         finally
         {

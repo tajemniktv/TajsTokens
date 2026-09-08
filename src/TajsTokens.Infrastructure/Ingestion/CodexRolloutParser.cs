@@ -27,7 +27,20 @@ internal sealed partial class CodexRolloutParser
             : root;
         var nestedType = ReadString(payload, "type") ?? ReadString(payload, "event_type");
         var eventClass = ClassifyEvent(topType, nestedType);
-        var timestamp = ReadTimestamp(root, "timestamp") ?? ReadTimestamp(payload, "timestamp") ?? DateTimeOffset.UtcNow;
+        var sourceTimestamp = ReadTimestamp(root, "timestamp") ?? ReadTimestamp(payload, "timestamp");
+        var timestamp = sourceTimestamp ?? DateTimeOffset.UtcNow;
+        CodexWorkloadObservation Workload(string type) => new(sourceRecordId, state.SourceIdentity,
+            state.FilePath, record.StartByteOffset, record.EndByteOffset, state.OwnSessionId!, type,
+            sourceTimestamp, DateTimeOffset.UtcNow, ReadString(payload, "turn_id"), ReadString(payload, "root_turn_id"),
+            type == "session_meta" ? state.ParentSessionId : null,
+            type == "turn_context" ? ReadString(payload, "model") : null,
+            type == "turn_context" ? ReadEffort(payload) : null,
+            ReadLong(payload, "model_context_window"),
+            StartedAtUnixSeconds: ReadLong(payload, "started_at"),
+            CompletedAtUnixSeconds: ReadLong(payload, "completed_at"),
+            DurationMilliseconds: ReadLong(payload, "duration_ms"),
+            TimeToFirstTokenMilliseconds: ReadLong(payload, "time_to_first_token_ms"),
+            SessionSourceKind: type == "session_meta" ? ReadSessionSourceKind(payload) : null);
 
         if (string.Equals(topType, "session_meta", StringComparison.OrdinalIgnoreCase))
         {
@@ -42,7 +55,7 @@ internal sealed partial class CodexRolloutParser
                     : new AgentRelationship(state.ParentSessionId!, sessionId, timestamp);
                 return new ParsedRolloutRecord(
                     sourceRecordId, eventClass, recordBytes, timestamp, sessionId,
-                    session, agent, relationship, null, null, [], null);
+                    session, agent, relationship, null, null, [], null, Workload("session_meta"));
             }
 
             // A filename without an owning UUID is intentionally storage-only. Choosing the first
@@ -59,13 +72,15 @@ internal sealed partial class CodexRolloutParser
             string.Equals(nestedType, "turn_context", StringComparison.OrdinalIgnoreCase))
         {
             state.CurrentModel = ReadString(payload, "model") ?? state.CurrentModel;
-            state.ReasoningEffort = ReadString(payload, "reasoning_effort") ?? ReadNestedString(payload, "reasoning", "effort") ?? state.ReasoningEffort;
+            // Turn context is the new baseline. Absent/null effort must not borrow the prior
+            // turn's value, especially across a model change. Current native format uses effort.
+            state.ReasoningEffort = ReadEffort(payload);
             state.ContextWindowTokens = ReadLong(payload, "model_context_window") ?? state.ContextWindowTokens;
             var usageEvent = new UsageEvent(sourceRecordId, state.OwnSessionId!, timestamp, "turn_context", BuildTurnContextSummary(state), null);
             return new ParsedRolloutRecord(
                 sourceRecordId, eventClass, recordBytes, timestamp, state.OwnSessionId,
                 state.BuildSession(timestamp, "active"), state.BuildAgent(timestamp, AgentRuntimeState.Running), null,
-                usageEvent, null, [], null);
+                usageEvent, null, [], null, Workload("turn_context"));
         }
 
         if (IsTokenCount(topType, nestedType, payload))
@@ -151,10 +166,25 @@ internal sealed partial class CodexRolloutParser
             return new ParsedRolloutRecord(
                 sourceRecordId, eventClass, recordBytes, timestamp, state.OwnSessionId,
                 state.BuildSession(timestamp, status), state.BuildAgent(timestamp, stateValue), null,
-                usageEvent, null, [], null);
+                usageEvent, null, [], null,
+                normalizedType is "task_started" or "task_complete" or "turn_aborted" ? Workload(normalizedType) : null);
         }
 
         return ParsedRolloutRecord.StorageOnly(sourceRecordId, eventClass, recordBytes, timestamp, state.OwnSessionId);
+    }
+
+    private static string? ReadEffort(JsonElement payload) => payload.TryGetProperty("effort", out _)
+        ? ReadString(payload, "effort")
+        : ReadString(payload, "reasoning_effort") ?? ReadNestedString(payload, "reasoning", "effort");
+
+    private static string? ReadSessionSourceKind(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("source", out var source)) return null;
+        if (source.ValueKind == JsonValueKind.String) return source.GetString();
+        // Only the native enum discriminator, never custom source payload text.
+        if (source.ValueKind == JsonValueKind.Object && source.EnumerateObject().Count() == 1)
+            return source.EnumerateObject().First().Name;
+        return null;
     }
 
     private static IReadOnlyList<QuotaSnapshot> ParseRateLimits(JsonElement payload, DateTimeOffset timestamp)
@@ -503,11 +533,12 @@ internal sealed record ParsedRolloutRecord(
     UsageEvent? UsageEvent,
     CodexTokenCountObservation? TokenObservation,
     IReadOnlyList<QuotaSnapshot> QuotaSnapshots,
-    CodexContextObservation? ContextObservation)
+    CodexContextObservation? ContextObservation,
+    CodexWorkloadObservation? WorkloadObservation = null)
 {
     public bool HasNormalizedTelemetry =>
         Session is not null || Agent is not null || Relationship is not null || UsageEvent is not null ||
-        TokenObservation is not null || QuotaSnapshots.Count > 0 || ContextObservation is not null;
+        TokenObservation is not null || QuotaSnapshots.Count > 0 || ContextObservation is not null || WorkloadObservation is not null;
 
     public static ParsedRolloutRecord StorageOnly(
         string sourceRecordId,
