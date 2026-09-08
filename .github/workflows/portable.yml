@@ -36,10 +36,10 @@ jobs:
           dotnet-version: '10.0.x'
 
       - name: Restore
-        run: dotnet restore TajsTokens.sln
+        run: dotnet restore TajsTokens.slnx
 
       - name: Build
-        run: dotnet build TajsTokens.sln --configuration Release --no-restore
+        run: dotnet build TajsTokens.slnx --configuration Release --no-restore
 
       - name: Test
         run: dotnet test tests/TajsTokens.Core.Tests/TajsTokens.Core.Tests.csproj --configuration Release --no-build
