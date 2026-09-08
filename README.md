@@ -8,22 +8,6 @@ Local-first means users should be able to inspect the data their own Codex insta
 
 Possible future providers are a design consideration, not the current product scope. TajsTokens is intentionally **Codex-first, not Codex-shaped**: Codex can have a rich first-class model, while a future provider should be free to keep its own native concepts rather than being forced into Codex's schema.
 
-## Architecture reset
-
-The project is currently rebuilding its data model from source evidence upward. The existing application is a working implementation, but its current metrics, labels, database shapes, and derived behavior are **not** the architectural specification.
-
-The architecture proceeds through five layers:
-
-1. raw source acquisition;
-2. empirical source contracts;
-3. provider-native normalized observations;
-4. durable evidence;
-5. provider-native and, where justified, shared read models.
-
-There is deliberately no universal provider schema between acquisition and the UI. Shared abstractions are introduced only where source semantics genuinely overlap.
-
-[`PROJECT.md`](PROJECT.md) is the sole authority for current product/data architecture and planning. Older planning, architecture, audit, and performance documents have been preserved under `docs/archive/` for archaeology only.
-
 ## Current investigation tooling
 
 The application includes a read-only Codex State DB Explorer for inspecting Codex-owned SQLite state without assigning domain meaning to fields merely because they exist. The Codex Threads page consumes the `ICodexThreadReadModel` provider-native query boundary for a bounded thread catalog/detail view, including state metadata, project roots, spawned-thread edges, dynamic tools, turns, normal history items and a separate realtime lane. The Codex Sources page builds bounded, provider-native views for memory, goals, queue, thread artifacts, and Desktop catalog/summary stores on top of that same boundary. It supports the evidence-first source-contract work described in `PROJECT.md`; content-bearing values remain local to inspection and are not mirrored into the TajsTokens database.
