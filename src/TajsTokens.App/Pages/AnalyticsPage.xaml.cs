@@ -146,6 +146,7 @@ public sealed partial class AnalyticsPage : Page
             ContributorList.ItemsSource = null;
             SelectedIntervalTitle.Text = "Select a quota-burn interval";
             SelectedIntervalFacts.Text = "Observed provider facts and estimated local contributors will appear here.";
+            IntervalEvidenceText.Text = string.Empty;
         }
 
         ResetList.ItemsSource = dashboard.ResetEvents.Count == 0
@@ -174,6 +175,7 @@ public sealed partial class AnalyticsPage : Page
             ContributorList.ItemsSource = null;
             SelectedIntervalTitle.Text = "Select a quota-burn interval";
             SelectedIntervalFacts.Text = "Observed provider facts and estimated local contributors will appear here.";
+            IntervalEvidenceText.Text = string.Empty;
             return;
         }
 

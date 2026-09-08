@@ -123,7 +123,7 @@ public sealed partial class ForecastsPage : Page
 
     private void RenderHistory()
     {
-        var selectedHeader = (ForecastList.SelectedItem as ForecastRow)?.Header;
+        var selectedIdentity = (ForecastList.SelectedItem as ForecastRow)?.Identity;
         var filtered = _history.Where(x => WindowFilter.SelectedIndex == 0 ||
             x.Forecast.Kind == (WindowFilter.SelectedIndex == 1 ? QuotaWindowKind.FiveHour : QuotaWindowKind.Weekly)).ToArray();
         var visible = HistoryDensity.SelectedIndex == 0
@@ -142,10 +142,10 @@ public sealed partial class ForecastsPage : Page
                 $"Quota observed: {snapshot.QuotaCapturedAtUtc?.ToLocalTime().ToString("g") ?? "not recorded"}\n" +
                 $"Reset: {snapshot.QuotaResetsAtUtc?.ToLocalTime().ToString("g") ?? "not recorded"}";
             return new ForecastRow($"{f.GeneratedAtUtc.ToLocalTime():g} · {FormatKind(f.Kind)}",
-                FormatOutcome(f), details);
+                FormatOutcome(f), details, (snapshot.Provider, snapshot.Profile, f.Kind, f.GeneratedAtUtc));
         }).ToArray();
         ForecastList.ItemsSource = rows;
-        ForecastList.SelectedItem = rows.FirstOrDefault(x => x.Header == selectedHeader) ?? rows.FirstOrDefault();
+        ForecastList.SelectedItem = rows.FirstOrDefault(x => x.Identity == selectedIdentity) ?? rows.FirstOrDefault();
         if (rows.Length == 0)
         {
             SelectedForecastTitle.Text = "No saved forecasts in this view";
@@ -315,7 +315,8 @@ public sealed partial class ForecastsPage : Page
         return value.Length <= 320 ? value : value[..320] + "…";
     }
 
-    private sealed record ForecastRow(string Header, string Detail, string? Evidence = null)
+    private sealed record ForecastRow(string Header, string Detail, string? Evidence = null,
+        (string Provider, string Profile, QuotaWindowKind Kind, DateTimeOffset GeneratedAtUtc)? Identity = null)
     {
         public override string ToString() => $"{Header} · {Detail}";
     }

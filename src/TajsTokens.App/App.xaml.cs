@@ -325,43 +325,6 @@ public partial class App : Application
         Exit();
     }
 
-    private static SystemTrayStatus BuildTrayStatus(TelemetrySnapshot snapshot)
-    {
-        var fiveHour = LatestQuota(snapshot, QuotaWindowKind.FiveHour);
-        var weekly = LatestQuota(snapshot, QuotaWindowKind.Weekly);
-        var remainingValues = new[] { fiveHour?.RemainingPercent, weekly?.RemainingPercent }
-            .Where(value => value is not null)
-            .Select(value => value!.Value)
-            .ToArray();
-
-        int? constrained = remainingValues.Length == 0
-            ? null
-            : (int)Math.Round(remainingValues.Min(), MidpointRounding.AwayFromZero);
-
-        var anyFreshLane = snapshot.QuotaLanes.Count == 0
-            ? snapshot.QuotaDataFresh
-            : snapshot.QuotaLanes.Any(lane => lane.IsFresh);
-        var allFreshLanes = snapshot.QuotaLanes.Count == 0
-            ? snapshot.QuotaDataFresh
-            : snapshot.QuotaLanes.Count > 0 && snapshot.QuotaLanes.All(lane => lane.IsFresh);
-        var health = allFreshLanes
-            ? "live"
-            : anyFreshLane
-                ? "partial"
-                : snapshot.QuotaSnapshots.Count > 0
-                    ? "stale"
-                    : "quota unavailable";
-
-        var tooltip = $"TajsTokens · 5h {FormatQuota(fiveHour)} · week {FormatQuota(weekly)} · {health}";
-        return new SystemTrayStatus(tooltip, constrained, allFreshLanes, health);
-    }
-
-    private static QuotaSnapshot? LatestQuota(TelemetrySnapshot snapshot, QuotaWindowKind kind) =>
-        snapshot.QuotaSnapshots
-            .Where(item => item.Kind == kind)
-            .OrderByDescending(item => item.CapturedAtUtc)
-            .FirstOrDefault();
-
-    private static string FormatQuota(QuotaSnapshot? snapshot) =>
-        snapshot?.RemainingPercent is double remaining ? $"{remaining:0}%" : "?";
+    private static SystemTrayStatus BuildTrayStatus(TelemetrySnapshot snapshot) =>
+        TajsTokens.Core.Services.SystemTrayStatusPresenter.Build(snapshot);
 }
