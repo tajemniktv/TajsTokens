@@ -190,7 +190,9 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 MaxBurnIntervals,
                 hasNativeEvents,
                 hasContext,
-                cancellationToken);
+                cancellationToken,
+                effective.BurnKind,
+                effective.BurnAuthority);
             var resets = await LoadResetEventsAsync(connection, effective.FromUtc, effective.ToUtc, 200, cancellationToken);
             var fiveHourForecasts = await LoadForecastHistoryAsync(
                 connection,
@@ -440,7 +442,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             from = to.AddDays(-maxBuckets);
         }
 
-        return new IntelligenceQuery(from, to, size, maxBuckets);
+        return query with { FromUtc = from, ToUtc = to, BucketSize = size, MaxBuckets = maxBuckets };
     }
 
     private static async Task<IReadOnlyList<UsageHistoryBucket>> LoadUsageHistoryAsync(
@@ -685,11 +687,13 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         bool hasNativeEvents,
         bool hasContext,
         CancellationToken cancellationToken,
-        QuotaWindowKind? kindFilter = null)
+        QuotaWindowKind? kindFilter = null,
+        QuotaObservationAuthority? authority = null)
     {
-        var snapshots = await LoadQuotaSnapshotsAsync(connection, fromUtc.AddDays(-7), toUtc, cancellationToken);
+        var snapshots = await LoadQuotaSnapshotsAsync(connection, fromUtc.AddDays(-7), toUtc, cancellationToken,
+            preserveSources: true, authority: authority);
         var candidates = new List<QuotaBurnIntervalSeed>();
-        foreach (var group in snapshots.GroupBy(snapshot => (snapshot.Provider, snapshot.Profile, snapshot.Kind)))
+        foreach (var group in snapshots.GroupBy(snapshot => (snapshot.Provider, snapshot.Profile, snapshot.Kind, snapshot.Source)))
         {
             if (kindFilter is QuotaWindowKind requestedKind && group.Key.Kind != requestedKind)
             {
@@ -701,7 +705,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             {
                 var previous = ordered[index - 1];
                 var current = ordered[index];
-                if (current.CapturedAtUtc < fromUtc || current.CapturedAtUtc > toUtc ||
+                if (current.CapturedAtUtc <= previous.CapturedAtUtc || current.CapturedAtUtc < fromUtc || current.CapturedAtUtc > toUtc ||
                     previous.UsedPercent is null || current.UsedPercent is null ||
                     previous.WindowMinutes != current.WindowMinutes ||
                     previous.ResetsAtUtc is null || current.ResetsAtUtc is null ||
@@ -939,7 +943,9 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         SqliteConnection connection,
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool preserveSources = false,
+        QuotaObservationAuthority? authority = null)
     {
         var command = connection.CreateCommand();
         command.CommandText = """
@@ -947,18 +953,22 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             FROM quota_snapshots
             WHERE captured_at_utc >= $from AND captured_at_utc <= $to
               AND kind IN ('FiveHour', 'Weekly')
-            ORDER BY provider, profile, kind, captured_at_utc
+              AND ($authority IS NULL
+                   OR ($authority = 'ProviderAuthoritative' AND instr(lower(source), 'app-server') > 0)
+                   OR ($authority = 'EmbeddedObservation' AND instr(lower(source), 'rollout') > 0))
+            ORDER BY captured_at_utc DESC
             LIMIT 50000;
             """;
         command.Parameters.AddWithValue("$from", SerializeUtc(fromUtc));
         command.Parameters.AddWithValue("$to", SerializeUtc(toUtc));
+        command.Parameters.AddWithValue("$authority", authority is null ? DBNull.Value : authority.ToString());
         var results = new List<QuotaSnapshot>();
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
             results.Add(ReadQuotaSnapshot(reader));
         }
-        return CanonicalizeQuotaSnapshots(results);
+        return preserveSources ? results : CanonicalizeQuotaSnapshots(results);
     }
 
     private static IReadOnlyList<QuotaSnapshot> CanonicalizeQuotaSnapshots(
@@ -1029,6 +1039,8 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             current.Provider,
             current.Profile,
             current.Kind,
+            previous.Source,
+            current.Source,
             previous.CapturedAtUtc.ToUniversalTime().ToString("O"),
             current.CapturedAtUtc.ToUniversalTime().ToString("O"),
             current.ResetsAtUtc?.ToUniversalTime().ToString("O") ?? "none");

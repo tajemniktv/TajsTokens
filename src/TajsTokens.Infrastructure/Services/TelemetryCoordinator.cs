@@ -138,7 +138,7 @@ public sealed class TelemetryCoordinator
                 }
 
                 quotaLanes = BuildQuotaLanes(previous, supported, startedAt);
-                quotaFresh = quotaLanes.Count > 0 && quotaLanes.All(lane => lane.IsFresh);
+                quotaFresh = quotaResponseHasSupportedWindow && quotaLanes.All(lane => lane.IsFresh || lane.NotReportedByProvider);
                 var liveCount = quotaLanes.Count(lane => lane.State == TelemetryHealthState.Live);
                 var staleCount = quotaLanes.Count(lane => lane.State == TelemetryHealthState.Stale);
                 var unavailableCount = quotaLanes.Count(lane => lane.State == TelemetryHealthState.Unavailable);
@@ -149,7 +149,7 @@ public sealed class TelemetryCoordinator
                         ? TelemetryHealthState.Stale
                         : TelemetryHealthState.Unavailable;
                 var detail = quotaFresh
-                    ? $"{liveCount} supported provider-authoritative quota lane(s) refreshed. No model turn was created."
+                    ? $"{liveCount} reported quota window(s) refreshed; {quotaLanes.Count(lane => lane.NotReportedByProvider)} not reported by Codex. No model turn was created."
                     : quotaResponseHasSupportedWindow
                         ? $"Partial provider-authoritative quota refresh: {liveCount} live, {staleCount} stale, {unavailableCount} unavailable lane(s). Fresh lanes remain independently usable."
                         : "The app-server responded but did not expose a supported five-hour or weekly window; previous lanes remain stale when available.";
@@ -163,7 +163,7 @@ public sealed class TelemetryCoordinator
                     startedAt,
                     "Quota refresh",
                     quotaFresh
-                        ? "Captured a complete provider-authoritative Codex quota snapshot."
+                        ? "Refreshed the quota windows reported by Codex. Unreported windows are not treated as unlimited."
                         : quotaResponseHasSupportedWindow
                             ? "Captured a partial Codex quota response; retained omitted last-known-good lanes as stale."
                             : "Codex app-server returned no supported five-hour or weekly quota windows."));
@@ -593,7 +593,8 @@ public sealed class TelemetryCoordinator
             return previous.QuotaLanes
                 .Select(lane => lane with
                 {
-                    State = lane.Snapshot is null ? TelemetryHealthState.Unavailable : TelemetryHealthState.Stale
+                    State = lane.Snapshot is null ? TelemetryHealthState.Unavailable : TelemetryHealthState.Stale,
+                    NotReportedByProvider = false
                 })
                 .ToArray();
         }
@@ -655,12 +656,14 @@ public sealed class TelemetryCoordinator
                 string.Equals(lane.Provider, key.Provider, StringComparison.Ordinal) &&
                 string.Equals(lane.Profile, key.Profile, StringComparison.Ordinal));
             return previousLane is null
-                ? new QuotaLaneState(key.Kind, key.Provider, key.Profile, null, TelemetryHealthState.Unavailable)
+                ? new QuotaLaneState(key.Kind, key.Provider, key.Profile, null, TelemetryHealthState.Unavailable,
+                    NotReportedByProvider: fresh.Count > 0)
                 : previousLane with
                 {
                     State = previousLane.Snapshot is null
                         ? TelemetryHealthState.Unavailable
-                        : TelemetryHealthState.Stale
+                        : TelemetryHealthState.Stale,
+                    NotReportedByProvider = fresh.Count > 0
                 };
         }).ToArray();
     }

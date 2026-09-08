@@ -4,13 +4,15 @@
 
 Read [`PROJECT.md`](PROJECT.md) before making product, telemetry, persistence, provider-model, or architecture decisions.
 
-`PROJECT.md` is the sole authority for current product/data architecture and planning during the foundation reset. Existing code is implementation evidence, not specification. Files under `docs/archive/` are historical only and must not be used to resurrect old architecture or roadmap assumptions.
+`PROJECT.md` is the authority for product goals, data architecture, retention decisions, and source contracts. Read [`plan.md`](plan.md) for current delivery sequencing and acceptance gates when planning or implementing a workstream. This file owns contributor operating instructions. Keep the three consistent; a checklist or existing implementation does not establish new source semantics. Files under `docs/archive/` are historical only.
 
 ## Current product direction
 
 TajsTokens is a **Codex-first observability and intelligence application**. The product goal is a coherent, trustworthy, production-quality local view of Codex: current quota and usage, source-native history, threads/workspaces/subagents, diagnostics, and evidence-backed predictions that help the user understand what is happening and what is likely to happen next.
 
-The near-term priority is still to understand and expose Codex richly from trustworthy local evidence. Predictive or inferential features sit above that evidence; they must not weaken source contracts or turn guesses into stored facts.
+The foundation reset is over as a development phase. The priority is now coherent product delivery, integration, and hardening over the working implementation. Resolve concrete evidence gaps without repeatedly re-proving established contracts. Predictive features remain above the evidence layer and must not turn guesses into stored facts.
+
+The end goal is a dependable local Windows companion: Overview answers what is happening now; native history explains threads/workspaces/subagents and usage; intelligence helps plan supported workloads; diagnostics explain missing or conflicting evidence. Everyday workflows must not require raw database archaeology. Responsive UX, reliable collection/recovery, and privacy are part of completion, not optional polish. See `PROJECT.md` for the full target.
 
 Keep possible future providers in mind when choosing boundaries, but do not turn current Codex work into a generic-provider framework unless a concrete need requires that abstraction.
 
@@ -20,14 +22,14 @@ The architectural shorthand is:
 
 A useful product-level completion test is that normal Codex observability workflows should be useful without requiring raw SQLite/JSONL archaeology, while the raw explorers remain available for investigation and evidence work.
 
-## Reset rules
+## Evidence and privacy rules
 
 - Do not introduce new semantic claims unless they are supported by an empirical source contract in `PROJECT.md` or work explicitly being added to it.
 - Do not treat current UI labels, database columns, service names, tests, comments, table names, or field names as proof that a metric or relationship means what it appears to mean.
 - Keep raw acquisition, source contracts, normalization, durable evidence, and read-model policy conceptually separate.
 - Preserve source provenance, source-native identity, missing fields, ambiguity, and conflicting observations instead of silently resolving them during ingestion.
-- Do not add new roadmap/phase/architecture documents. Update `PROJECT.md`.
-- Do not delete working implementation merely because it is pre-reset. Change or remove it only when reset work establishes a reason.
+- Update `PROJECT.md` for product/architecture decisions and `plan.md` for delivery work. Do not create additional competing roadmaps or semantic specifications.
+- Preserve working implementation unless an evidence-backed correction or deliberate product change requires modifying it. Do not use its pre-reset origin as a reason for replacement.
 - **Do not confuse local inspection with durable collection.** TajsTokens may show a user raw/content-bearing data exposed by their local Codex installation when that is useful for observability. That does not automatically authorize copying the same payload into TajsTokens' durable evidence store.
 - Durable duplication of prompts, reasoning text, source-code bodies, credentials, authentication material, and similar sensitive payloads requires an explicit design decision and source-specific justification.
 - Any export path is a separate privacy boundary. Make it explicit what leaves the machine; provide sanitization/redaction where appropriate; never silently convert a raw view into a lossy export or silently upload source data. If raw export is supported, it must be an explicit user choice.
@@ -37,6 +39,10 @@ A useful product-level completion test is that normal Codex observability workfl
 - Source explorers and raw inspection tools are acquisition aids. Their output does not become product truth merely because it came from a Codex-owned database or API.
 
 ## Provider and schema rules
+
+- Keep TajsTokens' owned database separate from Codex. Use selective durable collection, direct on-demand inspection, and rebuildable read models; do not mirror raw databases or write back to native sources.
+- Establish native identity and accounting overlap before linking SQLite and rollout observations. Preserve alternatives; do not destructively merge conflicting values or backfill historical metadata from mutable current rows.
+- Audit all relevant writers, reducers, readers, checkpoints, and migrations before changing a durable contract. Verify idempotence and recovery as well as the happy path. Retain actual collection times and source generations.
 
 - **Do not force Codex into a lowest-common-denominator provider schema.** If Codex exposes a useful, safe, contracted concept or relationship, preserve it even if a hypothetical future provider has no equivalent.
 - **Do not force future providers into the Codex ontology.** A future provider may use runs, requests, generations, workers, queues, hardware metrics, or entirely different concepts. Give it a provider-native model rather than manufacturing Codex threads/turns/subagents.
@@ -66,9 +72,13 @@ Prediction is active product scope. For quota forecasting, scenario planning, in
 - Use evaluation results to improve the actual product. Do not stop at an analysis harness if evidence supports a better production model.
 - In Overview/intelligence UI, favor decision-useful outputs: reset survival/exhaustion risk, useful uncertainty, remaining-at-reset range, sustainable pace, regime context, freshness, and provenance.
 
-Current EWMA, confidence heuristics, and account-local ridge scenario estimation are baselines, not architectural commitments. Replace or ensemble them when measured historical performance justifies it.
+Current EWMA and account-local scenario models are baselines, not architectural commitments. Replace or ensemble them when measured historical performance justifies it; sparse evidence is not permission to invent confidence.
 
 ## Working style
+
+Use `plan.md` to select a concrete vertical slice: source/contract, acquisition where needed, read model, user-facing behavior, and verification. Reuse established owners rather than creating parallel prototypes. Mark implementation, automated validation, runtime checks, and user visual acceptance separately; do not mark work complete from a build alone. Keep the plan's status honest without rewriting it after every routine command.
+
+Respect user-owned dirty work and concurrent changes. Do not launch, restart, or manipulate the app when the user reserves runtime/visual testing for themselves. For documentation-only work, validate consistency, links, and referenced commands; do not launch the application or run unrelated test suites.
 
 Prefer coherent, evidence-backed changes that can be reviewed against captured evidence. Small source-focused changes are usually easiest to validate, but substantial refactors are appropriate when they remove duplicated policy, establish a cleaner ownership boundary, or materially improve a measured prediction path. New parsers or adapters should come with sanitized fixtures/probes covering observed variants and edge cases.
 
@@ -107,12 +117,12 @@ The repository also contains a read-only Codex State DB Explorer. Treat it as ac
 Full WinUI validation is Windows-specific.
 
 ```powershell
-dotnet restore TajsTokens.sln
+dotnet restore TajsTokens.slnx
 dotnet test tests/TajsTokens.Core.Tests/TajsTokens.Core.Tests.csproj -c Debug
-dotnet build TajsTokens.sln -c Debug
+dotnet build TajsTokens.slnx -c Debug
 ```
 
-For focused changes, use targeted tests while iterating when they answer a concrete question. Do not rerun the full suite after every small edit. At a sensible milestone and before completion, run the full Core test suite and Windows application build; algorithm work should also run its relevant backtests/evaluation.
+For code changes, use targeted tests while iterating when they answer a concrete question. Do not rerun the full suite after every small edit. At a sensible milestone and before completion, run the full Core test suite and Windows application build; algorithm work should also run its relevant backtests/evaluation. Run builds and tests serially when they share output paths. An isolated build may avoid disturbing a running user instance; report its location and distinguish it from the running version.
 
 ## References
 
