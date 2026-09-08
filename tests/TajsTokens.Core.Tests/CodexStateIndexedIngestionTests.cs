@@ -8,6 +8,70 @@ namespace TajsTokens.Core.Tests;
 
 public sealed class CodexStateIndexedIngestionTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RefreshAsync_PeriodicallyReconcilesOldPathWithoutTimestampAdvance(bool initiallyMissing)
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-warm-reconcile-");
+        try
+        {
+            var sessions = Directory.CreateDirectory(Path.Combine(directory.FullName, "sessions"));
+            var activePath = Path.Combine(sessions.FullName, "active.jsonl");
+            var replacementPath = Path.Combine(sessions.FullName, "replacement.jsonl");
+            var recentPath = Path.Combine(sessions.FullName, "recent.jsonl");
+            await File.WriteAllTextAsync(activePath, "{}\n");
+            await File.WriteAllTextAsync(recentPath, "{}\n");
+            var statePath = Path.Combine(directory.FullName, "state_5.sqlite");
+            await CreateStateDatabaseAsync(statePath,
+                [new("old", activePath, 10_000, 20_000, 0),
+                 new("recent", recentPath, 200_000, 300_000, 0)]);
+            var telemetryPath = Path.Combine(directory.FullName, "telemetry.db");
+            await new SqliteTelemetryRepository(telemetryPath).InitializeAsync(CancellationToken.None);
+            var store = new SqliteCodexObservatoryStore(telemetryPath);
+            var ingestion = new RecordingIngestionService("old");
+            var time = new ReconciliationClock();
+            var service = new CodexObservatoryService(ingestion, store,
+                new CodexStateCatalog(directory.FullName), new SqliteCodexStateIndexStore(telemetryPath),
+                [sessions.FullName], time);
+            await service.RefreshAsync(CancellationToken.None);
+            Assert.Equal(2, ingestion.Paths.Count);
+            await UpdateRolloutPathOnlyAsync(statePath, "old", replacementPath);
+            if (!initiallyMissing) await File.WriteAllTextAsync(replacementPath, "{}\n");
+
+            time.Advance(TimeSpan.FromMinutes(4));
+            await service.RefreshAsync(CancellationToken.None);
+            Assert.Equal(2, ingestion.Paths.Count);
+            time.Advance(TimeSpan.FromMinutes(1));
+            var reconciliation = await service.RefreshAsync(CancellationToken.None);
+            if (initiallyMissing)
+            {
+                Assert.Equal(1, reconciliation.Errors);
+                await File.WriteAllTextAsync(replacementPath, "{}\n");
+                // Failure must retry immediately, not postpone another five minutes.
+                await service.RefreshAsync(CancellationToken.None);
+            }
+            Assert.Equal(3, ingestion.Paths.Count);
+            Assert.Equal(replacementPath, ingestion.Paths.Last());
+            time.Advance(TimeSpan.FromMinutes(5));
+            await service.RefreshAsync(CancellationToken.None);
+            Assert.Equal(3, ingestion.Paths.Count); // unchanged bodies are still skipped
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    private sealed class ReconciliationClock : TimeProvider
+    {
+        private long _timestamp;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => _timestamp;
+        public void Advance(TimeSpan duration) => _timestamp += duration.Ticks;
+    }
+
     [Fact]
     public async Task RefreshAsync_StateCatalogSkipsUnchangedRolloutAndReopensChangedThread()
     {

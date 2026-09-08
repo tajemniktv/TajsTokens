@@ -1,0 +1,16 @@
+<Project>
+  <Target Name="TajsBuildIdentity" BeforeTargets="GetAssemblyVersion" Condition="'$(MSBuildProjectName)' == 'TajsTokens.App' and '$(OS)' == 'Windows_NT' and '$(DesignTimeBuild)' != 'true'">
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)tools\dogfood\Get-BuildIdentity.ps1&quot;" ConsoleToMSBuild="true" StandardOutputImportance="Low">
+      <Output TaskParameter="ConsoleOutput" PropertyName="TajsGitIdentity" />
+    </Exec>
+    <PropertyGroup>
+      <InformationalVersion>$(Version)+$(TajsGitIdentity)</InformationalVersion>
+      <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    </PropertyGroup>
+  </Target>
+  <!-- Only an actual Windows app Build, never restore/design-time/test projects or recursive publish. -->
+  <Target Name="TajsDogfood" AfterTargets="Build"
+          Condition="'$(MSBuildProjectName)' == 'TajsTokens.App' and '$(OS)' == 'Windows_NT' and '$(DogfoodEnabled)' == 'true' and '$(Dogfood)' != 'false' and '$(DesignTimeBuild)' != 'true' and '$(IsCrossTargetingBuild)' != 'true' and '$(IsTestProject)' != 'true' and '$(ContinuousIntegrationBuild)' != 'true' and '$(TajsDogfoodIsCI)' != 'true' and '$(VSTestSessionCorrelationId)' == '' and '$(_IsPublishing)' != 'true'">
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)tools\dogfood\Deploy.ps1&quot; -Configuration &quot;$(Configuration)&quot;" />
+  </Target>
+</Project>

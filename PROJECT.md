@@ -66,6 +66,27 @@ The architectural end state is **selective durable collection + direct local ins
 
 This is the target, not a declaration that every workflow is complete. Delivery gates and outstanding work belong in `plan.md`; dated audits below describe their captured evidence, not timeless guarantees.
 
+## Local installation and owned data
+
+Successful local Windows app builds dogfood a verified self-contained publish into
+`%LOCALAPPDATA%/Programs/TajemnikTV/TajsTokens/current`, with a stable Start-menu launcher,
+graceful lifecycle handshake, prior binaries, stopped-app database/settings backups, and an
+explicit build opt-out. CI and test-only builds must not alter the daily installation.
+Git commit/dirty identity is build provenance, not Codex source evidence.
+
+Owned application data lives in the sibling `data` directory, not in a replaceable binary
+generation. A first-run copy-and-promote migration retains the old `%LOCALAPPDATA%/TajsTokens`
+database, settings, WAL/SHM and local inspection exports unchanged as a recovery copy. Existing
+destination data is never merged or overwritten. Legacy build-validation outputs are excluded.
+Failed migrations remain separate and retryable. The migration requires no other legacy app
+instance to be running. This is a local storage relocation, not new collection or export.
+
+Deployment never writes Codex-owned sources. Binary rollback does not imply that a newer
+database schema can be downgraded; live data is never automatically overwritten on rollback.
+Matching backups and failed binary generations remain available for deliberate recovery.
+No automatic deletion/retention policy is introduced. Startup acknowledgement proves shell
+initialization, not source availability, full workflow correctness, or user visual acceptance.
+
 ## Working principles
 
 - **Evidence before interpretation.** A field existing does not prove what it means beyond what the source supports.
@@ -179,6 +200,39 @@ Keep the owned SQLite database separate from Codex's databases. Do not mirror th
 The existing owned database can contain evidence, ingestion checkpoints, and derived tables with explicit ownership. These are logical boundaries, not a requirement for three databases or a generic JSON payload bus. Runtime settings need not move from their existing storage merely to fit this model.
 
 For every source-specific collection decision, specify the fields, historical need, native identity, change-detection method, retention/privacy posture, and source/schema/parser version. SQLite metadata should be collected only where a concrete historical need warrants it; a field being visible in a native explorer is not sufficient justification.
+
+### Verified daily-workflow integration map (2026-09-08, afternoon)
+
+This is a bounded implementation map, not a field-by-field contract for every native table.
+Read-only SQLite transactions against the current installation found 352 state threads,
+1,845 history turns, and an owned database with 351 sessions, 7,763 workload observations,
+97,993 quota observations, and 351 state-index fingerprints. Native SQLite uses SQLx migrations
+(`user_version` is 0); owned `user_version` is 8 plus component schema versions. The numbers
+are non-atomic **across databases**, can change during collection, and must not be reconciled
+by making table counts equal. The earlier dated inventories below remain historical evidence.
+
+| Daily question | Current source and reader | Owned storage / read policy | Boundary and remaining gap |
+| --- | --- | --- | --- |
+| What quota is reported now? | App-server quota response through `TelemetryCoordinator` | `SqliteTelemetryRepository` stores source-qualified `quota_snapshots`; current lanes keep freshness/omission separate from history | Account-meter readings are not thread-token costs. Provider/profile labels do not yet establish continuity of authenticated account identity across account changes. |
+| What work exists and how is it organized? | State/project/spawn rows through `CodexThreadObservabilityService` and `ICodexThreadReadModel` | Direct on-demand inspection; explicit `CodexThreadReadModelPolicy` preserves alternatives | Native thread IDs link supported records. Current model/project metadata is not historical turn context. Owned `sessions`/`agents` are rollout-derived projections, not a mirror of every native thread. |
+| What happened in a thread? | History SQLite turns/items and separate realtime lane through the native thread reader | On-demand local content; selected source and provenance retained in the view, no durable transcript copy | Projection coverage may differ from retained JSONL. Missing history is not proof that a turn never happened; alternative sources are not silently concatenated. |
+| How much local token/context activity was observed? | Owned rollout records through `CodexRolloutParser` / `CodexSessionIngestionService` | `codex_native_token_events`, `context_observations`, `codex_workload_observations` retain selected safe observations; counter/parser/checkpoint tables support replay | Native record/turn/session identity and source offsets qualify observations. Collection time is separate from event time; legacy missing collection times remain missing. Native state totals are not added to rollout totals. |
+| Which files need collection? | `CodexStateCatalog` reads compact mutable state rows; filesystem discovery remains the compatibility fallback | `codex_state_thread_fingerprints` / `codex_state_sync` are replaceable acceleration state; ingestion batch writer owns transactional rollout progress | `updated_at_ms` is not a complete change feed. Full fingerprint reconciliation occurs at startup and on the first refresh after five minutes; unchanged bodies stay unopened. No source deletion propagates into historical deletion. |
+| Why did quota move; what may happen next? | Source-isolated owned quota and bounded local workload via `SqliteIntelligenceService` / `SqliteForecastDatasetReader` | Burn intervals, reset classification, forecast/scenario policy, and `forecast_snapshots` are derived, not provider facts | Never sum overlapping sources or train on future observations. Rebuildability depends on retaining the relevant evidence, not just forecast outputs. |
+| Why is data missing or different? | Source reader diagnostics, telemetry health, raw explorers | Direct inspection plus bounded product diagnostics | Acquisition/index progress is not yet a complete per-source coverage report; count differences alone are not errors or proof of loss. |
+
+The timestamp gap is corroborated by `codex-rs/state/src/runtime/threads.rs::replace_rollout_path_if_current`
+at local upstream commit `a51608398d53b6d23ed98b8287de415b35f1eea5`: it updates only
+`rollout_path`, without advancing `updated_at_ms`. That clone is not asserted to match the
+installed desktop exactly; the installed schema supports the queried fields, and sanitized
+regression fixtures cover an old thread changing path outside the warm timestamp overlap.
+Five minutes is explicit collection policy, not a native delivery guarantee. Failed full
+passes retry on the next refresh; successful scans do not copy current model/effort onto old events.
+
+Outstanding integration decisions: prove account/installation scoping before attributing local
+work to a quota account; audit source-generation replacement and rollout-only coverage before
+claiming exhaustive discovery; expose retained-versus-native coverage without inventing equality.
+This slice does not authorize additional durable fields, data deletion, or a schema migration.
 
 ### Linking sources without erasing their meaning
 

@@ -10,13 +10,15 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
 {
     private const long StateOverlapMs = 60_000;
     private const long StateRolloutVisibilityToleranceMs = 250;
+    private static readonly TimeSpan StateReconciliationInterval = TimeSpan.FromMinutes(5);
 
     private readonly ICodexSessionIngestionService _ingestionService;
     private readonly ICodexObservatoryStore _store;
     private readonly CodexStateCatalog? _stateCatalog;
     private readonly SqliteCodexStateIndexStore? _stateIndexStore;
     private readonly IReadOnlyList<string> _roots;
-    private bool _stateCatalogReconciledThisProcess;
+    private readonly TimeProvider _timeProvider;
+    private long? _lastStateReconciliation;
 
     public CodexObservatoryService(
         ICodexSessionIngestionService ingestionService,
@@ -31,12 +33,14 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
         ICodexObservatoryStore store,
         CodexStateCatalog? stateCatalog,
         SqliteCodexStateIndexStore? stateIndexStore,
-        IEnumerable<string>? roots = null)
+        IEnumerable<string>? roots = null,
+        TimeProvider? timeProvider = null)
     {
         _ingestionService = ingestionService;
         _store = store;
         _stateCatalog = stateCatalog;
         _stateIndexStore = stateIndexStore;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _roots = (roots ?? GetDefaultRoots())
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Select(Path.GetFullPath)
@@ -85,11 +89,13 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
         await _stateIndexStore.InitializeAsync(cancellationToken);
         var watermark = await _stateIndexStore.GetWatermarkAsync(cancellationToken);
 
-        // A full catalog read once per process catches path/archive/model metadata changes that a
-        // private provider build might persist without advancing updated_at_ms. Subsequent warm
-        // refreshes use the indexed timestamp window. Reading a few hundred compact SQLite rows once
-        // is intentionally cheaper than trusting an undocumented timestamp as an infallible journal.
-        var minimumUpdatedAtMs = _stateCatalogReconciledThisProcess
+        // updated_at_ms is an acceleration hint, not a complete change journal (Codex can update
+        // rollout_path alone). Reconcile compact catalog fingerprints periodically even in a
+        // long-running process; unchanged rollout bodies remain unopened. Use monotonic elapsed time.
+        var reconciliationStarted = _timeProvider.GetTimestamp();
+        var reconciliationDue = _lastStateReconciliation is not long lastReconciliation ||
+            _timeProvider.GetElapsedTime(lastReconciliation, reconciliationStarted) >= StateReconciliationInterval;
+        var minimumUpdatedAtMs = !reconciliationDue
             ? Math.Max(0, watermark - StateOverlapMs)
             : 0;
         var catalog = await _stateCatalog.TryReadSinceAsync(minimumUpdatedAtMs, cancellationToken);
@@ -194,12 +200,10 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
             await _stateIndexStore.CommitAsync(appliedThreads, nextWatermark, cancellationToken);
         }
 
-        // Reconciliation is considered complete only after the full catalog path reached its normal
-        // return with no state-ahead or failed threads. A failed/cancelled first pass retries the full
-        // comparison on the next refresh.
+        // Failed/cancelled full passes do not defer reconciliation: retry on the next refresh.
         if (minimumUpdatedAtMs == 0 && earliestUnappliedUpdatedAtMs is null)
         {
-            _stateCatalogReconciledThisProcess = true;
+            _lastStateReconciliation = reconciliationStarted;
         }
 
         return new CodexObservatoryRefreshResult(

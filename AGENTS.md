@@ -116,6 +116,19 @@ The repository also contains a read-only Codex State DB Explorer. Treat it as ac
 
 Full WinUI validation is Windows-specific.
 
+Successful local Windows app builds now publish/install/restart the daily build at
+`%LOCALAPPDATA%/Programs/TajemnikTV/TajsTokens/current`; persistent data is in the sibling
+`data` directory. Use `-p:DogfoodEnabled=false` whenever an isolated build is required or
+the user reserves runtime testing. CI and test-only builds skip deployment. SDK outputs use
+the ignored repo-level `artifacts/` tree. See `README.md` for rollback/recovery and run
+`powershell -NoProfile -ExecutionPolicy Bypass -File tools/dogfood/Test-Deployment.ps1`
+when changing deployment behavior.
+
+The common desktop workflow matches TajsToucher: `DogfoodEnabled=false` (with `Dogfood=false`
+as an alias), `tools/dogfood/Deploy.ps1`, `current/previous/retained`, versioned build manifests,
+and `.codex/temp/dogfood` staging. Keep app-specific data backup and shutdown ownership intact;
+do not introduce a cross-repository runtime dependency to share the deployment implementation.
+
 ```powershell
 dotnet restore TajsTokens.slnx
 dotnet test tests/TajsTokens.Core.Tests/TajsTokens.Core.Tests.csproj -c Debug

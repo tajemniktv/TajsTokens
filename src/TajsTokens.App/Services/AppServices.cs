@@ -16,7 +16,10 @@ public sealed class AppServices
     public AppServices()
     {
         var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        DataFolder = Path.Combine(appDataPath, "TajsTokens");
+        if (!Directory.Exists(AppDataLocation.GetDataFolder(appDataPath)) &&
+            System.Diagnostics.Process.GetProcessesByName("TajsTokens.App").Any(process => process.Id != Environment.ProcessId))
+            throw new InvalidOperationException("Exit other TajsTokens instances before migrating application data.");
+        DataFolder = AppDataLocation.EnsureMigrated(appDataPath);
         DatabasePath = Path.Combine(DataFolder, "telemetry.db");
         var settingsPath = Path.Combine(DataFolder, "settings.json");
 

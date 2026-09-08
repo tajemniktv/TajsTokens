@@ -17,6 +17,7 @@ public partial class App : Application
     private Window? _window;
     private DispatcherQueue? _dispatcher;
     private bool _exitRequested;
+    private DogfoodLifetime? _dogfoodLifetime;
 
     public App()
     {
@@ -29,6 +30,7 @@ public partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         _dispatcher = DispatcherQueue.GetForCurrentThread();
+        _dogfoodLifetime = new DogfoodLifetime(() => RunOnDispatcher(RequestExit));
 
         _trayService.OpenDashboardRequested += (_, _) => ShowDashboard();
         _trayService.RefreshRequested += (_, _) => _ = RefreshFromTrayAsync();
@@ -51,6 +53,7 @@ public partial class App : Application
         }
 
         StartPeriodicCollector();
+        _dogfoodLifetime.MarkReady();
     }
 
     private async Task ReconcileStartupRegistrationAsync()
@@ -299,6 +302,8 @@ public partial class App : Application
         if (_window is null)
         {
             _window = new MainWindow();
+            _window.Title = $"TajsTokens — {System.Reflection.Assembly.GetExecutingAssembly().GetCustomAttributes(false)
+                .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "unknown build"}";
             _window.AppWindow.Closing += OnWindowClosing;
         }
 
@@ -321,6 +326,7 @@ public partial class App : Application
         Services.Telemetry.SnapshotUpdated -= OnSnapshotUpdated;
         Services.SettingsChanged -= OnSettingsChanged;
         _trayService.Dispose();
+        _dogfoodLifetime?.Dispose();
         _window?.Close();
         Exit();
     }

@@ -50,6 +50,14 @@ Our database preserves the history we need, not everything Codex can expose. Rea
 
 **Gate:** a reviewer can trace each planned user-facing claim to evidence and explain why it is retained, read directly, or derived. No blanket “SQLite wins” or “rollouts win” rule.
 
+**2026-09-08 bounded progress:** `PROJECT.md` now maps current daily workflows to native readers,
+owned evidence/projections, and explicit unresolved boundaries using a fresh read-only installation
+inventory. This is not completion of the field-level/account-scope gates above. The first correction
+adds five-minute full state-fingerprint reconciliation to catch timestamp-independent path changes
+without reopening unchanged rollouts or replacing historical metadata. Validation: six targeted
+state-index tests and all 239 Core tests passed; the Windows solution build passed with zero
+warnings/errors and `DogfoodEnabled=false`. User runtime/visual acceptance remains separate.
+
 ## 2. Complete selective, reliable collection
 
 **Depends on:** the relevant decisions from workstream 1; unrelated established paths need not wait.
@@ -104,6 +112,24 @@ Our database preserves the history we need, not everything Codex can expose. Rea
 
 ## 6. Harden storage and operation
 
+### Delivered local dogfooding slice (2026-09-08)
+
+- [x] Centralized SDK `artifacts/` outputs and ignored disposable work.
+- [x] Default local app-build publish/stage/hash verification, graceful stop, backup, install,
+  startup acknowledgement, stable launcher, binary rollback, CI/test/design-time exclusions,
+  explicit opt-out, and Git commit/dirty provenance.
+- [x] Stable `%LOCALAPPDATA%/Programs/TajemnikTV/TajsTokens` installation with sibling `data`;
+  non-destructive first-run migration of legacy owned DB/settings/local exports.
+- [x] Automated migration and transaction failure/recovery checks; full Core suite and Windows build.
+- [x] Live replacement and rollback in both directions; installed startup acknowledgement;
+  settings byte-identical after relocation; migrated database `quick_check` returned `ok`.
+- [x] 237 Core tests, 10 isolated transaction scenarios, and MSBuild CI/design-time/opt-out/
+  test-only skip checks; Windows solution build completed with zero warnings/errors.
+- [ ] User visual acceptance (not implied by startup or build validation).
+
+These are local deployment gates, not completion of the broader storage work below. Binary
+rollback does not automatically downgrade live data; snapshots remain available for explicit recovery.
+
 - [ ] Classify owned tables/caches by retention and rebuildability; define a concrete retention policy before deleting any unique history.
 - [ ] Establish recoverable migrations and backup/restore behavior for TajsTokens-owned data without modifying Codex-owned databases.
 - [ ] Verify source/schema upgrades, permissions failures, partial corruption, and unavailable files fail with actionable diagnostics rather than silent substitution.
@@ -121,4 +147,4 @@ For code milestones, follow the commands in `AGENTS.md` using `TajsTokens.slnx`,
 
 A slice is complete only when its acceptance gate is evidenced, existing behavior is preserved where intended, limitations are explicit, and documentation describes the delivered behavior. Overall completion means the product end-state workflows and operational guarantees in `PROJECT.md` are satisfied—not that every possible Codex table is copied or every optional advanced model is implemented.
 
-**Next action:** produce the bounded integration map for the existing daily workflows, identify the highest-value unsupported history/reconciliation gap, and implement that slice through its acceptance gate. This document authorizes no automatic deletion, broad source mirroring, or rollout of speculative architecture.
+**Next action:** audit source-generation replacement and rollout-only discovery coverage against the mapped readers/checkpoints, then expose a bounded coverage diagnostic for the highest-value verified gap. Separately establish authenticated-account versus installation scope before making account attribution claims. This document authorizes no automatic deletion, broad source mirroring, or rollout of speculative architecture.
