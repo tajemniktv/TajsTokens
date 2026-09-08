@@ -47,7 +47,7 @@ public sealed class TelemetryCoordinatorTests : IDisposable
     }
 
     [Fact]
-    public async Task PartialQuotaResponse_RetainsOmittedLaneAndMarksCombinedStateStale()
+    public async Task PartialQuotaResponse_RetainsOmittedHistoryWithoutCallingSuccessfulResponseStale()
     {
         var firstCaptured = DateTimeOffset.UnixEpoch.AddHours(1);
         var secondCaptured = firstCaptured.AddMinutes(1);
@@ -77,7 +77,7 @@ public sealed class TelemetryCoordinatorTests : IDisposable
         var second = await coordinator.RefreshAsync(RefreshTrigger.Interval, CancellationToken.None);
 
         Assert.True(first.QuotaDataFresh);
-        Assert.False(second.QuotaDataFresh);
+        Assert.True(second.QuotaDataFresh);
         Assert.Equal(2, second.QuotaSnapshots.Count);
         var fiveHour = second.QuotaSnapshots.Single(item => item.Kind == QuotaWindowKind.FiveHour);
         var weekly = second.QuotaSnapshots.Single(item => item.Kind == QuotaWindowKind.Weekly);
@@ -87,7 +87,35 @@ public sealed class TelemetryCoordinatorTests : IDisposable
         Assert.False(second.IsQuotaSnapshotFresh(weekly));
         Assert.Equal(TelemetryHealthState.Live, second.FindQuotaLane(fiveHour)!.State);
         Assert.Equal(TelemetryHealthState.Stale, second.FindQuotaLane(weekly)!.State);
-        Assert.Equal(TelemetryHealthState.Stale, second.Sources.Single(source => source.Provider == "Codex app-server").State);
+        Assert.True(second.FindQuotaLane(weekly)!.NotReportedByProvider);
+        Assert.False(second.FindQuotaLane(fiveHour)!.NotReportedByProvider);
+        Assert.Equal(TelemetryHealthState.Live, second.Sources.Single(source => source.Provider == "Codex app-server").State);
+    }
+
+    [Fact]
+    public async Task WeeklyOnlyResponse_DistinguishesOmissionFromFailureAndRecoversFiveHour()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var weekly = Quota(QuotaWindowKind.Weekly, now, 3, now.AddDays(7));
+        var fiveHour = Quota(QuotaWindowKind.FiveHour, now, 1, now.AddHours(5));
+        var tokens = new SequencedTokscaleProvider(
+            Enumerable.Range(0, 3).Select(_ => new Func<CancellationToken, Task<IReadOnlyList<TokenUsage>>>(_ => Task.FromResult<IReadOnlyList<TokenUsage>>([]))),
+            Enumerable.Range(0, 3).Select(_ => new Func<CancellationToken, Task<IReadOnlyList<TokenTimeBucket>>>(_ => Task.FromResult<IReadOnlyList<TokenTimeBucket>>([]))));
+        var quota = new SequencedQuotaProvider([
+            _ => Task.FromResult<IReadOnlyList<QuotaSnapshot>>([weekly]),
+            _ => throw new IOException("fixture unavailable"),
+            _ => Task.FromResult<IReadOnlyList<QuotaSnapshot>>([weekly, fiveHour])]);
+        var coordinator = CreateCoordinator(tokens, quota);
+        var first = await coordinator.RefreshAsync(RefreshTrigger.Startup, CancellationToken.None);
+        Assert.True(first.QuotaDataFresh);
+        Assert.True(first.QuotaLanes.Single(x => x.Kind == QuotaWindowKind.FiveHour).NotReportedByProvider);
+        Assert.Null(first.QuotaLanes.Single(x => x.Kind == QuotaWindowKind.FiveHour).Snapshot);
+        var failed = await coordinator.RefreshAsync(RefreshTrigger.Interval, CancellationToken.None);
+        Assert.False(failed.QuotaDataFresh);
+        Assert.All(failed.QuotaLanes, x => Assert.False(x.NotReportedByProvider));
+        var recovered = await coordinator.RefreshAsync(RefreshTrigger.Interval, CancellationToken.None);
+        Assert.All(recovered.QuotaLanes, x => Assert.True(x.IsFresh));
+        Assert.All(recovered.QuotaLanes, x => Assert.False(x.NotReportedByProvider));
     }
 
     [Fact]

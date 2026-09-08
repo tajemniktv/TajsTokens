@@ -15,11 +15,11 @@
                         PaneDisplayMode="LeftCompact"
                         SelectionChanged="OnNavigationSelectionChanged">
             <NavigationView.MenuItems>
-                <NavigationViewItem Content="Overview" Tag="overview" Icon="View" />
-                <NavigationViewItem Content="Codex CLI Harness" Tag="codex-cli" Icon="Play" IsSelected="True" />
+                <NavigationViewItem Content="Overview" Tag="overview" Icon="View" IsSelected="True" />
+                <NavigationViewItem Content="Codex CLI Harness" Tag="codex-cli" Icon="Play" />
                 <NavigationViewItem Content="Codex" Tag="codex" Icon="People" />
                 <NavigationViewItem Content="Forecasts" Tag="forecasts" Icon="Preview" />
-                <NavigationViewItem Content="Analytics" Tag="analytics" Icon="Document" />
+                <NavigationViewItem Content="Quota burn" Tag="analytics" Icon="Document" />
                 <NavigationViewItem Content="Diagnostics" Tag="diagnostics" Icon="Repair" />
             </NavigationView.MenuItems>
             <NavigationView.FooterMenuItems>

@@ -65,9 +65,21 @@ public sealed partial class AnalyticsPage : Page
             StatusText.Text = "Correlating quota observations with normalized Codex activity…";
             var now = DateTimeOffset.UtcNow;
             var days = ParseDays();
+            var authority = SourceFilter.SelectedIndex switch
+            {
+                0 => (QuotaObservationAuthority?)QuotaObservationAuthority.ProviderAuthoritative,
+                1 => QuotaObservationAuthority.EmbeddedObservation,
+                _ => null
+            };
+            var kind = BurnWindowFilter.SelectedIndex switch
+            {
+                1 => (QuotaWindowKind?)QuotaWindowKind.FiveHour,
+                2 => QuotaWindowKind.Weekly,
+                _ => null
+            };
             var dashboard = await Task.Run(
                 () => App.Services.Intelligence.QueryAsync(
-                    new IntelligenceQuery(now.AddDays(-days), now, AnalyticsBucketSize.Hour, 720),
+                    new IntelligenceQuery(now.AddDays(-days), now, AnalyticsBucketSize.Hour, 720, authority, kind),
                     cancellationToken),
                 cancellationToken);
 
@@ -104,7 +116,7 @@ public sealed partial class AnalyticsPage : Page
         LargestDropText.Text = dashboard.QuotaBurnIntervals.Count == 0
             ? "None observed"
             : $"+{dashboard.QuotaBurnIntervals.Max(interval => interval.DeltaUsedPercent):0.#} pp";
-        ResetCountText.Text = dashboard.ResetEvents.Count.ToString("N0");
+        ResetCountText.Text = SourceFilter.SelectedIndex switch { 0 => "Account meter", 1 => "Rollout readings", _ => "Separate sources" };
         var correlated = dashboard.QuotaBurnIntervals.Count(interval => interval.NativeTokens > 0);
         CorrelatedIntervalsText.Text = dashboard.QuotaBurnIntervals.Count == 0
             ? "—"
@@ -112,13 +124,12 @@ public sealed partial class AnalyticsPage : Page
 
         var burnRows = dashboard.QuotaBurnIntervals.Select(interval => new BurnIntervalRow(
             interval.IntervalId,
-            $"{FormatKind(interval.Kind)} · +{interval.DeltaUsedPercent:0.#} pp · {interval.EndUtc.ToLocalTime():g}",
-            $"{FormatDuration(interval.EndUtc - interval.StartUtc)} observation interval · " +
-            $"native {FormatCount(interval.NativeTokens)} · roots {interval.RootSessions:N0} · children {interval.SubagentSessions:N0} · " +
-            $"confidence {interval.Confidence:P0} · {interval.BeforeSource} → {interval.AfterSource}"))
+            $"+{interval.DeltaUsedPercent:0.#} pp · {FormatKind(interval.Kind)} · {interval.EndUtc.ToLocalTime():dd MMM HH:mm:ss}",
+            $"Over {FormatDuration(interval.EndUtc - interval.StartUtc)} · {FormatCount(interval.NativeTokens)} local tokens · " +
+            (QuotaSnapshot.ClassifyAuthority(interval.AfterSource) == QuotaObservationAuthority.ProviderAuthoritative ? "account meter" : "rollout reading")))
             .ToArray();
         BurnIntervalList.ItemsSource = burnRows.Length == 0
-            ? new[] { new BurnIntervalRow(string.Empty, "No positive quota movement", "No adjacent within-window provider observations showed an increase in used quota in this range.") }
+            ? new[] { new BurnIntervalRow(string.Empty, "No changes in this view", "Try a longer range or another source. Missing readings do not mean zero consumption.") }
             : burnRows;
 
         if (!string.IsNullOrEmpty(selectedId))
@@ -135,6 +146,7 @@ public sealed partial class AnalyticsPage : Page
             ContributorList.ItemsSource = null;
             SelectedIntervalTitle.Text = "Select a quota-burn interval";
             SelectedIntervalFacts.Text = "Observed provider facts and estimated local contributors will appear here.";
+            IntervalEvidenceText.Text = string.Empty;
         }
 
         ResetList.ItemsSource = dashboard.ResetEvents.Count == 0
@@ -142,13 +154,15 @@ public sealed partial class AnalyticsPage : Page
             : dashboard.ResetEvents.Select(reset => new ResetRow(
                 $"{reset.EffectiveAtUtc.ToLocalTime():g} · {FormatKind(reset.Kind)} · {FormatClassification(reset.Classification)}",
                 $"{FormatNullablePercent(reset.BeforeUsedPercent)} → {FormatNullablePercent(reset.AfterUsedPercent)} used · " +
-                $"confidence {reset.Confidence:P0} · {reset.Source} · {reset.Explanation}"))
+                $"{reset.Source} · {reset.Explanation}"))
                 .ToArray();
 
         StatusText.Text =
-            $"{dashboard.QuotaBurnIntervals.Count:N0} provider-observed burn interval(s), {dashboard.ResetEvents.Count:N0} reset/re-anchor event(s) in the selected range. " +
-            "Contributor ranking is estimated from activity inside the observation interval; provider quota movement remains the only observed burn fact.";
+            $"Showing {dashboard.QuotaBurnIntervals.Count:N0} recent changes · up to 80 per view. Sources are never joined to calculate a change.";
     }
+
+    private void OnFilterChanged(object sender, SelectionChangedEventArgs e) =>
+        OnRefreshClicked(sender, new RoutedEventArgs());
 
     private async void OnBurnIntervalSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
@@ -161,17 +175,19 @@ public sealed partial class AnalyticsPage : Page
             ContributorList.ItemsSource = null;
             SelectedIntervalTitle.Text = "Select a quota-burn interval";
             SelectedIntervalFacts.Text = "Observed provider facts and estimated local contributors will appear here.";
+            IntervalEvidenceText.Text = string.Empty;
             return;
         }
 
         SelectedIntervalTitle.Text =
             $"{FormatKind(interval.Kind)} · {interval.BeforeUsedPercent:0.#}% → {interval.AfterUsedPercent:0.#}% used";
         SelectedIntervalFacts.Text =
-            $"OBSERVED: provider/profile {interval.Provider}/{interval.Profile}; " +
-            $"{interval.StartUtc.ToLocalTime():g} → {interval.EndUtc.ToLocalTime():g}; +{interval.DeltaUsedPercent:0.#} quota points; " +
-            $"reset {FormatReset(interval.ResetsAtUtc)}; source {interval.BeforeSource} → {interval.AfterSource}. " +
-            $"LOCAL ACTIVITY IN INTERVAL: {FormatCount(interval.NativeTokens)} native shadow tokens, " +
-            $"{FormatCount(interval.RootTokens)} root / {FormatCount(interval.SubagentTokens)} subagent, {interval.Compactions:N0} compaction(s).";
+            $"+{interval.DeltaUsedPercent:0.#} quota points over {FormatDuration(interval.EndUtc - interval.StartUtc)}\n" +
+            $"{FormatCount(interval.NativeTokens)} local tokens · {interval.RootSessions} root / {interval.SubagentSessions} subagent sessions";
+        IntervalEvidenceText.Text =
+            $"{interval.StartUtc.ToLocalTime():G} → {interval.EndUtc.ToLocalTime():G}\n" +
+            $"Source: {interval.AfterSource}\nAccount profile: {interval.Provider}/{interval.Profile}\nReset: {FormatReset(interval.ResetsAtUtc)}\n\n" +
+            "The meter can be rounded or delayed. Session activity is correlated with the interval; it does not establish per-session quota costs. Activity bars show shares of locally recorded tokens, not shares of quota.";
         ContributorList.ItemsSource = new[] { new ContributorRow("Loading estimated contributors…", "Querying only the selected interval.") };
 
         try
@@ -185,16 +201,14 @@ public sealed partial class AnalyticsPage : Page
             }
 
             ContributorList.ItemsSource = detail.Contributors.Count == 0
-                ? new[] { new ContributorRow("No local contributors observed", detail.Methodology) }
-                : detail.Contributors.Select((contributor, index) => new ContributorRow(
-                    $"#{index + 1} · {contributor.DisplayName} · score {contributor.AttributionScore:P0}",
-                    $"ESTIMATE · {(contributor.IsSubagent ? "subagent" : "root")} · {contributor.Repository} · " +
-                    $"native {FormatCount(contributor.NativeTokens)} ({contributor.TokenShare:P0} of interval) · " +
-                    $"uncached {FormatCount(contributor.UncachedInputTokens)} · cache read {FormatCount(contributor.CacheReadTokens)} · " +
-                    $"compactions {contributor.Compactions:N0}" +
+                ? new[] { new ContributorRow("No local activity found", "The quota change is observed, but this installation has no token activity recorded in that interval.") }
+                : detail.Contributors.OrderByDescending(contributor => contributor.NativeTokens).Select(contributor => new ContributorRow(
+                    $"{contributor.DisplayName} · {contributor.TokenShare:P0} of local tokens",
+                    $"{(contributor.IsSubagent ? "Subagent" : "Root")} · {contributor.Repository}\n" +
+                    $"{FormatCount(contributor.NativeTokens)} tokens · {FormatCount(contributor.UncachedInputTokens)} uncached · {FormatCount(contributor.CacheReadTokens)} cached" +
                     (string.IsNullOrWhiteSpace(contributor.Model) ? string.Empty : $" · {contributor.Model}") +
-                    (string.IsNullOrWhiteSpace(contributor.ReasoningEffort) ? string.Empty : $" · reasoning {contributor.ReasoningEffort}")))
-                    .Append(new ContributorRow("Methodology", detail.Methodology))
+                    (string.IsNullOrWhiteSpace(contributor.ReasoningEffort) ? string.Empty : $" · {contributor.ReasoningEffort}"),
+                    contributor.TokenShare * 100))
                     .ToArray();
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -236,7 +250,8 @@ public sealed partial class AnalyticsPage : Page
         reset is DateTimeOffset value ? value.ToLocalTime().ToString("g") : "unknown";
 
     private static string FormatDuration(TimeSpan duration) =>
-        duration.TotalHours >= 1 ? $"{duration.TotalHours:0.0}h" : $"{Math.Max(0, duration.TotalMinutes):0.#}m";
+        duration.TotalHours >= 1 ? $"{duration.TotalHours:0.#}h" : duration.TotalMinutes >= 1
+            ? $"{duration.TotalMinutes:0.#}m" : duration.TotalSeconds >= 1 ? $"{duration.TotalSeconds:0.#}s" : "<1s";
 
     private static string FormatCount(long value)
     {
@@ -257,6 +272,6 @@ public sealed partial class AnalyticsPage : Page
     }
 
     private sealed record BurnIntervalRow(string IntervalId, string Header, string Detail);
-    private sealed record ContributorRow(string Header, string Detail);
+    private sealed record ContributorRow(string Header, string Detail, double Share = 0);
     private sealed record ResetRow(string Header, string Detail);
 }

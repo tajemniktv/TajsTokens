@@ -18,7 +18,8 @@ public sealed record QuotaLaneState(
     string Profile,
     QuotaSnapshot? Snapshot,
     TelemetryHealthState State,
-    DateTimeOffset? LastSuccessUtc = null)
+    DateTimeOffset? LastSuccessUtc = null,
+    bool NotReportedByProvider = false)
 {
     public bool IsFresh => State == TelemetryHealthState.Live;
 }

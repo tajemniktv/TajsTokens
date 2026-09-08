@@ -1,142 +1,138 @@
 <Page
     x:Class="TajsTokens.App.Pages.ForecastsPage"
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
-    xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
-    mc:Ignorable="d">
-
-    <Grid Padding="24" RowSpacing="14">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Padding="24" RowSpacing="16">
+<VisualStateManager.VisualStateGroups>
+                            <VisualStateGroup>
+                                <VisualState>
+                                    <VisualState.StateTriggers><AdaptiveTrigger MinWindowWidth="1000" /></VisualState.StateTriggers>
+                                    <VisualState.Setters>
+                                        <Setter Target="HistoryDetailColumn.Width" Value="*" />
+                                        <Setter Target="HistoryDetailRow.Height" Value="0" />
+                                        <Setter Target="HistoryDetails.(Grid.Row)" Value="0" />
+                                        <Setter Target="HistoryDetails.(Grid.Column)" Value="1" />
+                                    </VisualState.Setters>
+                                </VisualState>
+                            </VisualStateGroup>
+                        </VisualStateManager.VisualStateGroups>
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-
-        <Grid ColumnSpacing="12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="Auto" />
-            </Grid.ColumnDefinitions>
-            <StackPanel>
-                <TextBlock Text="Forecasts &amp; scenario planner" FontSize="28" FontWeight="SemiBold" />
-                <TextBlock Text="Reset-aware forecast history plus account-local workload scenarios. Predictions stop at the edge of the evidence instead of wandering off into horoscope territory."
-                           Opacity="0.72" TextWrapping="Wrap" Margin="0,4,0,0" />
-                <TextBlock x:Name="StatusText" Text="Loading persisted forecast history…" Opacity="0.72" Margin="0,8,0,0" TextWrapping="Wrap" />
+        <Grid ColumnSpacing="16">
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <StackPanel Spacing="4">
+                <TextBlock Text="Forecasts" FontSize="28" FontWeight="SemiBold" />
+                <TextBlock Text="What past quota readings suggested — and what a future workload might use." TextWrapping="Wrap" Opacity="0.7" />
+                <TextBlock x:Name="StatusText" Text="Loading history…" TextWrapping="Wrap" Opacity="0.6" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
-                <ComboBox x:Name="HistoryRangeCombo" Width="130" SelectedIndex="1">
-                    <ComboBoxItem Content="7 days" Tag="7" />
-                    <ComboBoxItem Content="30 days" Tag="30" />
-                    <ComboBoxItem Content="90 days" Tag="90" />
-                    <ComboBoxItem Content="180 days" Tag="180" />
+                <ComboBox x:Name="HistoryRangeCombo" Width="120" SelectedIndex="1" SelectionChanged="OnHistoryRangeChanged" AutomationProperties.Name="History range">
+                    <ComboBoxItem Content="7 days" Tag="7" /><ComboBoxItem Content="30 days" Tag="30" />
+                    <ComboBoxItem Content="90 days" Tag="90" /><ComboBoxItem Content="180 days" Tag="180" />
                 </ComboBox>
                 <Button Content="Refresh" Click="OnRefreshClicked" />
             </StackPanel>
         </Grid>
-
         <Grid Grid.Row="1" ColumnSpacing="12">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-            <Border Padding="14" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                <StackPanel>
-                    <TextBlock Text="5h forecast samples" Opacity="0.65" />
-                    <TextBlock x:Name="FiveHourSamplesText" Text="—" FontSize="22" FontWeight="SemiBold" />
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+            <Border Padding="16" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="5-hour · latest saved outlook" Opacity="0.65" />
+                    <TextBlock x:Name="FiveHourSafeText" Text="—" FontSize="22" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBlock x:Name="FiveHourSamplesText" Text="—" Opacity="0.65" TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
-            <Border Grid.Column="1" Padding="14" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                <StackPanel>
-                    <TextBlock Text="Weekly forecast samples" Opacity="0.65" />
-                    <TextBlock x:Name="WeeklySamplesText" Text="—" FontSize="22" FontWeight="SemiBold" />
-                </StackPanel>
-            </Border>
-            <Border Grid.Column="2" Padding="14" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                <StackPanel>
-                    <TextBlock Text="5h conditional survive projections" Opacity="0.65" TextWrapping="Wrap" />
-                    <TextBlock x:Name="FiveHourSafeText" Text="—" FontSize="22" FontWeight="SemiBold" />
-                </StackPanel>
-            </Border>
-            <Border Grid.Column="3" Padding="14" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                <StackPanel>
-                    <TextBlock Text="Weekly conditional survive projections" Opacity="0.65" TextWrapping="Wrap" />
-                    <TextBlock x:Name="WeeklySafeText" Text="—" FontSize="22" FontWeight="SemiBold" />
+            <Border Grid.Column="1" Padding="16" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                <StackPanel Spacing="6">
+                    <TextBlock Text="Weekly · latest saved outlook" Opacity="0.65" />
+                    <TextBlock x:Name="WeeklySafeText" Text="—" FontSize="22" FontWeight="SemiBold" TextWrapping="Wrap" />
+                    <TextBlock x:Name="WeeklySamplesText" Text="—" Opacity="0.65" TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
         </Grid>
+        <Pivot Grid.Row="2">
+            <PivotItem Header="History">
+                <Grid RowSpacing="12">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <ComboBox x:Name="WindowFilter" SelectedIndex="0" SelectionChanged="OnHistoryFilterChanged" AutomationProperties.Name="Quota window">
+                            <ComboBoxItem Content="All windows" /><ComboBoxItem Content="5-hour" /><ComboBoxItem Content="Weekly" />
+                        </ComboBox>
+                        <ComboBox x:Name="HistoryDensity" SelectedIndex="0" SelectionChanged="OnHistoryFilterChanged" AutomationProperties.Name="History detail">
+                            <ComboBoxItem Content="Hourly samples" /><ComboBoxItem Content="Every sample" />
+                        </ComboBox>
+                    </StackPanel>
+                    <Grid Grid.Row="1" x:Name="HistoryLayout" ColumnSpacing="12" RowSpacing="12">
+                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition x:Name="HistoryDetailColumn" Width="0" /></Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition x:Name="HistoryDetailRow" Height="*" /></Grid.RowDefinitions>
 
-        <Expander Grid.Row="2" Header="Historical validation — authoritative quota targets" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-            <StackPanel Spacing="8">
-                <Button x:Name="EvaluateButton" Content="Run walk-forward evaluation" Click="OnEvaluateClicked" HorizontalAlignment="Left" />
-                <TextBlock x:Name="EvaluationStatusText" Text="Uses the selected history range and Codex/default profile. No source data is exported. Sparse evidence is reported, not converted to a confidence percentage." TextWrapping="Wrap" Opacity="0.72" />
-                <ListView x:Name="EvaluationList" MaxHeight="240" SelectionMode="None">
-                    <ListView.ItemTemplate>
-                        <DataTemplate>
-                            <StackPanel Padding="4" Spacing="2">
-                                <TextBlock Text="{Binding Header}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" Opacity="0.72" />
-                            </StackPanel>
-                        </DataTemplate>
-                    </ListView.ItemTemplate>
-                </ListView>
-            </StackPanel>
-        </Expander>
-
-        <Grid Grid.Row="3" ColumnSpacing="14">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="3*" />
-                <ColumnDefinition Width="2*" />
-            </Grid.ColumnDefinitions>
-
-            <Border Padding="12" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                <Grid RowSpacing="8">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-                    <TextBlock Text="Forecast history" FontSize="18" FontWeight="SemiBold" />
-                    <ListView x:Name="ForecastList" Grid.Row="1" SelectionMode="None" ScrollViewer.IsDeferredScrollingEnabled="True">
-                        <ListView.ItemTemplate>
-                            <DataTemplate>
-                                <StackPanel Padding="5" Spacing="2">
-                                    <TextBlock Text="{Binding Header}" FontWeight="SemiBold" />
-                                    <TextBlock Text="{Binding Detail}" Opacity="0.72" TextWrapping="Wrap" />
+                        <Border Padding="8" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                            <ListView x:Name="ForecastList" SelectionMode="Single" SelectionChanged="OnForecastSelectionChanged" ScrollViewer.IsDeferredScrollingEnabled="True" AutomationProperties.Name="Saved forecasts">
+                                <ListView.ItemTemplate><DataTemplate>
+                                    <StackPanel Padding="8" Spacing="4">
+                                        <TextBlock Text="{Binding Header}" Opacity="0.65" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding Detail}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </DataTemplate></ListView.ItemTemplate>
+                            </ListView>
+                        </Border>
+                        <Border x:Name="HistoryDetails" Grid.Row="1" Padding="20" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                            <ScrollViewer>
+                                <StackPanel Spacing="12">
+                                    <TextBlock x:Name="SelectedForecastTitle" Text="Select a saved forecast" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="SelectedForecastOutcome" FontSize="26" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    <TextBlock Text="A historical projection, not a measured outcome or your current quota." Opacity="0.65" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="SelectedForecastDetails" Text="Select a row to inspect its pace, uncertainty and source." TextWrapping="Wrap" IsTextSelectionEnabled="True" />
                                 </StackPanel>
-                            </DataTemplate>
-                        </ListView.ItemTemplate>
-                    </ListView>
+                            </ScrollViewer>
+                        </Border>
+                    </Grid>
                 </Grid>
-            </Border>
-
-            <Border Grid.Column="1" Padding="14" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+            </PivotItem>
+            <PivotItem Header="Plan a workload">
                 <ScrollViewer>
-                    <StackPanel Spacing="10">
-                        <TextBlock Text="Workload scenario" FontSize="18" FontWeight="SemiBold" />
-                        <TextBlock Text="Uses authoritative intervals, including unchanged meters. Requested model/effort and recent active-session counts require matching historical support. Unsupported scenarios stay unavailable; uncertainty requires held-out reset generations." Opacity="0.68" TextWrapping="Wrap" />
-
-                        <TextBlock Text="Duration (hours)" />
-                        <NumberBox x:Name="DurationBox" Value="2" Minimum="0.1" Maximum="168" SpinButtonPlacementMode="Compact" />
-                        <TextBlock Text="Recently token-active root sessions" />
-                        <NumberBox x:Name="RootAgentsBox" Value="1" Minimum="0" Maximum="32" SpinButtonPlacementMode="Compact" />
-                        <TextBlock Text="Recently token-active subagent sessions" />
-                        <NumberBox x:Name="SubagentsBox" Value="0" Minimum="0" Maximum="64" SpinButtonPlacementMode="Compact" />
-                        <TextBlock Text="Intensity (unvalidated scaling disabled)" />
-                        <NumberBox x:Name="IntensityBox" Value="1" Minimum="1" Maximum="1" IsEnabled="False" />
-                        <TextBlock Text="Model (optional)" />
-                        <TextBox x:Name="ModelBox" PlaceholderText="e.g. gpt-5.6-luna" />
-                        <TextBlock Text="Reasoning effort (optional)" />
-                        <TextBox x:Name="ReasoningBox" PlaceholderText="e.g. xhigh" />
-
-                        <Button Content="Estimate from history" Click="OnEstimateClicked" HorizontalAlignment="Left" />
+                    <StackPanel MaxWidth="760" HorizontalAlignment="Left" Spacing="16" Padding="4,12,4,20">
+                        <TextBlock Text="Explore a workload" FontSize="22" FontWeight="SemiBold" />
+                        <TextBlock Text="Estimate quota use from comparable activity in your own history. If there is not enough evidence, no estimate is shown." Opacity="0.7" TextWrapping="Wrap" />
+                        <Grid ColumnSpacing="12">
+                            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+                            <NumberBox x:Name="DurationBox" Header="Duration · hours" Value="0.5" Minimum="0.1" Maximum="168" SpinButtonPlacementMode="Compact" />
+                            <NumberBox x:Name="RootAgentsBox" Grid.Column="1" Header="Root sessions" Value="1" Minimum="0" Maximum="32" SpinButtonPlacementMode="Compact" />
+                            <NumberBox x:Name="SubagentsBox" Grid.Column="2" Header="Subagent sessions" Value="0" Minimum="0" Maximum="64" SpinButtonPlacementMode="Compact" />
+                        </Grid>
+                        <TextBlock Text="Session counts mean recently token-active sessions, not simultaneous model computation." TextWrapping="Wrap" Opacity="0.6" />
+                        <Expander Header="Match a model or reasoning effort" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                            <StackPanel Spacing="12">
+                                <TextBox x:Name="ModelBox" Header="Model · optional" PlaceholderText="Exact model name" />
+                                <TextBox x:Name="ReasoningBox" Header="Reasoning effort · optional" PlaceholderText="For example, high" />
+                            </StackPanel>
+                        </Expander>
+                        <Button Content="Estimate quota use" Click="OnEstimateClicked" Style="{StaticResource AccentButtonStyle}" />
                         <InfoBar x:Name="ScenarioInfo" IsOpen="False" IsClosable="False" />
-                        <TextBlock x:Name="ScenarioMethodText" Opacity="0.62" TextWrapping="Wrap" />
+                        <Expander Header="How this estimate works" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                            <TextBlock x:Name="ScenarioMethodText" Text="Estimates use source-isolated authoritative intervals and historical workload support. Unsupported intensity scaling is not applied." Opacity="0.7" TextWrapping="Wrap" />
+                        </Expander>
                     </StackPanel>
                 </ScrollViewer>
-            </Border>
-        </Grid>
+            </PivotItem>
+            <PivotItem Header="Model evaluation">
+                <Grid RowSpacing="12" Padding="4,12,4,0">
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                    <Button x:Name="EvaluateButton" Content="Evaluate against recorded outcomes" Click="OnEvaluateClicked" HorizontalAlignment="Left" />
+                    <TextBlock x:Name="EvaluationStatusText" Grid.Row="1" Text="Compare models against authoritative quota observations in the selected range. Runs locally; nothing is exported." TextWrapping="Wrap" Opacity="0.7" />
+                    <ListView x:Name="EvaluationList" Grid.Row="2" SelectionMode="None">
+                        <ListView.ItemTemplate><DataTemplate>
+                            <StackPanel Padding="8" Spacing="6">
+                                <TextBlock Text="{Binding Header}" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" Opacity="0.7" />
+                            </StackPanel>
+                        </DataTemplate></ListView.ItemTemplate>
+                    </ListView>
+                </Grid>
+            </PivotItem>
+        </Pivot>
     </Grid>
 </Page>
