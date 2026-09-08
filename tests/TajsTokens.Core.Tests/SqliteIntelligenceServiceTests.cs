@@ -9,6 +9,44 @@ namespace TajsTokens.Core.Tests;
 public sealed class SqliteIntelligenceServiceTests
 {
     [Fact]
+    public async Task BurnIntervals_NeverBridgeSources_AndFiltersApplyToIntervals()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-burn-sources-");
+        try
+        {
+            var database = Path.Combine(directory.FullName, "telemetry.db");
+            var repository = new SqliteTelemetryRepository(database);
+            await repository.InitializeAsync(CancellationToken.None);
+            var start = DateTimeOffset.UtcNow.AddHours(-1);
+            var reset = start.AddHours(5);
+            foreach (var row in new[] {
+                Quota(QuotaWindowKind.FiveHour, start, 10, reset, "codex-app-server:codex"),
+                Quota(QuotaWindowKind.FiveHour, start.AddMinutes(5), 50, reset, "codex-rollout:primary"),
+                Quota(QuotaWindowKind.FiveHour, start.AddMinutes(10), 12, reset, "codex-app-server:codex"),
+                Quota(QuotaWindowKind.FiveHour, start.AddMinutes(15), 53, reset, "codex-rollout:primary") })
+                await repository.UpsertQuotaSnapshotAsync(row, CancellationToken.None);
+            var service = new SqliteIntelligenceService(database, repository);
+            var query = new IntelligenceQuery(start.AddMinutes(-1), start.AddMinutes(30));
+            var all = await service.QueryAsync(query, CancellationToken.None);
+            Assert.Equal(2, all.QuotaBurnIntervals.Count);
+            Assert.All(all.QuotaBurnIntervals, x => Assert.Equal(x.BeforeSource, x.AfterSource));
+            Assert.Equal(new[] { 2d, 3d }, all.QuotaBurnIntervals.Select(x => x.DeltaUsedPercent).Order().ToArray());
+            var account = await service.QueryAsync(query with { BurnAuthority = QuotaObservationAuthority.ProviderAuthoritative }, CancellationToken.None);
+            var selected = Assert.Single(account.QuotaBurnIntervals);
+            Assert.Equal(2, selected.DeltaUsedPercent);
+            var detail = await service.GetQuotaBurnDetailAsync(selected, 10, CancellationToken.None);
+            Assert.Equal(selected.IntervalId, detail.Interval.IntervalId);
+            var weekly = await service.QueryAsync(query with { BurnKind = QuotaWindowKind.Weekly }, CancellationToken.None);
+            Assert.Empty(weekly.QuotaBurnIntervals);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(true);
+        }
+    }
+
+    [Fact]
     public async Task Query_OnFreshDatabase_InitializesBaseTelemetrySchema()
     {
         var directory = Directory.CreateTempSubdirectory("tajstokens-intelligence-fresh-");

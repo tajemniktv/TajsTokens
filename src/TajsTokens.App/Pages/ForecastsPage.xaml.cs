@@ -92,52 +92,87 @@ public sealed partial class ForecastsPage : Page
         }
     }
 
+    private IReadOnlyList<ForecastSnapshot> _history = [];
+
     private void RenderForecasts(IntelligenceDashboard dashboard)
     {
-        FiveHourSamplesText.Text = dashboard.FiveHourForecasts.Count.ToString("N0");
-        WeeklySamplesText.Text = dashboard.WeeklyForecasts.Count.ToString("N0");
-        FiveHourSafeText.Text = FormatSurvivalRate(dashboard.FiveHourForecasts);
-        WeeklySafeText.Text = FormatSurvivalRate(dashboard.WeeklyForecasts);
-
-        var rows = dashboard.FiveHourForecasts
-            .Concat(dashboard.WeeklyForecasts)
-            .OrderByDescending(snapshot => snapshot.Forecast.GeneratedAtUtc)
-            .Take(400)
-            .Select(snapshot =>
-            {
-                var forecast = snapshot.Forecast;
-                var outcome = forecast.EstimatedExhaustionAtUtc is DateTimeOffset exhaustion
-                    ? $"exhaustion {exhaustion.ToLocalTime():g}"
-                    : forecast.ProjectedRemainingAtResetPercent is double margin
-                        ? $"~{margin:0.#}% at reset"
-                        : "outcome learning";
-                var pace = forecast.BurnRatePercentPerHour is double burn
-                    ? $"{burn:0.00} pp/h"
-                    : "pace uncertain";
-                var pressure = forecast.BurnPressure is double value ? $" · {value:0.00}× sustainable" : string.Empty;
-                var anchor = snapshot.QuotaCapturedAtUtc is DateTimeOffset captured
-                    ? $" · anchor {snapshot.QuotaAuthority} @ {captured.ToLocalTime():g} · {snapshot.QuotaSource ?? "unknown source"}" +
-                      $" · window {(snapshot.QuotaWindowMinutes is int window ? $"{window}m" : "unknown window")}" +
-                      $" · reset {(snapshot.QuotaResetsAtUtc is DateTimeOffset reset ? reset.ToLocalTime().ToString("g") : "unknown reset")}"
-                    : " · legacy forecast without quota-anchor metadata";
-                return new ForecastRow(
-                    $"{forecast.GeneratedAtUtc.ToLocalTime():g} · {FormatKind(forecast.Kind)} · {forecast.State}",
-                    $"{pace}{pressure} · conditional {outcome}" +
-                    (forecast.Evidence is { } evidence
-                        ? $" · {evidence.Model} ({evidence.PolicyVersion}) · {evidence.UncertaintyDescription}"
-                        : " · legacy heuristic estimate; no calibrated uncertainty") +
-                    (string.IsNullOrWhiteSpace(forecast.Trend) ? string.Empty : $" · {forecast.Trend}") + anchor);
-            })
-            .ToArray();
-
-        ForecastList.ItemsSource = rows.Length == 0
-            ? new[] { new ForecastRow("No forecast history yet", "Phase 4 now persists reset-aware forecasts during shared telemetry refreshes. Let the collector observe a few quota samples first.") }
-            : rows;
-
-        StatusText.Text =
-            $"{dashboard.FiveHourForecasts.Count + dashboard.WeeklyForecasts.Count:N0} persisted forecast sample(s) in the selected range. " +
-            "New samples preserve the provider-authoritative quota anchor used by Overview; legacy rows remain explicitly unattributed.";
+        _history = dashboard.FiveHourForecasts.Concat(dashboard.WeeklyForecasts)
+            .OrderByDescending(x => x.Forecast.GeneratedAtUtc).ToArray();
+        RenderLatest(QuotaWindowKind.FiveHour, FiveHourSafeText, FiveHourSamplesText);
+        RenderLatest(QuotaWindowKind.Weekly, WeeklySafeText, WeeklySamplesText);
+        RenderHistory();
     }
+
+    private void RenderLatest(QuotaWindowKind kind, TextBlock outcome, TextBlock caption)
+    {
+        var latest = _history.FirstOrDefault(x => x.Forecast.Kind == kind);
+        var lane = App.Services.Telemetry.Latest.QuotaLanes.FirstOrDefault(x => x.Kind == kind);
+        outcome.Text = lane?.NotReportedByProvider == true ? "Not reported by Codex"
+            : latest is null ? "No saved outlook yet" : FormatOutcome(latest.Forecast);
+        caption.Text = latest is null ? "History will appear after quota observations are collected."
+            : $"Saved {latest.Forecast.GeneratedAtUtc.ToLocalTime():g} · historical projection, not current quota";
+    }
+
+    private void OnHistoryRangeChanged(object sender, SelectionChangedEventArgs e) =>
+        OnRefreshClicked(sender, new RoutedEventArgs());
+
+    private void OnHistoryFilterChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isLoaded) RenderHistory();
+    }
+
+    private void RenderHistory()
+    {
+        var selectedIdentity = (ForecastList.SelectedItem as ForecastRow)?.Identity;
+        var filtered = _history.Where(x => WindowFilter.SelectedIndex == 0 ||
+            x.Forecast.Kind == (WindowFilter.SelectedIndex == 1 ? QuotaWindowKind.FiveHour : QuotaWindowKind.Weekly)).ToArray();
+        var visible = HistoryDensity.SelectedIndex == 0
+            ? filtered.GroupBy(x => (x.Forecast.Kind, Hour: x.Forecast.GeneratedAtUtc.UtcTicks / TimeSpan.TicksPerHour))
+                .Select(g => g.First()).OrderByDescending(x => x.Forecast.GeneratedAtUtc).ToArray()
+            : filtered;
+        var rows = visible.Select(snapshot =>
+        {
+            var f = snapshot.Forecast;
+            var details = $"Pace: {(f.BurnRatePercentPerHour is double rate ? $"{rate:0.##} quota points/hour" : "not established")}\n" +
+                $"Trend: {f.Trend ?? "not established"}\n\n" +
+                (f.Evidence is { } evidence
+                    ? $"Uncertainty\n{evidence.UncertaintyDescription}\n\nModel: {evidence.Model}\nPolicy: {evidence.PolicyVersion}\n"
+                    : "Legacy estimate: no recorded uncertainty method.\n") +
+                $"Source: {snapshot.QuotaSource ?? "not recorded"}\n" +
+                $"Quota observed: {snapshot.QuotaCapturedAtUtc?.ToLocalTime().ToString("g") ?? "not recorded"}\n" +
+                $"Reset: {snapshot.QuotaResetsAtUtc?.ToLocalTime().ToString("g") ?? "not recorded"}";
+            return new ForecastRow($"{f.GeneratedAtUtc.ToLocalTime():g} · {FormatKind(f.Kind)}",
+                FormatOutcome(f), details, (snapshot.Provider, snapshot.Profile, f.Kind, f.GeneratedAtUtc));
+        }).ToArray();
+        ForecastList.ItemsSource = rows;
+        ForecastList.SelectedItem = rows.FirstOrDefault(x => x.Identity == selectedIdentity) ?? rows.FirstOrDefault();
+        if (rows.Length == 0)
+        {
+            SelectedForecastTitle.Text = "No saved forecasts in this view";
+            SelectedForecastOutcome.Text = "—";
+            SelectedForecastDetails.Text = "Try another window or a longer history range.";
+        }
+        StatusText.Text = $"{rows.Length:N0} displayed · {filtered.Length:N0} loaded samples" +
+            (HistoryDensity.SelectedIndex == 0 ? " · latest sample per hour and window" : " · every loaded sample") +
+            ". Up to 500 recent samples per window.";
+    }
+
+    private void OnForecastSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (ForecastList.SelectedItem is not ForecastRow row) return;
+        SelectedForecastTitle.Text = row.Header;
+        SelectedForecastOutcome.Text = row.Detail;
+        SelectedForecastDetails.Text = row.Evidence ?? "No additional evidence recorded.";
+    }
+
+    private static string FormatOutcome(Forecast f) => f.State switch
+    {
+        ForecastState.IdleWithinMeterPrecision => "No movement visible at meter precision",
+        ForecastState.Learning => "Learning from quota observations",
+        _ when f.EstimatedExhaustionAtUtc is DateTimeOffset eta => $"At that pace: exhausted {eta.ToLocalTime():ddd HH:mm}",
+        _ when f.ProjectedRemainingAtResetPercent is double left => $"At that pace: ~{left:0.#}% left at reset",
+        _ => "Outlook unavailable"
+    };
 
     private async void OnEvaluateClicked(object sender, RoutedEventArgs e)
     {
@@ -191,7 +226,7 @@ public sealed partial class ForecastsPage : Page
                 ReadNumber(DurationBox, 2),
                 (int)Math.Round(ReadNumber(RootAgentsBox, 1)),
                 (int)Math.Round(ReadNumber(SubagentsBox, 0)),
-                ReadNumber(IntensityBox, 1),
+                1,
                 NullIfWhiteSpace(ModelBox.Text),
                 NullIfWhiteSpace(ReasoningBox.Text));
             var historyFrom = DateTimeOffset.UtcNow.AddDays(-ParseHistoryDays());
@@ -280,5 +315,9 @@ public sealed partial class ForecastsPage : Page
         return value.Length <= 320 ? value : value[..320] + "…";
     }
 
-    private sealed record ForecastRow(string Header, string Detail);
+    private sealed record ForecastRow(string Header, string Detail, string? Evidence = null,
+        (string Provider, string Profile, QuotaWindowKind Kind, DateTimeOffset GeneratedAtUtc)? Identity = null)
+    {
+        public override string ToString() => $"{Header} · {Detail}";
+    }
 }

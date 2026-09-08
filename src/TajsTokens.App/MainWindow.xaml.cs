@@ -9,7 +9,7 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        ContentFrame.Navigate(typeof(CodexCliHarnessPage));
+        ContentFrame.Navigate(typeof(OverviewPage));
     }
 
     private void OnNavigationSelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)

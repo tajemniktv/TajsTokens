@@ -1,16 +1,16 @@
-# TajsTokens foundation
+# TajsTokens product and architecture
 
-> **Status: authoritative working document.**
+> **Status: active product development, beyond the foundation reset.** This file owns product goals, architectural decisions, and source contracts. [`plan.md`](plan.md) owns delivery sequencing and acceptance gates; [`AGENTS.md`](AGENTS.md) owns contributor operating instructions.
 
-## Why this reset exists
+## Development stage
 
-TajsTokens reached a point where implementation, UI, and derived metrics moved faster than our understanding of the underlying data. A polished result is not useful if the source semantics are uncertain.
-The reset therefore starts from evidence. We will study each source empirically, record what it actually exposes, preserve uncertainty, and only then define normalized data and read models.
-If current code conflicts with this document or with newly established source evidence, that conflict is a finding. We do not bend the evidence to preserve an existing implementation.
+The foundation reset established the evidence, provenance, privacy, and provider-native boundaries below. It is no longer the organizing phase of the project. TajsTokens has working acquisition, normalized history, native source inspection, forecasting, and product surfaces; the task now is to integrate and harden them into a coherent application.
+
+Extend the existing implementation where it serves the product. Do not restart discovery or rebuild working systems merely because they originated before the reset. Investigate concrete semantic gaps and runtime disagreements, then deliver and validate the corresponding product behavior. The evidence rules remain permanent engineering constraints, not a reason to postpone useful features indefinitely.
 
 ## Product direction: Codex-first observability
 
-TajsTokens is currently a **Codex-first observability and intelligence application**. The immediate goal is not broad provider support, a generic AI telemetry platform, or a lowest-common-denominator usage dashboard. The goal is to make Codex richly inspectable from trustworthy local evidence and, where that evidence is strong enough, turn it into useful account-local predictions about quota usage and near-future behavior.
+TajsTokens is a **Codex-first observability and intelligence application**. The goal is a dependable daily companion for understanding Codex activity, usage, quota, history, and likely future behavior. It is not primarily a database explorer, a generic AI telemetry platform, or a replacement Codex client.
 Codex exposes a large and evolving set of source-native concepts. Where source contracts establish their semantics, TajsTokens should preserve and use that richness rather than flattening it into generic `session`, `event`, or `usage` records merely because those names might also fit another provider later.
 At the same time, TajsTokens should not become permanently shaped like Codex. Possible future providers influence the architecture through clean boundaries, not through premature genericization.
 
@@ -51,6 +51,21 @@ Future provider sources
 
 There is deliberately no universal provider schema in the middle of this pipeline.
 
+## Product end state
+
+A production-quality local Windows application should let the user:
+
+- **Understand now:** open Overview and immediately see reported quota windows, usage, recent activity, freshness, and actionable problems. Missing windows, source failures, and stale history must look different.
+- **Understand work:** navigate workspaces, threads, turns, and supported root/subagent relationships; inspect relevant history and token/context behavior without manually joining SQLite rows and JSONL files.
+- **Understand changes:** investigate quota movement, lifecycle events, source disagreements, and collection gaps through concise summaries with evidence available on demand. Correlation must not masquerade as causality.
+- **Plan ahead:** see conditional quota outlooks, sustainable pace, supported workload scenarios, and useful uncertainty. Calibrated probabilities are an earned capability, not a release requirement that can be satisfied by inventing confidence.
+- **Trust the record:** understand what was observed, where it came from, when it was observed/collected, and what remains unknown. Repeated collection must not double-count work or rewrite historical meaning.
+- **Operate comfortably:** use responsive, accessible native views, reliable background collection, safe upgrades and recovery, and explicit privacy/export controls. Raw explorers remain useful diagnostic tools, not prerequisites for everyday workflows.
+
+The architectural end state is **selective durable collection + direct local inspection + rebuildable reconciled views**. Codex owns its operational data; TajsTokens owns its selected observation history and derived intelligence. Future providers may add their own native models when there is concrete demand, without weakening the Codex experience.
+
+This is the target, not a declaration that every workflow is complete. Delivery gates and outstanding work belong in `plan.md`; dated audits below describe their captured evidence, not timeless guarantees.
+
 ## Working principles
 
 - **Evidence before interpretation.** A field existing does not prove what it means beyond what the source supports.
@@ -67,7 +82,7 @@ There is deliberately no universal provider schema in the middle of this pipelin
 - **Privacy stays conservative for duplication and secrets.** Do not expand durable duplication of prompts, reasoning text, source bodies, credentials, authentication material, or other sensitive payloads merely to make analysis easier. Secret-bearing data requires explicit handling even when the source can be inspected locally.
 - **Predictions are policy, not evidence.** Forecasts, confidence scores, scenarios, inferred contributors, and classifications must remain rebuildable outputs with explicit inputs and policy/model versions. They never become source facts merely because they were persisted for history.
 - **Evaluation before sophistication.** A more complicated forecasting model earns its place only through leakage-safe historical evaluation against simpler baselines. False precision and uncalibrated confidence are product defects.
-- **Existing implementation has no grandfathered semantic authority.** Useful plumbing may survive; claims must earn their way back through source evidence.
+- **Implementation is evidence, not semantic authority.** Preserve working behavior unless a supported correction or deliberate product change requires otherwise; names and existing formulas alone do not establish meaning.
 - **Do not design for hypothetical provider symmetry.** A clean provider boundary is valuable; forcing Codex into a lowest-common-denominator model is not.
 
 ## 1. Raw source acquisition
@@ -151,6 +166,37 @@ Two conflicting source observations may normalize into two conflicting observati
 
 ## 4. Durable evidence store
 
+### Decision: keep a separate TajsTokens database
+
+Keep the owned SQLite database separate from Codex's databases. Do not mirror their schemas, merge their files into ours, or introduce a general-purpose bidirectional synchronizer. There are three complementary paths:
+
+| Path | Responsibility | Retention |
+| --- | --- | --- |
+| Direct source inspection | Read current native details and user-requested raw/content-bearing records through source-specific readers | On demand; not automatically duplicated |
+| Durable acquisition | Collect contracted, safe observations whose history the product needs | TajsTokens-owned evidence with native identity and provenance |
+| Read models and intelligence | Link observations, apply explicit presentation policy, aggregate, forecast, and evaluate | Rebuildable projections/caches, distinguishable from source evidence |
+
+The existing owned database can contain evidence, ingestion checkpoints, and derived tables with explicit ownership. These are logical boundaries, not a requirement for three databases or a generic JSON payload bus. Runtime settings need not move from their existing storage merely to fit this model.
+
+For every source-specific collection decision, specify the fields, historical need, native identity, change-detection method, retention/privacy posture, and source/schema/parser version. SQLite metadata should be collected only where a concrete historical need warrants it; a field being visible in a native explorer is not sufficient justification.
+
+### Linking sources without erasing their meaning
+
+- Preserve each source-qualified observation before reconciliation. Join through supported native identifiers and relationships; do not infer identity solely from similar names, timestamps, totals, or paths.
+- A mutable SQLite thread row can describe current metadata; a rollout turn context can describe historical metadata. A later current-model value must not overwrite the model recorded for an earlier turn.
+- SQLite totals and rollout increments may overlap. Establish their accounting relationship before choosing or comparing them; never add both merely because both are available.
+- Keep authority specific to the question and field. Current quota uses the supported authoritative app-server bucket; neither every SQLite row nor every JSONL field has universal precedence.
+- Keep provider/profile, installation/source instance, and proven account scope distinct. A local rollout directory is not proof that all its work belongs to the currently authenticated quota account.
+- Preserve disagreements and expose the selected view's rationale. Reconciliation rules are versioned policy, not destructive ingestion updates.
+
+### Collection and lifecycle guarantees
+
+Use read-only native access and consistent bounded reads where the source supports them. Incremental collection must have source-specific identities/checkpoints, idempotent replay, and atomic evidence/checkpoint commits. File offsets require source-generation/truncation handling; SQLite polling must use a supported change signal rather than assuming row IDs are a universal change feed.
+
+Preserve source event time separately from actual collection time. A backfill reconstructs available history; it cannot claim those records were collected at their original event times. A disappearing native row/file must not silently delete retained historical observations. Conversely, direct-inspection content may become unavailable when Codex removes it: the product must not promise transcript recovery it never retained.
+
+Migrations, retention, backups, and rebuild operations must distinguish irreplaceable collected evidence from disposable projections. Never silently delete unique quota observations or other evidence that cannot be reacquired. Changes to these lifecycle policies require explicit implementation and validation; this section defines the target guarantees, not proof that every maintenance workflow already exists.
+
 The durable store is history of normalized evidence, not a warehouse of product conclusions and not an automatic mirror of every readable source payload.
 
 Its design must support:
@@ -213,6 +259,23 @@ For the 5-hour and weekly quota windows, the prediction system should aim to pro
 The Overview should surface the compact decision-useful version. Deeper intelligence views may expose backtest performance, model/policy versions, uncertainty diagnostics, and historical forecast-versus-outcome comparisons.
 
 ### Evidence and authority boundary
+
+The 2026-09-08 installed account response after a plan change reports only the weekly window in
+the main `codex` bucket (`primary.windowDurationMins=10080`, `secondary=null`). A separate Spark
+bucket still has its own five-hour/weekly windows; those must not fill a missing main Codex window.
+A successful response containing supported windows now marks other supported lanes as **not
+reported**, independently of retained last-known-good history. This is neither a request failure
+nor proof of an unlimited/disabled entitlement. Response health may be live while an omitted lane
+has no current forecast. Request failures clear the omission marker and retain ordinary stale or
+unavailable states; a subsequently reported window resumes automatically. No plan-specific quota
+assumptions are persisted.
+
+The quota-burn read model calculates differences only within an exact provider/profile/window/source
+stream. The product view defaults to authoritative account readings, with explicit source/window
+filters applied before interval limits; rollout readings remain separately inspectable. Local token
+shares describe activity during an interval, not causal quota attribution or confidence probabilities.
+Forecast history defaults to the latest saved sample per hour/window, with every loaded sample and
+per-sample provenance still accessible. Overview is the application's startup destination.
 
 Current forecasts must be anchored to the provider-authoritative current quota observation for the exact provider/profile/window/reset generation being forecast. Stale, non-authoritative, future-dated, or differently anchored observations may remain visible as history but must not silently become the current forecast anchor.
 
@@ -322,7 +385,7 @@ Confidence has to mean something. Heuristic confidence scores may be labelled as
 
 The current production baseline is deliberately simple:
 
-- `ForecastingService` isolates the active reset epoch, derives observed quota-percent-per-hour intervals, uses a chronological EWMA with different fixed alphas for 5-hour and weekly windows, estimates sustainable pace/reset survival, and applies heuristic confidence.
+- `ForecastingService` isolates the active source/reset epoch and retains EWMA as the incumbent until comparable matured outcomes support another candidate. Model selection is chronological; empirical uncertainty requires sufficient prior reset generations. Outputs are conditional projections or explicit learning states, not heuristic confidence probabilities.
 - Flat quantized histories produce `IdleWithinMeterPrecision` rather than a confident zero-burn forecast.
 - `SqliteIntelligenceService.BuildAndPersistCurrentForecastsAsync` owns current forecast generation, requires a fresh provider-authoritative anchor, excludes history newer than it, persists the exact forecast shown to the app, and prevents stale/non-authoritative lanes from borrowing a competing forecast.
 - `ScenarioPlannerService` uses non-overlapping, source-isolated authoritative intervals (including unchanged meters), with reconstructed workload evidence bounded at interval start. It compares an elapsed-time baseline with account-local ridge on matured chronological outcomes. Recent token-active session counts are not simultaneous compute or agent-hours. Exact requested model/effort cohorts require support; unsupported intensity scaling and extrapolation return unavailable. Uncertainty requires eight comparable held-out reset generations, never training residuals or heuristic confidence percentages. Reconstruction is not proof the app had collected those inputs at the historical origin.
@@ -331,7 +394,7 @@ These implementations are **baselines, not architecture**. Their formulas, coeff
 
 ## Current work
 
-There is deliberately no phase roadmap during the foundation reset. Work is selected by product value and evidence readiness: establish or strengthen source contracts where semantics remain uncertain, then promote trustworthy observations into useful read models and intelligence.
+[`plan.md`](plan.md) is the active implementation plan. Work is sequenced by product value, dependencies, and evidence readiness. Strengthen contracts where a concrete gap blocks a claim, then integrate and validate the useful behavior rather than reopening the foundation reset.
 
 The current product focus is **rich Codex observability plus trustworthy account-local intelligence**. The major local Codex source families are already inspectable through raw and provider-native surfaces, and the application has working quota, token-accounting, thread/workspace/subagent, auxiliary-source, forecasting, and intelligence paths. Those existing paths are implementation evidence, not proof that every semantic or algorithm is finished.
 
@@ -521,6 +584,8 @@ contract or a replacement for the read-only Codex source boundaries above.
 
 ## Documentation rule
 
-Do not create a competing roadmap, architecture guide, phase document, or semantic specification while this reset is active. Update this file instead.
+Keep this document authoritative for product goals, architecture, retention decisions, and source semantics. Keep `plan.md` authoritative for implementation sequence, open work, and acceptance evidence. Keep `AGENTS.md` focused on how contributors work. Update the relevant documents together when scope or architecture changes; a task checklist is not a new source contract.
+
+Do not introduce additional competing roadmaps or architecture specifications without a concrete need. Mark dated observations and superseded decisions explicitly; do not silently reinterpret older audit counts as current state.
 
 Historical documents may be consulted for implementation archaeology, but any useful claim from them must be re-established and deliberately incorporated here before becoming current architecture again.

@@ -217,6 +217,21 @@ public sealed class ProviderParsingTests
     }
 
     [Fact]
+    public void CodexRateLimits_WeeklyOnlyCodexDoesNotBorrowSparkFiveHourWindow()
+    {
+        const string json = """
+            {"result":{"rateLimitsByLimitId":{
+              "codex_bengalfox":{"primary":{"usedPercent":0,"windowDurationMins":300}},
+              "codex":{"primary":{"usedPercent":3,"windowDurationMins":10080},"secondary":null}
+            }}}
+            """;
+        var snapshot = Assert.Single(CodexAppServerQuotaProvider.ParseRateLimitsResponse(json, DateTimeOffset.UnixEpoch));
+        Assert.Equal(QuotaWindowKind.Weekly, snapshot.Kind);
+        Assert.Equal(97, snapshot.RemainingPercent);
+        Assert.Equal("codex-app-server:codex", snapshot.Source);
+    }
+
+    [Fact]
     public void CodexRateLimits_PrefersCodexEntryFromRateLimitsByLimitId()
     {
         const string json = """

@@ -169,6 +169,15 @@ public sealed partial class OverviewViewModel : ObservableObject
             .FirstOrDefault();
 
         var title = kind == QuotaWindowKind.FiveHour ? "5-hour quota" : "Weekly quota";
+        var lane = snapshot.QuotaLanes.FirstOrDefault(item => item.Kind == kind && item.Provider == "codex" && item.Profile == "default");
+        if (lane?.NotReportedByProvider == true)
+        {
+            SetQuotaCard(kind, new QuotaCardViewModel(title, "Not reported", "—", "—", "No forecast for this window",
+                "Codex responded successfully",
+                "Codex is not reporting this quota window in its current response. This does not establish unlimited usage; it will appear automatically if reported again.",
+                InfoBarSeverity.Informational));
+            return;
+        }
         if (current is null)
         {
             SetQuotaCard(kind, UnavailableQuota(title, "No quota sample has been observed yet."));

@@ -6,7 +6,9 @@ public sealed record IntelligenceQuery(
     DateTimeOffset FromUtc,
     DateTimeOffset ToUtc,
     AnalyticsBucketSize BucketSize = AnalyticsBucketSize.Hour,
-    int MaxBuckets = 720);
+    int MaxBuckets = 720,
+    QuotaObservationAuthority? BurnAuthority = null,
+    QuotaWindowKind? BurnKind = null);
 
 public sealed record UsageHistoryBucket(
     DateTimeOffset StartUtc,
