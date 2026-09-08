@@ -2,158 +2,171 @@
 
 **Updated:** 2026-09-08
 
-**Stage:** active product integration and hardening, after the foundation reset.
+**Stage:** product integration and dogfooding; the foundation reset is finished.
 
-**Status:** this is the delivery plan, not a claim that the work below is complete.
+[PROJECT.md](PROJECT.md) owns product direction, source semantics, retention and architecture.
+[AGENTS.md](AGENTS.md) owns contributor/build instructions. This plan records delivered work,
+concrete remaining work and the next useful action—not another source specification.
 
-## Purpose and authority
+## Acceptance standard: practical dogfood quality
 
-Deliver the product end state in [PROJECT.md](PROJECT.md): a trustworthy, comfortable local Windows companion for understanding Codex activity, history, quota, and likely future behavior without routine SQLite/JSONL archaeology.
+**Correct under the conditions we've actually observed, conservative when uncertain, diagnosable
+when wrong.** This is a solo local application, not a distributed database.
 
-`PROJECT.md` owns product and architecture decisions and source contracts. [AGENTS.md](AGENTS.md) owns contributor instructions. This plan owns implementation sequence, dependencies, and acceptance gates. When implementation reveals a new semantic or retention decision, update `PROJECT.md` rather than quietly making the checklist the specification.
+- Check the changed behavior with representative observed inputs and relevant failure cases.
+  Reuse existing tests; do not re-audit unchanged paths or invent an exhaustive failure matrix.
+- Run the normal Core tests and Windows build at a code milestone. Backtest material prediction
+  changes, not labels, plumbing, or the same sparse historical dataset again.
+- Give concrete data-loss, double-counting and privacy risks stronger attention. Keep unknown
+  values explicit and failures understandable rather than silently substituting convenient data.
+- A useful implementation can be done with documented limits. Reserved user visual feedback is
+  a separate follow-up, not an indefinitely open implementation gate.
+- Stop when supported behavior works and no known in-scope defect remains. New hardening work
+  needs an observed problem or a specific product need.
 
-## Starting point
+## Next-agent handoff
 
-The repository already has native source readers/explorers, thread read models, rollout ingestion, token accounting, owned quota history, forecasting/backtesting, and WinUI product views. Build on those owners; this is not a greenfield rewrite.
+1. **Read the current worktree, not an old commit checkpoint.** This delivery work is not committed;
+   preserve existing changes. Do not reset the checkout or recreate the completed slices below.
+2. **The former next steps are implemented:** alternate-rollout comparison, backend-account quota
+   isolation, and explanatory quota/forecast UI. There is no pending alternate-file research task
+   and no permission to automatically ingest, deduplicate or delete those files.
+3. **Diagnostics is now a real page**, not a placeholder. It reuses the shared collector snapshot
+   and refresh owner. The retention/recovery policy is explicit in `PROJECT.md` and Settings.
+4. **Runtime/visual feedback remains with the user.** Use `-p:DogfoodEnabled=false` for isolated
+   builds while that reservation applies. Do not launch/restart the app or migrate its live data.
+   Temporary work stays under `.codex/temp`.
+5. **Next action:** act on a concrete dogfood
+   issue or requested feature. Do not reconstruct historical account ownership, rerun old
+   forecasting studies without a reason, or turn the delivered checklist into a new audit.
 
-Recent work establishes safe workload metadata collection, historical effort repair, authoritative-target evaluation, source-isolated quota-burn intervals, and clearer forecast/omitted-window UX. The dated evaluation in `PROJECT.md` still has sparse authoritative outcomes; it does not prove that advanced models or calibrated probabilities are ready. Recent UI changes have automated/build evidence, while the user has reserved visual acceptance for themselves.
+### Existing owners to reuse
 
-The following workstreams are **open acceptance scopes**. They may reuse substantial existing implementation. First inspect what already satisfies each gate; do not recreate it or label an entire workstream complete from one passing helper test.
+| Area | Owners |
+| --- | --- |
+| Current quota, shared refresh, freshness and alerts | `CodexAppServerQuotaProvider`, `TelemetryCoordinator`, `TelemetrySnapshot`, `QuotaAlertEngine` |
+| Collection, source identity and checkpoints | `CodexSessionIngestionService`, `CodexRolloutParser`, observatory/semantic batch stores |
+| State acceleration and alternate-file inspection | `CodexStateCatalog`, `CodexObservatoryService`, `CodexRolloutComparisonReader` |
+| Native work navigation and detail | `ICodexThreadReadModel`, `CodexThreadObservabilityService`, `CodexThreadReadModelPolicy` |
+| Burn history, forecasts, scenarios and evaluation | `SqliteIntelligenceService`, `SqliteForecastDatasetReader`, Core forecasting/scenario services |
+| Product diagnostics | `TelemetryDiagnosticsPresenter`, `DiagnosticsPage`; no separate polling loop or incident database |
+| Owned storage and deployment | `SqliteTelemetryRepository`, `AppDataLocation`, `RuntimeSettingsStore`, `tools/dogfood` |
 
-## Target arrangement
+## Delivered implementation
 
-```text
-Codex SQLite / JSONL / app-server
-             |
-     source-specific readers
-             |
-             +--> on-demand local inspection --> native detail / raw explorer
-             |
-             +--> selected safe observations --> TajsTokens-owned evidence
-                                                        |
-                                            reconciled read models
-                                                        |
-                                            product UI / intelligence
-```
+Checked items mean the stated implementation exists and has relevant automated/build evidence.
+They do not claim exhaustive native-source coverage or user visual approval.
 
-Our database preserves the history we need, not everything Codex can expose. Read models link sources through supported identities and explicit policy; ingestion does not erase disagreements. Derived caches can be rebuilt. Unique collected evidence must not be treated as disposable.
+### 1. Source and storage boundaries
 
-## 1. Make the integration map explicit
+- [x] Map the current daily workflows to their native readers, owned evidence and read-model policies
+  in `PROJECT.md`; distinguish direct content inspection from durable collection and export.
+- [x] Preserve native identities, source generations, event/collection times, missing fields and
+  alternatives in the supported paths. Mutable current state is not backfilled as historical context.
+- [x] Separate response-reported backend-account quota from installation-wide workload. Retain only
+  a versioned account pseudonym; legacy/ambiguous scope remains unknown.
+- [x] Document retention and rebuildability by owned-data group. There is no automatic age-based
+  cleanup or blanket safe-delete cache; active token/bookkeeping generations are retired on path
+  replacement rather than promised as an immutable archive.
 
-**Outcome:** every product-relevant data path has a known source, owner, retention decision, and meaning.
+### 2. Selective collection and coverage
 
-- [ ] Map the fields needed by Overview, work history, quota investigation, diagnostics, and predictions to existing source contracts and current readers/writers.
-- [ ] For each candidate, classify it as direct inspection, durable evidence, or derived policy. Record decisions in `PROJECT.md`.
-- [ ] Document native keys, source instance/generation, event and collection times, supported change signals, missing-field behavior, and known overlaps between SQLite and rollouts.
-- [ ] Identify gaps that prevent a specific user workflow. Investigate those gaps, not every unused native table.
-- [ ] Establish how installation history and authenticated quota account/profile scope are distinguished across account changes. Unknown associations remain unknown.
+- [x] Collect content-free token/context/workload evidence through the existing rollout pipeline,
+  with source-qualified identity and observation/checkpoint batch ownership.
+- [x] Support normal append/replay and observed replacement/interruption cases without recounting
+  completed records; preserve historical evidence when native files disappear.
+- [x] Repair eligible historical effort metadata without changing token totals or inventing old
+  collection timestamps.
+- [x] Reconcile state fingerprints at startup, on selected-database change and after five minutes;
+  changed paths are detected without reopening every unchanged rollout.
+- [x] Report timestamped indexed/discovered path coverage without equating counts with unique work.
+- [x] Provide bounded, cancellable alternate-rollout comparison under **Codex > Rollout coverage**:
+  exact bytes, owned-stream equality, prefix overlap, divergence and unresolved inputs remain distinct.
+  Inspection performs no owned writes or automatic alternate import.
 
-**Gate:** a reviewer can trace each planned user-facing claim to evidence and explain why it is retained, read directly, or derived. No blanket “SQLite wins” or “rollouts win” rule.
+Evidence includes `CodexSessionIngestionServiceTests`, state-index consistency/ingestion tests,
+rollout/semantic batch tests, `CodexWorkloadEvidenceTests` and `CodexRolloutInspectionTests`.
+The native comparison probe returned two identical pairs and six unresolved results on its first
+bounded page without creating an owned database. That is a sample, not proof about every file.
 
-**2026-09-08 bounded progress:** `PROJECT.md` now maps current daily workflows to native readers,
-owned evidence/projections, and explicit unresolved boundaries using a fresh read-only installation
-inventory. This is not completion of the field-level/account-scope gates above. The first correction
-adds five-minute full state-fingerprint reconciliation to catch timestamp-independent path changes
-without reopening unchanged rollouts or replacing historical metadata. Validation: six targeted
-state-index tests and all 239 Core tests passed; the Windows solution build passed with zero
-warnings/errors and `DogfoodEnabled=false`. User runtime/visual acceptance remains separate.
+### 3. Native work and accounting read models
 
-**Coverage follow-up:** verified native-index/discovery differences without assuming missing
-threads or importing alternate files. Added timestamped best-effort path coverage to source
-diagnostics and immediate full reconciliation on a selected database-path change, re-anchoring
-the disposable cursor without deleting retained history. Same-path replacement remains periodic;
-alternate-rollout ownership/divergence and authenticated-account scope remain open.
-Validation: all 242 Core tests passed, including generation-switch, path-coverage, and
-product-diagnostics cases; Windows solution build passed with zero warnings/errors and
-deployment disabled. No live source files were modified or alternate rollouts imported.
+- [x] Navigate workspaces, roots and recursive subagents with search, archive filtering and detail.
+  Missing parents and cycles remain visible instead of becoming invented root relationships.
+- [x] Keep current state, historical turns, realtime items and source alternatives distinct;
+  expose selection rationale and bounded-read limitations.
+- [x] Present supported native content through tolerant detail cards; unknown/malformed items remain
+  inspectable rather than silently disappearing.
+- [x] Use native rollout accounting as the default. Optional Tokscale comparison/fallback is explicit;
+  state totals and overlapping rollout counters are not added together.
+- [x] Reuse native read-model/presentation owners rather than creating a parallel generic schema.
 
-## 2. Complete selective, reliable collection
+Evidence includes thread navigation, observability, presentation and native accounting tests.
+Raw explorers and the explicitly invoked CLI harness remain available for investigation.
 
-**Depends on:** the relevant decisions from workstream 1; unrelated established paths need not wait.
+### 4. Everyday quota and diagnostics UI
 
-- [ ] Extend existing ingestion only for missing, justified historical observations. Do not add a raw database mirror or generic sync service.
-- [ ] Verify source-qualified identities and atomic observation/checkpoint commits across normal refresh and replay.
-- [ ] Cover append, truncation/replacement, interrupted batches, rescans, source disappearance/reappearance, duplicates, and schema changes with sanitized fixtures/probes.
-- [ ] Define safe change detection for any selected SQLite observation; mutable rows and deletions are not automatically lifecycle events.
-- [ ] Backfill eligible history without recounting tokens, inventing collection timestamps, or copying content-bearing payloads.
-- [ ] Surface collection coverage, lag, unsupported sources, and recovery actions instead of silently returning empty data.
+- [x] Overview shows reported windows, remaining quota, reset/pace outlook, freshness and omission.
+  Same-time alternate observations cannot borrow another anchor's freshness or forecast.
+- [x] Keep account/source/reset streams separate in Quota Burn, forecast history, alerts, scenarios
+  and evaluation. Co-observed local activity is not presented as account membership or causal cost.
+- [x] Distinguish saved outlooks from current quota; keep history selection stable across density/filter
+  changes and label the saved account scope.
+- [x] Explain withheld forecasts and unsupported scenarios using their actual reason. Missing current
+  account scope requests a fresh quota read; one-window scenario support is not called a total failure.
+- [x] Put Overview forecast methodology behind an evidence expander, leaving the main message concise.
+- [x] Replace the Diagnostics placeholder with source health, per-window forecast explanations,
+  bounded recent events, shared refresh/cancellation, and links to coverage, native sources and Settings.
+  Opening Diagnostics does not trigger acquisition or export.
+- [x] Cover relevant waiting, omitted, stale, unavailable and error states in shared presentation tests;
+  preserve user-owned visual feedback as a separate follow-up.
 
-**Gate:** repeated collection is idempotent; interrupted collection resumes without loss or double counting; source files remain read-only; retained payloads obey the privacy contract. A backfill report distinguishes reconstructed history from collection-time proof.
+### 5. Quota intelligence
 
-## 3. Reconcile through provider-native read models
+- [x] Persist authoritative quota observations with source/account scope and isolate reset generations.
+  A current forecast cannot borrow legacy unknown-account or another account's history.
+- [x] Evaluate five-hour and weekly streams separately with chronological outcomes and sensible
+  baselines, including sparse, stale, quantized and reset/re-anchor behavior.
+- [x] Report fitted origins, independent reset generations, remaining-quota errors, available
+  exhaustion/ETA labels and interval coverage; keep unsupported confidence claims unavailable.
+- [x] Use the evaluated production policy. Retain the simpler baseline where historical results do
+  not justify promotion; no advanced-model implementation is required merely because it is possible.
+- [x] Keep scenarios within observed support and separate local workload features from account identity.
+  Learning/unknown states are intentional when usable evidence is insufficient.
 
-**Depends on:** the contracts and observations needed for each view.
+The dated experiments and model policy are in `PROJECT.md`. Newly scoped accounts need new
+observations. More independent outcomes are an evidence dependency, not unfinished algorithm code.
 
-- [ ] Link supported thread/turn/workspace/root/subagent identities without treating a missing parent as proof of a root agent.
-- [ ] Keep current SQLite metadata distinct from historical turn metadata and observed lifecycle events.
-- [ ] Verify accounting equivalence before comparing or deduplicating totals across sources; never sum overlapping counters.
-- [ ] Retain source alternatives and expose selection rationale, freshness, scope, and conflicts in detail views.
-- [ ] Keep source selection stable across refresh and paging; report truncation and non-snapshot-consistent reads.
-- [ ] Consolidate duplicate presentation policy behind existing native read-model owners where a concrete duplicate exists.
+### 6. Storage, recovery and local operation
 
-**Gate:** disagreement fixtures remain inspectable, consistent fixtures produce useful unified views, and no later observation rewrites the evidence available at an earlier time.
+- [x] Use the owned database and stable data folder; migrations preserve legacy evidence, and the
+  account-scope migration has representative rollback/retry coverage.
+- [x] Keep collection/query work off the UI thread, support cancellation and bounded reads, and publish
+  quota independently of slower background intelligence work.
+- [x] Publish normal local builds through the existing dogfood deployment workflow with stopped-app
+  backups, retained binary generations, startup acknowledgement and rollback. CI/test-only builds skip it.
+- [x] Document explicit stopped-app data recovery in `README.md`; binary rollback does not downgrade
+  the live database. Preserve the current data directory before restoring a matching backup.
+- [x] Keep exports explicit and separate from raw local inspection. Diagnostics adds no export/upload path.
+- [x] Expose data paths, retention posture, source failures and non-destructive recovery guidance.
 
-## 4. Finish the daily product workflows
+Existing deployment evidence includes replacement/rollback and migration checks documented in
+`README.md` and earlier task results. This task does not reimplement or repeat deployment.
 
-**Can progress alongside:** collection/reconciliation work wherever contracts are already established.
+## Validation and remaining follow-ups
 
-- [ ] Overview answers “what is happening now?” with reported windows, freshness, usage, and concise actionable messages.
-- [ ] Work navigation connects workspaces, threads, turns, and supported subagent activity with useful search/filter/detail flows.
-- [ ] Quota Burn separates observed movement from local activity and keeps sources distinct; Forecasts separates current context, saved projections, scenarios, and evaluation.
-- [ ] Put technical provenance and methodology behind deliberate detail actions, not repeated paragraphs in every row.
-- [ ] Verify loading, empty, missing, stale, failed, narrow-window, large-history, keyboard, and accessibility states.
-- [ ] Preserve raw explorers and the explicit user-invoked CLI harness without making either a prerequisite for normal observability.
+**Current milestone:** all 291 Core tests pass, including four new Diagnostics presentation cases.
+The isolated Windows solution build passes with zero warnings/errors (`DogfoodEnabled=false`),
+and `git diff --check` is clean. The evaluation tool built successfully in the preceding account-scope
+milestone; this follow-up changes no prediction algorithm. The installed app and live database
+were not replaced, restarted or migrated.
 
-**Gate:** representative everyday questions are answerable without raw SQL/JSONL; diagnostics remain reachable. Automated/build checks and user-owned visual acceptance are recorded separately. Do not automate the visual pass while the user has reserved it.
+- [ ] User dogfood/visual feedback on the updated quota, coverage and Diagnostics surfaces.
+  The implementation is not blocked by this reserved pass; do not claim it has happened.
+- [ ] Observe new account-scoped history before reconsidering model promotion or calibrated bands.
+  Do not attach older unknown-account data to the current account to make learning disappear.
 
-## 5. Improve intelligence as evidence permits
-
-**Depends on:** sufficient correctly scoped observations and leakage-safe features, not simply a large row count.
-
-- [ ] Accumulate usable authoritative quota outcomes while preserving reset/account/source boundaries and omitted-window semantics.
-- [ ] Evaluate five-hour and weekly behavior separately, including flat/quantized, sparse, stale, and changing-workload cases.
-- [ ] Compare simple baselines and justified token/model/effort/activity/context candidates with chronological training and out-of-sample outcomes.
-- [ ] Report actual fitted origins, independent reset generations, remaining-quota error, exhaustion/ETA evidence, and interval coverage—not just aggregate fit quality.
-- [ ] Promote a more complex candidate only when comparable held-out results justify it; otherwise retain the simpler production model.
-- [ ] Keep scenarios inside historical support and expose unknown/learning states. Calibrate probability labels before presenting them as probabilities.
-
-**Gate:** production uses the evaluated policy, with reproducible inputs/version/provenance and honest support limits. Insufficient historical outcomes are an explicit evidence limitation, not a reason to manufacture a success metric or loop over the same backtest indefinitely.
-
-## 6. Harden storage and operation
-
-### Delivered local dogfooding slice (2026-09-08)
-
-- [x] Centralized SDK `artifacts/` outputs and ignored disposable work.
-- [x] Default local app-build publish/stage/hash verification, graceful stop, backup, install,
-  startup acknowledgement, stable launcher, binary rollback, CI/test/design-time exclusions,
-  explicit opt-out, and Git commit/dirty provenance.
-- [x] Stable `%LOCALAPPDATA%/Programs/TajemnikTV/TajsTokens` installation with sibling `data`;
-  non-destructive first-run migration of legacy owned DB/settings/local exports.
-- [x] Automated migration and transaction failure/recovery checks; full Core suite and Windows build.
-- [x] Live replacement and rollback in both directions; installed startup acknowledgement;
-  settings byte-identical after relocation; migrated database `quick_check` returned `ok`.
-- [x] 237 Core tests, 10 isolated transaction scenarios, and MSBuild CI/design-time/opt-out/
-  test-only skip checks; Windows solution build completed with zero warnings/errors.
-- [ ] User visual acceptance (not implied by startup or build validation).
-
-These are local deployment gates, not completion of the broader storage work below. Binary
-rollback does not automatically downgrade live data; snapshots remain available for explicit recovery.
-
-- [ ] Classify owned tables/caches by retention and rebuildability; define a concrete retention policy before deleting any unique history.
-- [ ] Establish recoverable migrations and backup/restore behavior for TajsTokens-owned data without modifying Codex-owned databases.
-- [ ] Verify source/schema upgrades, permissions failures, partial corruption, and unavailable files fail with actionable diagnostics rather than silent substitution.
-- [ ] Measure startup, refresh, query latency, memory, and storage growth using representative histories; agree explicit budgets from measurements rather than invented thresholds.
-- [ ] Keep long queries cancellable and bounded, avoid native-source write locks, and prevent slow collection from freezing current quota/UI updates.
-- [ ] Verify that export is explicit and reviewed/sanitized as appropriate; raw local inspection must never become an automatic upload.
-
-**Gate:** upgrades and recovery preserve irreplaceable evidence; performance is acceptable against recorded budgets; the user can understand and recover from a failed source or collection step.
-
-## Delivery and completion discipline
-
-Implement vertical slices rather than one repository-wide migration: contract -> required evidence -> read model -> usable UI -> validation. Workstream 1 narrows the next slice; it is not an excuse to reopen all historical research. Keep existing project boundaries unless an observed ownership problem warrants a change.
-
-For code milestones, follow the commands in `AGENTS.md` using `TajsTokens.slnx`, run relevant algorithm evaluations, and inspect the intended diff. For documentation-only work, check consistency, links, and referenced paths/commands without launching the app.
-
-A slice is complete only when its acceptance gate is evidenced, existing behavior is preserved where intended, limitations are explicit, and documentation describes the delivered behavior. Overall completion means the product end-state workflows and operational guarantees in `PROJECT.md` are satisfied—not that every possible Codex table is copied or every optional advanced model is implemented.
-
-**Next action:** establish an explicit read-model policy for alternate rollout ownership/overlap/divergence before any additional collection, and verify authenticated-account versus installation scope before making account attribution claims. Path coverage is now visible but is not evidence completeness. This document authorizes no automatic deletion, broad source mirroring, or rollout of speculative architecture.
+There are no additional known implementation tasks hidden behind the old handoff instructions.
+If validation or dogfooding reveals a concrete defect, record and fix that defect here. Performance
+budgets, broader recovery tooling, additional durable sources and automatic retention are not
+implicit requirements; add them when an observed need justifies the work.

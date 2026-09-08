@@ -110,7 +110,7 @@ public sealed partial class ForecastsPage : Page
         outcome.Text = lane?.NotReportedByProvider == true ? "Not reported by Codex"
             : latest is null ? "No saved outlook yet" : FormatOutcome(latest.Forecast);
         caption.Text = latest is null ? "History will appear after quota observations are collected."
-            : $"Saved {latest.Forecast.GeneratedAtUtc.ToLocalTime():g} · historical projection, not current quota";
+            : $"Saved {latest.Forecast.GeneratedAtUtc.ToLocalTime():g} · {QuotaAccountScope.Describe(latest.AccountKey)} · historical projection, not current quota";
     }
 
     private void OnHistoryRangeChanged(object sender, SelectionChangedEventArgs e) =>
@@ -127,7 +127,7 @@ public sealed partial class ForecastsPage : Page
         var filtered = _history.Where(x => WindowFilter.SelectedIndex == 0 ||
             x.Forecast.Kind == (WindowFilter.SelectedIndex == 1 ? QuotaWindowKind.FiveHour : QuotaWindowKind.Weekly)).ToArray();
         var visible = HistoryDensity.SelectedIndex == 0
-            ? filtered.GroupBy(x => (x.Forecast.Kind, Hour: x.Forecast.GeneratedAtUtc.UtcTicks / TimeSpan.TicksPerHour))
+            ? filtered.GroupBy(x => (x.Provider, x.Profile, x.Forecast.Kind, x.AccountKey, Hour: x.Forecast.GeneratedAtUtc.UtcTicks / TimeSpan.TicksPerHour))
                 .Select(g => g.First()).OrderByDescending(x => x.Forecast.GeneratedAtUtc).ToArray()
             : filtered;
         var rows = visible.Select(snapshot =>
@@ -138,11 +138,11 @@ public sealed partial class ForecastsPage : Page
                 (f.Evidence is { } evidence
                     ? $"Uncertainty\n{evidence.UncertaintyDescription}\n\nModel: {evidence.Model}\nPolicy: {evidence.PolicyVersion}\n"
                     : "Legacy estimate: no recorded uncertainty method.\n") +
-                $"Source: {snapshot.QuotaSource ?? "not recorded"}\n" +
+                $"Source: {snapshot.QuotaSource ?? "not recorded"}\n{QuotaAccountScope.Describe(snapshot.AccountKey)}\n" +
                 $"Quota observed: {snapshot.QuotaCapturedAtUtc?.ToLocalTime().ToString("g") ?? "not recorded"}\n" +
                 $"Reset: {snapshot.QuotaResetsAtUtc?.ToLocalTime().ToString("g") ?? "not recorded"}";
             return new ForecastRow($"{f.GeneratedAtUtc.ToLocalTime():g} · {FormatKind(f.Kind)}",
-                FormatOutcome(f), details, (snapshot.Provider, snapshot.Profile, f.Kind, f.GeneratedAtUtc));
+                $"{FormatOutcome(f)} · {QuotaAccountScope.Describe(snapshot.AccountKey)}", details, (snapshot.Provider, snapshot.Profile, f.Kind, f.GeneratedAtUtc, snapshot.AccountKey));
         }).ToArray();
         ForecastList.ItemsSource = rows;
         ForecastList.SelectedItem = rows.FirstOrDefault(x => x.Identity == selectedIdentity) ?? rows.FirstOrDefault();
@@ -190,7 +190,7 @@ public sealed partial class ForecastsPage : Page
             if (!_isLoaded || cancellation.IsCancellationRequested || generation != Volatile.Read(ref _evaluationGeneration)) return;
             EvaluationStatusText.Text = $"{report.AuthoritativeQuotaObservations:N0} authoritative quota observations · {report.WorkloadObservations:N0} native workload observations · {report.TokensWithEffort:N0}/{report.TokenObservations:N0} token records with effort. {report.Methodology}";
             EvaluationList.ItemsSource = report.Scores.Select(score => new ForecastRow(
-                $"{FormatKind(score.Kind)} · {score.Target} · {score.Model} · {score.Source} · {score.Origins} origins / {score.ResetGenerations} reset generations",
+                $"{FormatKind(score.Kind)} · {score.Target} · {score.Model} · {score.Source} · {QuotaAccountScope.Describe(score.AccountKey)} · {score.Origins} origins / {score.ResetGenerations} reset generations",
                 score.Origins == 0 ? "No eligible outcomes in this range."
                     : $"MAE {score.MeanAbsoluteError:0.##}pp · RMSE {score.RootMeanSquaredError:0.##}pp · {score.Availability}" +
                       (score.Model.EndsWith("ridge", StringComparison.Ordinal) ? $" · {score.FittedOrigins} fitted origins (others use baseline)" : string.Empty) +
@@ -222,13 +222,25 @@ public sealed partial class ForecastsPage : Page
         var generation = Interlocked.Increment(ref _estimateGeneration);
         try
         {
+            var accounts = App.Services.Telemetry.Latest.QuotaLanes.Where(lane => lane.IsFresh)
+                .Select(lane => lane.Snapshot?.AccountKey).Distinct().ToArray();
+            if (accounts.Length != 1 || accounts[0] is null)
+            {
+                ScenarioInfo.IsOpen = true;
+                ScenarioInfo.Severity = InfoBarSeverity.Warning;
+                ScenarioInfo.Title = "Current quota account unavailable";
+                ScenarioInfo.Message = "Refresh quota and retry. A scenario needs a fresh Codex response with a known backend account; saved history alone cannot establish the current account.";
+                ScenarioMethodText.Text = string.Empty;
+                return;
+            }
             var request = new ScenarioRequest(
                 ReadNumber(DurationBox, 2),
                 (int)Math.Round(ReadNumber(RootAgentsBox, 1)),
                 (int)Math.Round(ReadNumber(SubagentsBox, 0)),
                 1,
                 NullIfWhiteSpace(ModelBox.Text),
-                NullIfWhiteSpace(ReasoningBox.Text));
+                NullIfWhiteSpace(ReasoningBox.Text),
+                accounts[0]);
             var historyFrom = DateTimeOffset.UtcNow.AddDays(-ParseHistoryDays());
             ScenarioInfo.IsOpen = true;
             ScenarioInfo.Severity = InfoBarSeverity.Informational;
@@ -245,8 +257,10 @@ public sealed partial class ForecastsPage : Page
             }
 
             var bothReady = estimate.FiveHour.HasEnoughHistory && estimate.Weekly.HasEnoughHistory;
+            var anyReady = estimate.FiveHour.HasEnoughHistory || estimate.Weekly.HasEnoughHistory;
             ScenarioInfo.Severity = bothReady ? InfoBarSeverity.Success : InfoBarSeverity.Warning;
-            ScenarioInfo.Title = bothReady ? "History-based scenario" : "More history required";
+            ScenarioInfo.Title = bothReady ? "History-based scenario"
+                : anyReady ? "Scenario available for one window" : "Scenario unavailable for this request";
             ScenarioInfo.Message = $"5h: {FormatEstimate(estimate.FiveHour)}\nWeekly: {FormatEstimate(estimate.Weekly)}";
             ScenarioMethodText.Text = estimate.Methodology;
         }
@@ -286,7 +300,7 @@ public sealed partial class ForecastsPage : Page
     {
         if (!estimate.HasEnoughHistory || estimate.ExpectedQuotaDeltaPercent is null)
         {
-            return $"not enough data ({estimate.SampleCount} samples) · {estimate.Explanation}";
+            return $"unavailable · {estimate.Explanation}";
         }
 
         var range = estimate.LowerQuotaDeltaPercent is not null && estimate.UpperQuotaDeltaPercent is not null
@@ -316,7 +330,7 @@ public sealed partial class ForecastsPage : Page
     }
 
     private sealed record ForecastRow(string Header, string Detail, string? Evidence = null,
-        (string Provider, string Profile, QuotaWindowKind Kind, DateTimeOffset GeneratedAtUtc)? Identity = null)
+        (string Provider, string Profile, QuotaWindowKind Kind, DateTimeOffset GeneratedAtUtc, string? AccountKey)? Identity = null)
     {
         public override string ToString() => $"{Header} · {Detail}";
     }

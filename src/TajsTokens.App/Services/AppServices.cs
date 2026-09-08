@@ -54,6 +54,7 @@ public sealed class AppServices
         ObservatoryStore = observatory.Store;
         CodexSessionIngestion = observatory.Ingestion;
         CodexObservatory = observatory.Service;
+        CodexRolloutInspection = observatory.RolloutInspection;
 
         Intelligence = new SqliteIntelligenceService(DatabasePath, Repository);
         Telemetry = new TelemetryCoordinator(
@@ -86,6 +87,7 @@ public sealed class AppServices
     public ICodexQuotaProvider CodexQuotaProvider { get; }
     public ICodexSessionIngestionService CodexSessionIngestion { get; }
     public ICodexObservatoryService CodexObservatory { get; }
+    public ICodexRolloutInspection CodexRolloutInspection { get; }
     public IIntelligenceService Intelligence { get; }
     public TelemetryCoordinator Telemetry { get; }
     public QuotaAlertEngine AlertEngine { get; }

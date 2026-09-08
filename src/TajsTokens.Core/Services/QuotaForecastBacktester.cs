@@ -18,7 +18,8 @@ public sealed record QuotaForecastTrial(
     bool? ObservedExhaustion,
     bool PredictedExhaustion,
     double? ExhaustionEtaBracketErrorHours,
-    DateTimeOffset? ExhaustionLabelAvailableAtUtc = null);
+    DateTimeOffset? ExhaustionLabelAvailableAtUtc = null,
+    string? AccountKey = null);
 
 /// <summary>
 /// Source-homogeneous chronological replay. Calibration sees only outcomes from earlier
@@ -86,8 +87,8 @@ public static class QuotaForecastBacktester
         foreach (var row in snapshots.OrderBy(x => x.CapturedAtUtc))
         {
             if (previous is not null && (row.Provider != previous.Provider || row.Profile != previous.Profile ||
-                row.Kind != previous.Kind || row.Source != previous.Source))
-                throw new ArgumentException("Replay requires one provider/profile/kind/source stream.", nameof(snapshots));
+                row.Kind != previous.Kind || row.Source != previous.Source || row.AccountKey != previous.AccountKey))
+                throw new ArgumentException("Replay requires one provider/profile/kind/source/account stream.", nameof(snapshots));
             var valid = row.UsedPercent is double used && double.IsFinite(used) && used is >= 0 and <= 100 &&
                         row.ResetsAtUtc is not null && row.CapturedAtUtc <= row.ResetsAtUtc;
             if (!valid)
@@ -168,7 +169,8 @@ public static class QuotaForecastBacktester
                     radius is double r ? Math.Max(0, prediction - r) : null,
                     radius is double r2 ? Math.Min(100, prediction + r2) : null,
                     calibration.Count, exhausted, predictsExhaustion, etaError,
-                    exhaustedIndex >= 0 ? epoch[exhaustedIndex].CapturedAtUtc : exhausted is false ? anchor.ResetsAtUtc : null));
+                    exhaustedIndex >= 0 ? epoch[exhaustedIndex].CapturedAtUtc : exhausted is false ? anchor.ResetsAtUtc : null,
+                    anchor.AccountKey));
             }
         }
         return trials;

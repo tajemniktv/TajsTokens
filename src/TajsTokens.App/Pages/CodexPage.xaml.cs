@@ -520,6 +520,9 @@ public sealed partial class CodexPage : Page
         }
     }
 
+    private void OnRolloutCoverageClicked(object sender, RoutedEventArgs e) =>
+        Frame?.Navigate(typeof(CodexRolloutCoveragePage));
+
     private bool IsSubagent(string? threadId) =>
         threadId is not null && _navigation?.PreferredSpawnEdges.Any(edge =>
             string.Equals(edge.ChildThreadId, threadId, StringComparison.OrdinalIgnoreCase)) == true;

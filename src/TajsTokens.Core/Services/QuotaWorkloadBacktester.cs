@@ -20,7 +20,7 @@ public static class QuotaWorkloadBacktester
         if (!Candidates.Contains(candidate)) throw new ArgumentException("Unknown workload candidate.", nameof(candidate));
         var results = new List<QuotaWorkloadTrial>();
         foreach (var stream in data.Quota.Where(x => x.Kind == kind && x.Authority == QuotaObservationAuthority.ProviderAuthoritative)
-                     .GroupBy(x => (x.Provider, x.Profile, x.Source)))
+                     .GroupBy(x => (x.Provider, x.Profile, x.Source, x.AccountKey)))
         {
             var baseline = QuotaForecastBacktester.Replay(stream.ToArray(), "legacy-ewma", horizonHours, cancellationToken);
             var featureRows = baseline.ToDictionary(x => x.OriginUtc,

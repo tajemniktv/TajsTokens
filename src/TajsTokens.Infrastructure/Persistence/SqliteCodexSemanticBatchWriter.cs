@@ -265,6 +265,7 @@ internal sealed class SqliteCodexIngestionBatchWriter(
                     ? DBNull.Value
                     : SerializeUtc(snapshot.ResetsAtUtc.Value));
                 Set(quota, "$source", snapshot.Source);
+                Set(quota, "$account", snapshot.AccountKey ?? "");
                 await quota.ExecuteNonQueryAsync(cancellationToken);
             }
 
@@ -348,13 +349,13 @@ internal sealed class SqliteCodexIngestionBatchWriter(
 
     private static SqliteCommand BuildQuotaCommand(SqliteConnection connection, SqliteTransaction transaction) =>
         BuildCommand(connection, transaction, """
-            INSERT INTO quota_snapshots(provider, profile, kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, source)
-            VALUES($provider, $profile, $kind, $captured, $used, $window, $resets, $source)
-            ON CONFLICT(provider, profile, kind, captured_at_utc, source) DO UPDATE SET
+            INSERT INTO quota_snapshots(provider, profile, kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, source, account_key)
+            VALUES($provider, $profile, $kind, $captured, $used, $window, $resets, $source, $account)
+            ON CONFLICT(provider, profile, kind, captured_at_utc, source, account_key) DO UPDATE SET
               used_percent = excluded.used_percent,
               window_minutes = excluded.window_minutes,
               resets_at_utc = excluded.resets_at_utc;
-            """, "$provider", "$profile", "$kind", "$captured", "$used", "$window", "$resets", "$source");
+            """, "$provider", "$profile", "$kind", "$captured", "$used", "$window", "$resets", "$source", "$account");
 
     private static SqliteCommand BuildContextCommand(SqliteConnection connection, SqliteTransaction transaction) =>
         BuildCommand(connection, transaction, """

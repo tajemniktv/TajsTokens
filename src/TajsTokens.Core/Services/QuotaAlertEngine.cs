@@ -77,7 +77,7 @@ public sealed class QuotaAlertEngine
                 var resetIdentity = quota.ResetsAtUtc is DateTimeOffset resetAt
                     ? resetAt.ToUnixTimeSeconds().ToString()
                     : $"fallback-{fallbackGeneration}";
-                var resetKey = $"quota-reset:{quota.Provider}:{quota.Profile}:{quota.Kind}:{resetIdentity}";
+                var resetKey = $"quota-reset:{quota.Provider}:{quota.Profile}:{quota.Kind}:{resetIdentity}:{quota.AccountKey ?? "unknown"}";
                 if (_emittedKeys.Add(resetKey))
                 {
                     var label = quota.Kind == QuotaWindowKind.FiveHour ? "5-hour" : "weekly";
@@ -95,7 +95,8 @@ public sealed class QuotaAlertEngine
             .Where(snapshot =>
                 snapshot.Kind == quota.Kind &&
                 string.Equals(snapshot.Provider, quota.Provider, StringComparison.Ordinal) &&
-                string.Equals(snapshot.Profile, quota.Profile, StringComparison.Ordinal))
+                string.Equals(snapshot.Profile, quota.Profile, StringComparison.Ordinal) &&
+                snapshot.Source == quota.Source && snapshot.AccountKey == quota.AccountKey)
             .OrderByDescending(snapshot => snapshot.CapturedAtUtc)
             .FirstOrDefault();
 
@@ -153,12 +154,12 @@ public sealed class QuotaAlertEngine
     {
         if (snapshot.ResetsAtUtc is DateTimeOffset reset)
         {
-            return $"{snapshot.Provider}:{snapshot.Profile}:{snapshot.Kind}:{reset.ToUnixTimeSeconds()}";
+            return $"{snapshot.Provider}:{snapshot.Profile}:{snapshot.Kind}:{reset.ToUnixTimeSeconds()}:{snapshot.AccountKey ?? "unknown"}";
         }
 
         return $"{BuildFallbackBaseIdentity(snapshot)}:{fallbackGeneration}";
     }
 
     private static string BuildFallbackBaseIdentity(QuotaSnapshot snapshot) =>
-        $"{snapshot.Provider}:{snapshot.Profile}:{snapshot.Kind}:no-reset";
+        $"{snapshot.Provider}:{snapshot.Profile}:{snapshot.Kind}:no-reset:{snapshot.AccountKey ?? "unknown"}";
 }

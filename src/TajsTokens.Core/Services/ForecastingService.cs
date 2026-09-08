@@ -34,7 +34,7 @@ public sealed class ForecastingService : IForecastingService
 
         // A rate never bridges distinct source lanes. Drops/invalid values/metadata changes
         // terminate the whole segment. Reused reset identities cannot resurrect old slopes.
-        var stream = eligible.Where(x => x.Source == latest.Source).ToArray();
+        var stream = eligible.Where(x => x.Source == latest.Source && x.AccountKey == latest.AccountKey).ToArray();
         var epoch = QuotaForecastBacktester.SplitEpochs(stream).LastOrDefault();
         if (epoch is null || epoch[^1] != latest) return Unknown("No unambiguous current segment is available.", sustainable);
         var observedHours = (latest.CapturedAtUtc - epoch[0].CapturedAtUtc).TotalHours;

@@ -41,12 +41,10 @@ public sealed record TelemetrySnapshot(
     public bool IsQuotaSnapshotFresh(QuotaSnapshot snapshot) =>
         QuotaLanes.Count == 0
             ? QuotaDataFresh
-            : FindQuotaLane(snapshot)?.IsFresh == true;
+            : FindQuotaLane(snapshot) is { IsFresh: true } lane && lane.Snapshot == snapshot;
 
+    // Match the complete observation, not merely its lane and capture time. Different sources
+    // may report at the same instant, and changed reset/meter metadata is a different anchor.
     public CurrentQuotaForecast? FindCurrentForecast(QuotaSnapshot snapshot) =>
-        CurrentForecasts.FirstOrDefault(item =>
-            item.Current.Kind == snapshot.Kind &&
-            string.Equals(item.Current.Provider, snapshot.Provider, StringComparison.Ordinal) &&
-            string.Equals(item.Current.Profile, snapshot.Profile, StringComparison.Ordinal) &&
-            item.Current.CapturedAtUtc == snapshot.CapturedAtUtc);
+        CurrentForecasts.FirstOrDefault(item => item.Current == snapshot);
 }

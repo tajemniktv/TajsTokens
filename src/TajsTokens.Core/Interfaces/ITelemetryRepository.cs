@@ -17,6 +17,7 @@ public interface ITelemetryRepository
     Task UpsertWorkspaceAsync(WorkspaceIdentity workspace, CancellationToken cancellationToken);
     Task UpsertForecastSnapshotAsync(ForecastSnapshot snapshot, CancellationToken cancellationToken);
 
+    // Null accountKey selects unknown scope; it is not an all-accounts wildcard.
     Task<IReadOnlyList<QuotaSnapshot>> GetRecentQuotaSnapshotsAsync(
         QuotaWindowKind kind,
         string provider,
@@ -24,7 +25,8 @@ public interface ITelemetryRepository
         int take,
         CancellationToken cancellationToken,
         DateTimeOffset? capturedAtUpperBoundUtc = null,
-        string? source = null);
+        string? source = null,
+        string? accountKey = null);
 
     Task<IReadOnlyList<ForecastSnapshot>> GetRecentForecastSnapshotsAsync(
         QuotaWindowKind kind,

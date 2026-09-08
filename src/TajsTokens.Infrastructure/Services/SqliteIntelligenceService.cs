@@ -107,6 +107,14 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 continue;
             }
 
+            if (current.AccountKey is null)
+            {
+                results.Add(new CurrentQuotaForecast(current, TelemetryHealthState.Live, null,
+                    "Current forecast is learning: the provider did not report backend-account scope.",
+                    "Unknown historical account scope is never assigned to the currently signed-in account."));
+                continue;
+            }
+
             var history = await _telemetryRepository.GetRecentQuotaSnapshotsAsync(
                 current.Kind,
                 current.Provider,
@@ -114,7 +122,8 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 10000,
                 cancellationToken,
                 current.CapturedAtUtc,
-                current.Source);
+                current.Source,
+                current.AccountKey);
             var anchored = history
                 .Where(item => item.CapturedAtUtc <= current.CapturedAtUtc)
                 .GroupBy(item => item.CapturedAtUtc)
@@ -135,7 +144,8 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                     current.Authority,
                     current.CapturedAtUtc,
                     current.WindowMinutes,
-                    current.ResetsAtUtc);
+                    current.ResetsAtUtc,
+                    current.AccountKey);
                 await _telemetryRepository.UpsertForecastSnapshotAsync(persisted, cancellationToken);
                 results.Add(new CurrentQuotaForecast(
                     current, TelemetryHealthState.Live, forecast,
@@ -345,7 +355,8 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         return new QuotaBurnDetail(
             currentInterval,
             contributors,
-            "Estimated attribution only. Score = 55% native token share + 25% uncached-input share + 15% cache-read share + 5% compaction share inside the provider-observed quota-change interval. The quota meter can be rounded/delayed, so no single event is claimed to have directly caused the change.");
+            $"{QuotaAccountScope.Describe(currentInterval.AccountKey)}. Local-installation activity during this interval is not verified to belong to that account. " +
+            "The score summarizes local token/uncached/cache/compaction shares, not causal quota attribution or account membership. The meter can be rounded or delayed.");
     }
 
     public async Task<ScenarioEstimate> EstimateScenarioAsync(
@@ -364,8 +375,13 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         await observatory.InitializeAsync(cancellationToken);
         var data = await new SqliteForecastDatasetReader(_databasePath).ReadAsync(
             "codex", "default", historyFromUtc, now, cancellationToken);
-        var samples = CodexScenarioHistoryBuilder.Build(data);
-        return _scenarioPlanner.Estimate(request, samples, now);
+        var latest = data.Quota.Where(item => item.CapturedAtUtc <= now && item.AccountKey == request.AccountKey).MaxBy(item => item.CapturedAtUtc);
+        var samples = request.AccountKey is not null && latest is not null && now - latest.CapturedAtUtc <= TimeSpan.FromHours(6)
+            ? CodexScenarioHistoryBuilder.Build(data with { Quota = data.Quota.Where(item => item.AccountKey == latest.AccountKey).ToArray() })
+            : [];
+        var estimate = _scenarioPlanner.Estimate(request, samples, now);
+        return estimate with { Methodology = $"{QuotaAccountScope.Describe(request.AccountKey)}. " +
+            "Quota targets stay within this reported backend account; local workload features are co-observed installation signals, not verified account membership. " + estimate.Methodology };
     }
 
     public async Task<ForecastEvaluationReport> EvaluateForecastsAsync(string provider, string profile,
@@ -390,14 +406,14 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         var command = connection.CreateCommand();
         command.CommandText = """
             WITH ranked AS (
-                SELECT kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, provider, profile, source,
+                SELECT kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, provider, profile, source, account_key,
                        ROW_NUMBER() OVER (
-                           PARTITION BY provider, profile, kind
+                           PARTITION BY provider, profile, kind, source, account_key
                            ORDER BY captured_at_utc DESC) AS rn
                 FROM quota_snapshots
                 WHERE kind IN ('FiveHour', 'Weekly')
             )
-            SELECT kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, provider, profile, source
+            SELECT kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, provider, profile, source, account_key
             FROM ranked
             WHERE rn <= $take
             ORDER BY provider, profile, kind, captured_at_utc;
@@ -412,7 +428,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         }
 
         return rows
-            .GroupBy(row => (row.Provider, row.Profile, row.Kind))
+            .GroupBy(row => (row.Provider, row.Profile, row.Kind, row.Source, row.AccountKey))
             .Select(group => (IReadOnlyList<QuotaSnapshot>)CanonicalizeQuotaSnapshots(group).ToArray())
             .ToArray();
     }
@@ -521,8 +537,11 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             }
         }
 
-        var quota = await LoadQuotaSnapshotsAsync(connection, query.FromUtc.AddDays(-7), query.ToUtc, cancellationToken);
-        foreach (var group in quota.GroupBy(snapshot => (snapshot.Provider, snapshot.Profile, snapshot.Kind)))
+        var quota = await LoadQuotaSnapshotsAsync(connection, query.FromUtc.AddDays(-7), query.ToUtc, cancellationToken, preserveSources: true);
+        var streams = quota.GroupBy(snapshot => (snapshot.Provider, snapshot.Profile, snapshot.Kind, snapshot.Source, snapshot.AccountKey)).ToArray();
+        // A shared local-activity chart cannot sum independent account/source meters. Detailed
+        // burn history remains available per stream; the broad overlay is unknown when ambiguous.
+        foreach (var group in streams.Where(group => streams.Count(other => other.Key.Kind == group.Key.Kind) == 1))
         {
             var ordered = group.OrderBy(snapshot => snapshot.CapturedAtUtc).ToArray();
             for (var index = 1; index < ordered.Length; index++)
@@ -693,7 +712,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         var snapshots = await LoadQuotaSnapshotsAsync(connection, fromUtc.AddDays(-7), toUtc, cancellationToken,
             preserveSources: true, authority: authority);
         var candidates = new List<QuotaBurnIntervalSeed>();
-        foreach (var group in snapshots.GroupBy(snapshot => (snapshot.Provider, snapshot.Profile, snapshot.Kind, snapshot.Source)))
+        foreach (var group in snapshots.GroupBy(snapshot => (snapshot.Provider, snapshot.Profile, snapshot.Kind, snapshot.Source, snapshot.AccountKey)))
         {
             if (kindFilter is QuotaWindowKind requestedKind && group.Key.Kind != requestedKind)
             {
@@ -763,7 +782,8 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 aggregate.Compactions,
                 aggregate.DominantModel,
                 aggregate.DominantReasoning,
-                Math.Clamp(confidence, 0.35, 0.95)));
+                Math.Clamp(confidence, 0.35, 0.95),
+                seed.Current.AccountKey));
         }
 
         return results;
@@ -851,7 +871,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         command.CommandText = """
             SELECT event_id, kind, provider, profile, detected_at_utc, effective_at_utc,
                    before_used_percent, after_used_percent, previous_reset_at_utc, current_reset_at_utc,
-                   classification, confidence, source, explanation
+                   classification, confidence, source, explanation, account_key
             FROM quota_reset_events
             WHERE detected_at_utc >= $from AND detected_at_utc <= $to
             ORDER BY detected_at_utc DESC
@@ -878,7 +898,8 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 Enum.Parse<QuotaResetClassification>(reader.GetString(10)),
                 reader.GetDouble(11),
                 reader.GetString(12),
-                reader.GetString(13)));
+                reader.GetString(13),
+                reader.GetString(14) is { Length: > 0 } account ? account : null));
         }
         return results;
     }
@@ -896,7 +917,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             SELECT provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
                    estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence,
                    state, burn_pressure, projected_remaining_at_reset_percent, trend, is_quantized_flat,
-                   quota_source, quota_authority, quota_captured_at_utc, quota_window_minutes, quota_resets_at_utc, evaluation_json
+                   quota_source, quota_authority, quota_captured_at_utc, quota_window_minutes, quota_resets_at_utc, evaluation_json, account_key
             FROM forecast_snapshots
             WHERE kind = $kind AND generated_at_utc >= $from AND generated_at_utc <= $to
             ORDER BY generated_at_utc DESC
@@ -934,7 +955,8 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 reader.IsDBNull(15) || !Enum.TryParse<QuotaObservationAuthority>(reader.GetString(15), out var authority) ? QuotaObservationAuthority.Unknown : authority,
                 reader.IsDBNull(16) ? null : ParseUtc(reader.GetString(16)),
                 reader.IsDBNull(17) ? null : reader.GetInt32(17),
-                reader.IsDBNull(18) ? null : ParseUtc(reader.GetString(18))));
+                reader.IsDBNull(18) ? null : ParseUtc(reader.GetString(18)),
+                reader.GetString(20) is { Length: > 0 } account ? account : null));
         }
         return results;
     }
@@ -949,7 +971,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
     {
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, provider, profile, source
+            SELECT kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, provider, profile, source, account_key
             FROM quota_snapshots
             WHERE captured_at_utc >= $from AND captured_at_utc <= $to
               AND kind IN ('FiveHour', 'Weekly')
@@ -978,6 +1000,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 snapshot.Provider,
                 snapshot.Profile,
                 snapshot.Kind,
+                snapshot.AccountKey,
                 snapshot.CapturedAtUtc))
             .Select(group => group
                 .OrderByDescending(snapshot => snapshot.Authority)
@@ -995,7 +1018,8 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             reader.IsDBNull(4) ? null : ParseUtc(reader.GetString(4)),
             reader.GetString(5),
             reader.GetString(6),
-            reader.GetString(7));
+            reader.GetString(7),
+            reader.GetString(8) is { Length: > 0 } account ? account : null);
 
     private static async Task<bool> TableExistsAsync(
         SqliteConnection connection,
@@ -1044,6 +1068,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             previous.CapturedAtUtc.ToUniversalTime().ToString("O"),
             current.CapturedAtUtc.ToUniversalTime().ToString("O"),
             current.ResetsAtUtc?.ToUniversalTime().ToString("O") ?? "none");
+        if (current.AccountKey is not null) material += "|" + current.AccountKey;
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material))).ToLowerInvariant();
         return $"quota-burn-{hash[..24]}";
     }

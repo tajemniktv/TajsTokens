@@ -6,7 +6,7 @@ using TajsTokens.Infrastructure.Persistence;
 
 namespace TajsTokens.Infrastructure.Services;
 
-public sealed class CodexObservatoryService : ICodexObservatoryService
+public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRolloutInspection
 {
     private const long StateOverlapMs = 60_000;
     private const long StateRolloutVisibilityToleranceMs = 250;
@@ -78,6 +78,39 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
         }
 
         return await RefreshFromFilesystemAsync(cancellationToken);
+    }
+
+    public async Task<CodexRolloutInspectionReport> InspectAlternateRolloutsAsync(int offset, CancellationToken cancellationToken)
+    {
+        offset = Math.Max(0, offset);
+        var observedAt = _timeProvider.GetUtcNow();
+        // Separate read-only inspection: no ingestion, checkpoint, cursor, or cached-coverage writes.
+        var catalog = _stateCatalog is null ? null : await _stateCatalog.TryReadSinceAsync(0, cancellationToken);
+        if (catalog is null)
+            return new(observedAt, null, null, 0, [], "No usable selected state catalog. Alternate-path ownership and the unindexed path count are unknown.");
+
+        var indexed = catalog.Threads.Select(thread => thread.RolloutPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var alternates = DiscoverFiles(cancellationToken).Where(path => !indexed.Contains(path))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray();
+        var owners = catalog.Threads.GroupBy(thread => thread.ThreadId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
+        var comparisons = new List<CodexRolloutComparison>();
+        var reader = new CodexRolloutComparisonReader();
+        foreach (var path in alternates.Skip(offset).Take(8))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var id = CodexRolloutParser.ExtractSessionIdFromFileName(path);
+            if (id is null || !owners.TryGetValue(id, out var matches) || matches.Length != 1)
+            {
+                comparisons.Add(new(path, null, CodexRolloutComparisonKind.Unresolved, false, false, null,
+                    "No unique indexed counterpart from filename identity. A first session_meta may be a copied non-owning prefix; ownership is not guessed."));
+                continue;
+            }
+            comparisons.Add(await reader.CompareAsync(path, matches[0].RolloutPath, matches[0].ThreadId, cancellationToken));
+        }
+        return new(observedAt, catalog.DatabasePath, alternates.Length, offset, comparisons,
+            "Read-only sample: up to 8 pairs, 2 MiB and 20,000 records per file. Native paths outside discovery roots are compared when indexed. " +
+            "Filesystem discovery and cross-file reads are best-effort, not an atomic snapshot. Results describe this inspection only; no import, merge, export, or durable content copy occurs.");
     }
 
     private async Task<CodexObservatoryRefreshResult?> TryRefreshFromStateCatalogAsync(
@@ -389,7 +422,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
             bytes);
     }
 
-    private IReadOnlyList<string> DiscoverFiles()
+    private IReadOnlyList<string> DiscoverFiles(CancellationToken cancellationToken = default)
     {
         var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var options = new EnumerationOptions
@@ -402,6 +435,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
 
         foreach (var root in _roots)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (!Directory.Exists(root))
             {
                 continue;
@@ -411,6 +445,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
             {
                 foreach (var file in Directory.EnumerateFiles(root, "*.jsonl", options))
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     files.Add(Path.GetFullPath(file));
                 }
             }

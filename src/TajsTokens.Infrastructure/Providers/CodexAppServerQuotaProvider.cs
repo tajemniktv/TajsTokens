@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Interfaces;
@@ -14,7 +16,10 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
 {
     private static readonly TimeSpan s_requestTimeout = TimeSpan.FromSeconds(20);
 
-    public async Task<IReadOnlyList<QuotaSnapshot>> GetQuotaSnapshotsAsync(CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<QuotaSnapshot>> GetQuotaSnapshotsAsync(CancellationToken cancellationToken) =>
+        (await GetQuotaResponseAsync(cancellationToken)).Snapshots;
+
+    public async Task<CodexQuotaResponse> GetQuotaResponseAsync(CancellationToken cancellationToken)
     {
         using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutSource.CancelAfter(s_requestTimeout);
@@ -56,7 +61,7 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
             await WriteJsonLineAsync(process, new { method = "initialized" });
             await WriteJsonLineAsync(process, new { method = "account/rateLimits/read", id = 1 });
             var response = await ReadResponseAsync(process, 1, codexCommand, stderrTask, token);
-            return ParseRateLimitsResponse(response, DateTimeOffset.UtcNow);
+            return ParseQuotaResponse(response, DateTimeOffset.UtcNow);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -88,7 +93,10 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
         }
     }
 
-    internal static IReadOnlyList<QuotaSnapshot> ParseRateLimitsResponse(string json, DateTimeOffset capturedAtUtc)
+    internal static IReadOnlyList<QuotaSnapshot> ParseRateLimitsResponse(string json, DateTimeOffset capturedAtUtc) =>
+        ParseQuotaResponse(json, capturedAtUtc).Snapshots;
+
+    internal static CodexQuotaResponse ParseQuotaResponse(string json, DateTimeOffset capturedAtUtc)
     {
         using var document = JsonDocument.Parse(json);
         var root = document.RootElement;
@@ -141,12 +149,20 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
         AddWindow(limits, "primary", snapshots, capturedAtUtc, source);
         AddWindow(limits, "secondary", snapshots, capturedAtUtc, source);
 
+        // Backend account associated with this usage response, not a user or rollout owner.
+        // Keep only a versioned pseudonym; do not retain raw identifiers or inspect auth files.
+        string? accountKey = null;
+        if (result.EnumerateObject().Count(property => property.NameEquals("accountId")) == 1 &&
+            result.TryGetProperty("accountId", out var account) && account.ValueKind == JsonValueKind.String &&
+            account.GetString() is { Length: > 0 and <= 1024 } accountId && !string.IsNullOrWhiteSpace(accountId))
+            accountKey = "codex-account-sha256/v1:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(accountId))).ToLowerInvariant();
+
         // Some app-server versions have moved weekly into primary and omitted secondary. Window
         // duration, not primary/secondary position, is the semantic identity we trust.
-        return snapshots
+        return new(snapshots
             .GroupBy(snapshot => snapshot.Kind)
-            .Select(group => group.First())
-            .ToArray();
+            .Select(group => group.First() with { AccountKey = accountKey })
+            .ToArray(), accountKey);
     }
 
     internal static string ResolveCodexCommand()

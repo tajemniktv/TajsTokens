@@ -23,13 +23,15 @@ public sealed class SqliteForecastDatasetReader(string databasePath)
         DateTimeOffset? OptionalTime(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : Time(r.GetString(i));
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
+        command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('quota_snapshots') WHERE name = 'account_key';";
+        var hasAccountKey = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 1;
         command.Parameters.AddWithValue("$from", Utc(fromUtc));
         command.Parameters.AddWithValue("$lookback", Utc(fromUtc.AddHours(-2)));
         command.Parameters.AddWithValue("$to", Utc(toUtc));
         command.Parameters.AddWithValue("$provider", provider);
         command.Parameters.AddWithValue("$profile", profile);
-        command.CommandText = """
-            SELECT kind,captured_at_utc,used_percent,window_minutes,resets_at_utc,source
+        command.CommandText = $"""
+            SELECT kind,captured_at_utc,used_percent,window_minutes,resets_at_utc,source,{(hasAccountKey ? "account_key" : "''")}
             FROM quota_snapshots WHERE provider=$provider AND profile=$profile
               AND captured_at_utc >= $from AND captured_at_utc <= $to AND source LIKE 'codex-app-server:%'
             ORDER BY captured_at_utc LIMIT 100001;
@@ -38,7 +40,8 @@ public sealed class SqliteForecastDatasetReader(string databasePath)
         await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
             while (await reader.ReadAsync(cancellationToken))
                 quota.Add(new QuotaSnapshot(Enum.Parse<QuotaWindowKind>(reader.GetString(0)), Time(reader.GetString(1)),
-                    reader.IsDBNull(2) ? null : reader.GetDouble(2), reader.IsDBNull(3) ? null : reader.GetInt32(3), OptionalTime(reader, 4), provider, profile, reader.GetString(5)));
+                    reader.IsDBNull(2) ? null : reader.GetDouble(2), reader.IsDBNull(3) ? null : reader.GetInt32(3), OptionalTime(reader, 4), provider, profile, reader.GetString(5),
+                    reader.GetString(6) is { Length: > 0 } account ? account : null));
         if (quota.Count > 100000) throw new InvalidOperationException("Quota evaluation range exceeds the 100,000-row bound; narrow the range.");
         command.CommandText = """
             SELECT w.source_record_id,w.source_identity,w.source_file,w.start_byte_offset,w.end_byte_offset,

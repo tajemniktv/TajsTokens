@@ -187,7 +187,18 @@ public sealed partial class OverviewViewModel : ObservableObject
         var laneFresh = snapshot.IsQuotaSnapshotFresh(current);
         var currentForecast = snapshot.FindCurrentForecast(current);
         var forecast = currentForecast is { IsFresh: true } ? currentForecast.Forecast : null;
-        SetQuotaCard(kind, BuildQuotaCard(title, current, forecast, laneFresh));
+        var card = BuildQuotaCard(title, current, forecast, laneFresh);
+        if (laneFresh && forecast is null && currentForecast is not null)
+        {
+            card = card with
+            {
+                PredictedExhaustion = "Forecast unavailable",
+                SurvivalMessage = string.IsNullOrWhiteSpace(currentForecast.Diagnostic)
+                    ? currentForecast.HistoryPolicy
+                    : $"{currentForecast.HistoryPolicy} {currentForecast.Diagnostic}"
+            };
+        }
+        SetQuotaCard(kind, card);
     }
 
     private void SetQuotaCard(QuotaWindowKind kind, QuotaCardViewModel card)
@@ -285,7 +296,7 @@ public sealed partial class OverviewViewModel : ObservableObject
                 resetCountdown,
                 "Paused while stale",
                 "Forecast paused",
-                $"Last known good · {snapshot.Source}",
+                $"Last known good · {snapshot.Source} · {QuotaAccountScope.Describe(snapshot.AccountKey)}",
                 "Last-known-good quota is shown; forecasting is paused until the provider is fresh again.",
                 InfoBarSeverity.Warning);
         }
@@ -332,10 +343,13 @@ public sealed partial class OverviewViewModel : ObservableObject
                 ? $" · 80%-target band {lower:0}–{upper:0}% ({evidence.CalibrationEpochs} past resets)"
                 : $" · uncertainty learning ({evidence.CalibrationEpochs} comparable past resets)"
             : string.Empty;
-        if (forecast?.Evidence is { } diagnostics)
-            survivalMessage += $" {diagnostics.UncertaintyDescription} Model: {diagnostics.Model}; {diagnostics.ObservationCount} observations over {diagnostics.ObservedHours:0.#}h.";
+        var methodology = forecast?.Evidence is { } diagnostics
+            ? $"\n{diagnostics.UncertaintyDescription} Model: {diagnostics.Model}; {diagnostics.ObservationCount} observations over {diagnostics.ObservedHours:0.#}h."
+            : string.Empty;
         var trend = string.IsNullOrWhiteSpace(forecast?.Trend) ? string.Empty : $" · {forecast.Trend}";
-        var freshness = $"live · {snapshot.Source}";
+        var freshness = $"live · {snapshot.Source} · {QuotaAccountScope.Describe(snapshot.AccountKey)}";
+        if (snapshot.AccountKey is null)
+            survivalMessage = "Quota is live, but backend-account scope was not reported. Forecasting will not borrow unknown-account history.";
 
         return new QuotaCardViewModel(
             title,
@@ -343,7 +357,7 @@ public sealed partial class OverviewViewModel : ObservableObject
             resetCountdown,
             paceText,
             windowForecast,
-            $"{freshness}{confidence}{trend}",
+            $"{freshness}{confidence}{trend}{methodology}",
             survivalMessage,
             severity);
     }

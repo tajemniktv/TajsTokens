@@ -135,6 +135,7 @@
                           Checked="OnArchivedChanged" Unchecked="OnArchivedChanged" />
                 <Button x:Name="OpenNavigationButton" Content="Browse" Click="OnOpenNavigationClicked" Visibility="Collapsed" />
                 <Button Content="Refresh" Click="OnRefreshClicked" />
+                <Button Content="Rollout coverage" Click="OnRolloutCoverageClicked" />
             </StackPanel>
         </Grid>
 

@@ -182,6 +182,40 @@ public sealed class TelemetryCoordinatorTests : IDisposable
             intelligenceService: intelligenceService);
     }
 
+    [Theory]
+    [InlineData("B", true)]
+    [InlineData("B", false)]
+    [InlineData(null, true)]
+    public async Task SuccessfulAccountSwitchDropsOtherAccountsOmittedLanes(string? nextAccount, bool reportsWeekly)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var fiveHour = Quota(QuotaWindowKind.FiveHour, now, 10, now.AddHours(5)) with { AccountKey = "A" };
+        var weekly = Quota(QuotaWindowKind.Weekly, now, 20, now.AddDays(7)) with { AccountKey = "A" };
+        var tokens = new SequencedTokscaleProvider(
+            Enumerable.Range(0, 3).Select(_ => new Func<CancellationToken, Task<IReadOnlyList<TokenUsage>>>(_ => Task.FromResult<IReadOnlyList<TokenUsage>>([]))),
+            Enumerable.Range(0, 3).Select(_ => new Func<CancellationToken, Task<IReadOnlyList<TokenTimeBucket>>>(_ => Task.FromResult<IReadOnlyList<TokenTimeBucket>>([]))));
+        var provider = new ScopedQuotaProvider(new([fiveHour, weekly], "A"),
+            new(reportsWeekly ? [weekly with { AccountKey = nextAccount }] : [], nextAccount));
+        var coordinator = CreateCoordinator(tokens, provider);
+        await coordinator.RefreshAsync(RefreshTrigger.Startup, default);
+        var changed = await coordinator.RefreshAsync(RefreshTrigger.Interval, default);
+        Assert.Null(changed.QuotaLanes.Single(x => x.Kind == QuotaWindowKind.FiveHour).Snapshot);
+        Assert.All(changed.QuotaSnapshots, x => Assert.Equal(nextAccount, x.AccountKey));
+        Assert.Equal(reportsWeekly ? 1 : 0, changed.QuotaSnapshots.Count);
+        var failed = await coordinator.RefreshAsync(RefreshTrigger.Interval, default);
+        Assert.False(failed.QuotaDataFresh);
+        Assert.Equal(changed.QuotaSnapshots, failed.QuotaSnapshots);
+        Assert.All(failed.QuotaLanes, x => Assert.False(x.IsFresh));
+    }
+
+    private sealed class ScopedQuotaProvider(params CodexQuotaResponse[] responses) : ICodexQuotaProvider
+    {
+        private readonly Queue<CodexQuotaResponse> _responses = new(responses);
+        public Task<IReadOnlyList<QuotaSnapshot>> GetQuotaSnapshotsAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<CodexQuotaResponse> GetQuotaResponseAsync(CancellationToken cancellationToken) => _responses.Count > 0
+            ? Task.FromResult(_responses.Dequeue()) : throw new IOException("Sanitized provider failure");
+    }
+
     private static TokenUsage Usage(string model, long tokens) => new(
         "tokscale",
         "codex",

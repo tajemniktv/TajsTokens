@@ -41,19 +41,20 @@ if (args.Length == 2 && args[0] == "--evaluate")
     var report = QuotaForecastEvaluation.Evaluate(data);
     Console.WriteLine(report.Methodology);
     Console.WriteLine($"quota={report.AuthoritativeQuotaObservations}; workload={report.WorkloadObservations}; tokens={report.TokenObservations}; effort={report.TokensWithEffort}; collected={report.TokensWithCollectionTime}");
-    Console.WriteLine("kind,model,target,availability,n,epochs,MAE,RMSE,band_n,coverage,fitted");
+    var accounts = report.Scores.Select(x => x.AccountKey).Distinct().ToList();
+    Console.WriteLine("account_cohort,kind,model,target,availability,n,epochs,MAE,RMSE,band_n,coverage,fitted");
     foreach (var score in report.Scores)
-        Console.WriteLine(FormattableString.Invariant($"{score.Kind},{score.Model},{score.Target},{score.Availability},{score.Origins},{score.ResetGenerations},{score.MeanAbsoluteError:F3},{score.RootMeanSquaredError:F3},{score.IntervalOrigins},{score.IntervalCoverage:F3},{score.FittedOrigins}"));
+        Console.WriteLine(FormattableString.Invariant($"{(score.AccountKey is null ? "unknown" : $"cohort-{accounts.IndexOf(score.AccountKey) + 1}")},{score.Kind},{score.Model},{score.Target},{score.Availability},{score.Origins},{score.ResetGenerations},{score.MeanAbsoluteError:F3},{score.RootMeanSquaredError:F3},{score.IntervalOrigins},{score.IntervalCoverage:F3},{score.FittedOrigins}"));
     var scenarioHistory = CodexScenarioHistoryBuilder.Build(data);
     var scenario = new ScenarioPlannerService().Estimate(new ScenarioRequest(0.5, 1, 0), scenarioHistory, data.CapturedAtUtc);
     Console.WriteLine($"Scenario 5h: {scenario.FiveHour.Explanation}");
     Console.WriteLine($"Scenario weekly: {scenario.Weekly.Explanation}");
-    foreach (var stream in data.Quota.GroupBy(x => (x.Kind, x.Source)))
+    foreach (var stream in data.Quota.GroupBy(x => (x.Kind, x.Source, x.AccountKey)))
     {
         var productionRows = stream.OrderBy(x => x.CapturedAtUtc).ToArray();
         var timer = System.Diagnostics.Stopwatch.StartNew();
         var forecast = new ForecastingService().BuildForecast(productionRows, productionRows[^1].CapturedAtUtc);
-        Console.WriteLine($"Production {stream.Key.Kind}: {forecast.State}; model={forecast.Evidence?.Model}; calibration={forecast.Evidence?.CalibrationEpochs}; elapsed_ms={timer.ElapsedMilliseconds}");
+        Console.WriteLine($"Production {stream.Key.Kind} {(stream.Key.AccountKey is null ? "unknown" : $"cohort-{accounts.IndexOf(stream.Key.AccountKey) + 1}")}: {forecast.State}; model={forecast.Evidence?.Model}; calibration={forecast.Evidence?.CalibrationEpochs}; elapsed_ms={timer.ElapsedMilliseconds}");
     }
     return;
 }
@@ -61,14 +62,17 @@ if (args.Length != 1) throw new ArgumentException("Usage: ForecastEvaluation <lo
 using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = args[0], Mode = SqliteOpenMode.ReadOnly }.ToString());
 connection.Open();
 using var command = connection.CreateCommand();
-command.CommandText = "SELECT provider,profile,kind,source,captured_at_utc,used_percent,window_minutes,resets_at_utc FROM quota_snapshots WHERE used_percent BETWEEN 0 AND 100 AND resets_at_utc IS NOT NULL ORDER BY provider,profile,kind,source,captured_at_utc";
+command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('quota_snapshots') WHERE name='account_key'";
+var hasAccountKey = Convert.ToInt32(command.ExecuteScalar(), CultureInfo.InvariantCulture) == 1;
+command.CommandText = $"SELECT provider,profile,kind,source,captured_at_utc,used_percent,window_minutes,resets_at_utc,{(hasAccountKey ? "account_key" : "''")} FROM quota_snapshots WHERE used_percent BETWEEN 0 AND 100 AND resets_at_utc IS NOT NULL ORDER BY provider,profile,kind,source,captured_at_utc";
 var rows = new List<QuotaSnapshot>();
 using (var reader = command.ExecuteReader())
     while (reader.Read())
-        rows.Add(new QuotaSnapshot(Enum.Parse<QuotaWindowKind>(reader.GetString(2)), DateTimeOffset.Parse(reader.GetString(4), CultureInfo.InvariantCulture), reader.GetDouble(5), reader.IsDBNull(6) ? null : reader.GetInt32(6), DateTimeOffset.Parse(reader.GetString(7), CultureInfo.InvariantCulture), reader.GetString(0), reader.GetString(1), reader.GetString(3)));
+        rows.Add(new QuotaSnapshot(Enum.Parse<QuotaWindowKind>(reader.GetString(2)), DateTimeOffset.Parse(reader.GetString(4), CultureInfo.InvariantCulture), reader.GetDouble(5), reader.IsDBNull(6) ? null : reader.GetInt32(6), DateTimeOffset.Parse(reader.GetString(7), CultureInfo.InvariantCulture), reader.GetString(0), reader.GetString(1), reader.GetString(3), reader.GetString(8) is { Length: > 0 } account ? account : null));
 Console.WriteLine("Source-separated replay; embedded timestamps are event-time reconstruction, not proof of historical ingestion availability. Near-reset values are proxies within 5 minutes, not invented exact reset outcomes. Exhaustion negatives require a reading at reset. Bands use earlier completed generations only, one score per epoch at similar lead. No raw identifiers exported.");
-Console.WriteLine("kind,source,model,target,n,epochs,MAE_pp,RMSE_pp,band_n,coverage,width_pp,exhaustion_label_n,classification_accuracy,eta_n,eta_bracket_MAE_h");
-foreach (var stream in rows.GroupBy(x => (x.Provider, x.Profile, x.Kind, x.Source)))
+Console.WriteLine("account_cohort,kind,source,model,target,n,epochs,MAE_pp,RMSE_pp,band_n,coverage,width_pp,exhaustion_label_n,classification_accuracy,eta_n,eta_bracket_MAE_h");
+var accountCohorts = rows.Select(x => x.AccountKey).Distinct().ToList();
+foreach (var stream in rows.GroupBy(x => (x.Provider, x.Profile, x.Kind, x.Source, x.AccountKey)))
 {
     foreach (var model in QuotaPaceModels.Candidates.Append("adaptive"))
     foreach (var horizon in new[] { 0.5, 2.0, 24.0, -1.0 })
@@ -82,6 +86,6 @@ foreach (var stream in rows.GroupBy(x => (x.Provider, x.Profile, x.Kind, x.Sourc
         var labels = trials.Where(x => x.ObservedExhaustion is not null).ToArray();
         var etas = trials.Where(x => x.ExhaustionEtaBracketErrorHours is not null).ToArray();
         string Metric(IEnumerable<double> values) => values.Any() ? values.Average().ToString("F3", CultureInfo.InvariantCulture) : "NA";
-        Console.WriteLine(FormattableString.Invariant($"{stream.Key.Kind},{stream.Key.Source},{model},{trials[0].Target},{trials.Count},{trials.Select(x => x.ResetUtc).Distinct().Count()},{errors.Average(Math.Abs):F3},{Math.Sqrt(errors.Average(x => x * x)):F3},{bands.Length},{Metric(bands.Select(x => x.ObservedRemaining >= x.LowerRemaining && x.ObservedRemaining <= x.UpperRemaining ? 1d : 0d))},{Metric(bands.Select(x => x.UpperRemaining!.Value - x.LowerRemaining!.Value))},{labels.Length},{Metric(labels.Select(x => x.PredictedExhaustion == x.ObservedExhaustion ? 1d : 0d))},{etas.Length},{Metric(etas.Select(x => x.ExhaustionEtaBracketErrorHours!.Value))}"));
+        Console.WriteLine(FormattableString.Invariant($"{(stream.Key.AccountKey is null ? "unknown" : $"cohort-{accountCohorts.IndexOf(stream.Key.AccountKey) + 1}")},{stream.Key.Kind},{stream.Key.Source},{model},{trials[0].Target},{trials.Count},{trials.Select(x => x.ResetUtc).Distinct().Count()},{errors.Average(Math.Abs):F3},{Math.Sqrt(errors.Average(x => x * x)):F3},{bands.Length},{Metric(bands.Select(x => x.ObservedRemaining >= x.LowerRemaining && x.ObservedRemaining <= x.UpperRemaining ? 1d : 0d))},{Metric(bands.Select(x => x.UpperRemaining!.Value - x.LowerRemaining!.Value))},{labels.Length},{Metric(labels.Select(x => x.PredictedExhaustion == x.ObservedExhaustion ? 1d : 0d))},{etas.Length},{Metric(etas.Select(x => x.ExhaustionEtaBracketErrorHours!.Value))}"));
     }
 }

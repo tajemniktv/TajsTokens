@@ -127,17 +127,26 @@ public sealed class TelemetryCoordinator
             var quotaResponseHasSupportedWindow = false;
             try
             {
-                freshQuotaSnapshots = await _quotaProvider.GetQuotaSnapshotsAsync(refreshToken);
+                var response = await _quotaProvider.GetQuotaResponseAsync(refreshToken);
+                freshQuotaSnapshots = response.Snapshots;
+                if (freshQuotaSnapshots.Any(item => item.AccountKey != response.AccountKey))
+                    throw new InvalidOperationException("Quota response contains inconsistent backend-account scope.");
+                var compatiblePrevious = previous with
+                {
+                    QuotaSnapshots = previous.QuotaSnapshots.Where(item => item.AccountKey == response.AccountKey).ToArray(),
+                    QuotaLanes = previous.QuotaLanes.Select(lane =>
+                        lane.Snapshot is { } retained && retained.AccountKey != response.AccountKey
+                            ? lane with { Snapshot = null, State = TelemetryHealthState.Unavailable, LastSuccessUtc = null }
+                            : lane).ToArray()
+                };
+                currentForecasts = currentForecasts.Where(item => item.Current.AccountKey == response.AccountKey).ToArray();
                 var supported = freshQuotaSnapshots
                     .Where(snapshot => snapshot.Kind is QuotaWindowKind.FiveHour or QuotaWindowKind.Weekly)
                     .ToArray();
                 quotaResponseHasSupportedWindow = supported.Length > 0;
-                if (quotaResponseHasSupportedWindow)
-                {
-                    quotaSnapshots = MergeQuotaSnapshots(previous.QuotaSnapshots, supported);
-                }
+                quotaSnapshots = MergeQuotaSnapshots(compatiblePrevious.QuotaSnapshots, supported);
 
-                quotaLanes = BuildQuotaLanes(previous, supported, startedAt);
+                quotaLanes = BuildQuotaLanes(compatiblePrevious, supported, startedAt);
                 quotaFresh = quotaResponseHasSupportedWindow && quotaLanes.All(lane => lane.IsFresh || lane.NotReportedByProvider);
                 var liveCount = quotaLanes.Count(lane => lane.State == TelemetryHealthState.Live);
                 var staleCount = quotaLanes.Count(lane => lane.State == TelemetryHealthState.Stale);
@@ -154,6 +163,7 @@ public sealed class TelemetryCoordinator
                         ? $"Partial provider-authoritative quota refresh: {liveCount} live, {staleCount} stale, {unavailableCount} unavailable lane(s). Fresh lanes remain independently usable."
                         : "The app-server responded but did not expose a supported five-hour or weekly window; previous lanes remain stale when available.";
 
+                detail += $" {QuotaAccountScope.Describe(response.AccountKey)}; local rollout work is not account-attributed.";
                 sources.Add(new ProviderHealthSnapshot(
                     "Codex app-server",
                     sourceState,
@@ -259,7 +269,8 @@ public sealed class TelemetryCoordinator
                             $"{coverage.DiscoveredPaths} files in configured discovery roots, {coverage.UnindexedPaths} not indexed; " +
                             $"{coverage.IndexedOutsideDiscovery} indexed paths outside that discovered set. " +
                             "Unindexed files may be alternate copies, not missing tasks; they are not automatically imported while the state index is usable. " +
-                            "These path counts do not measure unique work or durable collection completeness.";
+                            "These path counts do not measure unique work or durable collection completeness. " +
+                            "Use Codex > Rollout coverage for bounded, read-only alternate-file comparisons.";
                     }
                     sources.Add(new ProviderHealthSnapshot(
                         "Codex rollouts",
@@ -405,7 +416,7 @@ public sealed class TelemetryCoordinator
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
-                    currentForecasts = previous.CurrentForecasts
+                    currentForecasts = currentForecasts
                         .Select(item => item with { State = TelemetryHealthState.Stale, Diagnostic = AppendDiagnostic(item.Diagnostic, SummarizeError(exception)) })
                         .ToArray();
                     events.Add(new TelemetryRefreshEvent(DateTimeOffset.UtcNow, "Forecast unavailable", SummarizeError(exception)));

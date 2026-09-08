@@ -465,9 +465,9 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         await EnsureInitializedAsync(cancellationToken);
         await ExecuteAsync(
             """
-            INSERT INTO quota_snapshots(provider, profile, kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, source)
-            VALUES($provider, $profile, $kind, $captured, $used, $window, $resets, $source)
-            ON CONFLICT(provider, profile, kind, captured_at_utc, source) DO UPDATE SET
+            INSERT INTO quota_snapshots(provider, profile, kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, source, account_key)
+            VALUES($provider, $profile, $kind, $captured, $used, $window, $resets, $source, $account)
+            ON CONFLICT(provider, profile, kind, captured_at_utc, source, account_key) DO UPDATE SET
               used_percent = excluded.used_percent,
               window_minutes = excluded.window_minutes,
               resets_at_utc = excluded.resets_at_utc;
@@ -482,6 +482,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                 command.Parameters.AddWithValue("$window", DbValue(snapshot.WindowMinutes));
                 command.Parameters.AddWithValue("$resets", snapshot.ResetsAtUtc is null ? DBNull.Value : SerializeUtc(snapshot.ResetsAtUtc.Value));
                 command.Parameters.AddWithValue("$source", snapshot.Source);
+                command.Parameters.AddWithValue("$account", snapshot.AccountKey ?? "");
             },
             cancellationToken);
     }

@@ -7,7 +7,8 @@ namespace TajsTokens.Infrastructure.Services;
 public sealed record CodexObservatoryRuntime(
     ICodexObservatoryStore Store,
     ICodexSessionIngestionService Ingestion,
-    ICodexObservatoryService Service);
+    ICodexObservatoryService Service,
+    ICodexRolloutInspection RolloutInspection);
 
 /// <summary>
 /// Infrastructure composition boundary for the local Codex observatory. UI code receives only the
@@ -36,6 +37,6 @@ public static class CodexObservatoryRuntimeFactory
             store,
             stateCatalog,
             stateIndexStore);
-        return new CodexObservatoryRuntime(store, ingestion, service);
+        return new CodexObservatoryRuntime(store, ingestion, service, service);
     }
 }

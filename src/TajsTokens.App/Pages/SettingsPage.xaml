@@ -182,7 +182,7 @@
                     <TextBlock x:Name="SettingsSchemaText"
                                Opacity="0.7"
                                Margin="0,6,0,0" />
-                    <TextBlock Text="TajsTokens stores normalized content-free telemetry here. Provider-owned rollout paths and raw prompt/tool payloads are not copied into the normal telemetry surface."
+                    <TextBlock Text="TajsTokens retains selected content-free observations and local source paths, not prompt, reasoning, or tool bodies. There is no automatic age-based cleanup. Replaced rollout generations can rebuild accounting projections; preserve backups for recovery. Native source data remains read-only."
                                Opacity="0.75"
                                TextWrapping="Wrap" />
                 </StackPanel>

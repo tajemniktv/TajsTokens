@@ -9,7 +9,7 @@ public static class QuotaForecastEvaluation
     {
         var scores = new List<ForecastEvaluationScore>();
         foreach (var stream in data.Quota.Where(x => x.Authority == QuotaObservationAuthority.ProviderAuthoritative)
-                     .GroupBy(x => (x.Provider, x.Profile, x.Kind, x.Source)))
+                     .GroupBy(x => (x.Provider, x.Profile, x.Kind, x.Source, x.AccountKey)))
         {
             var rows = stream.ToArray();
             var local = data with { Quota = rows };
@@ -22,7 +22,7 @@ public static class QuotaForecastEvaluation
                     cancellationToken.ThrowIfCancellationRequested();
                     var trials = model == "adaptive" ? QuotaForecastBacktester.ReplayAdaptive(rows, horizon, cancellationToken)
                         : QuotaForecastBacktester.Replay(rows, model, horizon, cancellationToken);
-                    scores.Add(Score(stream.Key.Kind, stream.Key.Source, model, target, "quota-capture-time", trials));
+                    scores.Add(Score(stream.Key.Kind, stream.Key.Source, model, target, "quota-capture-time", trials) with { AccountKey = stream.Key.AccountKey });
                 }
                 foreach (var availability in Enum.GetValues<ForecastReplayAvailability>())
                 foreach (var candidate in QuotaWorkloadBacktester.Candidates)
@@ -36,7 +36,7 @@ public static class QuotaForecastEvaluation
                         ObservedExhaustion = null, ExhaustionEtaBracketErrorHours = null
                     }).ToArray();
                     scores.Add(Score(stream.Key.Kind, stream.Key.Source, candidate, target, availability.ToString(), points,
-                        trials.Count(x => x.UsedWorkloadModel)));
+                        trials.Count(x => x.UsedWorkloadModel)) with { AccountKey = stream.Key.AccountKey });
                 }
             }
         }

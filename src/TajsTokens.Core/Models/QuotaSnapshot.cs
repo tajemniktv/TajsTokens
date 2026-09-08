@@ -10,7 +10,8 @@ public sealed record QuotaSnapshot(
     DateTimeOffset? ResetsAtUtc,
     string Provider,
     string Profile,
-    string Source)
+    string Source,
+    string? AccountKey = null)
 {
     public double? RemainingPercent => UsedPercent is null
         ? null

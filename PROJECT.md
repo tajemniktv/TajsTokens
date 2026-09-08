@@ -213,7 +213,7 @@ by making table counts equal. The earlier dated inventories below remain histori
 
 | Daily question | Current source and reader | Owned storage / read policy | Boundary and remaining gap |
 | --- | --- | --- | --- |
-| What quota is reported now? | App-server quota response through `TelemetryCoordinator` | `SqliteTelemetryRepository` stores source-qualified `quota_snapshots`; current lanes keep freshness/omission separate from history | Account-meter readings are not thread-token costs. Provider/profile labels do not yet establish continuity of authenticated account identity across account changes. |
+| What quota is reported now? | App-server quota response through `TelemetryCoordinator` | `SqliteTelemetryRepository` stores source/account-qualified `quota_snapshots`; current lanes keep freshness/omission separate from history | The response's backend-account pseudonym separates quota streams; unknown historical scope stays unknown. It does not identify a person or attribute local thread work. |
 | What work exists and how is it organized? | State/project/spawn rows through `CodexThreadObservabilityService` and `ICodexThreadReadModel` | Direct on-demand inspection; explicit `CodexThreadReadModelPolicy` preserves alternatives | Native thread IDs link supported records. Current model/project metadata is not historical turn context. Owned `sessions`/`agents` are rollout-derived projections, not a mirror of every native thread. |
 | What happened in a thread? | History SQLite turns/items and separate realtime lane through the native thread reader | On-demand local content; selected source and provenance retained in the view, no durable transcript copy | Projection coverage may differ from retained JSONL. Missing history is not proof that a turn never happened; alternative sources are not silently concatenated. |
 | How much local token/context activity was observed? | Owned rollout records through `CodexRolloutParser` / `CodexSessionIngestionService` | `codex_native_token_events`, `context_observations`, `codex_workload_observations` retain selected safe observations; counter/parser/checkpoint tables support replay | Native record/turn/session identity and source offsets qualify observations. Collection time is separate from event time; legacy missing collection times remain missing. Native state totals are not added to rollout totals. |
@@ -249,8 +249,8 @@ configured-root discovery count, unindexed paths, and indexed paths outside that
 refreshes retain the original coverage timestamp rather than pretending the enumeration ran again.
 Discovery remains best-effort (inaccessible/reparse-point paths can be excluded), not proof of
 complete filesystem or durable-history coverage. Unindexed files are not automatically ingested
-while the state catalog is usable. A future alternate-rollout policy must establish ownership,
-overlap, and divergence before promoting additional records; same thread ID is not sufficient.
+while the state catalog is usable. The inspection-only alternate-rollout policy below does not
+authorize promotion of additional records; same thread ID is not sufficient.
 
 When the selected state database path changes, the collector immediately rereads the new source
 without the old timestamp cursor. A successful full reconciliation re-anchors that disposable
@@ -259,6 +259,66 @@ replacement is covered by the periodic full comparison, not claimed as immediate
 Sanitized generation-switch tests cover a new catalog whose timestamps are lower than the old
 cursor and verify retained fingerprints. Path-coverage tests cover indexed files outside discovery
 roots, unindexed alternatives, unchanged warm refreshes, and diagnostics reaching the product.
+
+#### Alternate-rollout inspection policy (2026-09-08)
+
+`CodexObservatoryService` exposes a separate, user-invoked `ICodexRolloutInspection` capability
+through **Codex > Rollout coverage**. It reuses the collector's selected state catalog and
+configured-root discovery; it does not use or mutate ingestion checkpoints, fingerprints,
+counter state, cached coverage, or owned observations. Routine refreshes do not read alternate
+file bodies. Existing source diagnostics point to this inspection rather than treating path
+counts as evidence completeness.
+
+Each page inspects at most eight unindexed paths, in stable path order, with a 2 MiB and
+20,000-record limit per file and a 30-second cancellable UI operation. An indexed counterpart
+is selected only from a unique state-thread/filename ID match, including indexed paths outside
+discovery roots. That is candidate selection, not proof of ownership. Both filenames and an
+observed `session_meta.payload.id` must corroborate the indexed thread before comparing owned
+records. A fresh no-UUID file does not acquire ownership from its first metadata record.
+Non-owning prefixes are kept distinct; they are not counted as the child's records and are not
+asserted to be a parent relationship merely because they precede the owner. A later conflicting
+session owner, invalid JSON, incomplete final line, unreadable/replaced/changing input, or an
+inspection limit produces an explicit unresolved result.
+
+The comparison is of captured bytes, not normalized token totals or semantic equivalence:
+
+- **Identical bytes:** complete captured file bytes match; ownership is a separate reported fact.
+- **Identical owned records:** owned record bytes match while non-owning prefixes differ; the
+  whole files are not identical.
+- **Prefix overlap:** one complete owned record stream is an exact byte-for-byte prefix of the
+  other. Additional records are not automatically missing collected work.
+- **Different records:** owned streams differ after their common prefix. Formatting changes
+  alone can cause this result; it is not proof of conflicting semantics or additional usage.
+- **Unresolved:** no safe comparison at these bounds. Unknown is not a zero-overlap conclusion.
+
+Physical identity, length, creation time, and write time are checked around each read pair to
+reject ordinary concurrent replacement/change. Native files and catalog rows do not form an
+atomic snapshot; same-size in-place edits with deliberately preserved metadata are not promised
+to be detectable. Results are dated, local, ephemeral inspection output. Transcripts, reasoning,
+tool bodies, byte buffers, and comparison hashes are not retained in the owned database or exported.
+No comparison result permits automatic import, deduplication, deletion, or accounting changes.
+
+The bounded native inventory selected `state_5.sqlite`: 353 indexed paths, 355 discovered paths,
+31 unindexed paths, and 29 indexed paths outside discovery roots. Of the eight smallest alternate
+pairs sampled, five were byte-identical with corroborated owners and three exceeded 2 MiB. The
+other pairs were not compared; these counts are dated observations, not a corpus-wide equality claim.
+The implemented C# capability was also exercised read-only against the installed source: its
+first path-ordered page returned two identical pairs and six unresolved comparisons, with no
+owned database created. This is a different sample ordering from the smallest-file inventory.
+At local upstream commit `a51608398d53b6d23ed98b8287de415b35f1eea5`,
+`codex-rs/thread-store/src/local/rollout_migration.rs` stages/reprojects and renames replacement
+rollouts while checking source length/mtime. This corroborates the need to handle replacements;
+it does not establish that migration caused these particular copies, or that the installed
+desktop exactly matches that commit.
+
+Existing ingestion retains physical file identity and offset-qualified record identity, restores
+parser ownership at the matching checkpoint, and writes projection batches before ordered token
+reduction and checkpoint advancement. `codex_counter_state` is keyed by session while source
+event deduplication is physical-record-qualified. Therefore replay safety within a known source
+does not establish safe accounting across divergent/copy files (especially last-only counters).
+Any future alternate collection must first specify source/record equivalence, overlapping counter
+epochs, active/retired generation selection, replay/recovery, migration and retention tests. This
+inspection slice deliberately changes none of those writers.
 
 ### Linking sources without erasing their meaning
 
@@ -276,6 +336,34 @@ Use read-only native access and consistent bounded reads where the source suppor
 Preserve source event time separately from actual collection time. A backfill reconstructs available history; it cannot claim those records were collected at their original event times. A disappearing native row/file must not silently delete retained historical observations. Conversely, direct-inspection content may become unavailable when Codex removes it: the product must not promise transcript recovery it never retained.
 
 Migrations, retention, backups, and rebuild operations must distinguish irreplaceable collected evidence from disposable projections. Never silently delete unique quota observations or other evidence that cannot be reacquired. Changes to these lifecycle policies require explicit implementation and validation; this section defines the target guarantees, not proof that every maintenance workflow already exists.
+
+### Current owned-data retention and recovery policy
+
+The current local policy is **no automatic age-based history deletion**. There is no reset-history
+button. This is intentional for a small dogfood application; add retention controls only when measured
+growth or a user request warrants them. This does not prohibit existing ingestion corrections or
+replacement of active accounting projections when a rollout generation changes.
+
+| Owned data | Retention / rebuild posture |
+| --- | --- |
+| `quota_snapshots`, context/workload observations, legacy `token_usage` / `usage_events` / `reset_events` / `announcements` | No age-based expiry. Native sources may disappear and live quota cannot be reacquired retrospectively. Do not assume legacy rows are disposable merely because a newer pipeline exists. |
+| `codex_native_token_events` | Active normalized accounting, not an immutable archive of every physical generation. The existing batch writer retires the replaced path's token generation while activating its new identity, avoiding double counting. No separate historical-generation archive is promised. |
+| `sessions`, `agents`, relationships, repositories/workspaces | Retain existing rollout-derived metadata. Some projections can be recalculated while source evidence remains; there is no blanket safe-delete promise after native history is removed. |
+| Rollout file/record identities, parser/counter state, ingestion checkpoints, schema/revision tables | Managed with the associated active replay/checkpoint generation. The batch writer retires obsolete path-generation bookkeeping transactionally. These are not independent user-cleanable caches; deleting a subset can cause re-ingestion or lost continuity. |
+| State-index fingerprints and sync cursor | Rebuildable acquisition acceleration. Existing reconciliation re-anchors on selected-source changes; it does not delete collected history. |
+| `forecast_snapshots`, `quota_reset_events` and in-memory burn/scenario/evaluation results | Derived, not source truth. Recalculation requires the retained inputs and policy; saved results are currently retained, not periodically purged. |
+| Settings, local exports, deployment backups and retained binaries | User-owned/local recovery material, retained until explicit removal. Exports are separately user-invoked; this policy does not authorize sharing them. |
+
+Normal local deployment takes stopped-app data/settings backups and supports binary rollback.
+Restoring data remains an explicit stopped-app operation described in `README.md`; preserve the
+entire current data directory before restoring a matching snapshot. Binary rollback does not migrate
+a newer database backward. No new automatic restore, deletion, source write, or upload is introduced.
+
+The Diagnostics page consumes the existing in-memory collector snapshot, shows per-source health,
+quota/forecast explanations and bounded recent events, and links to source inspection and Settings.
+Opening it performs no acquisition; its Refresh action uses the existing shared coordinator. It does
+not infer root causes from error text or claim durable incident history. Overview keeps detailed
+forecast evidence/methodology behind an expander rather than repeating it in the main message.
 
 The durable store is history of normalized evidence, not a warehouse of product conclusions and not an automatic mirror of every readable source payload.
 
@@ -364,6 +452,43 @@ Historical inputs must be bounded at forecast evaluation time. No walk-forward/b
 Provider meters are quantized/limited-precision observations. A repeated percentage reading means no movement was visible at the meter's precision; it does **not** establish exact zero consumption. Forecasting methods must model or conservatively preserve that uncertainty.
 
 ### Account-local learning
+
+**2026-09-08 scope audit:** the installed npm CLI (`codex-cli 0.153.4`), reached through the
+same CLI installation used by the provider's PATH fallback, returns nonempty `accountId` on
+`account/rateLimits/read`. Only field presence/names were recorded by the read-only probe, not
+the identifier value or authentication material. Its response has no `userId` field. At local
+upstream commit `a51608398d53b6d23ed98b8287de415b35f1eea5`,
+`app-server-protocol/src/protocol/v2/account.rs::GetAccountRateLimitsResponse.account_id`
+is explicitly the backend account associated with that usage snapshot. This does not prove
+which account produced historical rollout work, identify a person within a shared account,
+or establish that every historical `default` profile row has the same account. The upstream
+checkout is corroboration, not an exact-build match for the installed CLI.
+
+**Backend-account retention and read policy (2026-09-08):** retain a versioned SHA-256 pseudonym
+of the exact nonempty response `accountId`, never the raw ID or authentication material. This
+is a linkable local account key, not anonymization or a user identity. Missing, malformed,
+oversized, or duplicate account fields remain unknown. The response envelope preserves scope
+even when no supported quota windows are returned. No auth-file inspection is needed.
+
+Owned schema 9 adds this scope to quota and forecast keys; intelligence component 2 adds it to
+reset observations. Existing rows are preserved with unknown scope, without backfilling from
+the current login. This field follows the retained quota/derived-history lifetime; no new
+export or automatic deletion is introduced. The quota history reader's omitted/null account
+parameter selects unknown scope, not every account. Historical explorers can still show all
+streams with scope labels; read-only evaluation also supports schema-8 databases as unknown.
+
+Current forecasts use only a fresh authoritative anchor and same-source, same-account history
+no newer than that anchor. Unknown current scope has usable meter readings but a learning
+forecast. Successful account changes clear omitted lanes and forecasts from another account;
+failed reads retain the last successful observations as stale. Resets, burn intervals, alerts,
+scenario cohorts, and chronological evaluation stay account-separated. Broad quota overlays
+are omitted when independent streams cannot be represented honestly in one series.
+
+Local rollout/token activity remains installation-scoped. Showing it beside quota movement
+means co-observation, not account membership or causation. Production scenarios require a
+known current quota scope and recent matching evidence; no legacy/other-account history is
+borrowed to fill sparse training data. The pace algorithm and calibration thresholds are
+unchanged. A newly observed account may need to learn from new quota samples.
 
 There is no assumed universal conversion from tokens to subscription quota. Any relationship between quota movement and workload must be learned from the user's own observed history and remain conditional on available coverage.
 

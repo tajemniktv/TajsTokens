@@ -167,7 +167,7 @@ public sealed class SqliteIntelligenceServiceTests
             var detail = await intelligence.GetQuotaBurnDetailAsync(burn, 20, CancellationToken.None);
             Assert.Contains(detail.Contributors, item => item.SessionId == "root" && !item.IsSubagent);
             Assert.Contains(detail.Contributors, item => item.SessionId == "child" && item.IsSubagent);
-            Assert.Contains("Estimated attribution", detail.Methodology, StringComparison.OrdinalIgnoreCase);
+            Assert.Contains("not verified to belong to that account", detail.Methodology, StringComparison.OrdinalIgnoreCase);
         }
         finally
         {
@@ -411,7 +411,9 @@ public sealed class SqliteIntelligenceServiceTests
 
             var snapshots = await repository.GetRecentQuotaSnapshotsAsync(
                 QuotaWindowKind.FiveHour, "codex", "default", 10, CancellationToken.None);
-            Assert.Equal(3, snapshots.Count);
+            Assert.Single(snapshots);
+            Assert.Equal(2, (await repository.GetRecentQuotaSnapshotsAsync(
+                QuotaWindowKind.FiveHour, "codex", "default", 10, CancellationToken.None, accountKey: "fixture-account")).Count);
 
             var results = await intelligence.BuildAndPersistCurrentForecastsAsync(
                 [new QuotaLaneState(QuotaWindowKind.FiveHour, "codex", "default", current, TelemetryHealthState.Live, current.CapturedAtUtc)],
@@ -616,7 +618,8 @@ public sealed class SqliteIntelligenceServiceTests
             reset,
             "codex",
             "default",
-            source);
+            source,
+            source == "app-server" || source.StartsWith("codex-app-server:", StringComparison.Ordinal) ? "fixture-account" : null);
 
     private static QuotaSnapshot QuotaWithoutReset(
         QuotaWindowKind kind,

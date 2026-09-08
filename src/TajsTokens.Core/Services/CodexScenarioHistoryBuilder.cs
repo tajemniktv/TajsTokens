@@ -10,7 +10,7 @@ public static class CodexScenarioHistoryBuilder
     {
         var result = new List<ScenarioHistorySample>();
         foreach (var stream in data.Quota.Where(x => x.Authority == QuotaObservationAuthority.ProviderAuthoritative)
-                     .GroupBy(x => (x.Provider, x.Profile, x.Kind, x.Source)))
+                     .GroupBy(x => (x.Provider, x.Profile, x.Kind, x.Source, x.AccountKey)))
         foreach (var epoch in QuotaForecastBacktester.SplitEpochs(stream))
         {
             var start = 0;
@@ -30,7 +30,7 @@ public static class CodexScenarioHistoryBuilder
                 result.Add(new ScenarioHistorySample(before.Kind, before.CapturedAtUtc, after.CapturedAtUtc,
                     after.UsedPercent!.Value - before.UsedPercent!.Value,
                     features.TokenActiveRootSessions, features.TokenActiveSubagentSessions,
-                    Exclusive(features.ModelTokenShares), Exclusive(features.EffortTokenShares), before.ResetsAtUtc, before.Source));
+                    Exclusive(features.ModelTokenShares), Exclusive(features.EffortTokenShares), before.ResetsAtUtc, before.Source, before.AccountKey));
             }
         }
         return result;

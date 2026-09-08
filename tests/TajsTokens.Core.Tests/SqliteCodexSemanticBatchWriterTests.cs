@@ -103,7 +103,7 @@ public sealed class SqliteCodexIngestionBatchWriterTests
                 captured.AddHours(5),
                 "codex",
                 "codex",
-                "codex-app-server:codex");
+                "codex-app-server:codex", "fixture-account");
             var current = new QuotaSnapshot(
                 QuotaWindowKind.FiveHour,
                 captured,
@@ -112,7 +112,7 @@ public sealed class SqliteCodexIngestionBatchWriterTests
                 captured.AddHours(5),
                 "codex",
                 "codex",
-                "codex-app-server:codex");
+                "codex-app-server:codex", "fixture-account");
             await repository.UpsertQuotaSnapshotAsync(previous, CancellationToken.None);
             if (providerFirst)
             {
@@ -133,7 +133,9 @@ public sealed class SqliteCodexIngestionBatchWriterTests
 
             var snapshots = await repository.GetRecentQuotaSnapshotsAsync(
                 QuotaWindowKind.FiveHour, "codex", "codex", 10, CancellationToken.None);
-            Assert.Equal(3, snapshots.Count);
+            Assert.Single(snapshots);
+            Assert.Equal(2, (await repository.GetRecentQuotaSnapshotsAsync(
+                QuotaWindowKind.FiveHour, "codex", "codex", 10, CancellationToken.None, accountKey: "fixture-account")).Count);
 
             var intelligence = new TajsTokens.Infrastructure.Services.SqliteIntelligenceService(database, repository);
             var results = await intelligence.BuildAndPersistCurrentForecastsAsync(

@@ -126,7 +126,8 @@ public sealed partial class AnalyticsPage : Page
             interval.IntervalId,
             $"+{interval.DeltaUsedPercent:0.#} pp · {FormatKind(interval.Kind)} · {interval.EndUtc.ToLocalTime():dd MMM HH:mm:ss}",
             $"Over {FormatDuration(interval.EndUtc - interval.StartUtc)} · {FormatCount(interval.NativeTokens)} local tokens · " +
-            (QuotaSnapshot.ClassifyAuthority(interval.AfterSource) == QuotaObservationAuthority.ProviderAuthoritative ? "account meter" : "rollout reading")))
+            (QuotaSnapshot.ClassifyAuthority(interval.AfterSource) == QuotaObservationAuthority.ProviderAuthoritative ? "account meter" : "rollout reading") +
+            $" · {QuotaAccountScope.Describe(interval.AccountKey)}"))
             .ToArray();
         BurnIntervalList.ItemsSource = burnRows.Length == 0
             ? new[] { new BurnIntervalRow(string.Empty, "No changes in this view", "Try a longer range or another source. Missing readings do not mean zero consumption.") }
@@ -154,7 +155,7 @@ public sealed partial class AnalyticsPage : Page
             : dashboard.ResetEvents.Select(reset => new ResetRow(
                 $"{reset.EffectiveAtUtc.ToLocalTime():g} · {FormatKind(reset.Kind)} · {FormatClassification(reset.Classification)}",
                 $"{FormatNullablePercent(reset.BeforeUsedPercent)} → {FormatNullablePercent(reset.AfterUsedPercent)} used · " +
-                $"{reset.Source} · {reset.Explanation}"))
+                $"{reset.Source} · {QuotaAccountScope.Describe(reset.AccountKey)} · {reset.Explanation}"))
                 .ToArray();
 
         StatusText.Text =
@@ -186,8 +187,8 @@ public sealed partial class AnalyticsPage : Page
             $"{FormatCount(interval.NativeTokens)} local tokens · {interval.RootSessions} root / {interval.SubagentSessions} subagent sessions";
         IntervalEvidenceText.Text =
             $"{interval.StartUtc.ToLocalTime():G} → {interval.EndUtc.ToLocalTime():G}\n" +
-            $"Source: {interval.AfterSource}\nAccount profile: {interval.Provider}/{interval.Profile}\nReset: {FormatReset(interval.ResetsAtUtc)}\n\n" +
-            "The meter can be rounded or delayed. Session activity is correlated with the interval; it does not establish per-session quota costs. Activity bars show shares of locally recorded tokens, not shares of quota.";
+            $"Source: {interval.AfterSource}\nProvider/profile label: {interval.Provider}/{interval.Profile}\n{QuotaAccountScope.Describe(interval.AccountKey)}\nReset: {FormatReset(interval.ResetsAtUtc)}\n\n" +
+            "Local activity is not verified to belong to this backend account. The meter can be rounded or delayed. Session activity is correlated with the interval; it does not establish per-session quota costs. Activity bars show local token shares, not quota shares.";
         ContributorList.ItemsSource = new[] { new ContributorRow("Loading estimated contributors…", "Querying only the selected interval.") };
 
         try

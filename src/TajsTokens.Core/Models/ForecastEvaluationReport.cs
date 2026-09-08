@@ -7,7 +7,8 @@ public sealed record ForecastEvaluationScore(
     int Origins, int ResetGenerations, double? MeanAbsoluteError, double? RootMeanSquaredError,
     int IntervalOrigins, double? IntervalCoverage, double? MeanIntervalWidth,
     int ExhaustionLabels, int ExhaustionPositiveLabels, double? ExhaustionClassificationAccuracy,
-    int EtaOrigins, double? EtaBracketMeanAbsoluteHours, int FittedOrigins = 0);
+    int EtaOrigins, double? EtaBracketMeanAbsoluteHours, int FittedOrigins = 0,
+    string? AccountKey = null);
 
 public sealed record ForecastEvaluationReport(
     DateTimeOffset EvaluatedAtUtc, int AuthoritativeQuotaObservations, int WorkloadObservations,

@@ -76,7 +76,8 @@ public sealed record QuotaBurnInterval(
     int Compactions,
     string? DominantModel,
     string? DominantReasoningEffort,
-    double Confidence);
+    double Confidence,
+    string? AccountKey = null);
 
 public sealed record QuotaContributor(
     string SessionId,
@@ -111,7 +112,8 @@ public sealed record QuotaResetEvent(
     QuotaResetClassification Classification,
     double Confidence,
     string Source,
-    string Explanation);
+    string Explanation,
+    string? AccountKey = null);
 
 public sealed record ScenarioRequest(
     double DurationHours,
@@ -119,7 +121,8 @@ public sealed record ScenarioRequest(
     int Subagents,
     double IntensityMultiplier = 1.0,
     string? Model = null,
-    string? ReasoningEffort = null);
+    string? ReasoningEffort = null,
+    string? AccountKey = null);
 
 public sealed record ScenarioHistorySample(
     QuotaWindowKind Kind,
@@ -131,7 +134,8 @@ public sealed record ScenarioHistorySample(
     string? DominantModel,
     string? DominantReasoningEffort,
     DateTimeOffset? ResetUtc = null,
-    string Source = "");
+    string Source = "",
+    string? AccountKey = null);
 
 public sealed record ScenarioWindowEstimate(
     QuotaWindowKind Kind,
