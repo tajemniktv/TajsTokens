@@ -19,6 +19,8 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
     private readonly IReadOnlyList<string> _roots;
     private readonly TimeProvider _timeProvider;
     private long? _lastStateReconciliation;
+    private string? _lastStateCatalogPath;
+    private CodexCollectionCoverage? _lastCoverage;
 
     public CodexObservatoryService(
         ICodexSessionIngestionService ingestionService,
@@ -102,6 +104,26 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
         if (catalog is null)
         {
             return null;
+        }
+
+        // A new source generation can have timestamps older than the previous database's cursor.
+        // Reread without that cursor before comparing fingerprints; never clear retained evidence.
+        if (minimumUpdatedAtMs != 0 &&
+            !string.Equals(_lastStateCatalogPath, catalog.DatabasePath, StringComparison.OrdinalIgnoreCase))
+        {
+            minimumUpdatedAtMs = 0;
+            catalog = await _stateCatalog.TryReadSinceAsync(0, cancellationToken);
+            if (catalog is null) return null;
+        }
+
+        if (minimumUpdatedAtMs == 0)
+        {
+            var discovered = DiscoverFiles().ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var indexed = catalog.Threads.Select(thread => thread.RolloutPath)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            _lastCoverage = new CodexCollectionCoverage(
+                _timeProvider.GetUtcNow(), indexed.Count, indexed.Count(File.Exists), discovered.Count,
+                discovered.Count(path => !indexed.Contains(path)), indexed.Count(path => !discovered.Contains(path)));
         }
 
         var fingerprints = await _stateIndexStore.GetFingerprintsAsync(cancellationToken);
@@ -193,7 +215,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
 
         var nextWatermark = earliestUnappliedUpdatedAtMs is long unappliedAt
             ? Math.Max(0, unappliedAt - StateOverlapMs)
-            : Math.Max(watermark, catalog.MaxUpdatedAtMs);
+            : minimumUpdatedAtMs == 0 ? catalog.MaxUpdatedAtMs : Math.Max(watermark, catalog.MaxUpdatedAtMs);
 
         if (appliedThreads.Count > 0 || nextWatermark != watermark)
         {
@@ -204,6 +226,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
         if (minimumUpdatedAtMs == 0 && earliestUnappliedUpdatedAtMs is null)
         {
             _lastStateReconciliation = reconciliationStarted;
+            _lastStateCatalogPath = catalog.DatabasePath;
         }
 
         return new CodexObservatoryRefreshResult(
@@ -213,7 +236,10 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
             normalized,
             sessionsTouched.Count,
             errors,
-            bytes);
+            bytes)
+        {
+            Coverage = _lastCoverage
+        };
     }
 
     private async Task<bool> CanCommitFingerprintAsync(

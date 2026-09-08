@@ -234,6 +234,32 @@ work to a quota account; audit source-generation replacement and rollout-only co
 claiming exhaustive discovery; expose retained-versus-native coverage without inventing equality.
 This slice does not authorize additional durable fields, data deletion, or a schema migration.
 
+#### Native index versus rollout path coverage follow-up
+
+A subsequent read-only path audit found 352 distinct state-index paths and 354 JSONL files in
+the configured discovery roots: 31 discovered paths were not indexed, while 29 indexed paths
+were outside that discovered set. All 352 indexed paths existed. A bounded `session_meta`
+inspection of those 31 unindexed files found thread IDs already present in state. This does
+**not** prove identical file contents or missing work; it establishes that path-count differences
+cannot be treated as counts of additional threads. No alternate files were imported by the audit.
+
+The collector now attaches ephemeral `CodexCollectionCoverage` to full catalog reconciliations.
+Overview's existing source diagnostics show its observation time, accessible indexed paths,
+configured-root discovery count, unindexed paths, and indexed paths outside that set. Warm
+refreshes retain the original coverage timestamp rather than pretending the enumeration ran again.
+Discovery remains best-effort (inaccessible/reparse-point paths can be excluded), not proof of
+complete filesystem or durable-history coverage. Unindexed files are not automatically ingested
+while the state catalog is usable. A future alternate-rollout policy must establish ownership,
+overlap, and divergence before promoting additional records; same thread ID is not sufficient.
+
+When the selected state database path changes, the collector immediately rereads the new source
+without the old timestamp cursor. A successful full reconciliation re-anchors that disposable
+cursor to the selected catalog; existing fingerprints/history are not deleted. Same-path source
+replacement is covered by the periodic full comparison, not claimed as immediately detectable.
+Sanitized generation-switch tests cover a new catalog whose timestamps are lower than the old
+cursor and verify retained fingerprints. Path-coverage tests cover indexed files outside discovery
+roots, unindexed alternatives, unchanged warm refreshes, and diagnostics reaching the product.
+
 ### Linking sources without erasing their meaning
 
 - Preserve each source-qualified observation before reconciliation. Join through supported native identifiers and relationships; do not infer identity solely from similar names, timestamps, totals, or paths.

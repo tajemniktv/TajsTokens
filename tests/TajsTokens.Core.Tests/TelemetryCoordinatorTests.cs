@@ -11,6 +11,32 @@ public sealed class TelemetryCoordinatorTests : IDisposable
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "TajsTokens.Tests", Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public async Task RolloutCoverageAppearsInDiagnosticsWithoutCallingAlternativesMissingTasks()
+    {
+        var tokens = new SequencedTokscaleProvider(
+            [_ => Task.FromResult<IReadOnlyList<TokenUsage>>([])],
+            [_ => Task.FromResult<IReadOnlyList<TokenTimeBucket>>([])]);
+        var quota = new SequencedQuotaProvider([_ => Task.FromResult<IReadOnlyList<QuotaSnapshot>>([])]);
+        var coordinator = CreateCoordinator(tokens, quota, observatoryService: new CoverageObservatory());
+        var result = await coordinator.RefreshAsync(RefreshTrigger.Manual, CancellationToken.None);
+        var source = Assert.Single(result.Sources, item => item.Provider == "Codex rollouts");
+        Assert.Equal(TelemetryHealthState.Live, source.State);
+        Assert.Contains("2/2 indexed paths accessible", source.Detail);
+        Assert.Contains("3 files in configured discovery roots, 1 not indexed", source.Detail);
+        Assert.Contains("not missing tasks", source.Detail);
+        Assert.Contains("do not measure unique work or durable collection completeness", source.Detail);
+    }
+
+    private sealed class CoverageObservatory : ICodexObservatoryService
+    {
+        public Task<CodexObservatoryRefreshResult> RefreshAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(new CodexObservatoryRefreshResult(2, 0, 0, 0, 0, 0, 0)
+            {
+                Coverage = new(DateTimeOffset.UnixEpoch, 2, 2, 3, 1, 0)
+            });
+    }
+
+    [Fact]
     public async Task TokscalePartialFailure_PreservesWholePreviousGeneration()
     {
         var firstUsage = Usage("first-model", 100);
@@ -144,13 +170,15 @@ public sealed class TelemetryCoordinatorTests : IDisposable
     private TelemetryCoordinator CreateCoordinator(
         ITokscaleProvider tokens,
         ICodexQuotaProvider quota,
-        IIntelligenceService? intelligenceService = null)
+        IIntelligenceService? intelligenceService = null,
+        ICodexObservatoryService? observatoryService = null)
     {
         Directory.CreateDirectory(_directory);
         return new TelemetryCoordinator(
             tokens,
             quota,
             new SqliteTelemetryRepository(Path.Combine(_directory, "telemetry.db")),
+            observatoryService: observatoryService,
             intelligenceService: intelligenceService);
     }
 

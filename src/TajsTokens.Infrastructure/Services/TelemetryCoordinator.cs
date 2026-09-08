@@ -252,6 +252,15 @@ public sealed class TelemetryCoordinator
                         ? "No local Codex rollout JSONL sources were discovered. Previously normalized history, if any, remains historical rather than live."
                         : $"{observatory.FilesDiscovered} catalog rollout(s), {observatory.FilesScanned} changed file(s) scanned, {observatory.RecordsScanned} new complete record(s), {observatory.RecordsNormalized} normalized, {observatory.SessionsTouched} touched session(s), {FormatByteCount(observatory.BytesObserved)} observed on changed sources." +
                           (observatory.Errors > 0 ? $" {observatory.Errors} file(s) could not be refreshed and will retry." : string.Empty);
+                    if (observatory.Coverage is { } coverage)
+                    {
+                        detail += $" Best-effort path coverage at {coverage.ObservedAtUtc:u}: " +
+                            $"{coverage.AccessibleIndexedPaths}/{coverage.IndexedPaths} indexed paths accessible; " +
+                            $"{coverage.DiscoveredPaths} files in configured discovery roots, {coverage.UnindexedPaths} not indexed; " +
+                            $"{coverage.IndexedOutsideDiscovery} indexed paths outside that discovered set. " +
+                            "Unindexed files may be alternate copies, not missing tasks; they are not automatically imported while the state index is usable. " +
+                            "These path counts do not measure unique work or durable collection completeness.";
+                    }
                     sources.Add(new ProviderHealthSnapshot(
                         "Codex rollouts",
                         state,

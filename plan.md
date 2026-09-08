@@ -58,6 +58,15 @@ without reopening unchanged rollouts or replacing historical metadata. Validatio
 state-index tests and all 239 Core tests passed; the Windows solution build passed with zero
 warnings/errors and `DogfoodEnabled=false`. User runtime/visual acceptance remains separate.
 
+**Coverage follow-up:** verified native-index/discovery differences without assuming missing
+threads or importing alternate files. Added timestamped best-effort path coverage to source
+diagnostics and immediate full reconciliation on a selected database-path change, re-anchoring
+the disposable cursor without deleting retained history. Same-path replacement remains periodic;
+alternate-rollout ownership/divergence and authenticated-account scope remain open.
+Validation: all 242 Core tests passed, including generation-switch, path-coverage, and
+product-diagnostics cases; Windows solution build passed with zero warnings/errors and
+deployment disabled. No live source files were modified or alternate rollouts imported.
+
 ## 2. Complete selective, reliable collection
 
 **Depends on:** the relevant decisions from workstream 1; unrelated established paths need not wait.
@@ -147,4 +156,4 @@ For code milestones, follow the commands in `AGENTS.md` using `TajsTokens.slnx`,
 
 A slice is complete only when its acceptance gate is evidenced, existing behavior is preserved where intended, limitations are explicit, and documentation describes the delivered behavior. Overall completion means the product end-state workflows and operational guarantees in `PROJECT.md` are satisfied—not that every possible Codex table is copied or every optional advanced model is implemented.
 
-**Next action:** audit source-generation replacement and rollout-only discovery coverage against the mapped readers/checkpoints, then expose a bounded coverage diagnostic for the highest-value verified gap. Separately establish authenticated-account versus installation scope before making account attribution claims. This document authorizes no automatic deletion, broad source mirroring, or rollout of speculative architecture.
+**Next action:** establish an explicit read-model policy for alternate rollout ownership/overlap/divergence before any additional collection, and verify authenticated-account versus installation scope before making account attribution claims. Path coverage is now visible but is not evidence completeness. This document authorizes no automatic deletion, broad source mirroring, or rollout of speculative architecture.
