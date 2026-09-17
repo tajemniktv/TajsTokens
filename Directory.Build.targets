@@ -11,6 +11,6 @@
   <!-- Only an actual Windows app Build, never restore/design-time/test projects or recursive publish. -->
   <Target Name="TajsDogfood" AfterTargets="Build"
           Condition="'$(MSBuildProjectName)' == 'TajsTokens.App' and '$(OS)' == 'Windows_NT' and '$(DogfoodEnabled)' == 'true' and '$(Dogfood)' != 'false' and '$(DesignTimeBuild)' != 'true' and '$(IsCrossTargetingBuild)' != 'true' and '$(IsTestProject)' != 'true' and '$(ContinuousIntegrationBuild)' != 'true' and '$(TajsDogfoodIsCI)' != 'true' and '$(VSTestSessionCorrelationId)' == '' and '$(_IsPublishing)' != 'true'">
-    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)tools\dogfood\Deploy.ps1&quot; -Configuration &quot;$(Configuration)&quot;" />
+    <Exec Condition="'$(Configuration)' == 'Debug' or '$(Configuration)' == 'Release'" Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)tools\dogfood\Deploy.ps1&quot; -Configuration &quot;$(Configuration)&quot;" />
   </Target>
 </Project>

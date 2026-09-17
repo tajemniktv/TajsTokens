@@ -137,6 +137,9 @@ public sealed class QuotaResetDetector
             current.CapturedAtUtc.ToUniversalTime().ToString("O"));
         if (current.AccountKey is not null) material += "|" + current.Source + "|" + current.AccountKey;
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material))).ToLowerInvariant();
-        return $"quota-reset-{hash[..24]}";
+        // Keep known-account IDs stable. Legacy unknown IDs are source-qualified by the
+        // intelligence migration using the same UTF-8 hexadecimal suffix.
+        return $"quota-reset-{hash[..24]}" + (current.AccountKey is null
+            ? ":unknown:source:" + Convert.ToHexString(Encoding.UTF8.GetBytes(current.Source)) : "");
     }
 }

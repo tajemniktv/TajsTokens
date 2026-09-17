@@ -16,8 +16,8 @@ internal sealed class CodexRolloutComparisonReader(Action? afterRead = null)
     public async Task<CodexRolloutComparison> CompareAsync(
         string alternatePath, string indexedPath, string threadId, CancellationToken cancellationToken)
     {
-        CodexRolloutComparison Unknown(string reason) => new(alternatePath, indexedPath,
-            CodexRolloutComparisonKind.Unresolved, false, false, null, reason);
+        CodexRolloutComparison Unknown(string reason, bool hasPrefix = false) => new(alternatePath, indexedPath,
+            CodexRolloutComparisonKind.Unresolved, false, hasPrefix, null, reason);
         try
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -35,7 +35,7 @@ internal sealed class CodexRolloutComparisonReader(Action? afterRead = null)
             var left = InspectRecords(alternate, alternatePath, threadId, cancellationToken);
             var right = InspectRecords(indexed, indexedPath, threadId, cancellationToken);
             if (left.Error is not null || right.Error is not null)
-                return Unknown($"Not comparable: alternate {left.Error ?? "complete"}; indexed {right.Error ?? "complete"}.");
+                return Unknown($"Not comparable: alternate {left.Error ?? "complete"}; indexed {right.Error ?? "complete"}.", left.HasPrefix || right.HasPrefix);
 
             var hasPrefix = left.HasPrefix || right.HasPrefix;
             // Even exact bytes do not establish a logical owner. Keep that independent result visible.
@@ -46,7 +46,7 @@ internal sealed class CodexRolloutComparisonReader(Action? afterRead = null)
                     "Complete captured bytes match. " + (owned ? "Both files corroborate the indexed thread owner. " : "Logical ownership remains unresolved. ") +
                     "This does not authorize import or prove durable collection completeness.");
             if (!owned)
-                return Unknown("Logical ownership is unresolved: both filenames and session_meta must corroborate the indexed thread, with no later conflicting owner.");
+                return Unknown("Logical ownership is unresolved: both filenames and session_meta must corroborate the indexed thread, with no later conflicting owner.", hasPrefix);
 
             var common = 0;
             while (common < Math.Min(left.Records.Count, right.Records.Count))
@@ -110,21 +110,24 @@ internal sealed class CodexRolloutComparisonReader(Action? afterRead = null)
             while (start < bytes.Length)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                if (++recordCount > MaximumRecords) return new(null, hasPrefix, result, "record limit exceeded");
                 var end = Array.IndexOf(bytes, (byte)'\n', start);
+                if (bytes.AsSpan(start, end - start).IndexOfAnyExcept((byte)' ', (byte)'\t', (byte)'\r') < 0)
+                { start = end + 1; continue; }
+                if (++recordCount > MaximumRecords) return new(null, hasPrefix, result, "record limit exceeded");
                 using var document = JsonDocument.Parse(bytes.AsMemory(start, end - start));
                 var root = document.RootElement;
                 if (root.ValueKind != JsonValueKind.Object) return new(null, hasPrefix, result, "non-object record");
                 if (root.EnumerateObject().Count(property => property.NameEquals("type")) > 1)
                     return new(null, hasPrefix, result, "ambiguous record type");
-                if (root.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String && type.GetString() == "session_meta")
+                if (root.TryGetProperty("type", out var type) && type.ValueKind == JsonValueKind.String && string.Equals(type.GetString(), "session_meta", StringComparison.OrdinalIgnoreCase))
                 {
-                    if (root.EnumerateObject().Count(property => property.NameEquals("payload")) != 1)
+                    if (root.EnumerateObject().Count(property => property.NameEquals("payload")) > 1)
                         return new(null, hasPrefix, result, "ambiguous session metadata");
-                    if (!root.TryGetProperty("payload", out var payload) || payload.ValueKind != JsonValueKind.Object ||
-                        !payload.TryGetProperty("id", out var id) || id.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(id.GetString()))
+                    var payload = root.TryGetProperty("payload", out var nested) && nested.ValueKind == JsonValueKind.Object ? nested : root;
+                    var ownerField = payload.TryGetProperty("id", out var primary) && primary.ValueKind == JsonValueKind.String ? "id" : "session_id";
+                    if (!payload.TryGetProperty(ownerField, out var id) || id.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(id.GetString()))
                         return new(null, hasPrefix, result, "missing session owner");
-                    if (payload.EnumerateObject().Count(property => property.NameEquals("id")) != 1)
+                    if (payload.EnumerateObject().Count(property => property.NameEquals(ownerField)) != 1)
                         return new(null, hasPrefix, result, "ambiguous session owner");
                     if (corroboratedFilename && string.Equals(id.GetString(), threadId, StringComparison.OrdinalIgnoreCase))
                         ownedStart ??= start;

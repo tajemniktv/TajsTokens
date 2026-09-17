@@ -36,6 +36,9 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                 return;
             }
 
+            // Ingestion can be the first reader after an upgrade. The telemetry owner must
+            // migrate shared quota tables before any observatory writes use those columns.
+            await new SqliteTelemetryRepository(databasePath).InitializeAsync(cancellationToken);
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
 

@@ -232,7 +232,7 @@ passes retry on the next refresh; successful scans do not copy current model/eff
 Outstanding integration decisions: prove account/installation scoping before attributing local
 work to a quota account; audit source-generation replacement and rollout-only coverage before
 claiming exhaustive discovery; expose retained-versus-native coverage without inventing equality.
-This slice does not authorize additional durable fields, data deletion, or a schema migration.
+This integration-map research alone does not authorize additional durable fields, data deletion, or a schema migration. The separately implemented account-scope migration below is not part of that research-only restriction.
 
 #### Native index versus rollout path coverage follow-up
 
