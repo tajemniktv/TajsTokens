@@ -51,11 +51,11 @@ internal sealed class CodexStateCatalog
         "archived"
     ];
 
-    private readonly string _codexHome;
+    private readonly string? _codexHome;
 
-    public CodexStateCatalog(string codexHome)
+    public CodexStateCatalog(string? codexHome)
     {
-        _codexHome = Path.GetFullPath(codexHome);
+        _codexHome = codexHome is null ? null : Path.GetFullPath(codexHome);
     }
 
     public async Task<CodexStateCatalogBatch?> TryReadSinceAsync(

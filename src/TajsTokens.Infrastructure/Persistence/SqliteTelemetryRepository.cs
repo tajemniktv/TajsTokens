@@ -9,7 +9,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryRepository, ISessionIngestionCheckpointStore
 {
     private const int CurrentSchemaVersion = 10;
-    private const int IntelligenceSchemaVersion = 2;
+    private const int IntelligenceSchemaVersion = 3;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _intelligenceInitializeGate = new(1, 1);
     private volatile bool _intelligenceInitialized;
@@ -495,6 +495,16 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 await ExecuteMigrationAsync(connection, """
                     ALTER TABLE quota_reset_events ADD COLUMN account_key TEXT NOT NULL DEFAULT '';
                     UPDATE intelligence_schema SET version = 2 WHERE component = 'phase4-intelligence';
+                    """, cancellationToken);
+            }
+
+            if (version < 3)
+            {
+                await ExecuteMigrationAsync(connection, """
+                    UPDATE quota_reset_events
+                    SET event_id = event_id || ':unknown:source:' || hex(source)
+                    WHERE account_key = '' AND instr(event_id, ':unknown:source:') = 0;
+                    UPDATE intelligence_schema SET version = 3 WHERE component = 'phase4-intelligence';
                     """, cancellationToken);
             }
 

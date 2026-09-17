@@ -11,6 +11,7 @@ public interface ICodexQuotaProvider
     async Task<CodexQuotaResponse> GetQuotaResponseAsync(CancellationToken cancellationToken)
     {
         var snapshots = await GetQuotaSnapshotsAsync(cancellationToken);
-        return new(snapshots, snapshots.Select(snapshot => snapshot.AccountKey).Distinct().SingleOrDefault());
+        var accounts = snapshots.Select(snapshot => snapshot.AccountKey).Distinct().Take(2).ToArray();
+        return new(snapshots, accounts.Length == 1 ? accounts[0] : null);
     }
 }

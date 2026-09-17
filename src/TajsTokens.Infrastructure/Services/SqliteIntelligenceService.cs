@@ -107,7 +107,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 continue;
             }
 
-            if (current.AccountKey is null)
+            if (string.IsNullOrWhiteSpace(current.AccountKey))
             {
                 results.Add(new CurrentQuotaForecast(current, TelemetryHealthState.Live, null,
                     "Current forecast is learning: the provider did not report backend-account scope.",

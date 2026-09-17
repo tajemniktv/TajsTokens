@@ -25,6 +25,7 @@ function Start-App([string]$Directory) {
 }
 function Set-Launcher { }
 function dotnet {
+    $script:publishes++
     if ($script:publishFails) { $global:LASTEXITCODE = 1; return }
     $stagePath = $args[[Array]::IndexOf($args, '-o') + 1]
     New-Fixture $stagePath 'new'
@@ -49,8 +50,11 @@ function Expect-Failure([scriptblock]$Action, [string]$Pattern) {
 }
 function Identity([string]$Path) { (Get-Content -LiteralPath (Join-Path $Path 'TajsTokens.App.exe') -Raw).Trim() }
 
+$controls = @('CI', 'GITHUB_ACTIONS', 'TF_BUILD', 'BUILD_BUILDID', 'JENKINS_URL', 'TEAMCITY_VERSION', 'DogfoodEnabled', 'Dogfood')
+$ambient = @{}
+foreach ($name in $controls) { $ambient[$name] = [Environment]::GetEnvironmentVariable($name); [Environment]::SetEnvironmentVariable($name, $null) }
 try {
-    foreach ($case in @('success', 'publish-failure', 'incomplete', 'shutdown-refusal', 'startup-failure', 'rollback', 'lock', 'interrupted', 'move-boundary', 'move-existing', 'shutdown-preflight', 'ci', 'opt-out')) {
+    foreach ($case in @('success', 'publish-failure', 'incomplete', 'shutdown-refusal', 'startup-failure', 'rollback', 'rollback-failure', 'lock', 'interrupted', 'move-boundary', 'move-existing', 'shutdown-preflight', 'ci', 'opt-out')) {
         $repo = Join-Path $testBase "$case/repo"
         $root = [IO.Path]::GetFullPath((Join-Path $testBase "$case/install"))
         $current = Join-Path $root 'current'
@@ -64,6 +68,7 @@ try {
         New-Item -ItemType Directory -Path $data -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $data 'settings.json') -Value 'keep me'
         $script:stops = 0; $script:starts = 0
+        $script:publishes = 0
         $script:stopFails = $false; $script:startFailures = 0
         $script:publishFails = $false; $script:incomplete = $false
         switch ($case) {
@@ -107,6 +112,14 @@ try {
                 Assert ((Identity $current) -eq 'older') 'Rollback did not promote previous'
                 Assert ((Identity $previous) -eq 'old') 'Rollback did not retain replaced build'
             }
+            'rollback-failure' {
+                $script:startFailures = 1
+                Expect-Failure { Invoke-DogfoodDeployment -Rollback } 'prior binaries restored'
+                Assert ((Identity $current) -eq 'old') 'Failed rollback did not restore current'
+                Assert ((Identity $previous) -eq 'older') 'Failed rollback lost retry target'
+                Invoke-DogfoodDeployment -Rollback
+                Assert ((Identity $current) -eq 'older') 'Failed rollback was not retryable'
+            }
             'lock' {
                 $held = [IO.File]::Open((Join-Path $root 'deploy.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
                 try { Expect-Failure { Invoke-DogfoodDeployment } 'installation lock' }
@@ -139,18 +152,21 @@ try {
                 try { $env:CI = '1'; Invoke-DogfoodDeployment }
                 finally { $env:CI = $oldCI }
                 Assert ($script:stops -eq 0) 'CI touched running app'
+                Assert ($script:publishes -eq 0) 'CI published before skipping'
             }
             'opt-out' {
                 $oldOptOut = $env:DogfoodEnabled
                 try { $env:DogfoodEnabled = 'false'; Invoke-DogfoodDeployment }
                 finally { $env:DogfoodEnabled = $oldOptOut }
                 Assert ($script:stops -eq 0) 'Opt-out touched the running app'
+                Assert ($script:publishes -eq 0) 'Opt-out published before skipping'
             }
         }
         Assert ((Get-Content -LiteralPath (Join-Path $data 'settings.json') -Raw).Trim() -eq 'keep me') 'Settings changed'
         Write-Host "PASS $case"
     }
 } finally {
+    foreach ($name in $controls) { [Environment]::SetEnvironmentVariable($name, $ambient[$name]) }
     $expected = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../.codex/temp')) + [IO.Path]::DirectorySeparatorChar
     if (-not [IO.Path]::GetFullPath($testBase).StartsWith($expected, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe test cleanup path' }
     Remove-Item -LiteralPath $testBase -Recurse -Force

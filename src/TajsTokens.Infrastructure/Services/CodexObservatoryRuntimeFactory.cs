@@ -31,7 +31,8 @@ public static class CodexObservatoryRuntimeFactory
             ingestionBatchWriter);
 
         var stateIndexStore = new SqliteCodexStateIndexStore(databasePath);
-        var stateCatalog = new CodexStateCatalog(CodexObservatoryService.GetCodexHome());
+        var stateCatalog = new CodexStateCatalog(CodexSqliteHome.Resolve(
+            CodexObservatoryService.GetCodexHome(), Environment.GetEnvironmentVariable("CODEX_SQLITE_HOME")));
         var service = new CodexObservatoryService(
             ingestion,
             store,

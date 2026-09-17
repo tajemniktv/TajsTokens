@@ -18,7 +18,9 @@ public static class AppDataLocation
         var legacy = Path.Combine(localAppData, "TajsTokens");
         var staging = destination + ".migration-" + Guid.NewGuid().ToString("N");
         Directory.CreateDirectory(staging);
-        // A failed copy stays separate for inspection. Never promote an incomplete snapshot.
+        try
+        {
+        // Never promote an incomplete snapshot. The legacy source remains the recovery copy.
         foreach (var name in new[] { "settings.json", "telemetry.db", "telemetry.db-wal", "telemetry.db-shm", "InspectionExports" })
         {
             var source = Path.Combine(legacy, name);
@@ -27,6 +29,13 @@ public static class AppDataLocation
         }
         Directory.Move(staging, destination);
         return destination;
+        }
+        catch
+        {
+            // Only our freshly-created GUID staging tree is disposable, never the source/data.
+            if (Directory.Exists(staging)) Directory.Delete(staging, recursive: true);
+            throw;
+        }
     }
 
     private static void Copy(string source, string destination)

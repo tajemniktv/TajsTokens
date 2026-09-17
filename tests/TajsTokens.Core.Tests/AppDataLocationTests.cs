@@ -5,6 +5,23 @@ namespace TajsTokens.Core.Tests;
 public sealed class AppDataLocationTests
 {
     [Fact]
+    public void StartupLeaseExcludesConcurrentMigrationAndDeployment()
+    {
+        var root = CreateRoot();
+        try
+        {
+            using (var lease = AppStartupLease.TryAcquire(root))
+            {
+                Assert.NotNull(lease);
+                Assert.Null(AppStartupLease.TryAcquire(root));
+            }
+            using var retry = AppStartupLease.TryAcquire(root);
+            Assert.NotNull(retry);
+        }
+        finally { Directory.Delete(root, recursive: true); }
+    }
+
+    [Fact]
     public void MigrationPreservesLegacyAndDoesNotMergeIntoExistingData()
     {
         var root = CreateRoot();
@@ -42,6 +59,7 @@ public sealed class AppDataLocationTests
             using (var held = new FileStream(db, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
                 Assert.Throws<IOException>(() => AppDataLocation.EnsureMigrated(root));
             Assert.False(Directory.Exists(AppDataLocation.GetDataFolder(root)));
+            Assert.Empty(Directory.GetDirectories(Path.GetDirectoryName(AppDataLocation.GetDataFolder(root))!, "data.migration-*"));
             var data = AppDataLocation.EnsureMigrated(root);
             Assert.Equal("db", File.ReadAllText(Path.Combine(data, "telemetry.db")));
         }
