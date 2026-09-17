@@ -1,6 +1,10 @@
 # TajsTokens product and architecture
 
-> **Status: active product development, beyond the foundation reset.** This file owns product goals, architectural decisions, and source contracts. [`plan.md`](plan.md) owns delivery sequencing and acceptance gates; [`AGENTS.md`](AGENTS.md) owns contributor operating instructions.
+> **Status: active product development.** This is the single authority for product goals,
+> architecture, source contracts, retention, implementation status and next work.
+> [Current work](#current-work) distinguishes delivered behavior from planned changes.
+> [AGENTS.md](AGENTS.md) owns stable contributor rules; [README.md](README.md) describes shipped
+> user-facing features; [the contributor guide](docs/DEVELOPMENT.md) owns build/recovery procedures.
 
 ## Development stage
 
@@ -11,6 +15,9 @@ Extend the existing implementation where it serves the product. Do not restart d
 ## Product direction: Codex-first observability
 
 TajsTokens is a **Codex-first observability and intelligence application**. The goal is a dependable daily companion for understanding Codex activity, usage, quota, history, and likely future behavior. It is not primarily a database explorer, a generic AI telemetry platform, or a replacement Codex client.
+Quota planning is a primary product outcome: what remains, whether current or planned work will
+exhaust it, and what changed. Rich native history and usage understanding support that outcome
+and remain useful independently. A token-count prediction alone does not complete quota forecasting.
 Codex exposes a large and evolving set of source-native concepts. Where source contracts establish their semantics, TajsTokens should preserve and use that richness rather than flattening it into generic `session`, `event`, or `usage` records merely because those names might also fit another provider later.
 At the same time, TajsTokens should not become permanently shaped like Codex. Possible future providers influence the architecture through clean boundaries, not through premature genericization.
 
@@ -30,26 +37,21 @@ This means:
 A useful mental model is:
 
 ```text
-Codex sources
-    -> Codex source contracts
-    -> Codex-native normalized observations
-    -> durable evidence
-    -> rich Codex read models
-                 \
-                  -> optional shared observability projections
-    -> Codex-specific UI
+Rollout JSONL + app-server quota + selected Codex SQLite observations
+    -> source-specific acquisition and normalization
+    -> TajsTokens telemetry.db (provenance-aware durable evidence)
+    -> reconciled read models
+    -> history / analytics / usage prediction / quota outlook / UI
 
-Future provider sources
-    -> provider-specific source contracts
-    -> provider-native normalized observations
-    -> durable evidence
-    -> provider-native read models
-    -> provider-specific UI
-                 \
-                  -> compatible shared projections where semantics genuinely overlap
+Content-heavy or unnecessary-to-duplicate native data
+    -> direct read-only inspection (not automatically copied into telemetry.db)
 ```
 
 There is deliberately no universal provider schema in the middle of this pipeline.
+One physical owned database can hold workload facts, quota observations and selected native
+metadata, alongside separately identified derived tables and checkpoints. Sources are observation
+mechanisms feeding that store, not competing forecasting architectures. Combining evidence does
+not mean copying every native table, losing provenance or adding overlapping counters.
 
 ## Product end state
 
@@ -64,7 +66,196 @@ A production-quality local Windows application should let the user:
 
 The architectural end state is **selective durable collection + direct local inspection + rebuildable reconciled views**. Codex owns its operational data; TajsTokens owns its selected observation history and derived intelligence. Future providers may add their own native models when there is concrete demand, without weakening the Codex experience.
 
-This is the target, not a declaration that every workflow is complete. Delivery gates and outstanding work belong in `plan.md`; dated audits below describe their captured evidence, not timeless guarantees.
+This is the target, not a declaration that every workflow is complete. Delivery gates and outstanding
+work are in [Current work](#current-work); dated audits below describe captured evidence, not timeless guarantees.
+
+## Current work
+
+### Historical analytics first (2026-09-17)
+
+Quota burn's normal timeline shows account-meter transitions with explicit local start/end
+times and before/after percentages. Source details and local activity are collapsed by default.
+Rollout/all-source modes live under diagnostics and explicitly describe observations, not
+unique changes: different sessions can repeat one account transition and must not be summed.
+This is a presentation change, not a source merger or forecast training change. Current forecasts
+remain authoritative-source/account/cohort scoped; historical evaluation remains cohort separated.
+
+Usage is integrated under Codex → Usage breakdown alongside Work & threads, over the existing intelligence/accounting
+owners, not a new acquisition or storage system. Models, session repositories (projects),
+sessions and UTC hourly/daily/monthly groups use the same disjoint input, output, cache read,
+cache write and reasoning columns. Selected rows filter all breakdowns; exact counts and
+reported-versus-component differences are inspectable. Search and sorting operate on displayed
+groups. All-retained history is available; long time ranges explicitly disclose coarsened buckets.
+The usage-only read path skips quota forecasts/burn queries and removes the old top-20 dimension
+cap. A partial first time bucket is retained instead of silently dropping in-range events.
+Overview keeps measured quota/reset values prominent and places conditional outlook details
+behind an expander; missing/stale warnings remain visible.
+
+The standalone Usage sidebar entry was removed after UX feedback. Codex keeps its work browser
+as the default, with an explicit switch to usage reports. A thread offers View token usage;
+session report rows offer Open thread. Switching views preserves report filters and work context,
+and detaching reports uses their existing cancellation lifecycle. Browser-only controls are
+hidden in usage mode so there are no competing range selectors or duplicated page headings.
+
+Reconciliation used installed Tokscale 4.17.0, Codex-only local CLI JSON for local date
+2026-09-08 (UTC interval September 7 22:00 to September 8 22:00), not the screenshots'
+multi-provider/two-device totals. TajsTokens recorded 122,888,366 tokens; Tokscale's disjoint
+buckets total 123,088,748. Session-level comparison isolated the entire 200,382 difference
+to one event at September 8 22:00:20.419 UTC, just outside our interval, which Tokscale
+included in the preceding local day. Its components are 4,981 uncached input, 194,816 cache
+read, 347 non-reasoning output and 238 reasoning tokens. Other session aggregates match.
+This is a time-attribution boundary difference, not evidence to overwrite native event time.
+The earlier inspected upstream reference dcf8d3656bbcecf05d112c6f35f9be328e4f66b7 is not
+claimed to be an exact version match for the installed binary. No raw source content or
+credentials were exported; comparison artifacts remain private under `.codex/temp`.
+
+This slice does not add remote-device ingestion, additional providers, credential management,
+reset-credit actions or API-price estimates. Those are separate source/product contracts;
+the new tables intentionally do not fabricate those capabilities.
+
+Validation: 317 Core tests passed, including partial bucket conservation, all-retained
+range preservation, more than 20 sessions, disjoint totals and intersecting project/model/session
+filters. The final Windows Debug build passed with zero warnings/errors and dogfooded build
+`20260917T203858538Z-52dcf1c3`. Live native inspection verified Overview, Usage model/project
+tables, exact-count detail and project-scoped session navigation. User visual acceptance remains
+separate; no remote totals or pricing accuracy is claimed.
+
+This section owns delivery sequencing and acceptance. It replaces the separate delivery plan;
+dated audits elsewhere in this document are evidence, not a queue to rerun.
+
+### Implemented baseline (2026-09-09)
+
+| Area | Implemented behavior / owners |
+| --- | --- |
+| Current quota | `CodexAppServerQuotaProvider`, `TelemetryCoordinator`, `TelemetrySnapshot`, `QuotaAlertEngine`: current lanes, reported omissions, freshness, account-scoped anchors and alerts. |
+| Collection and coverage | `CodexSessionIngestionService`, `CodexRolloutParser`, observatory/semantic stores: incremental content-free evidence, native identity, replay/checkpoints and historical effort repair. `CodexStateCatalog` accelerates acquisition; `CodexRolloutComparisonReader` inspects alternate files without importing or deleting them. |
+| Native work and accounting | `ICodexThreadReadModel`, `CodexThreadObservabilityService`, `CodexThreadReadModelPolicy`: workspace/root/subagent navigation, source alternatives and bounded local detail. Native rollout accounting is the default; optional Tokscale comparison/fallback remains explicit. |
+| Usage prediction | `TokenWorkloadPredictionService`: retrospective rollout-trained token predictions, no quota-row/account dependency; current Overview/Forecasts display and evaluation. |
+| Quota intelligence | `QuotaHistoryPolicy`, `SqliteIntelligenceService`, `SqliteForecastDatasetReader`, Core quota/scenario services: provenance-aware rollout/app-server history, explainable eligibility, burn history, saved/current outlooks and source-isolated backtests. Current anchors remain fresh/account-scoped. Inferred regime detection and cross-cohort calibration transfer are not implemented. |
+| Diagnostics and operation | `TelemetryDiagnosticsPresenter` / `DiagnosticsPage` reuse shared collection health and bounded events. `SqliteTelemetryRepository`, `AppDataLocation`, `RuntimeSettingsStore` and `tools/dogfood` own data, settings, upgrades and recovery. |
+
+Last implementation milestone (2026-09-09): **313 Core tests passed** in 48 seconds; Windows Debug
+build passed with zero warnings/errors and normal dogfood installation/restart was verified.
+Live checks confirmed owned schema 10, state-index component 3 and new provenance-bearing rows
+arriving during the one-time replay. The full private-copy replay/evaluation is recorded below;
+this is not a claim that the live replay or user visual acceptance has completed. SQLite test
+collections now run serially because process-wide pool cleanup raced other fixtures' native handles.
+
+### Delivered slice: canonical historical quota evidence
+
+- Owned schema 10 retains optional native bucket/plan/lane, session/source-generation/record identity,
+  actual collection time and missing-event-time status. Legacy rows survive without invented metadata.
+  `typed-v5-quota-provenance` and state-index component 3 safely revisit unchanged historical files;
+  exact retries preserve first collection time and same-time alternatives are not overwritten.
+- `quota-history/v1` supplies historical eligibility to burn history, reset refresh and evaluation.
+  Rollout sessions with unknown account scope remain separate from each other and from app-server
+  accounts; reported bucket/plan/duration changes do not share calibration. Possibly cached repeats,
+  conflicts, invalid windows and legacy missing provenance have explicit reasons. Unknown rollout durations
+  are retained but not forecast. No cross-source synchronized stream is manufactured.
+- Current `quota-walk-forward/v3` and `quota-workload/v2` retain fresh app-server/account anchors,
+  isolate reported bucket/plan history, and record those anchor labels in saved evidence. Unknown
+  historical scope is not transferred to the current account. Workload corrections still have to earn
+  selection; this slice does not claim a new universal conversion or calibrated risk probability.
+- Forecasts exposes historical eligibility counts without a backtest; evaluation reports source/cohort,
+  event-time versus collection-time mode and within-cohort non-overlapping origin counts.
+
+Private-copy replay on 2026-09-09 read **355 files / 387,517 records, zero ingestion errors**.
+The resulting 195,856 quota rows contained **10,297 eligible readings** (2,199 app-server and
+8,098 rollout), 88,138 possibly cached repeats, 95,986 legacy rows without provenance, nine
+conflicting readings, 142 same-time duplicates, 750 invalid/missing windows and 534 unsupported
+durations. Retained legacy and replay rows are not summed as independent evidence.
+
+The actual short-horizon policy had **153 half-hour, 59 two-hour and eight 24-hour origins** across
+separate cohorts. For rollout primary five-hour targets, half-hour MAE was **5.41pp** versus
+**7.18pp** for legacy EWMA (51 origins); two-hour MAE was **21.16pp** versus **23.03pp** (19 origins).
+These are retrospective observed-meter errors, not live-account performance or globally independent
+samples across sessions. No workload correction earned selection and no cohort earned a horizon
+uncertainty band. Backfilled rollout rows produced no historical collection-time origins. Therefore
+the existing pace-based fallback remains; broader learned calibration is still next work.
+
+**Acceptance coverage:** representative paired and non-paired source fixtures cover rounding, cached repeats,
+bucket/window changes, resets, missing account scope and disagreement. Replay/collection does not
+double count, rewrite raw evidence or leak later inputs. Evaluation reports coverage, independent
+targets and errors for the actual policy; current-anchor safety is unchanged. Automated, runtime
+and visual evidence remain separately reported. Do not demand exact synchronized equality or
+complete historical account identity before separately scoped historical modelling can be useful.
+
+### Delivered UI pass: readable answers and progressive detail
+
+The native Overview, Forecasts and Quota burn views now use clearer hierarchy without changing
+prediction or collection semantics:
+
+- Responsive labelled navigation keeps everyday views together and moves the explicit CLI harness
+  beside the raw explorer. The full build identifier is selectable in Settings rather than filling the title bar.
+- Overview emphasizes remaining quota and reset outlooks. Cards stop stretching to match an expanded
+  neighbor; narrower layouts stack. Hourly bars show labelled amounts with a proportional zero baseline,
+  and explicitly disclose omitted gaps. Local-history totals and token prediction are separately labelled.
+  Detailed source logs remain available under a collection-health summary; stale/missing quota stays visible.
+- Forecast tabs use **Quota outlook history**, **Usage prediction**, **Plan a workload** and **Model evaluation**.
+  Latest saved outlooks and quota evidence no longer occupy unrelated tabs. History separates the outcome,
+  account, horizon summary and optional method/provenance. Hourly sampling retains source/bucket/plan scope.
+- Usage predictions use compact amounts and visible uncertainty ranges. The scenario form explains its
+  initial state. Evaluation selects one cohort/target before comparing model errors; no cross-cohort ranking
+  or aggregation is implied. Detailed methods and metrics remain expandable, and range changes clear old results.
+- Burn history separates activity from source/account labels. Reset signals expose their source without
+  expansion and support a separate source filter; detections are never silently merged into account resets.
+
+Validation: 313 Core tests passed; the Windows build passed with zero warnings/errors and dogfooded
+the initial UI pass. Native accessibility inspection confirmed the rebuilt Overview and live values load,
+but the user's screenshot exposed an Overview width/reflow regression. The correction removes its
+max-width/scroll-content interaction and nested adaptive states: actual viewport width now constrains
+content and selects the column layout, following the Codex browser's size-change pattern. After the user
+authorized restart, the corrected Windows build passed with zero warnings/errors and was dogfooded.
+Live visual inspection confirmed the Overview's bounded, two-column layout both windowed and maximized,
+and its stacked layout at roughly 850 pixels wide. Forecast-history and usage-prediction tabs rendered
+correctly; the local evaluation completed and displayed cohort-scoped model comparisons. User design acceptance remains separate
+from these smoke checks. No forecast algorithm or durable data contract changed.
+
+### Next: regime-aware quota calibration
+
+- Segment reported account/bucket/window/plan changes and investigate sustained unexplained model
+  error as a possible regime change. Version the inferred policy and validate transfer/fallback;
+  do not declare undocumented provider changes as observed facts.
+- Compare direct quota pace, workload-informed corrections and the usage-to-quota composition.
+  Forecast remaining quota/reset survival and useful ranges across supported observed windows,
+  without treating any plan as unlimited or assuming a fixed allowance.
+- Only then consider a shared normalized workload score/TT experiment if there is a concrete
+  measured benefit over direct features. This is not a required prerequisite or promised release.
+
+Other known limitations stay scoped: alternate-file inspection is not automatic alternate ingestion;
+coverage counts are not exhaustive work/accounting proof; broader auxiliary-source pagination and
+snapshot-consistent multi-page log reads are not complete. Address these when a concrete workflow
+requires them, rather than restarting the completed source-foundation audit.
+
+### Acceptance and upkeep
+
+Be correct under observed conditions, conservative when uncertain and diagnosable when wrong.
+Choose coherent vertical slices using the existing owners; preserve unrelated work and native data.
+Give accounting overlap, data loss and privacy stronger scrutiny than cosmetic polish. Follow
+AGENTS.md for proportional validation and deployment. A pending user visual pass is not hidden
+implementation scope. Update this section when a meaningful slice, decision or verified limitation
+changes—not after every routine command.
+
+## Local installation and owned data
+
+Successful local Windows app builds dogfood a verified self-contained publish into
+`%LOCALAPPDATA%/Programs/TajemnikTV/TajsTokens/current`, with a stable Start-menu launcher,
+graceful lifecycle handshake, prior binaries, stopped-app database/settings backups, and an
+explicit build opt-out. CI and test-only builds must not alter the daily installation.
+Git commit/dirty identity is build provenance, not Codex source evidence.
+
+Owned application data lives in the sibling `data` directory, not in a replaceable binary
+generation. A first-run copy-and-promote migration retains the old `%LOCALAPPDATA%/TajsTokens`
+database, settings, WAL/SHM and local inspection exports unchanged as a recovery copy. Existing
+destination data is never merged or overwritten. Legacy build-validation outputs are excluded.
+Failed migrations remain separate and retryable. The migration requires no other legacy app
+instance to be running. This is a local storage relocation, not new collection or export.
+
+Deployment never writes Codex-owned sources. Binary rollback does not imply that a newer
+database schema can be downgraded; live data is never automatically overwritten on rollback.
+Matching backups and failed binary generations remain available for deliberate recovery.
+No automatic deletion/retention policy is introduced. Startup acknowledgement proves shell
+initialization, not source availability, full workflow correctness, or user visual acceptance.
 
 ## Working principles
 
@@ -180,6 +371,125 @@ The existing owned database can contain evidence, ingestion checkpoints, and der
 
 For every source-specific collection decision, specify the fields, historical need, native identity, change-detection method, retention/privacy posture, and source/schema/parser version. SQLite metadata should be collected only where a concrete historical need warrants it; a field being visible in a native explorer is not sufficient justification.
 
+### Verified daily-workflow integration map (2026-09-08, afternoon)
+
+This is a bounded implementation map, not a field-by-field contract for every native table.
+Read-only SQLite transactions against the current installation found 352 state threads,
+1,845 history turns, and an owned database with 351 sessions, 7,763 workload observations,
+97,993 quota observations, and 351 state-index fingerprints. Native SQLite uses SQLx migrations
+(`user_version` is 0); owned `user_version` is 8 plus component schema versions. The numbers
+are non-atomic **across databases**, can change during collection, and must not be reconciled
+by making table counts equal. The earlier dated inventories below remain historical evidence.
+
+| Daily question | Current source and reader | Owned storage / read policy | Boundary and remaining gap |
+| --- | --- | --- | --- |
+| What quota is reported now? | App-server quota response through `TelemetryCoordinator` | `SqliteTelemetryRepository` stores source/account-qualified `quota_snapshots`; current lanes keep freshness/omission separate from history | The response's backend-account pseudonym separates quota streams; unknown historical scope stays unknown. It does not identify a person or attribute local thread work. |
+| What work exists and how is it organized? | State/project/spawn rows through `CodexThreadObservabilityService` and `ICodexThreadReadModel` | Direct on-demand inspection; explicit `CodexThreadReadModelPolicy` preserves alternatives | Native thread IDs link supported records. Current model/project metadata is not historical turn context. Owned `sessions`/`agents` are rollout-derived projections, not a mirror of every native thread. |
+| What happened in a thread? | History SQLite turns/items and separate realtime lane through the native thread reader | On-demand local content; selected source and provenance retained in the view, no durable transcript copy | Projection coverage may differ from retained JSONL. Missing history is not proof that a turn never happened; alternative sources are not silently concatenated. |
+| How much local token/context activity was observed? | Owned rollout records through `CodexRolloutParser` / `CodexSessionIngestionService` | `codex_native_token_events`, `context_observations`, `codex_workload_observations` retain selected safe observations; counter/parser/checkpoint tables support replay | Native record/turn/session identity and source offsets qualify observations. Collection time is separate from event time; legacy missing collection times remain missing. Native state totals are not added to rollout totals. |
+| Which files need collection? | `CodexStateCatalog` reads compact mutable state rows; filesystem discovery remains the compatibility fallback | `codex_state_thread_fingerprints` / `codex_state_sync` are replaceable acceleration state; ingestion batch writer owns transactional rollout progress | `updated_at_ms` is not a complete change feed. Full fingerprint reconciliation occurs at startup and on the first refresh after five minutes; unchanged bodies stay unopened. No source deletion propagates into historical deletion. |
+| Why did quota move; what may happen next? | Source-isolated owned quota and bounded local workload via `SqliteIntelligenceService` / `SqliteForecastDatasetReader` | Burn intervals, reset classification, forecast/scenario policy, and `forecast_snapshots` are derived, not provider facts | Never sum overlapping sources or train on future observations. Rebuildability depends on retaining the relevant evidence, not just forecast outputs. |
+| Why is data missing or different? | Source reader diagnostics, telemetry health, raw explorers | Direct inspection plus bounded product diagnostics | Acquisition/index progress is not yet a complete per-source coverage report; count differences alone are not errors or proof of loss. |
+
+The timestamp gap is corroborated by `codex-rs/state/src/runtime/threads.rs::replace_rollout_path_if_current`
+at local upstream commit `a51608398d53b6d23ed98b8287de415b35f1eea5`: it updates only
+`rollout_path`, without advancing `updated_at_ms`. That clone is not asserted to match the
+installed desktop exactly; the installed schema supports the queried fields, and sanitized
+regression fixtures cover an old thread changing path outside the warm timestamp overlap.
+Five minutes is explicit collection policy, not a native delivery guarantee. Failed full
+passes retry on the next refresh; successful scans do not copy current model/effort onto old events.
+
+Outstanding integration decisions: prove account/installation scoping before attributing local
+work to a quota account; audit source-generation replacement and rollout-only coverage before
+claiming exhaustive discovery; expose retained-versus-native coverage without inventing equality.
+This integration-map research alone does not authorize additional durable fields, data deletion, or a schema migration. The separately implemented account-scope migration below is not part of that research-only restriction.
+
+#### Native index versus rollout path coverage follow-up
+
+A subsequent read-only path audit found 352 distinct state-index paths and 354 JSONL files in
+the configured discovery roots: 31 discovered paths were not indexed, while 29 indexed paths
+were outside that discovered set. All 352 indexed paths existed. A bounded `session_meta`
+inspection of those 31 unindexed files found thread IDs already present in state. This does
+**not** prove identical file contents or missing work; it establishes that path-count differences
+cannot be treated as counts of additional threads. No alternate files were imported by the audit.
+
+The collector now attaches ephemeral `CodexCollectionCoverage` to full catalog reconciliations.
+Overview's existing source diagnostics show its observation time, accessible indexed paths,
+configured-root discovery count, unindexed paths, and indexed paths outside that set. Warm
+refreshes retain the original coverage timestamp rather than pretending the enumeration ran again.
+Discovery remains best-effort (inaccessible/reparse-point paths can be excluded), not proof of
+complete filesystem or durable-history coverage. Unindexed files are not automatically ingested
+while the state catalog is usable. The inspection-only alternate-rollout policy below does not
+authorize promotion of additional records; same thread ID is not sufficient.
+
+When the selected state database path changes, the collector immediately rereads the new source
+without the old timestamp cursor. A successful full reconciliation re-anchors that disposable
+cursor to the selected catalog; existing fingerprints/history are not deleted. Same-path source
+replacement is covered by the periodic full comparison, not claimed as immediately detectable.
+Sanitized generation-switch tests cover a new catalog whose timestamps are lower than the old
+cursor and verify retained fingerprints. Path-coverage tests cover indexed files outside discovery
+roots, unindexed alternatives, unchanged warm refreshes, and diagnostics reaching the product.
+
+#### Alternate-rollout inspection policy (2026-09-08)
+
+`CodexObservatoryService` exposes a separate, user-invoked `ICodexRolloutInspection` capability
+through **Codex > Rollout coverage**. It reuses the collector's selected state catalog and
+configured-root discovery; it does not use or mutate ingestion checkpoints, fingerprints,
+counter state, cached coverage, or owned observations. Routine refreshes do not read alternate
+file bodies. Existing source diagnostics point to this inspection rather than treating path
+counts as evidence completeness.
+
+Each page inspects at most eight unindexed paths, in stable path order, with a 2 MiB and
+20,000-record limit per file and a 30-second cancellable UI operation. An indexed counterpart
+is selected only from a unique state-thread/filename ID match, including indexed paths outside
+discovery roots. That is candidate selection, not proof of ownership. Both filenames and an
+observed `session_meta.payload.id` must corroborate the indexed thread before comparing owned
+records. A fresh no-UUID file does not acquire ownership from its first metadata record.
+Non-owning prefixes are kept distinct; they are not counted as the child's records and are not
+asserted to be a parent relationship merely because they precede the owner. A later conflicting
+session owner, invalid JSON, incomplete final line, unreadable/replaced/changing input, or an
+inspection limit produces an explicit unresolved result.
+
+The comparison is of captured bytes, not normalized token totals or semantic equivalence:
+
+- **Identical bytes:** complete captured file bytes match; ownership is a separate reported fact.
+- **Identical owned records:** owned record bytes match while non-owning prefixes differ; the
+  whole files are not identical.
+- **Prefix overlap:** one complete owned record stream is an exact byte-for-byte prefix of the
+  other. Additional records are not automatically missing collected work.
+- **Different records:** owned streams differ after their common prefix. Formatting changes
+  alone can cause this result; it is not proof of conflicting semantics or additional usage.
+- **Unresolved:** no safe comparison at these bounds. Unknown is not a zero-overlap conclusion.
+
+Physical identity, length, creation time, and write time are checked around each read pair to
+reject ordinary concurrent replacement/change. Native files and catalog rows do not form an
+atomic snapshot; same-size in-place edits with deliberately preserved metadata are not promised
+to be detectable. Results are dated, local, ephemeral inspection output. Transcripts, reasoning,
+tool bodies, byte buffers, and comparison hashes are not retained in the owned database or exported.
+No comparison result permits automatic import, deduplication, deletion, or accounting changes.
+
+The bounded native inventory selected `state_5.sqlite`: 353 indexed paths, 355 discovered paths,
+31 unindexed paths, and 29 indexed paths outside discovery roots. Of the eight smallest alternate
+pairs sampled, five were byte-identical with corroborated owners and three exceeded 2 MiB. The
+other pairs were not compared; these counts are dated observations, not a corpus-wide equality claim.
+The implemented C# capability was also exercised read-only against the installed source: its
+first path-ordered page returned two identical pairs and six unresolved comparisons, with no
+owned database created. This is a different sample ordering from the smallest-file inventory.
+At local upstream commit `a51608398d53b6d23ed98b8287de415b35f1eea5`,
+`codex-rs/thread-store/src/local/rollout_migration.rs` stages/reprojects and renames replacement
+rollouts while checking source length/mtime. This corroborates the need to handle replacements;
+it does not establish that migration caused these particular copies, or that the installed
+desktop exactly matches that commit.
+
+Existing ingestion retains physical file identity and offset-qualified record identity, restores
+parser ownership at the matching checkpoint, and writes projection batches before ordered token
+reduction and checkpoint advancement. `codex_counter_state` is keyed by session while source
+event deduplication is physical-record-qualified. Therefore replay safety within a known source
+does not establish safe accounting across divergent/copy files (especially last-only counters).
+Any future alternate collection must first specify source/record equivalence, overlapping counter
+epochs, active/retired generation selection, replay/recovery, migration and retention tests. This
+inspection slice deliberately changes none of those writers.
+
 ### Linking sources without erasing their meaning
 
 - Preserve each source-qualified observation before reconciliation. Join through supported native identifiers and relationships; do not infer identity solely from similar names, timestamps, totals, or paths.
@@ -196,6 +506,34 @@ Use read-only native access and consistent bounded reads where the source suppor
 Preserve source event time separately from actual collection time. A backfill reconstructs available history; it cannot claim those records were collected at their original event times. A disappearing native row/file must not silently delete retained historical observations. Conversely, direct-inspection content may become unavailable when Codex removes it: the product must not promise transcript recovery it never retained.
 
 Migrations, retention, backups, and rebuild operations must distinguish irreplaceable collected evidence from disposable projections. Never silently delete unique quota observations or other evidence that cannot be reacquired. Changes to these lifecycle policies require explicit implementation and validation; this section defines the target guarantees, not proof that every maintenance workflow already exists.
+
+### Current owned-data retention and recovery policy
+
+The current local policy is **no automatic age-based history deletion**. There is no reset-history
+button. This is intentional for a small dogfood application; add retention controls only when measured
+growth or a user request warrants them. This does not prohibit existing ingestion corrections or
+replacement of active accounting projections when a rollout generation changes.
+
+| Owned data | Retention / rebuild posture |
+| --- | --- |
+| `quota_snapshots`, context/workload observations, legacy `token_usage` / `usage_events` / `reset_events` / `announcements` | No age-based expiry. Native sources may disappear and live quota cannot be reacquired retrospectively. Do not assume legacy rows are disposable merely because a newer pipeline exists. |
+| `codex_native_token_events` | Active normalized accounting, not an immutable archive of every physical generation. The existing batch writer retires the replaced path's token generation while activating its new identity, avoiding double counting. No separate historical-generation archive is promised. |
+| `sessions`, `agents`, relationships, repositories/workspaces | Retain existing rollout-derived metadata. Some projections can be recalculated while source evidence remains; there is no blanket safe-delete promise after native history is removed. |
+| Rollout file/record identities, parser/counter state, ingestion checkpoints, schema/revision tables | Managed with the associated active replay/checkpoint generation. The batch writer retires obsolete path-generation bookkeeping transactionally. These are not independent user-cleanable caches; deleting a subset can cause re-ingestion or lost continuity. |
+| State-index fingerprints and sync cursor | Rebuildable acquisition acceleration. Existing reconciliation re-anchors on selected-source changes; it does not delete collected history. |
+| `forecast_snapshots`, `quota_reset_events` and in-memory burn/scenario/evaluation results | Derived, not source truth. Recalculation requires the retained inputs and policy; saved results are currently retained, not periodically purged. |
+| Settings, local exports, deployment backups and retained binaries | User-owned/local recovery material, retained until explicit removal. Exports are separately user-invoked; this policy does not authorize sharing them. |
+
+Normal local deployment takes stopped-app data/settings backups and supports binary rollback.
+Restoring data remains an explicit stopped-app operation described in [the contributor guide](docs/DEVELOPMENT.md); preserve the
+entire current data directory before restoring a matching snapshot. Binary rollback does not migrate
+a newer database backward. No new automatic restore, deletion, source write, or upload is introduced.
+
+The Diagnostics page consumes the existing in-memory collector snapshot, shows per-source health,
+quota/forecast explanations and bounded recent events, and links to source inspection and Settings.
+Opening it performs no acquisition; its Refresh action uses the existing shared coordinator. It does
+not infer root causes from error text or claim durable incident history. Overview keeps detailed
+forecast evidence/methodology behind an expander rather than repeating it in the main message.
 
 The durable store is history of normalized evidence, not a warehouse of product conclusions and not an automatic mirror of every readable source payload.
 
@@ -242,7 +580,54 @@ Trustworthy current facts and inspectable history remain the foundation. Predict
 
 ## 6. Intelligence, forecasting, and prediction
 
-TajsTokens should help answer not only **what Codex has done**, but also **what the current workload implies for the rest of the quota window**. This layer is explicitly derived, account-local, replaceable, and evaluation-driven.
+TajsTokens should help answer not only **what Codex has done**, but also **what the current workload implies for the rest of the quota window**. Intelligence is derived, replaceable and evaluation-driven. Workload history is installation-scoped; quota calibration retains known account and regime scope rather than assigning all local work to an account.
+
+### Product language and modelling layers
+
+In the primary product language, **forecast/outlook means quota outlook**. Use **Usage prediction**
+or **Workload prediction** for expected token activity and **Plan a workload** for user-supplied
+scenarios. The current UI still uses a Forecasts page and token-workload labels; aligning those
+labels is planned work, not a feature shipped by this documentation change.
+
+Separate three questions internally, without creating separate source-specific products:
+
+1. **Expected usage:** what local workload is likely next? Learn from native token composition,
+   model, reasoning effort, cache, context, lifecycle and root/subagent activity. Historical rollouts
+   can train this directly without quota readings.
+2. **Quota calibration:** how did observed workload relate to observed quota movement in a
+   particular account/bucket/window/regime? Learn this; do not invent a universal conversion.
+3. **Quota outlook:** given the current meter/reset and expected or requested workload, what may
+   remain, when might it run out, and what uncertainty matters to the user?
+
+This decomposition does not require a mandatory three-service pipeline or a new framework.
+Direct quota-pace models remain valid baselines; adding a workload predictor, residual correction
+or shared latent model must improve held-out results. Expected tokens alone do not complete quota
+forecasting, and quota calibration gaps must not prevent useful usage prediction.
+
+Use the windows actually reported, not hardcoded Plus/Pro assumptions. Plan labels are optional
+observed metadata. No plan is treated as effectively unlimited; an omitted bucket/window is
+neither zero usage nor an unlimited entitlement.
+
+### Quota regimes and optional normalized workload research
+
+Historical percentages are not assumed comparable across changing accounts, buckets, window
+durations, plans or provider policy eras. A reset generation is a time boundary; a **quota regime**
+is a modelling cohort describing the applicable accounting conditions, not one reset. Record reported
+changes; label inferred change points as derived policy, not provider facts. Missing plan/version/
+identity remains missing. Never rewrite observations when a regime interpretation changes.
+
+Regime-aware calibration is planned work. Define compatible history, boundaries, transfer restrictions
+and fallback before mixing cohorts. Unknown-account history can support separately labelled historical
+modelling without becoming evidence about today's account. Transfer into live account forecasts
+requires an explicit, evaluated compatibility policy.
+
+**TT (a TajsTokens workload unit) is optional research, not a committed feature or current metric.**
+A normalized workload score might help cross-window/regime prediction, but adding a scalar does not
+solve the unknown quota conversion. If explored, retain original token composition/model/effort,
+define a reference scale, and version weights and calibration separately. Do not claim provider
+compute cost, billing value, a fixed quota percentage or automatic comparability across score versions.
+Weights fitted to quota are not independently validated workload costs. Compare with direct-feature
+baselines before introducing a public TT label.
 
 ### Product goals
 
@@ -258,7 +643,76 @@ For the 5-hour and weekly quota windows, the prediction system should aim to pro
 
 The Overview should surface the compact decision-useful version. Deeper intelligence views may expose backtest performance, model/policy versions, uncertainty diagnostics, and historical forecast-versus-outcome comparisons.
 
-### Evidence and authority boundary
+### Quota source contract and current implementation boundary
+
+**Decision (2026-09-09): rollout `rate_limits` are legitimate provider-derived historical quota
+evidence.** They do not have categorically weaker meter semantics merely because they are embedded
+in JSONL. The fresh app-server **read** remains the current anchor; source origin, freshness,
+account scope, bucket identity, window/reset identity and precision are separate dimensions.
+
+At inspected upstream commit `a51608398d53b6d23ed98b8287de415b35f1eea5`:
+
+- `codex-rs/rollout/src/policy.rs` retains `EventMsg::TokenCount` in rollout history.
+- `codex-rs/app-server/src/bespoke_event_handling.rs::handle_token_count_event` directly forwards
+  the event's `rate_limits` into `account/rateLimits/updated` through the protocol conversion.
+- `codex-rs/core/src/state/session.rs::token_info_and_rate_limits` clones cached session quota;
+  a token event timestamp is not proof of a new backend meter measurement.
+- `codex-rs/app-server-protocol/src/protocol/v2/account.rs` rounds core `used_percent` from a
+  float to an integer, maps `window_minutes` to `window_duration_mins`, and preserves reset time.
+- `codex-rs/app-server/src/request_processors/account_processor.rs::get_account_rate_limits_response`
+  fetches backend usage and returns account identity when available and a limit-ID map. A fresh
+  request is not a guarantee of an instantaneous backend measurement.
+
+This source snapshot is corroboration, not an asserted exact installed-build match. A bounded
+read-only installed-data check sampled seven recent rollout files: 836 window observations and
+663 consecutive repeated quota snapshots. Of 90 nearby (within 120 seconds) same-duration/reset
+comparisons for the main Codex bucket, 82 percentages matched exactly; the maximum difference
+was one percentage point. These were not synchronized samples and do not prove account identity,
+every historical bucket's equivalence or a universal lag bound. No credentials were inspected.
+
+Historical reconciliation must:
+
+- Preserve original observations, source/native identity and supported precision; compare like
+  buckets, windows and reset generations. Primary/secondary position is not a fixed duration,
+  and similar percentages alone do not establish identity.
+- Keep source event time and actual collection time distinct. Mark possibly cached repetitions;
+  do not count repeated embeddings as independent meter measurements or proof of exact zero burn.
+- Preserve disagreements and account ambiguity. Equivalent meter semantics do not identify an
+  account, prove a rollout's causal cost, or authorize destructive merging/double counting.
+- Make selection, deduplication and training eligibility explainable, versioned read-model policy.
+  Allow separately labelled historical cohorts without claiming live-account attribution.
+- Validate against later compatible observations from both supported paths, reporting freshness,
+  precision, source coverage and account/regime limitations.
+
+**Implemented historical contract (2026-09-09):** owned schema 10 extends `quota_snapshots`, not a
+parallel source store. Retained optional fields are `observation_id`, `source_identity`, `session_id`,
+`limit_id`, `plan_type`, `lane`, `collected_at_utc` and `has_source_timestamp`. They justify native
+identity, replay safety, cohort separation and availability; no prompts, auth material or raw payloads
+are added. `captured_at_utc` keeps its existing source-event meaning for rollouts and acquisition-time
+meaning for app-server reads; the new collection field removes that ambiguity for new collection.
+Source precision is retained numerically (including fractional rollout values), not normalized to an
+invented meter step. Missing rollout `limit_id` uses Codex's documented main-bucket default only in
+read policy; absence stays absent in storage. Plan/account absence is never backfilled from login.
+
+The quota key now also includes observation identity. Rollouts use native source-record identity plus
+lane; reads without a record ID use a content fingerprint within the source/account/time key, retaining
+conflicting same-time alternatives. Exact retries do not update values or first collection time.
+Migration preserves legacy rows with missing provenance; a versioned native replay adds qualified
+observations rather than fabricating provenance onto old rows. Old source generations remain retained;
+the forecast dataset reads only currently selected native generations. The state-index upgrade clears
+only owned acceleration fingerprints/watermark so unchanged files are revisited. It does not clear
+native evidence or write to Codex. Initial replay can take minutes on multi-gigabyte history.
+
+`QuotaObservationAuthority` remains the compatibility classification for current-read safety;
+historical eligibility is independently owned by `quota-history/v1`. Evaluation and burn history use
+separate source/account/bucket/plan/duration cohorts and separate unknown-account rollout sessions.
+Repeated embeddings are marked potentially cached and withheld as independent targets; conflicts and
+invalid points break slope segments. Strict replay dates availability no earlier than actual collection,
+so backfill cannot create past deployable predictions. Historical source inclusion does not relax
+current-anchor safety or establish account attribution. The bounded dataset read allows up to 500,000
+quota observations and fails explicitly above that bound; the ordinary history view remains bounded.
+
+#### Current quota presentation
 
 The 2026-09-08 installed account response after a plan change reports only the weekly window in
 the main `codex` bucket (`primary.windowDurationMins=10080`, `secondary=null`). A separate Spark
@@ -281,9 +735,59 @@ Current forecasts must be anchored to the provider-authoritative current quota o
 
 Historical inputs must be bounded at forecast evaluation time. No walk-forward/backtest may see later quota observations, later reset outcomes, or future workload features. Reset/re-anchor generations are separate forecasting epochs; older epochs may be used only as prior training data by a deliberately evaluated model.
 
+**Reset timestamp jitter (2026-09-17):** forecast policies `quota-walk-forward/v4` and
+`quota-workload/v3` tolerate a maximum one-second reset timestamp range within a derived
+epoch, matching observed alternating app-server timestamps. The range is bounded across
+the entire segment, not chained between adjacent readings. Meter drops, cohort changes,
+invalid observations and crossing the earliest reset boundary still terminate the segment.
+Raw provider timestamps and exact current-anchor matching are unchanged. Calibration and
+evaluation group one-second reset variants so they do not count as independent generations.
+On a frozen 512-reading current-account weekly sample, this recovers 4.26 hours rather than
+one reading. Chronological 30-minute replay yields seven targets (previously zero): MAE
+0.964 percentage points for the incumbent, 1.000 for persistence, 0.865 for epoch pace.
+This small single-window sample does not justify changing models or claiming calibrated
+coverage; no uncertainty bands are available. Larger timestamp changes remain boundaries.
+
 Provider meters are quantized/limited-precision observations. A repeated percentage reading means no movement was visible at the meter's precision; it does **not** establish exact zero consumption. Forecasting methods must model or conservatively preserve that uncertainty.
 
 ### Account-local learning
+
+**2026-09-08 scope audit:** the installed npm CLI (`codex-cli 0.153.4`), reached through the
+same CLI installation used by the provider's PATH fallback, returns nonempty `accountId` on
+`account/rateLimits/read`. Only field presence/names were recorded by the read-only probe, not
+the identifier value or authentication material. Its response has no `userId` field. At local
+upstream commit `a51608398d53b6d23ed98b8287de415b35f1eea5`,
+`app-server-protocol/src/protocol/v2/account.rs::GetAccountRateLimitsResponse.account_id`
+is explicitly the backend account associated with that usage snapshot. This does not prove
+which account produced historical rollout work, identify a person within a shared account,
+or establish that every historical `default` profile row has the same account. The upstream
+checkout is corroboration, not an exact-build match for the installed CLI.
+
+**Backend-account retention and read policy (2026-09-08):** retain a versioned SHA-256 pseudonym
+of the exact nonempty response `accountId`, never the raw ID or authentication material. This
+is a linkable local account key, not anonymization or a user identity. Missing, malformed,
+oversized, or duplicate account fields remain unknown. The response envelope preserves scope
+even when no supported quota windows are returned. No auth-file inspection is needed.
+
+Owned schema 9 adds this scope to quota and forecast keys; intelligence component 2 adds it to
+reset observations. Existing rows are preserved with unknown scope, without backfilling from
+the current login. This field follows the retained quota/derived-history lifetime; no new
+export or automatic deletion is introduced. The quota history reader's omitted/null account
+parameter selects unknown scope, not every account. Historical explorers can still show all
+streams with scope labels; read-only evaluation also supports schema-8 databases as unknown.
+
+The current implementation uses only a fresh authoritative anchor and same-source, same-account history
+no newer than that anchor. Unknown current scope has usable meter readings but a learning
+forecast. Successful account changes clear omitted lanes and forecasts from another account;
+failed reads retain the last successful observations as stale. Resets, burn intervals, alerts,
+scenario cohorts, and chronological evaluation stay account-separated. Broad quota overlays
+are omitted when independent streams cannot be represented honestly in one series.
+
+Local rollout/token activity remains installation-scoped. Showing it beside quota movement
+means co-observation, not account membership or causation. Production scenarios require a
+known current quota scope and recent matching evidence; no legacy/other-account history is
+borrowed to fill sparse training data. The planned reconciliation work must preserve the live
+anchor and account protections while removing blanket rejection of supported rollout history.
 
 There is no assumed universal conversion from tokens to subscription quota. Any relationship between quota movement and workload must be learned from the user's own observed history and remain conditional on available coverage.
 
@@ -337,8 +841,9 @@ wall time, not model-compute time; open or unmatched lifecycles remain incomplet
 completion may retrospectively mark a historical turn inactive. Backfilled event-time replay must
 be labelled reconstructed history, distinct from a strict replay using collection-time availability.
 Current mutable SQLite metadata does not establish historical availability or historical effort.
-Authoritative quota targets remain app-server observations; embedded quota replays are exploratory
-source-separated diagnostics, not a substitute for authoritative-target validation.
+The initial audit restricted quota targets to app-server observations. The 2026-09-09 quota source
+contract above supersedes that blanket historical exclusion; current code still needs the planned
+reconciliation/eligibility changes.
 
 The follow-up live scan also observed numeric `started_at` on 1,244 task starts; 1,158 completions
 with `completed_at`/`duration_ms`; and 956 completions with `time_to_first_token_ms`. The inspected
@@ -369,8 +874,9 @@ the elapsed/pace ridge MAE is 0.168 points versus the incumbent's 0.163. This do
 promoting workload sophistication. There are no weekly near-reset targets and no supported
 eight-generation uncertainty calibration. The production incumbent is therefore retained with
 explicit learning/conditional states, while chronological model selection and empirical bands
-activate only with sufficient comparable completed generations. More embedded rollout history
-does not repair this authoritative-label limitation. The evaluation UI and local CLI expose sample,
+activate only with sufficient comparable completed generations. This dated evaluation excluded
+rollout quota targets by policy, so it does not establish scarcity of quota evidence in the full
+corpus. The evaluation UI and local CLI expose sample,
 generation, actual-fit, and coverage counts so fallback predictions cannot masquerade as model proof.
 
 Forecasting changes must be judged primarily by historical walk-forward/backtesting over completed observations/windows, preserving only information that would actually have been available at each historical prediction time.
@@ -383,6 +889,86 @@ Confidence has to mean something. Heuristic confidence scores may be labelled as
 
 ### Current baseline and intended evolution
 
+#### Live short-horizon prediction (2026-09-09)
+
+**Native token prediction does not need quota labels.** `TokenWorkloadPredictionService` trains
+directly on the rollout corpus and predicts recorded token consumption over the next 30 minutes
+and 2 hours. This is installation-local, includes cached input, and is not an account-wide usage,
+billing or subscription-quota conversion. A missing interval contributes zero *recorded* tokens,
+not proof that no work happened elsewhere. Only origins with recent recorded activity are used;
+targets must end within the observed corpus. Current forecasts pause after two hours without a
+token observation. Current training reads 30 days; evaluation can inspect a wider selected range.
+
+The `rollout-token/v1` policy compares recent 30-minute pace, two-hour pace, recent target median,
+log-target ridge (penalty 10), and strongly regularized linear pace-residual ridge (penalty 100).
+The workload models use prior token volume/cache/reasoning mix, native model/effort shares,
+root/subagent/unknown activity, observed turns/overlap, compactions and context pressure. Fits use
+the latest 120 matured intervals, minimum 20, prefix-only scaling/vocabulary, and bounded
+extrapolation. Missing/unseen current model/effort falls back. Selection requires 16 held-out
+comparisons and 20% lower MAE over up to 48 previous non-overlapping targets. The half-hour
+fallback is recent half-hour pace; the two-hour fallback is the recent target median once eight
+training targets exist. Empirical 80%-target bands require 20 earlier selected-policy errors.
+
+Historical token learning intentionally reconstructs features at their source event times from
+evidence available **now**, allowing backfilled rollouts to be useful immediately. Future source
+events are never input features; outcomes must mature before subsequent training/selection.
+The retrospective scores are not claimed as historically deployed app performance. This is
+separate from the strict collection-time quota-policy experiment and introduces no source writes
+or durable raw-content retention. Current results are rebuildable in-memory read models exposed
+by the telemetry coordinator, Overview and the Forecasts token-workload tab, even without quota
+rows or a known quota account.
+
+The same private snapshot contains **350 sessions**, supporting **1,643 half-hour** and **413
+two-hour** token targets. Selected-policy MAE is 4.010 million / 15.182 million recorded tokens,
+versus recent-half-hour pace 4.045 million / 15.980 million; the simple two-hour target median
+achieves 14.745 million. Workload regressions are not consistently superior, so they are not
+forced on. Empirical band coverage is 80.7% / 77.9% (1,623 / 393 scored intervals). These errors
+show substantial workload variability, not a precise forecast guarantee. This dataset informed
+the model-policy choice; it is not an untouched external test set. Session/time indexing reduced
+the measured full-corpus live replay from 110 seconds to 2.45 seconds without changing candidate
+predictions; the normal live range is shorter. Synthetic tests cover learned workload selection,
+future-event isolation, backfill usability and native-token predictions with no quota data.
+
+`QuotaPredictionService` now supplies +30-minute, +2-hour and (weekly only) +24-hour
+remaining-quota predictions alongside the existing conditional reset outlook. The live owner
+persists exactly these outputs in optional `ForecastEvidence` JSON fields and Overview/history
+render them. No new durable source payload, token-to-quota conversion, or account assignment is
+introduced. The feature reader restricts quota by account before its row limit; live learning uses
+up to 14 days of same-account/source/window observations. Missing or over-limit workload reads
+retain quota-only predictions with an explicit diagnostic.
+
+The `quota-workload/v1` policy starts with a two-hour elapsed-time-weighted rate, avoiding fixed
+per-poll EWMA decay. For each horizon it compares pace candidates on matured, non-overlapping
+outcomes (minimum 6, latest 48); a replacement must improve MAE by 10% and 0.05 quota points.
+An account-local ridge residual correction uses token volume, cache/reasoning shares, model and
+effort shares, root/subagent/unknown activity, observed turns/overlap, compactions and context
+pressure. It fits the latest 120 compatible matured targets (minimum 12), with prefix-only scaling
+and vocabulary and penalty 10. Missing or unseen model/effort evidence falls back. The correction
+is used only after 6 non-overlapping held-out fitted predictions beat the actual adaptive pace
+baseline by the same margin. These are co-observed local workload signals, not verified account
+attribution or model-compute time. Live fitting uses actual collection-time availability; offline
+event-time reconstruction remains separately labelled. Backfilled rollouts can support retrospective
+experiments but cannot pretend to have been available to an earlier live prediction.
+
+Short-horizon bands use absolute errors of earlier selected-policy predictions, with at least 20
+non-overlapping outcomes, an empirical 80% target and a minimum 1-point resolution allowance.
+This is not a calibrated exhaustion probability or a guarantee under regime change. Long reset
+outlooks retain their separate completed-generation calibration; short-horizon training is not
+blocked on eight completed weekly resets. Flat meters remain precision-limited, even when a
+conditional point prediction equals the current reading.
+
+The private September 8 22:00 UTC snapshot has 2,067 quota observations and 63,236 token
+increments. In the historical unknown-account cohort, new-policy weekly MAE is 0.415 points at
+30 minutes (19 origins, 2 generations), 1.703 at 2 hours (6 origins, 1 generation), and 4.049 at
+24 hours (8 origins, 1 generation), versus legacy 0.608 / 1.194 / 11.851. Five-hour MAE is
+2.205 at 30 minutes (3 origins) and 17.411 at 2 hours (1 origin), versus 1.466 / 20.284.
+These sparse, mixed results do not establish universal superiority. No workload correction earns
+selection on that snapshot; the newly known account has no eligible matured targets. Synthetic
+known-relationship tests demonstrate earned workload selection and live/replay agreement, not
+real-world accuracy. The historical unknown cohort is never attached to the current account.
+Measured combined live projection time on this snapshot was 27 ms for the known weekly cohort
+and 639 ms for the larger historical weekly cohort, excluding database loading.
+
 The current production baseline is deliberately simple:
 
 - `ForecastingService` isolates the active source/reset epoch and retains EWMA as the incumbent until comparable matured outcomes support another candidate. Model selection is chronological; empirical uncertainty requires sufficient prior reset generations. Outputs are conditional projections or explicit learning states, not heuristic confidence probabilities.
@@ -392,26 +978,6 @@ The current production baseline is deliberately simple:
 
 These implementations are **baselines, not architecture**. Their formulas, coefficients, thresholds, confidence logic, and feature sets may be replaced when evaluation demonstrates a better production choice. Persisted forecast snapshots are derived historical outputs and should retain enough lineage to identify the anchor and policy/model used; they must remain rebuildable from durable evidence.
 
-## Current work
-
-[`plan.md`](plan.md) is the active implementation plan. Work is sequenced by product value, dependencies, and evidence readiness. Strengthen contracts where a concrete gap blocks a claim, then integrate and validate the useful behavior rather than reopening the foundation reset.
-
-The current product focus is **rich Codex observability plus trustworthy account-local intelligence**. The major local Codex source families are already inspectable through raw and provider-native surfaces, and the application has working quota, token-accounting, thread/workspace/subagent, auxiliary-source, forecasting, and intelligence paths. Those existing paths are implementation evidence, not proof that every semantic or algorithm is finished.
-
-Current work should therefore favor:
-
-- closing concrete source-contract or compatibility gaps that still make product claims unsafe;
-- making normal Codex workflows useful through provider-native views rather than requiring raw SQLite/JSONL inspection;
-- preserving source selection, provenance, missing/ambiguous/conflicting evidence, and source evolution explicitly;
-- improving durable evidence/read-model boundaries where current code still duplicates policy or stores derived assumptions as facts;
-- developing quota forecasting and scenario intelligence through leakage-safe walk-forward evaluation, calibrated uncertainty, and account-local evidence;
-- using workload signals only when their semantics are established and they improve measured out-of-sample prediction;
-- improving Overview/intelligence UX so predictions are actionable without overstating certainty;
-- maintaining strong tests, bounded queries, cancellation/concurrency behavior, and Windows build quality.
-
-Possible future providers should be kept in mind through clean provider/source boundaries. We are not implementing hypothetical providers now, and we are not weakening the Codex model to make imaginary future mappings easier.
-
-Quota remains one Codex-observability domain among many rather than the organizing principle of the architecture. It is currently a particularly valuable intelligence domain because it has an authoritative live meter, reset epochs, historical observations, and related workload evidence that make prediction measurable rather than purely speculative.
 
 ## Codex state SQLite inspection boundary
 
@@ -584,7 +1150,41 @@ contract or a replacement for the read-only Codex source boundaries above.
 
 ## Documentation rule
 
-Keep this document authoritative for product goals, architecture, retention decisions, and source semantics. Keep `plan.md` authoritative for implementation sequence, open work, and acceptance evidence. Keep `AGENTS.md` focused on how contributors work. Update the relevant documents together when scope or architecture changes; a task checklist is not a new source contract.
+Keep this document authoritative for current product goals, architecture, source semantics,
+retention, implementation status, next work and acceptance. Keep AGENTS.md stable and focused on
+contributor workflow; move feature-specific policy and changing implementation detail here instead.
+The contributor guide owns operational procedures. Update README.md only for actual user-facing
+feature/behavior, requirements or setup changes; exclude roadmaps, internal thresholds, audit
+counters and unimplemented concepts such as TT. A checklist or chat proposal is not source evidence.
+
+### Recorded-token prediction contract
+
+Owned schema 12 adds a SHA-256 fingerprint of consumed rollout bytes to ingestion checkpoints.
+Before resuming a changed file, ingestion verifies its consumed prefix, including in-place workspace
+relinks that preserve the filesystem identity. A mismatch (or legacy unverified checkpoint) starts
+a replacement generation; the existing batch writer retires old token/counter, workload, quota,
+context and usage projections for that file before replay. Source files remain read-only. Verification
+reads the consumed prefix once per changed-file ingestion pass (linear I/O); checkpoint hashing is
+incremental within the pass. A process-local cache skips rehashing when identity, checkpoint, size
+and write time are unchanged. This is not an atomic snapshot of a concurrently rewritten external file. Empty
+replacement files cannot activate a new parsed generation until a complete record arrives.
+
+Token forecasts target the sum of recorded native token increments (including cached input) in
+the next interval, conditional on recent installation-local activity. Zero means no tokens were
+recorded, not proof of no account activity. This is neither whole-account accounting nor a
+subscription-quota or price conversion. Chronological held-out targets exclude future tokens,
+completions, and model changes from inputs. Backfilled history supports retrospective learning,
+not claims that a past app had collected it. A retained result after refresh failure is explicitly
+stale and retains its original generation time.
+
+Owned schema 11 corrects the timestamp-provenance flag on legacy rows migrated by schema 10;
+legacy evidence is retained but cannot silently become eligible account-local training history.
+Unknown/malformed/conflicting observations terminate usable pace segments. Overlapping workload
+outcomes cannot satisfy the independent training threshold. Flat-meter point estimates are not
+exact zero consumption; all-flat production epochs remain precision-limited with no survival claim.
+The statistical replacement of point-estimate baselines with a censored-likelihood model remains
+research, not an implemented or calibrated model.
+
 
 Do not introduce additional competing roadmaps or architecture specifications without a concrete need. Mark dated observations and superseded decisions explicitly; do not silently reinterpret older audit counts as current state.
 

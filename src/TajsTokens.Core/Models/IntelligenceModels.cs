@@ -8,7 +8,14 @@ public sealed record IntelligenceQuery(
     AnalyticsBucketSize BucketSize = AnalyticsBucketSize.Hour,
     int MaxBuckets = 720,
     QuotaObservationAuthority? BurnAuthority = null,
-    QuotaWindowKind? BurnKind = null);
+    QuotaWindowKind? BurnKind = null)
+{
+    public bool UsageOnly { get; init; }
+    public string? Model { get; init; }
+    public string? Repository { get; init; }
+    public string? SessionId { get; init; }
+    public string? ThreadId { get; init; }
+}
 
 public sealed record UsageHistoryBucket(
     DateTimeOffset StartUtc,
@@ -43,6 +50,7 @@ public sealed record UsageDimensionTotal(
     long ReasoningOutputTokens,
     int Sessions)
 {
+    public string? ThreadId { get; init; }
     public long DisjointTokens => checked(
         UncachedInputTokens + CacheReadTokens + CacheWriteTokens + NonReasoningOutputTokens + ReasoningOutputTokens);
     public long IntegrityDelta => checked(NativeTokens - DisjointTokens);
@@ -76,7 +84,8 @@ public sealed record QuotaBurnInterval(
     int Compactions,
     string? DominantModel,
     string? DominantReasoningEffort,
-    double Confidence);
+    double Confidence,
+    string? AccountKey = null);
 
 public sealed record QuotaContributor(
     string SessionId,
@@ -111,7 +120,8 @@ public sealed record QuotaResetEvent(
     QuotaResetClassification Classification,
     double Confidence,
     string Source,
-    string Explanation);
+    string Explanation,
+    string? AccountKey = null);
 
 public sealed record ScenarioRequest(
     double DurationHours,
@@ -119,7 +129,8 @@ public sealed record ScenarioRequest(
     int Subagents,
     double IntensityMultiplier = 1.0,
     string? Model = null,
-    string? ReasoningEffort = null);
+    string? ReasoningEffort = null,
+    string? AccountKey = null);
 
 public sealed record ScenarioHistorySample(
     QuotaWindowKind Kind,
@@ -131,7 +142,8 @@ public sealed record ScenarioHistorySample(
     string? DominantModel,
     string? DominantReasoningEffort,
     DateTimeOffset? ResetUtc = null,
-    string Source = "");
+    string Source = "",
+    string? AccountKey = null);
 
 public sealed record ScenarioWindowEstimate(
     QuotaWindowKind Kind,
@@ -157,7 +169,10 @@ public sealed record IntelligenceDashboard(
     IReadOnlyList<QuotaBurnInterval> QuotaBurnIntervals,
     IReadOnlyList<QuotaResetEvent> ResetEvents,
     IReadOnlyList<ForecastSnapshot> FiveHourForecasts,
-    IReadOnlyList<ForecastSnapshot> WeeklyForecasts);
+    IReadOnlyList<ForecastSnapshot> WeeklyForecasts)
+{
+    public string? QuotaHistorySummary { get; init; }
+}
 
 public sealed record IntelligenceRefreshResult(
     int ForecastsPersisted,

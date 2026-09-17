@@ -1,60 +1,57 @@
 # TajsTokens
 
-TajsTokens is a local-first native Windows application for **rich Codex observability**.
+TajsTokens is a local-first Windows companion for **Codex quota, usage and activity**.
 
-The current focus is understanding and exposing what Codex already knows about its own activity: source state, projects, threads, turns, relationships, tools, logs, runtime metadata, usage-related observations, and other source-native structures where their semantics can be established safely from evidence.
+See your reported quota windows, explore your work history, and get conditional quota
+outlooks and usage predictions—with freshness and uncertainty kept visible.
 
-Local-first means users should be able to inspect the data their own Codex installation exposes without that data needing to leave the machine. Durable duplication and export are separate decisions: content-bearing source data does not automatically belong in TajsTokens' own database, and any export surface should make the boundary explicit and offer sanitization/redaction where appropriate. If raw export is supported, it should be an explicit user choice.
+## What you can do
 
-Possible future providers are a design consideration, not the current product scope. TajsTokens is intentionally **Codex-first, not Codex-shaped**: Codex can have a rich first-class model, while a future provider should be free to keep its own native concepts rather than being forced into Codex's schema.
+- **Overview:** check prominent remaining-quota values, resets, labelled hourly token usage,
+  quota outlooks and short-term usage predictions. Collection details stay available on demand.
+- **Codex → Work & threads:** navigate workspaces, threads and subagents; inspect turns, tools,
+  context and supported native source details. Jump from a thread to its token usage.
+- **Codex → Usage breakdown:** compare models, projects, sessions, hours, days and months in consistent token
+  tables. Search/sort rows, inspect exact counts and filter a selected row across breakdowns.
+  Scope is retained local Codex activity; time buckets use UTC, not inferred billing or quota cost.
+- **Forecasts:** browse saved quota outlooks, see token workload predictions, estimate
+  supported workload scenarios, and compare models within a selected history cohort and target. Historical evidence
+  explains which rollout/app-server readings are usable, repeated, conflicting or incomplete.
+- **Quota burn:** explore recorded quota movement alongside local token activity and filter
+  reset/re-anchor signals by source without combining overlapping observations.
+- **Diagnostics:** check source health, collection coverage and why a forecast is unavailable.
+- **Data Explorer:** inspect Codex SQLite data read-only and compare selected sources.
+- **Codex CLI Harness:** explicitly run a configured local CLI and inspect its output.
 
-## Current investigation tooling
+Predictions are estimates, not guarantees. Token predictions describe recorded local usage
+(including cached input), not subscription-quota percentages. Quota outlooks and scenarios
+may remain in a learning state when compatible history is insufficient. An omitted quota
+window is not treated as unlimited usage.
 
-The application includes a read-only Codex State DB Explorer for inspecting Codex-owned SQLite state without assigning domain meaning to fields merely because they exist. The Codex Threads page consumes the `ICodexThreadReadModel` provider-native query boundary for a bounded thread catalog/detail view, including state metadata, project roots, spawned-thread edges, dynamic tools, turns, normal history items and a separate realtime lane. The Codex Sources page builds bounded, provider-native views for memory, goals, queue, thread artifacts, and Desktop catalog/summary stores on top of that same boundary. It supports the evidence-first source-contract work described in `PROJECT.md`; content-bearing values remain local to inspection and are not mirrored into the TajsTokens database.
+## Local data and privacy
 
-Source-derived implementation notes live under `docs/source-notes/` when they save repeated archaeology without becoming architecture authority. The current [`Codex upstream SQLite schema reference`](docs/source-notes/CODEX_SQLITE_SCHEMA.md) maps a pinned public Codex source snapshot and remains subordinate to `PROJECT.md` and installed-runtime evidence.
+Codex source inspection is read-only. TajsTokens keeps selected telemetry in its own local
+database; viewing a conversation or other source content does not automatically copy it
+into that database. Inspection exports are explicit local actions, not automatic uploads.
+The CLI harness runs only when invoked.
 
-## Repository layout
+The daily installation lives at
+`%LOCALAPPDATA%/Programs/TajemnikTV/TajsTokens/current`, with persistent data in the
+sibling `data` directory. Launch **TajsTokens** from the Start menu after installation.
 
-- `src/TajsTokens.App` - WinUI 3 desktop application
-- `src/TajsTokens.Core` - core models and interfaces used by the current implementation
-- `src/TajsTokens.Infrastructure` - current source adapters, persistence, ingestion, and services
-- `tests/TajsTokens.Core.Tests` - regression tests
+## Build and run
 
-The layout above describes the repository as it exists today. It does not pre-approve the current semantic boundaries during the reset.
-
-## Requirements
-
-- .NET SDK 10.0+
-- Windows 11 or Windows 10 19041+ to launch the WinUI application
-
-## Build
-
-```powershell
-dotnet restore TajsTokens.sln
-dotnet build TajsTokens.sln -c Debug
-```
-
-The authoritative full application build is Windows because WinUI/XAML is Windows-specific.
-
-## Tests
-
-```powershell
-dotnet test tests/TajsTokens.Core.Tests/TajsTokens.Core.Tests.csproj -c Debug
-```
-
-## Run
+Requires **Windows 10 19041+ or Windows 11** and **.NET SDK 10.0+** to build from source.
 
 ```powershell
-dotnet run --project src/TajsTokens.App/TajsTokens.App.csproj
+dotnet restore TajsTokens.slnx
+dotnet build TajsTokens.slnx -c Debug
 ```
 
-## Documentation roles
+**A successful local app build installs and restarts the daily app.** To build without
+changing the running installation, add `-p:DogfoodEnabled=false`. CI and test-only builds
+do not deploy.
 
-The three root documents intentionally have different jobs:
-
-- [`README.md`](README.md) is the repository entry point: what TajsTokens is, how to build it, and where to start.
-- [`PROJECT.md`](PROJECT.md) is the **sole authoritative product/data architecture and planning document** during the reset.
-- [`AGENTS.md`](AGENTS.md) contains operational guardrails for coding agents working in the repository and is subordinate to `PROJECT.md` on all product/data semantics.
-
-Keeping those roles separate avoids turning either the README into an architecture novel or the agent instructions into a second competing specification, two venerable traditions of software documentation that we can safely skip.
+See the [contributor guide](docs/DEVELOPMENT.md) for isolated running, tests, deployment,
+backup and recovery instructions. [PROJECT.md](PROJECT.md) contains current architecture,
+product direction and planned work; those plans are not a list of shipped features.

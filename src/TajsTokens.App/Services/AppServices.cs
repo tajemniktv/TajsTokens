@@ -16,7 +16,14 @@ public sealed class AppServices
     public AppServices()
     {
         var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        DataFolder = Path.Combine(appDataPath, "TajsTokens");
+        if (!Directory.Exists(AppDataLocation.GetDataFolder(appDataPath)) &&
+            System.Diagnostics.Process.GetProcessesByName("TajsTokens.App").Any(process =>
+            {
+                using (process) return process.Id != Environment.ProcessId &&
+                    process.SessionId == System.Diagnostics.Process.GetCurrentProcess().SessionId;
+            }))
+            throw new InvalidOperationException("Exit other TajsTokens instances before migrating application data.");
+        DataFolder = AppDataLocation.EnsureMigrated(appDataPath);
         DatabasePath = Path.Combine(DataFolder, "telemetry.db");
         var settingsPath = Path.Combine(DataFolder, "settings.json");
 
@@ -51,6 +58,7 @@ public sealed class AppServices
         ObservatoryStore = observatory.Store;
         CodexSessionIngestion = observatory.Ingestion;
         CodexObservatory = observatory.Service;
+        CodexRolloutInspection = observatory.RolloutInspection;
 
         Intelligence = new SqliteIntelligenceService(DatabasePath, Repository);
         Telemetry = new TelemetryCoordinator(
@@ -83,6 +91,7 @@ public sealed class AppServices
     public ICodexQuotaProvider CodexQuotaProvider { get; }
     public ICodexSessionIngestionService CodexSessionIngestion { get; }
     public ICodexObservatoryService CodexObservatory { get; }
+    public ICodexRolloutInspection CodexRolloutInspection { get; }
     public IIntelligenceService Intelligence { get; }
     public TelemetryCoordinator Telemetry { get; }
     public QuotaAlertEngine AlertEngine { get; }

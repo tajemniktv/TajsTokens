@@ -6,17 +6,21 @@ using TajsTokens.Infrastructure.Persistence;
 
 namespace TajsTokens.Infrastructure.Services;
 
-public sealed class CodexObservatoryService : ICodexObservatoryService
+public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRolloutInspection
 {
     private const long StateOverlapMs = 60_000;
     private const long StateRolloutVisibilityToleranceMs = 250;
+    private static readonly TimeSpan StateReconciliationInterval = TimeSpan.FromMinutes(5);
 
     private readonly ICodexSessionIngestionService _ingestionService;
     private readonly ICodexObservatoryStore _store;
     private readonly CodexStateCatalog? _stateCatalog;
     private readonly SqliteCodexStateIndexStore? _stateIndexStore;
     private readonly IReadOnlyList<string> _roots;
-    private bool _stateCatalogReconciledThisProcess;
+    private readonly TimeProvider _timeProvider;
+    private long? _lastStateReconciliation;
+    private string? _lastStateCatalogPath;
+    private CodexCollectionCoverage? _lastCoverage;
 
     public CodexObservatoryService(
         ICodexSessionIngestionService ingestionService,
@@ -31,12 +35,14 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
         ICodexObservatoryStore store,
         CodexStateCatalog? stateCatalog,
         SqliteCodexStateIndexStore? stateIndexStore,
-        IEnumerable<string>? roots = null)
+        IEnumerable<string>? roots = null,
+        TimeProvider? timeProvider = null)
     {
         _ingestionService = ingestionService;
         _store = store;
         _stateCatalog = stateCatalog;
         _stateIndexStore = stateIndexStore;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _roots = (roots ?? GetDefaultRoots())
             .Where(path => !string.IsNullOrWhiteSpace(path))
             .Select(Path.GetFullPath)
@@ -74,6 +80,39 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
         return await RefreshFromFilesystemAsync(cancellationToken);
     }
 
+    public async Task<CodexRolloutInspectionReport> InspectAlternateRolloutsAsync(int offset, CancellationToken cancellationToken)
+    {
+        offset = Math.Max(0, offset);
+        var observedAt = _timeProvider.GetUtcNow();
+        // Separate read-only inspection: no ingestion, checkpoint, cursor, or cached-coverage writes.
+        var catalog = _stateCatalog is null ? null : await _stateCatalog.TryReadSinceAsync(0, cancellationToken);
+        if (catalog is null)
+            return new(observedAt, null, null, 0, [], "No usable selected state catalog. Alternate-path ownership and the unindexed path count are unknown.");
+
+        var indexed = catalog.Threads.Select(thread => thread.RolloutPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var alternates = DiscoverFiles(cancellationToken).Where(path => !indexed.Contains(path))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray();
+        var owners = catalog.Threads.GroupBy(thread => thread.ThreadId, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
+        var comparisons = new List<CodexRolloutComparison>();
+        var reader = new CodexRolloutComparisonReader();
+        foreach (var path in alternates.Skip(offset).Take(8))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var id = CodexRolloutParser.ExtractSessionIdFromFileName(path);
+            if (id is null || !owners.TryGetValue(id, out var matches) || matches.Length != 1)
+            {
+                comparisons.Add(new(path, null, CodexRolloutComparisonKind.Unresolved, false, false, null,
+                    "No unique indexed counterpart from filename identity. A first session_meta may be a copied non-owning prefix; ownership is not guessed."));
+                continue;
+            }
+            comparisons.Add(await reader.CompareAsync(path, matches[0].RolloutPath, matches[0].ThreadId, cancellationToken));
+        }
+        return new(observedAt, catalog.DatabasePath, alternates.Length, offset, comparisons,
+            "Read-only sample: up to 8 pairs, 2 MiB and 20,000 records per file. Native paths outside discovery roots are compared when indexed. " +
+            "Filesystem discovery and cross-file reads are best-effort, not an atomic snapshot. Results describe this inspection only; no import, merge, export, or durable content copy occurs.");
+    }
+
     private async Task<CodexObservatoryRefreshResult?> TryRefreshFromStateCatalogAsync(
         CancellationToken cancellationToken)
     {
@@ -85,17 +124,40 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
         await _stateIndexStore.InitializeAsync(cancellationToken);
         var watermark = await _stateIndexStore.GetWatermarkAsync(cancellationToken);
 
-        // A full catalog read once per process catches path/archive/model metadata changes that a
-        // private provider build might persist without advancing updated_at_ms. Subsequent warm
-        // refreshes use the indexed timestamp window. Reading a few hundred compact SQLite rows once
-        // is intentionally cheaper than trusting an undocumented timestamp as an infallible journal.
-        var minimumUpdatedAtMs = _stateCatalogReconciledThisProcess
+        // updated_at_ms is an acceleration hint, not a complete change journal (Codex can update
+        // rollout_path alone). Reconcile compact catalog fingerprints periodically even in a
+        // long-running process; unchanged rollout bodies remain unopened. Use monotonic elapsed time.
+        var reconciliationStarted = _timeProvider.GetTimestamp();
+        var reconciliationDue = _lastStateReconciliation is not long lastReconciliation ||
+            _timeProvider.GetElapsedTime(lastReconciliation, reconciliationStarted) >= StateReconciliationInterval;
+        var minimumUpdatedAtMs = !reconciliationDue
             ? Math.Max(0, watermark - StateOverlapMs)
             : 0;
         var catalog = await _stateCatalog.TryReadSinceAsync(minimumUpdatedAtMs, cancellationToken);
         if (catalog is null)
         {
             return null;
+        }
+
+        // A new source generation can have timestamps older than the previous database's cursor.
+        // Reread without that cursor before comparing fingerprints; never clear retained evidence.
+        if (minimumUpdatedAtMs != 0 &&
+            !string.Equals(_lastStateCatalogPath, catalog.DatabasePath, StringComparison.OrdinalIgnoreCase))
+        {
+            minimumUpdatedAtMs = 0;
+            catalog = await _stateCatalog.TryReadSinceAsync(0, cancellationToken);
+            if (catalog is null) return null;
+        }
+
+        reconciliationDue |= !string.Equals(_lastStateCatalogPath, catalog.DatabasePath, StringComparison.OrdinalIgnoreCase);
+        if (reconciliationDue)
+        {
+            var discovered = DiscoverFiles(cancellationToken).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var indexed = catalog.Threads.Select(thread => thread.RolloutPath)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            _lastCoverage = new CodexCollectionCoverage(
+                _timeProvider.GetUtcNow(), indexed.Count, indexed.Count(File.Exists), discovered.Count,
+                discovered.Count(path => !indexed.Contains(path)), indexed.Count(path => !discovered.Contains(path)));
         }
 
         var fingerprints = await _stateIndexStore.GetFingerprintsAsync(cancellationToken);
@@ -143,7 +205,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
 
                 var infoAfter = new FileInfo(thread.RolloutPath);
                 infoAfter.Refresh();
-                var sourceIdentity = CodexSessionIngestionService.GetSourceIdentity(thread.RolloutPath);
+                var sourceIdentity = result.SourceIdentity ?? CodexSessionIngestionService.GetSourceIdentity(thread.RolloutPath);
                 var touchedSessionId = result.SessionId ?? thread.ThreadId;
                 await _store.UpsertRolloutFileAsync(
                     sourceIdentity,
@@ -187,19 +249,18 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
 
         var nextWatermark = earliestUnappliedUpdatedAtMs is long unappliedAt
             ? Math.Max(0, unappliedAt - StateOverlapMs)
-            : Math.Max(watermark, catalog.MaxUpdatedAtMs);
+            : minimumUpdatedAtMs == 0 ? catalog.MaxUpdatedAtMs : Math.Max(watermark, catalog.MaxUpdatedAtMs);
 
         if (appliedThreads.Count > 0 || nextWatermark != watermark)
         {
             await _stateIndexStore.CommitAsync(appliedThreads, nextWatermark, cancellationToken);
         }
 
-        // Reconciliation is considered complete only after the full catalog path reached its normal
-        // return with no state-ahead or failed threads. A failed/cancelled first pass retries the full
-        // comparison on the next refresh.
-        if (minimumUpdatedAtMs == 0 && earliestUnappliedUpdatedAtMs is null)
+        // Failed/cancelled full passes do not defer reconciliation: retry on the next refresh.
+        if (reconciliationDue && earliestUnappliedUpdatedAtMs is null)
         {
-            _stateCatalogReconciledThisProcess = true;
+            _lastStateReconciliation = reconciliationStarted;
+            _lastStateCatalogPath = catalog.DatabasePath;
         }
 
         return new CodexObservatoryRefreshResult(
@@ -209,7 +270,10 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
             normalized,
             sessionsTouched.Count,
             errors,
-            bytes);
+            bytes)
+        {
+            Coverage = _lastCoverage
+        };
     }
 
     private async Task<bool> CanCommitFingerprintAsync(
@@ -286,7 +350,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
     private async Task<CodexObservatoryRefreshResult> RefreshFromFilesystemAsync(
         CancellationToken cancellationToken)
     {
-        var files = DiscoverFiles();
+        var files = DiscoverFiles(cancellationToken);
         var filesScanned = 0;
         var recordsScanned = 0;
         var normalized = 0;
@@ -307,20 +371,10 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
                 }
 
                 bytes = checked(bytes + info.Length);
-                var sourceIdentity = CodexSessionIngestionService.GetSourceIdentity(file);
                 var filenameSessionId = CodexRolloutParser.ExtractSessionIdFromFileName(file);
 
-                // The fallback path retains the conservative pre-ingestion identity refresh because
-                // it has no provider-owned catalog telling us whether an EOF file moved/archived.
-                await _store.UpsertRolloutFileAsync(
-                    sourceIdentity,
-                    file,
-                    filenameSessionId,
-                    info.Length,
-                    DateTimeOffset.UtcNow,
-                    cancellationToken);
-
                 var result = await _ingestionService.IngestAsync(file, cancellationToken);
+                var sourceIdentity = result.SourceIdentity ?? CodexSessionIngestionService.GetSourceIdentity(file);
                 recordsScanned += result.RecordsScanned;
                 normalized += result.RecordsNormalized;
 
@@ -359,7 +413,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
             bytes);
     }
 
-    private IReadOnlyList<string> DiscoverFiles()
+    private IReadOnlyList<string> DiscoverFiles(CancellationToken cancellationToken = default)
     {
         var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var options = new EnumerationOptions
@@ -372,6 +426,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
 
         foreach (var root in _roots)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (!Directory.Exists(root))
             {
                 continue;
@@ -381,6 +436,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService
             {
                 foreach (var file in Directory.EnumerateFiles(root, "*.jsonl", options))
                 {
+                    cancellationToken.ThrowIfCancellationRequested();
                     files.Add(Path.GetFullPath(file));
                 }
             }

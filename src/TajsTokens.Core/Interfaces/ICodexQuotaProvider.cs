@@ -5,4 +5,13 @@ namespace TajsTokens.Core.Interfaces;
 public interface ICodexQuotaProvider
 {
     Task<IReadOnlyList<QuotaSnapshot>> GetQuotaSnapshotsAsync(CancellationToken cancellationToken);
+
+    // Compatibility for providers implementing the original snapshot-only contract. No windows
+    // means unknown scope, not an inferred identity. The native adapter preserves response scope.
+    async Task<CodexQuotaResponse> GetQuotaResponseAsync(CancellationToken cancellationToken)
+    {
+        var snapshots = await GetQuotaSnapshotsAsync(cancellationToken);
+        var accounts = snapshots.Select(snapshot => snapshot.AccountKey).Distinct().Take(2).ToArray();
+        return new(snapshots, accounts.Length == 1 ? accounts[0] : null);
+    }
 }

@@ -11,6 +11,59 @@ public sealed class TelemetryCoordinatorTests : IDisposable
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "TajsTokens.Tests", Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public async Task TokenForecastUsesPersistedHistoryWhenAccountingFailsAndRetainsStaleResultOnQueryFailure()
+    {
+        var tokens = new SequencedTokscaleProvider(
+            [_ => Task.FromResult<IReadOnlyList<TokenUsage>>([]),
+             _ => Task.FromException<IReadOnlyList<TokenUsage>>(new IOException("offline")),
+             _ => Task.FromException<IReadOnlyList<TokenUsage>>(new IOException("offline"))],
+            [_ => Task.FromResult<IReadOnlyList<TokenTimeBucket>>([]),
+             _ => Task.FromResult<IReadOnlyList<TokenTimeBucket>>([]),
+             _ => Task.FromResult<IReadOnlyList<TokenTimeBucket>>([])]);
+        var quota = new SequencedQuotaProvider(Enumerable.Range(0, 3).Select(_ =>
+            (Func<CancellationToken, Task<IReadOnlyList<QuotaSnapshot>>>)(_ => Task.FromResult<IReadOnlyList<QuotaSnapshot>>([]))));
+        var intelligence = new BlockingIntelligenceService();
+        intelligence.Release.TrySetResult(true);
+        var coordinator = CreateCoordinator(tokens, quota, intelligence);
+        var first = await coordinator.RefreshAsync(RefreshTrigger.Manual, default);
+        Assert.False(first.TokenForecast!.IsStale);
+        intelligence.FailTokenForecast = true;
+        var failed = await coordinator.RefreshAsync(RefreshTrigger.Manual, default);
+        Assert.True(failed.TokenForecast!.IsStale);
+        Assert.Equal(first.TokenForecast.GeneratedAtUtc, failed.TokenForecast.GeneratedAtUtc);
+        intelligence.FailTokenForecast = false;
+        var recovered = await coordinator.RefreshAsync(RefreshTrigger.Manual, default);
+        Assert.False(recovered.TokenForecast!.IsStale);
+        Assert.Equal(3, intelligence.TokenForecastCalls);
+    }
+
+    [Fact]
+    public async Task RolloutCoverageAppearsInDiagnosticsWithoutCallingAlternativesMissingTasks()
+    {
+        var tokens = new SequencedTokscaleProvider(
+            [_ => Task.FromResult<IReadOnlyList<TokenUsage>>([])],
+            [_ => Task.FromResult<IReadOnlyList<TokenTimeBucket>>([])]);
+        var quota = new SequencedQuotaProvider([_ => Task.FromResult<IReadOnlyList<QuotaSnapshot>>([])]);
+        var coordinator = CreateCoordinator(tokens, quota, observatoryService: new CoverageObservatory());
+        var result = await coordinator.RefreshAsync(RefreshTrigger.Manual, CancellationToken.None);
+        var source = Assert.Single(result.Sources, item => item.Provider == "Codex rollouts");
+        Assert.Equal(TelemetryHealthState.Live, source.State);
+        Assert.Contains("2/2 indexed paths accessible", source.Detail);
+        Assert.Contains("3 files in configured discovery roots, 1 not indexed", source.Detail);
+        Assert.Contains("not missing tasks", source.Detail);
+        Assert.Contains("do not measure unique work or durable collection completeness", source.Detail);
+    }
+
+    private sealed class CoverageObservatory : ICodexObservatoryService
+    {
+        public Task<CodexObservatoryRefreshResult> RefreshAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(new CodexObservatoryRefreshResult(2, 0, 0, 0, 0, 0, 0)
+            {
+                Coverage = new(DateTimeOffset.UnixEpoch, 2, 2, 3, 1, 0)
+            });
+    }
+
+    [Fact]
     public async Task TokscalePartialFailure_PreservesWholePreviousGeneration()
     {
         var firstUsage = Usage("first-model", 100);
@@ -144,14 +197,50 @@ public sealed class TelemetryCoordinatorTests : IDisposable
     private TelemetryCoordinator CreateCoordinator(
         ITokscaleProvider tokens,
         ICodexQuotaProvider quota,
-        IIntelligenceService? intelligenceService = null)
+        IIntelligenceService? intelligenceService = null,
+        ICodexObservatoryService? observatoryService = null)
     {
         Directory.CreateDirectory(_directory);
         return new TelemetryCoordinator(
             tokens,
             quota,
             new SqliteTelemetryRepository(Path.Combine(_directory, "telemetry.db")),
+            observatoryService: observatoryService,
             intelligenceService: intelligenceService);
+    }
+
+    [Theory]
+    [InlineData("B", true)]
+    [InlineData("B", false)]
+    [InlineData(null, true)]
+    public async Task SuccessfulAccountSwitchDropsOtherAccountsOmittedLanes(string? nextAccount, bool reportsWeekly)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var fiveHour = Quota(QuotaWindowKind.FiveHour, now, 10, now.AddHours(5)) with { AccountKey = "A" };
+        var weekly = Quota(QuotaWindowKind.Weekly, now, 20, now.AddDays(7)) with { AccountKey = "A" };
+        var tokens = new SequencedTokscaleProvider(
+            Enumerable.Range(0, 3).Select(_ => new Func<CancellationToken, Task<IReadOnlyList<TokenUsage>>>(_ => Task.FromResult<IReadOnlyList<TokenUsage>>([]))),
+            Enumerable.Range(0, 3).Select(_ => new Func<CancellationToken, Task<IReadOnlyList<TokenTimeBucket>>>(_ => Task.FromResult<IReadOnlyList<TokenTimeBucket>>([]))));
+        var provider = new ScopedQuotaProvider(new([fiveHour, weekly], "A"),
+            new(reportsWeekly ? [weekly with { AccountKey = nextAccount }] : [], nextAccount));
+        var coordinator = CreateCoordinator(tokens, provider);
+        await coordinator.RefreshAsync(RefreshTrigger.Startup, default);
+        var changed = await coordinator.RefreshAsync(RefreshTrigger.Interval, default);
+        Assert.Null(changed.QuotaLanes.Single(x => x.Kind == QuotaWindowKind.FiveHour).Snapshot);
+        Assert.All(changed.QuotaSnapshots, x => Assert.Equal(nextAccount, x.AccountKey));
+        Assert.Equal(reportsWeekly ? 1 : 0, changed.QuotaSnapshots.Count);
+        var failed = await coordinator.RefreshAsync(RefreshTrigger.Interval, default);
+        Assert.False(failed.QuotaDataFresh);
+        Assert.Equal(changed.QuotaSnapshots, failed.QuotaSnapshots);
+        Assert.All(failed.QuotaLanes, x => Assert.False(x.IsFresh));
+    }
+
+    private sealed class ScopedQuotaProvider(params CodexQuotaResponse[] responses) : ICodexQuotaProvider
+    {
+        private readonly Queue<CodexQuotaResponse> _responses = new(responses);
+        public Task<IReadOnlyList<QuotaSnapshot>> GetQuotaSnapshotsAsync(CancellationToken cancellationToken) => throw new NotSupportedException();
+        public Task<CodexQuotaResponse> GetQuotaResponseAsync(CancellationToken cancellationToken) => _responses.Count > 0
+            ? Task.FromResult(_responses.Dequeue()) : throw new IOException("Sanitized provider failure");
     }
 
     private static TokenUsage Usage(string model, long tokens) => new(
@@ -221,6 +310,14 @@ public sealed class TelemetryCoordinatorTests : IDisposable
 
     private sealed class BlockingIntelligenceService : IIntelligenceService
     {
+        public bool FailTokenForecast { get; set; }
+        public int TokenForecastCalls { get; private set; }
+        public Task<TokenWorkloadForecast> ForecastTokenWorkloadAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken)
+        {
+            TokenForecastCalls++;
+            return FailTokenForecast ? Task.FromException<TokenWorkloadForecast>(new IOException("query failed"))
+                : Task.FromResult(new TokenWorkloadForecast(nowUtc, null, 0, 0, [], "test fixture"));
+        }
         public Task<ForecastEvaluationReport> EvaluateForecastsAsync(string provider, string profile,
             DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken cancellationToken) =>
             throw new NotSupportedException("This coordinator test double does not run historical evaluation.");

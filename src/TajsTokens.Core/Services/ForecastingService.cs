@@ -6,7 +6,7 @@ namespace TajsTokens.Core.Services;
 
 public sealed class ForecastingService : IForecastingService
 {
-    public const string PolicyVersion = "quota-walk-forward/v2";
+    public const string PolicyVersion = "quota-walk-forward/v4";
 
     public Forecast BuildForecast(IReadOnlyList<QuotaSnapshot> snapshots, DateTimeOffset nowUtc)
     {
@@ -18,8 +18,13 @@ public sealed class ForecastingService : IForecastingService
         if (eligible.Any(x => x.Kind != latest.Kind || x.Provider != latest.Provider || x.Profile != latest.Profile))
             throw new ArgumentException("Forecast snapshots must belong to one quota window/provider/profile.", nameof(snapshots));
         var model = QuotaForecastBacktester.DefaultModel(latest);
-        ForecastEvidence Evidence(int count, double hours, string description) => new(PolicyVersion, model,
-            latest.Source, count, hours, 0, null, null, null, null, description);
+        ForecastEvidence Evidence(int count, double hours, string description) => new(PolicyVersion, "not-estimated",
+            latest.Source, count, hours, 0, null, null, null, null, description)
+        {
+            AnchorLimitId = QuotaHistoryPolicy.Cohort(latest).LimitId,
+            AnchorPlanType = latest.PlanType,
+            HistoryPolicy = QuotaHistoryPolicy.Version
+        };
         Forecast Unknown(string reason, double? sustainable = null) => new(latest.Kind, nowUtc, null, null,
             null, sustainable, 0, ForecastState.Learning, Evidence: Evidence(0, 0, reason));
         if (latest.UsedPercent is not double used || !double.IsFinite(used) || used is < 0 or > 100)
@@ -34,7 +39,7 @@ public sealed class ForecastingService : IForecastingService
 
         // A rate never bridges distinct source lanes. Drops/invalid values/metadata changes
         // terminate the whole segment. Reused reset identities cannot resurrect old slopes.
-        var stream = eligible.Where(x => x.Source == latest.Source).ToArray();
+        var stream = eligible.Where(x => QuotaHistoryPolicy.Cohort(x) == QuotaHistoryPolicy.Cohort(latest)).ToArray();
         var epoch = QuotaForecastBacktester.SplitEpochs(stream).LastOrDefault();
         if (epoch is null || epoch[^1] != latest) return Unknown("No unambiguous current segment is available.", sustainable);
         var observedHours = (latest.CapturedAtUtc - epoch[0].CapturedAtUtc).TotalHours;

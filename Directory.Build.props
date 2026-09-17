@@ -1,5 +1,11 @@
 <Project>
   <PropertyGroup>
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <DogfoodEnabled Condition="'$(DogfoodEnabled)' == '' and '$(Dogfood)' != ''">$(Dogfood)</DogfoodEnabled>
+    <DogfoodEnabled Condition="'$(DogfoodEnabled)' == ''">true</DogfoodEnabled>
+    <TajsDogfoodIsCI Condition="('$(CI)' != '' and '$(CI)' != 'false' and '$(CI)' != '0') or ('$(GITHUB_ACTIONS)' != '' and '$(GITHUB_ACTIONS)' != 'false' and '$(GITHUB_ACTIONS)' != '0') or ('$(TF_BUILD)' != '' and '$(TF_BUILD)' != 'false' and '$(TF_BUILD)' != '0') or '$(BUILD_BUILDID)' != '' or '$(JENKINS_URL)' != '' or '$(TEAMCITY_VERSION)' != ''">true</TajsDogfoodIsCI>
+    <!-- Exclude legacy outputs too, without deleting user-owned build directories. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);**/bin/**;**/obj/**</DefaultItemExcludes>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <EnableNETAnalyzers>true</EnableNETAnalyzers>

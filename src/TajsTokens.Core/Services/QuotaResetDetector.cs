@@ -20,7 +20,7 @@ public sealed class QuotaResetDetector
         var events = new List<QuotaResetEvent>();
         foreach (var group in snapshots
                      .Where(snapshot => snapshot.Kind is QuotaWindowKind.FiveHour or QuotaWindowKind.Weekly)
-                     .GroupBy(snapshot => (snapshot.Provider, snapshot.Profile, snapshot.Kind)))
+                     .GroupBy(QuotaHistoryPolicy.Cohort))
         {
             var ordered = group.OrderBy(snapshot => snapshot.CapturedAtUtc).ToArray();
             for (var index = 1; index < ordered.Length; index++)
@@ -116,7 +116,8 @@ public sealed class QuotaResetDetector
                     classification.Value,
                     confidence,
                     source,
-                    explanation));
+                    explanation,
+                    current.AccountKey));
             }
         }
 
@@ -134,7 +135,11 @@ public sealed class QuotaResetDetector
             current.Kind,
             previous.CapturedAtUtc.ToUniversalTime().ToString("O"),
             current.CapturedAtUtc.ToUniversalTime().ToString("O"));
+        if (current.AccountKey is not null) material += "|" + current.Source + "|" + current.AccountKey;
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material))).ToLowerInvariant();
-        return $"quota-reset-{hash[..24]}";
+        // Keep known-account IDs stable. Legacy unknown IDs are source-qualified by the
+        // intelligence migration using the same UTF-8 hexadecimal suffix.
+        return $"quota-reset-{hash[..24]}" + (current.AccountKey is null
+            ? ":unknown:source:" + Convert.ToHexString(Encoding.UTF8.GetBytes(current.Source)) : "");
     }
 }

@@ -31,6 +31,15 @@ public sealed partial class OverviewViewModel : ObservableObject
     public partial string HistoryCaption { get; set; } = "Native Codex hourly history will appear after the first successful local accounting refresh.";
 
     [ObservableProperty]
+    public partial string TokenForecastText { get; set; } = "Token forecast will appear after local history is collected.";
+
+    [ObservableProperty]
+    public partial string TokenForecastEvidence { get; set; } = "Predicts recorded tokens, independently of subscription quota.";
+
+    [ObservableProperty]
+    public partial string CollectionHealthText { get; set; } = "Collection health and refresh log";
+
+    [ObservableProperty]
     public partial bool IsRefreshing { get; set; }
     public ObservableCollection<TokenSummaryCard> TokenSummaryCards { get; } = [];
     public ObservableCollection<ForecastPoint> HistoryPoints { get; } = [];
@@ -90,6 +99,10 @@ public sealed partial class OverviewViewModel : ObservableObject
                     FormatHealth(source.State),
                     source.Detail));
             }
+            var attention = snapshot.Sources.Count(source => source.State != TelemetryHealthState.Live);
+            CollectionHealthText = attention == 0
+                ? $"Collection health · {snapshot.Sources.Count} sources live · refresh log"
+                : $"Collection health · {attention} sources not live · inspect details";
 
             RecentEvents.Clear();
             foreach (var telemetryEvent in snapshot.Events.OrderByDescending(item => item.TimestampUtc))
@@ -111,6 +124,22 @@ public sealed partial class OverviewViewModel : ObservableObject
             }
 
             RenderQuota(QuotaWindowKind.FiveHour, snapshot);
+            if (snapshot.TokenForecast is { } tokenForecast)
+            {
+                TokenForecastText = tokenForecast.Predictions.Count > 0
+                    ? string.Join("\n", tokenForecast.Predictions.Select(x => $"Next {(x.HorizonHours < 1 ? $"{x.HorizonHours * 60:0} min" : $"{x.HorizonHours:0.#}h")}: ~{FormatTokenCount((long)x.ExpectedTokens)} recorded tokens"))
+                    : "No recent token activity to anchor a forecast.";
+                if (tokenForecast.IsStale) TokenForecastText = "Stale prediction — refresh failed\n" + TokenForecastText;
+                TokenForecastEvidence = $"Generated {tokenForecast.GeneratedAtUtc.ToLocalTime():g} · {tokenForecast.Sessions:N0} sessions · {tokenForecast.TokenEvents:N0} token observations. " +
+                    string.Join("\n", tokenForecast.Predictions.Select(x => $"{x.Model}: {x.Explanation}" +
+                        (x.LowerTokens is { } low && x.UpperTokens is { } high ? $" Range {low:N0}–{high:N0} tokens." : ""))) +
+                    "\n" + tokenForecast.Methodology;
+            }
+            else
+            {
+                TokenForecastText = "Token prediction unavailable for this refresh.";
+                TokenForecastEvidence = "Requires a successful recorded-history query, not a quota account or completed quota resets.";
+            }
             if (IsSuperseded(snapshotTicks))
             {
                 return;
@@ -174,7 +203,7 @@ public sealed partial class OverviewViewModel : ObservableObject
         {
             SetQuotaCard(kind, new QuotaCardViewModel(title, "Not reported", "—", "—", "No forecast for this window",
                 "Codex responded successfully",
-                "Codex is not reporting this quota window in its current response. This does not establish unlimited usage; it will appear automatically if reported again.",
+                "Codex currently omits this window. This does not mean unlimited usage.",
                 InfoBarSeverity.Informational));
             return;
         }
@@ -187,7 +216,18 @@ public sealed partial class OverviewViewModel : ObservableObject
         var laneFresh = snapshot.IsQuotaSnapshotFresh(current);
         var currentForecast = snapshot.FindCurrentForecast(current);
         var forecast = currentForecast is { IsFresh: true } ? currentForecast.Forecast : null;
-        SetQuotaCard(kind, BuildQuotaCard(title, current, forecast, laneFresh));
+        var card = BuildQuotaCard(title, current, forecast, laneFresh);
+        if (laneFresh && forecast is null && currentForecast is not null)
+        {
+            card = card with
+            {
+                PredictedExhaustion = "Forecast unavailable",
+                SurvivalMessage = string.IsNullOrWhiteSpace(currentForecast.Diagnostic)
+                    ? currentForecast.HistoryPolicy
+                    : $"{currentForecast.HistoryPolicy} {currentForecast.Diagnostic}"
+            };
+        }
+        SetQuotaCard(kind, card);
     }
 
     private void SetQuotaCard(QuotaWindowKind kind, QuotaCardViewModel card)
@@ -254,16 +294,17 @@ public sealed partial class OverviewViewModel : ObservableObject
         var max = visible.Max(bucket => bucket.Breakdown.Total);
         foreach (var bucket in visible)
         {
-            var height = max <= 0 ? 10d : 18d + (92d * bucket.Breakdown.Total / max);
+            var height = max <= 0 ? 0d : 120d * bucket.Breakdown.Total / max;
             HistoryPoints.Add(new ForecastPoint(
                 CompactBucketLabel(bucket.Label),
                 height,
-                $"{bucket.Label} · {FormatTokenCount(bucket.Breakdown.Total)}"));
+                $"{bucket.Label} · {FormatTokenCount(bucket.Breakdown.Total)}",
+                FormatTokenCount(bucket.Breakdown.Total)));
         }
 
         var freshness = isFresh ? "live" : "stale";
         var quality = generation?.IsFallback == true ? " · fallback" : string.Empty;
-        HistoryCaption = $"{source} hourly usage · {freshness}{quality} · last {visible.Length} bucket(s) · bars normalized to the busiest visible hour.";
+        HistoryCaption = $"{source} · {freshness}{quality} · last {visible.Length} recorded hours (gaps omitted). Bar height shows tokens relative to the busiest hour.";
     }
 
     private static QuotaCardViewModel BuildQuotaCard(
@@ -285,7 +326,7 @@ public sealed partial class OverviewViewModel : ObservableObject
                 resetCountdown,
                 "Paused while stale",
                 "Forecast paused",
-                $"Last known good · {snapshot.Source}",
+                $"Last known good · {snapshot.Source} · {QuotaAccountScope.Describe(snapshot.AccountKey)}",
                 "Last-known-good quota is shown; forecasting is paused until the provider is fresh again.",
                 InfoBarSeverity.Warning);
         }
@@ -315,7 +356,7 @@ public sealed partial class OverviewViewModel : ObservableObject
             ForecastState.ExhaustionLikelyBeforeReset => "Current pace is projected to exhaust this quota window before its authoritative reset.",
             ForecastState.NearSustainablePace => "Current pace is close to the sustainable pace for this reset window.",
             ForecastState.SafeUntilReset => "Current pace is projected to survive the current reset window.",
-            ForecastState.IdleWithinMeterPrecision => "Quota has not moved at the provider meter's visible precision; burn is uncertain rather than assumed to be exactly zero.",
+            ForecastState.IdleWithinMeterPrecision => "No visible meter change. Burn and survival until reset are still uncertain.",
             _ => "Quota is live; more observations from this reset window are needed before making a burn claim."
         };
 
@@ -332,10 +373,23 @@ public sealed partial class OverviewViewModel : ObservableObject
                 ? $" · 80%-target band {lower:0}–{upper:0}% ({evidence.CalibrationEpochs} past resets)"
                 : $" · uncertainty learning ({evidence.CalibrationEpochs} comparable past resets)"
             : string.Empty;
-        if (forecast?.Evidence is { } diagnostics)
-            survivalMessage += $" {diagnostics.UncertaintyDescription} Model: {diagnostics.Model}; {diagnostics.ObservationCount} observations over {diagnostics.ObservedHours:0.#}h.";
+        var methodology = forecast?.Evidence is { } diagnostics
+            ? $"\n{diagnostics.UncertaintyDescription} Model: {diagnostics.Model}; {diagnostics.ObservationCount} observations over {diagnostics.ObservedHours:0.#}h."
+            : string.Empty;
         var trend = string.IsNullOrWhiteSpace(forecast?.Trend) ? string.Empty : $" · {forecast.Trend}";
-        var freshness = $"live · {snapshot.Source}";
+        if (forecast?.Evidence?.HorizonPredictions is { Count: > 0 } horizons)
+        {
+            methodology += "\n" + string.Join("\n", horizons.Select(x =>
+                $"~{x.RemainingPercent:0.#}% left " +
+                $"+{x.HorizonHours:0.#}h · {x.Model} · " +
+                (x.LowerRemainingPercent is { } low && x.UpperRemainingPercent is { } high
+                    ? $"80%-target band {low:0.#}–{high:0.#}%"
+                    : "uncertainty learning") +
+                $" · {x.TrainingSamples} workload training / {x.ValidationSamples} validation outcomes"));
+        }
+        var freshness = $"live · {snapshot.Source} · {QuotaAccountScope.Describe(snapshot.AccountKey)}";
+        if (snapshot.AccountKey is null)
+            survivalMessage = "Quota is live, but backend-account scope was not reported. Forecasting will not borrow unknown-account history.";
 
         return new QuotaCardViewModel(
             title,
@@ -343,7 +397,7 @@ public sealed partial class OverviewViewModel : ObservableObject
             resetCountdown,
             paceText,
             windowForecast,
-            $"{freshness}{confidence}{trend}",
+            $"{freshness}{confidence}{trend}{methodology}",
             survivalMessage,
             severity);
     }

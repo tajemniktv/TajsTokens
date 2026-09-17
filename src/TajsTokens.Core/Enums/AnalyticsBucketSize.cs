@@ -4,5 +4,6 @@ public enum AnalyticsBucketSize
 {
     Minute,
     Hour,
-    Day
+    Day,
+    Month
 }

@@ -33,7 +33,7 @@ public sealed partial class MainWindow : Window
             "codex-data" => typeof(CodexDataExplorerPage),
             "forecasts" => typeof(ForecastsPage),
             "analytics" => typeof(AnalyticsPage),
-            "diagnostics" => typeof(PlaceholderPage),
+            "diagnostics" => typeof(DiagnosticsPage),
             "settings" => typeof(SettingsPage),
             _ => typeof(OverviewPage)
         };

@@ -9,6 +9,157 @@ namespace TajsTokens.Core.Tests;
 public sealed class CodexStateIndexedIngestionTests
 {
     [Fact]
+    public async Task RefreshAsync_NewStateGenerationDoesNotReuseOldWatermark()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-generation-reconcile-");
+        try
+        {
+            var sessions = Directory.CreateDirectory(Path.Combine(directory.FullName, "sessions"));
+            var oldPath = Path.Combine(sessions.FullName, "old.jsonl");
+            var newPath = Path.Combine(sessions.FullName, "new.jsonl");
+            await File.WriteAllTextAsync(oldPath, "{}\n");
+            await File.WriteAllTextAsync(newPath, "{}\n");
+            await CreateStateDatabaseAsync(Path.Combine(directory.FullName, "state_5.sqlite"),
+                [new("old", oldPath, 400_000, 500_000, 0)]);
+            var telemetryPath = Path.Combine(directory.FullName, "telemetry.db");
+            await new SqliteTelemetryRepository(telemetryPath).InitializeAsync(CancellationToken.None);
+            var store = new SqliteCodexObservatoryStore(telemetryPath);
+            var index = new SqliteCodexStateIndexStore(telemetryPath);
+            var ingestion = new RecordingIngestionService("old");
+            var service = new CodexObservatoryService(ingestion, store,
+                new CodexStateCatalog(directory.FullName), index, [sessions.FullName], new ReconciliationClock());
+            await service.RefreshAsync(CancellationToken.None);
+            Assert.Equal(500_000, await index.GetWatermarkAsync(CancellationToken.None));
+
+            await CreateStateDatabaseAsync(Path.Combine(directory.FullName, "state_6.sqlite"),
+                [new("new", newPath, 1_000, 2_000, 0)]);
+            var result = await service.RefreshAsync(CancellationToken.None);
+            Assert.Equal(2, ingestion.Paths.Count);
+            Assert.Equal(newPath, ingestion.Paths.Last());
+            Assert.Equal(2_000, await index.GetWatermarkAsync(CancellationToken.None));
+            Assert.Equal(2, (await index.GetFingerprintsAsync(CancellationToken.None)).Count);
+            Assert.Equal(1, result.Coverage!.IndexedPaths);
+            await service.RefreshAsync(CancellationToken.None);
+            Assert.Equal(2, ingestion.Paths.Count);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RefreshAsync_ReportsUnindexedAndOutsideRootPathsWithoutImportingAlternatives()
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-coverage-");
+        try
+        {
+            var sessions = Directory.CreateDirectory(Path.Combine(directory.FullName, "sessions"));
+            var indexedPath = Path.Combine(sessions.FullName, "indexed.jsonl");
+            var alternatePath = Path.Combine(sessions.FullName, "alternate.jsonl");
+            var outsidePath = Path.Combine(directory.FullName, "outside.jsonl");
+            foreach (var path in new[] { indexedPath, alternatePath, outsidePath })
+                await File.WriteAllTextAsync(path, "{}\n");
+            await CreateStateDatabaseAsync(Path.Combine(directory.FullName, "state_5.sqlite"),
+                [new("indexed", indexedPath, 100_000, 200_000, 0),
+                 new("outside", outsidePath, 100_000, 200_000, 0)]);
+            var telemetryPath = Path.Combine(directory.FullName, "telemetry.db");
+            await new SqliteTelemetryRepository(telemetryPath).InitializeAsync(CancellationToken.None);
+            var store = new SqliteCodexObservatoryStore(telemetryPath);
+            var ingestion = new RecordingIngestionService("indexed");
+            var time = new ReconciliationClock();
+            var service = new CodexObservatoryService(ingestion, store,
+                new CodexStateCatalog(directory.FullName), new SqliteCodexStateIndexStore(telemetryPath),
+                [sessions.FullName], time);
+            var first = await service.RefreshAsync(CancellationToken.None);
+            Assert.Equal(2, first.Coverage!.IndexedPaths);
+            Assert.Equal(2, first.Coverage.AccessibleIndexedPaths);
+            Assert.Equal(2, first.Coverage.DiscoveredPaths);
+            Assert.Equal(1, first.Coverage.UnindexedPaths);
+            Assert.Equal(1, first.Coverage.IndexedOutsideDiscovery);
+            Assert.DoesNotContain(alternatePath, ingestion.Paths);
+            var warm = await service.RefreshAsync(CancellationToken.None);
+            // Warm refresh deliberately reuses the last coverage scan until reconciliation.
+            Assert.Same(first.Coverage, warm.Coverage);
+            await File.WriteAllTextAsync(Path.Combine(sessions.FullName, "another.jsonl"), "{}\n");
+            time.Advance(TimeSpan.FromMinutes(5));
+            var later = await service.RefreshAsync(CancellationToken.None);
+            Assert.Equal(2, later.Coverage!.UnindexedPaths);
+            Assert.Equal(2, ingestion.Paths.Count);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RefreshAsync_PeriodicallyReconcilesOldPathWithoutTimestampAdvance(bool initiallyMissing)
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-warm-reconcile-");
+        try
+        {
+            var sessions = Directory.CreateDirectory(Path.Combine(directory.FullName, "sessions"));
+            var activePath = Path.Combine(sessions.FullName, "active.jsonl");
+            var replacementPath = Path.Combine(sessions.FullName, "replacement.jsonl");
+            var recentPath = Path.Combine(sessions.FullName, "recent.jsonl");
+            await File.WriteAllTextAsync(activePath, "{}\n");
+            await File.WriteAllTextAsync(recentPath, "{}\n");
+            var statePath = Path.Combine(directory.FullName, "state_5.sqlite");
+            await CreateStateDatabaseAsync(statePath,
+                [new("old", activePath, 10_000, 20_000, 0),
+                 new("recent", recentPath, 200_000, 300_000, 0)]);
+            var telemetryPath = Path.Combine(directory.FullName, "telemetry.db");
+            await new SqliteTelemetryRepository(telemetryPath).InitializeAsync(CancellationToken.None);
+            var store = new SqliteCodexObservatoryStore(telemetryPath);
+            var ingestion = new RecordingIngestionService("old");
+            var time = new ReconciliationClock();
+            var service = new CodexObservatoryService(ingestion, store,
+                new CodexStateCatalog(directory.FullName), new SqliteCodexStateIndexStore(telemetryPath),
+                [sessions.FullName], time);
+            await service.RefreshAsync(CancellationToken.None);
+            Assert.Equal(2, ingestion.Paths.Count);
+            await UpdateRolloutPathOnlyAsync(statePath, "old", replacementPath);
+            if (!initiallyMissing) await File.WriteAllTextAsync(replacementPath, "{}\n");
+
+            time.Advance(TimeSpan.FromMinutes(4));
+            await service.RefreshAsync(CancellationToken.None);
+            Assert.Equal(2, ingestion.Paths.Count);
+            time.Advance(TimeSpan.FromMinutes(1));
+            var reconciliation = await service.RefreshAsync(CancellationToken.None);
+            if (initiallyMissing)
+            {
+                Assert.Equal(1, reconciliation.Errors);
+                await File.WriteAllTextAsync(replacementPath, "{}\n");
+                // Failure must retry immediately, not postpone another five minutes.
+                await service.RefreshAsync(CancellationToken.None);
+            }
+            Assert.Equal(3, ingestion.Paths.Count);
+            Assert.Equal(replacementPath, ingestion.Paths.Last());
+            time.Advance(TimeSpan.FromMinutes(5));
+            await service.RefreshAsync(CancellationToken.None);
+            Assert.Equal(3, ingestion.Paths.Count); // unchanged bodies are still skipped
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
+    private sealed class ReconciliationClock : TimeProvider
+    {
+        private long _timestamp;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+        public override long GetTimestamp() => _timestamp;
+        public void Advance(TimeSpan duration) => _timestamp += duration.Ticks;
+    }
+
+    [Fact]
     public async Task RefreshAsync_StateCatalogSkipsUnchangedRolloutAndReopensChangedThread()
     {
         var directory = Directory.CreateTempSubdirectory("tajstokens-state-index-");

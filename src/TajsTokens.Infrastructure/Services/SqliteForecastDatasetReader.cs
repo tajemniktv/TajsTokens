@@ -9,10 +9,11 @@ namespace TajsTokens.Infrastructure.Services;
 public sealed class SqliteForecastDatasetReader(string databasePath)
 {
     public async Task<CodexForecastDataset> ReadAsync(string provider, string profile,
-        DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken cancellationToken)
+        DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken cancellationToken, string? accountKey = null,
+        bool includeQuota = true)
     {
         if (fromUtc >= toUtc) throw new ArgumentException("A non-empty chronological range is required.");
-        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Mode = SqliteOpenMode.ReadOnly }.ToString());
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
         await connection.OpenAsync(cancellationToken);
         using var transaction = connection.BeginTransaction(deferred: true);
         var captured = DateTimeOffset.UtcNow;
@@ -23,23 +24,41 @@ public sealed class SqliteForecastDatasetReader(string databasePath)
         DateTimeOffset? OptionalTime(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : Time(r.GetString(i));
         using var command = connection.CreateCommand();
         command.Transaction = transaction;
+        command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('quota_snapshots') WHERE name = 'account_key';";
+        var hasAccountKey = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 1;
+        command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('quota_snapshots') WHERE name = 'observation_id';";
+        var hasProvenance = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 1;
         command.Parameters.AddWithValue("$from", Utc(fromUtc));
         command.Parameters.AddWithValue("$lookback", Utc(fromUtc.AddHours(-2)));
         command.Parameters.AddWithValue("$to", Utc(toUtc));
         command.Parameters.AddWithValue("$provider", provider);
         command.Parameters.AddWithValue("$profile", profile);
-        command.CommandText = """
-            SELECT kind,captured_at_utc,used_percent,window_minutes,resets_at_utc,source
-            FROM quota_snapshots WHERE provider=$provider AND profile=$profile
-              AND captured_at_utc >= $from AND captured_at_utc <= $to AND source LIKE 'codex-app-server:%'
-            ORDER BY captured_at_utc LIMIT 100001;
+        command.Parameters.AddWithValue("$account", accountKey ?? (object)DBNull.Value);
+        command.Parameters.AddWithValue("$includeQuota", includeQuota ? 1 : 0);
+        command.CommandText = $"""
+            SELECT kind,captured_at_utc,used_percent,window_minutes,resets_at_utc,source,{(hasAccountKey ? "account_key" : "''")},
+                {(hasProvenance ? "observation_id,source_identity,session_id,limit_id,plan_type,lane,collected_at_utc,has_source_timestamp" : "NULL,NULL,NULL,NULL,NULL,NULL,NULL,0")}
+            FROM quota_snapshots WHERE provider=$provider AND profile=$profile AND $includeQuota=1
+              AND captured_at_utc >= $from AND captured_at_utc <= $to
+              AND (source LIKE 'codex-app-server:%' OR source LIKE 'codex-rollout:%')
+              {(hasProvenance ? "AND (source_identity IS NULL OR EXISTS(SELECT 1 FROM rollout_files f WHERE f.source_identity=quota_snapshots.source_identity))" : "")}
+              AND ($account IS NULL OR {(hasAccountKey ? "account_key=$account" : "0")})
+            ORDER BY captured_at_utc LIMIT 500001;
             """;
         var quota = new List<QuotaSnapshot>();
         await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
             while (await reader.ReadAsync(cancellationToken))
                 quota.Add(new QuotaSnapshot(Enum.Parse<QuotaWindowKind>(reader.GetString(0)), Time(reader.GetString(1)),
-                    reader.IsDBNull(2) ? null : reader.GetDouble(2), reader.IsDBNull(3) ? null : reader.GetInt32(3), OptionalTime(reader, 4), provider, profile, reader.GetString(5)));
-        if (quota.Count > 100000) throw new InvalidOperationException("Quota evaluation range exceeds the 100,000-row bound; narrow the range.");
+                    reader.IsDBNull(2) ? null : reader.GetDouble(2), reader.IsDBNull(3) ? null : reader.GetInt32(3), OptionalTime(reader, 4), provider, profile, reader.GetString(5),
+                    reader.GetString(6) is { Length: > 0 } account ? account : null)
+                {
+                    ObservationId = Text(reader, 7) is { Length: > 0 } id ? id : null,
+                    SourceIdentity = Text(reader, 8), SessionId = Text(reader, 9), LimitId = Text(reader, 10),
+                    PlanType = Text(reader, 11), Lane = Text(reader, 12), CollectedAtUtc = OptionalTime(reader, 13),
+                    HasSourceTimestamp = reader.GetInt32(14) != 0 &&
+                        (!string.IsNullOrEmpty(Text(reader, 7)) || OptionalTime(reader, 13) is not null)
+                });
+        if (quota.Count > 500000) throw new InvalidOperationException("Quota evaluation range exceeds the 500,000-row bound; narrow the range.");
         command.CommandText = """
             SELECT w.source_record_id,w.source_identity,w.source_file,w.start_byte_offset,w.end_byte_offset,
                    w.session_id,w.event_type,w.observed_at_utc,w.captured_at_utc,w.turn_id,w.root_turn_id,
@@ -47,6 +66,9 @@ public sealed class SqliteForecastDatasetReader(string databasePath)
                    w.started_at_unix_seconds,w.completed_at_unix_seconds,w.duration_ms,w.time_to_first_token_ms,w.session_source_kind
             FROM codex_workload_observations w
             WHERE w.observed_at_utc <= $to
+              AND w.session_id IN (
+                  SELECT session_id FROM codex_native_token_events WHERE observed_at_utc > $lookback AND observed_at_utc <= $to
+                  UNION SELECT session_id FROM codex_workload_observations WHERE observed_at_utc > $lookback AND observed_at_utc <= $to)
               AND EXISTS(SELECT 1 FROM rollout_files f WHERE f.source_identity=w.source_identity)
             ORDER BY w.observed_at_utc,w.start_byte_offset LIMIT 100001;
             """;
@@ -82,6 +104,6 @@ public sealed class SqliteForecastDatasetReader(string databasePath)
         if (context.Count > 500000) throw new InvalidOperationException("Context replay exceeds 500,000 rows; narrow the range.");
         transaction.Commit();
         return new CodexForecastDataset(quota, workload, tokens, context, captured,
-            "Authoritative app-server quota targets only. Workload is local installation history, not a verified account identity. Backfilled event-time reconstruction and strict collection-time replay are separate modes; missing legacy collection timestamps remain unknown.");
+            "Quota history includes app-server and rollout evidence; eligibility is decided by quota-history/v1. Legacy missing provenance remains unknown. Workload is local installation history, not verified account identity. Backfilled event-time reconstruction and strict collection-time replay are separate modes.");
     }
 }

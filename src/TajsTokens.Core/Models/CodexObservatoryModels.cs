@@ -5,6 +5,7 @@ public sealed record CodexIngestionResult(
     int RecordsNormalized,
     string? SessionId)
 {
+    public string? SourceIdentity { get; init; }
     public long LastCompleteRecordOffset { get; init; }
     public long SourceLength { get; init; }
 
@@ -22,8 +23,18 @@ public sealed record CodexObservatoryRefreshResult(
     int Errors,
     long BytesObserved)
 {
+    public CodexCollectionCoverage? Coverage { get; init; }
     public static CodexObservatoryRefreshResult Empty { get; } = new(0, 0, 0, 0, 0, 0, 0);
 }
+
+/// <summary>Ephemeral, best-effort path coverage; not a count of unique work or retained evidence.</summary>
+public sealed record CodexCollectionCoverage(
+    DateTimeOffset ObservedAtUtc,
+    int IndexedPaths,
+    int AccessibleIndexedPaths,
+    int DiscoveredPaths,
+    int UnindexedPaths,
+    int IndexedOutsideDiscovery);
 
 public sealed record CodexNativeTokenTotals(
     long UncachedInput,

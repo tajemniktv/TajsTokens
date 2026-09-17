@@ -12,6 +12,9 @@ public sealed partial class AnalyticsPage : Page
     private bool _isLoaded;
     private long _loadGeneration;
     private long _selectionGeneration;
+    private IReadOnlyList<ResetRow> _resetRows = [];
+    private string _burnStatus = "Loading quota changes…";
+    private string? _loadError;
 
     public AnalyticsPage()
     {
@@ -98,13 +101,15 @@ public sealed partial class AnalyticsPage : Page
         {
             if (_isLoaded && generation == Volatile.Read(ref _loadGeneration))
             {
-                StatusText.Text = $"Quota intelligence unavailable: {Summarize(exception.Message)}";
+                _loadError = $"Quota intelligence unavailable: {Summarize(exception.Message)} · displayed results may be stale.";
+                StatusText.Text = _loadError;
             }
         }
     }
 
     private void Render(IntelligenceDashboard dashboard)
     {
+        _loadError = null;
         var selectedId = (BurnIntervalList.SelectedItem as BurnIntervalRow)?.IntervalId;
         _intervalsById.Clear();
         foreach (var interval in dashboard.QuotaBurnIntervals)
@@ -124,9 +129,10 @@ public sealed partial class AnalyticsPage : Page
 
         var burnRows = dashboard.QuotaBurnIntervals.Select(interval => new BurnIntervalRow(
             interval.IntervalId,
-            $"+{interval.DeltaUsedPercent:0.#} pp · {FormatKind(interval.Kind)} · {interval.EndUtc.ToLocalTime():dd MMM HH:mm:ss}",
-            $"Over {FormatDuration(interval.EndUtc - interval.StartUtc)} · {FormatCount(interval.NativeTokens)} local tokens · " +
-            (QuotaSnapshot.ClassifyAuthority(interval.AfterSource) == QuotaObservationAuthority.ProviderAuthoritative ? "account meter" : "rollout reading")))
+            $"{interval.StartUtc.ToLocalTime():dd MMM HH:mm:ss} → {interval.EndUtc.ToLocalTime():dd MMM HH:mm:ss}",
+            $"{FormatKind(interval.Kind)} · {interval.BeforeUsedPercent:0.#}% → {interval.AfterUsedPercent:0.#}% used (+{interval.DeltaUsedPercent:0.#} pp)",
+            SourceLabel(interval.AfterSource) +
+            $" · {QuotaAccountScope.Describe(interval.AccountKey)}"))
             .ToArray();
         BurnIntervalList.ItemsSource = burnRows.Length == 0
             ? new[] { new BurnIntervalRow(string.Empty, "No changes in this view", "Try a longer range or another source. Missing readings do not mean zero consumption.") }
@@ -149,23 +155,63 @@ public sealed partial class AnalyticsPage : Page
             IntervalEvidenceText.Text = string.Empty;
         }
 
-        ResetList.ItemsSource = dashboard.ResetEvents.Count == 0
-            ? new[] { new ResetRow("No reset/re-anchor events", "No provider history in this range met the reset detector's evidence thresholds.") }
-            : dashboard.ResetEvents.Select(reset => new ResetRow(
+        _resetRows = dashboard.ResetEvents.Select(reset => new ResetRow(
                 $"{reset.EffectiveAtUtc.ToLocalTime():g} · {FormatKind(reset.Kind)} · {FormatClassification(reset.Classification)}",
                 $"{FormatNullablePercent(reset.BeforeUsedPercent)} → {FormatNullablePercent(reset.AfterUsedPercent)} used · " +
-                $"{reset.Source} · {reset.Explanation}"))
+                $"{reset.Explanation}\nPrevious reset: {FormatReset(reset.PreviousResetAtUtc)}\nNew reset: {FormatReset(reset.CurrentResetAtUtc)}\nSignal ID: {reset.EventId}",
+                Scope: $"{reset.Source} · {QuotaAccountScope.Describe(reset.AccountKey)}", Source: reset.Source))
                 .ToArray();
+        RenderResets();
 
-        StatusText.Text =
-            $"Showing {dashboard.QuotaBurnIntervals.Count:N0} recent changes · up to 80 per view. Sources are never joined to calculate a change.";
+        _burnStatus =
+            SourceFilter.SelectedIndex == 0
+                ? $"{dashboard.QuotaBurnIntervals.Count:N0} account-meter transitions · latest 80 at most. Times bracket when a change was observed, not when every token was consumed."
+                : $"Diagnostic view: {dashboard.QuotaBurnIntervals.Count:N0} observations, NOT unique quota changes. Several sessions may report the same change; do not add their deltas or token totals.";
+        if (BurnTabs.SelectedIndex == 0) StatusText.Text = _burnStatus;
     }
+
+    private void OnTabChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (BurnSummary is null || BurnTabs is null) return;
+        BurnSummary.Visibility = BurnTabs.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (BurnTabs.SelectedIndex == 0) StatusText.Text = _loadError ?? _burnStatus;
+        else RenderResets();
+    }
+
+    private void OnResetFilterChanged(object sender, SelectionChangedEventArgs e) => RenderResets();
+
+    private void RenderResets()
+    {
+        if (ResetList is null || ResetSourceFilter is null) return;
+        var rows = _resetRows.Where(row => ResetSourceFilter.SelectedIndex == 0 ||
+            ResetSourceFilter.SelectedIndex == (DisplayAuthority(row.Source) switch
+            {
+                QuotaObservationAuthority.ProviderAuthoritative => 1,
+                QuotaObservationAuthority.EmbeddedObservation => 2,
+                _ => 3
+            })).ToArray();
+        ResetList.ItemsSource = rows.Length > 0 ? rows :
+            new[] { new ResetRow("No reset signals in this view", "Try another source or a longer range. Missing evidence is not proof that no reset occurred.") };
+        if (BurnTabs?.SelectedIndex == 1)
+            StatusText.Text = _loadError ?? $"{rows.Length:N0} signals in this view · up to 200 loaded across sources. Signals are not a count of confirmed account resets.";
+    }
+
+    private static QuotaObservationAuthority DisplayAuthority(string source) =>
+        source.Contains('→') ? QuotaObservationAuthority.Unknown : QuotaSnapshot.ClassifyAuthority(source);
+
+    private static string SourceLabel(string source) => DisplayAuthority(source) switch
+    {
+        QuotaObservationAuthority.ProviderAuthoritative => "Account meter",
+        QuotaObservationAuthority.EmbeddedObservation => "Rollout reading",
+        _ => "Unknown / mixed source"
+    };
 
     private void OnFilterChanged(object sender, SelectionChangedEventArgs e) =>
         OnRefreshClicked(sender, new RoutedEventArgs());
 
     private async void OnBurnIntervalSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
+        SourceDetails.IsExpanded = ActivityDetails.IsExpanded = false;
         var generation = Interlocked.Increment(ref _selectionGeneration);
         var cancellation = _pageCancellation;
         if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested ||
@@ -182,12 +228,12 @@ public sealed partial class AnalyticsPage : Page
         SelectedIntervalTitle.Text =
             $"{FormatKind(interval.Kind)} · {interval.BeforeUsedPercent:0.#}% → {interval.AfterUsedPercent:0.#}% used";
         SelectedIntervalFacts.Text =
-            $"+{interval.DeltaUsedPercent:0.#} quota points over {FormatDuration(interval.EndUtc - interval.StartUtc)}\n" +
-            $"{FormatCount(interval.NativeTokens)} local tokens · {interval.RootSessions} root / {interval.SubagentSessions} subagent sessions";
+            $"{interval.StartUtc.ToLocalTime():dd MMM yyyy HH:mm:ss zzz} → {interval.EndUtc.ToLocalTime():dd MMM yyyy HH:mm:ss zzz}\n" +
+            $"+{interval.DeltaUsedPercent:0.#} percentage points observed over {FormatDuration(interval.EndUtc - interval.StartUtc)}";
         IntervalEvidenceText.Text =
             $"{interval.StartUtc.ToLocalTime():G} → {interval.EndUtc.ToLocalTime():G}\n" +
-            $"Source: {interval.AfterSource}\nAccount profile: {interval.Provider}/{interval.Profile}\nReset: {FormatReset(interval.ResetsAtUtc)}\n\n" +
-            "The meter can be rounded or delayed. Session activity is correlated with the interval; it does not establish per-session quota costs. Activity bars show shares of locally recorded tokens, not shares of quota.";
+            $"Source: {interval.AfterSource}\nProvider/profile label: {interval.Provider}/{interval.Profile}\n{QuotaAccountScope.Describe(interval.AccountKey)}\nReset: {FormatReset(interval.ResetsAtUtc)}\n\n" +
+            "Local activity is not verified to belong to this backend account. The meter can be rounded or delayed. Session activity is correlated with the interval; it does not establish per-session quota costs. Activity bars show local token shares, not quota shares.";
         ContributorList.ItemsSource = new[] { new ContributorRow("Loading estimated contributors…", "Querying only the selected interval.") };
 
         try
@@ -271,7 +317,7 @@ public sealed partial class AnalyticsPage : Page
         return value.Length <= 320 ? value : value[..320] + "…";
     }
 
-    private sealed record BurnIntervalRow(string IntervalId, string Header, string Detail);
+    private sealed record BurnIntervalRow(string IntervalId, string Header, string Detail, string? Scope = null);
     private sealed record ContributorRow(string Header, string Detail, double Share = 0);
-    private sealed record ResetRow(string Header, string Detail);
+    private sealed record ResetRow(string Header, string Detail, string? Scope = null, string Source = "");
 }

@@ -9,6 +9,53 @@ namespace TajsTokens.Core.Tests;
 
 public sealed class SqliteCodexIngestionBatchWriterTests
 {
+    [Theory]
+    [InlineData("C:/x")]
+    [InlineData("C:/same")]
+    [InlineData("C:/a/much/longer/workspace")]
+    public async Task InPlaceWorkspaceRewrite_ReplacesConsumedProjectionAndRemainsAppendable(string newPath)
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "PROJECT.md"))) root = root.Parent;
+        if (root is null) throw new InvalidOperationException("Repository root required.");
+        var directory = Directory.CreateDirectory(Path.Combine(root.FullName, ".codex", "temp", "rewrite-" + Guid.NewGuid().ToString("N")));
+        try
+        {
+            const string id = "11111111-1111-4111-8111-111111111111";
+            var file = Path.Combine(directory.FullName, $"rollout-2026-09-01T10-00-00-{id}.jsonl");
+            // Keep the first record unchanged: the consumed prefix, not just its header, must be checked.
+            static string Json(object value) => System.Text.Json.JsonSerializer.Serialize(value) + "\n";
+            var header = Json(new { timestamp = "2026-09-01T10:00:00Z", type = "session_meta", payload = new { id } });
+            string Body(string cwd) => Json(new { timestamp = "2026-09-01T10:00:01Z", type = "turn_context", payload = new { cwd, model = "gpt-5.6-luna" } });
+            string Tokens(int input, string time) => Json(new { timestamp = $"2026-09-01T{time}Z", type = "event_msg", payload = new { type = "token_count", info = new { total_token_usage = new { input_tokens = input, cached_input_tokens = 0, cache_write_input_tokens = 0, output_tokens = 10, reasoning_output_tokens = 0, total_tokens = input + 10 } } } });
+            var database = Path.Combine(directory.FullName, "telemetry.db");
+            var repository = new SqliteTelemetryRepository(database);
+            await repository.InitializeAsync(CancellationToken.None);
+            var store = new SqliteCodexObservatoryStore(database);
+            var ingestion = new CodexSessionIngestionService(new FileSystemCodexSessionEventProvider(), repository, store,
+                new SqliteCodexIngestionBatchWriter(database, store));
+            await File.WriteAllTextAsync(file, header + Body("C:/repo") + Tokens(100, "10:00:02"));
+            await ingestion.IngestAsync(file, CancellationToken.None);
+            var oldIdentity = (await repository.GetCheckpointAsync(file, CancellationToken.None))!.SourceIdentity;
+            ingestion = new CodexSessionIngestionService(new FileSystemCodexSessionEventProvider(), repository, store,
+                new SqliteCodexIngestionBatchWriter(database, store));
+            await File.WriteAllTextAsync(file, header + Body(newPath) + Tokens(100, "10:00:02"));
+            Assert.Equal(3, (await ingestion.IngestAsync(file, CancellationToken.None)).RecordsScanned);
+            Assert.NotEqual(oldIdentity, (await repository.GetCheckpointAsync(file, CancellationToken.None))!.SourceIdentity);
+            Assert.Equal(0, (await ingestion.IngestAsync(file, CancellationToken.None)).RecordsScanned);
+            await File.AppendAllTextAsync(file, Tokens(150, "10:00:03"));
+            Assert.Equal(1, (await ingestion.IngestAsync(file, CancellationToken.None)).RecordsScanned);
+            await using var connection = new SqliteConnection($"Data Source={database}");
+            await connection.OpenAsync();
+            Assert.Equal(4, await CountAsync(connection, "rollout_records"));
+            Assert.Equal(2, await CountAsync(connection, "codex_workload_observations"));
+            Assert.Equal(2, await CountAsync(connection, "codex_native_token_events"));
+            var accounting = await new SqliteNativeCodexAccountingProvider(database).GetSnapshotAsync(CancellationToken.None);
+            Assert.Equal(160, Assert.Single(accounting.Usage).Breakdown.Total);
+        }
+        finally { SqliteConnection.ClearAllPools(); directory.Delete(true); }
+    }
+
     [Fact]
     public async Task WriteBatchAsync_PersistsSemanticAndStorageBatchAndKeepsTokenReplayIdempotent()
     {
@@ -103,7 +150,7 @@ public sealed class SqliteCodexIngestionBatchWriterTests
                 captured.AddHours(5),
                 "codex",
                 "codex",
-                "codex-app-server:codex");
+                "codex-app-server:codex", "fixture-account") { HasSourceTimestamp = true };
             var current = new QuotaSnapshot(
                 QuotaWindowKind.FiveHour,
                 captured,
@@ -112,7 +159,7 @@ public sealed class SqliteCodexIngestionBatchWriterTests
                 captured.AddHours(5),
                 "codex",
                 "codex",
-                "codex-app-server:codex");
+                "codex-app-server:codex", "fixture-account") { HasSourceTimestamp = true };
             await repository.UpsertQuotaSnapshotAsync(previous, CancellationToken.None);
             if (providerFirst)
             {
@@ -133,7 +180,9 @@ public sealed class SqliteCodexIngestionBatchWriterTests
 
             var snapshots = await repository.GetRecentQuotaSnapshotsAsync(
                 QuotaWindowKind.FiveHour, "codex", "codex", 10, CancellationToken.None);
-            Assert.Equal(3, snapshots.Count);
+            Assert.Single(snapshots);
+            Assert.Equal(2, (await repository.GetRecentQuotaSnapshotsAsync(
+                QuotaWindowKind.FiveHour, "codex", "codex", 10, CancellationToken.None, accountKey: "fixture-account")).Count);
 
             var intelligence = new TajsTokens.Infrastructure.Services.SqliteIntelligenceService(database, repository);
             var results = await intelligence.BuildAndPersistCurrentForecastsAsync(

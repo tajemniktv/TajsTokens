@@ -146,6 +146,24 @@ internal sealed class SqliteCodexIngestionBatchWriter(
                          SELECT 1 FROM rollout_files
                          WHERE file_path = $file AND source_identity <> $identity);
 
+                   DELETE FROM codex_workload_observations
+                   WHERE source_identity IN (SELECT source_identity FROM rollout_files
+                       WHERE file_path = $file AND source_identity <> $identity);
+
+                   DELETE FROM quota_snapshots
+                   WHERE source_identity IN (SELECT source_identity FROM rollout_files
+                       WHERE file_path = $file AND source_identity <> $identity);
+
+                   DELETE FROM context_observations
+                   WHERE event_id IN (SELECT source_record_id || ':ctx' FROM rollout_records
+                       WHERE file_path = $file AND source_identity <> $identity);
+
+                   DELETE FROM usage_events
+                   WHERE event_id IN (SELECT source_record_id FROM rollout_records
+                       WHERE file_path = $file AND source_identity <> $identity)
+                      OR event_id IN (SELECT source_record_id || ':token' FROM rollout_records
+                       WHERE file_path = $file AND source_identity <> $identity);
+
                    DELETE FROM codex_parser_state
                    WHERE source_identity IN (
                        SELECT source_identity FROM rollout_files
@@ -255,16 +273,7 @@ internal sealed class SqliteCodexIngestionBatchWriter(
 
             foreach (var snapshot in record.QuotaSnapshots)
             {
-                Set(quota, "$provider", snapshot.Provider);
-                Set(quota, "$profile", snapshot.Profile);
-                Set(quota, "$kind", snapshot.Kind.ToString());
-                Set(quota, "$captured", SerializeUtc(snapshot.CapturedAtUtc));
-                Set(quota, "$used", DbValue(snapshot.UsedPercent));
-                Set(quota, "$window", DbValue(snapshot.WindowMinutes));
-                Set(quota, "$resets", snapshot.ResetsAtUtc is null
-                    ? DBNull.Value
-                    : SerializeUtc(snapshot.ResetsAtUtc.Value));
-                Set(quota, "$source", snapshot.Source);
+                SqliteQuotaEvidence.Bind(quota, snapshot);
                 await quota.ExecuteNonQueryAsync(cancellationToken);
             }
 
@@ -347,14 +356,7 @@ internal sealed class SqliteCodexIngestionBatchWriter(
             """, "$id", "$session", "$time", "$type", "$summary", "$delta");
 
     private static SqliteCommand BuildQuotaCommand(SqliteConnection connection, SqliteTransaction transaction) =>
-        BuildCommand(connection, transaction, """
-            INSERT INTO quota_snapshots(provider, profile, kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, source)
-            VALUES($provider, $profile, $kind, $captured, $used, $window, $resets, $source)
-            ON CONFLICT(provider, profile, kind, captured_at_utc, source) DO UPDATE SET
-              used_percent = excluded.used_percent,
-              window_minutes = excluded.window_minutes,
-              resets_at_utc = excluded.resets_at_utc;
-            """, "$provider", "$profile", "$kind", "$captured", "$used", "$window", "$resets", "$source");
+        BuildCommand(connection, transaction, SqliteQuotaEvidence.InsertSql);
 
     private static SqliteCommand BuildContextCommand(SqliteConnection connection, SqliteTransaction transaction) =>
         BuildCommand(connection, transaction, """

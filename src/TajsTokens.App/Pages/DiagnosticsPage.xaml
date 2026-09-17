@@ -1,0 +1,52 @@
+<Page
+    x:Class="TajsTokens.App.Pages.DiagnosticsPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:models="using:TajsTokens.Core.Models">
+    <Page.Resources>
+        <DataTemplate x:Key="DiagnosticTemplate" x:DataType="models:TelemetryDiagnosticEntry">
+            <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Margin="0,0,0,8">
+                <Expander.Header>
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="{x:Bind Name}" FontWeight="SemiBold" FontSize="16" />
+                        <TextBlock Text="{x:Bind Status}" FontWeight="SemiBold" />
+                        <TextBlock Text="{x:Bind Summary}" TextWrapping="Wrap" Opacity="0.8" />
+                    </StackPanel>
+                </Expander.Header>
+                <TextBlock Text="{x:Bind Detail}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+            </Expander>
+        </DataTemplate>
+    </Page.Resources>
+    <ScrollViewer>
+        <StackPanel Padding="24" Spacing="16" MaxWidth="1100" HorizontalAlignment="Stretch">
+            <TextBlock Text="Diagnostics" FontSize="28" FontWeight="SemiBold" />
+            <TextBlock Text="The collector's latest health, quota decisions, and recent refresh events. Expand a row for evidence and recovery guidance." TextWrapping="Wrap" Opacity="0.75" />
+            <TextBlock x:Name="StatusText" TextWrapping="Wrap" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+                <Button x:Name="RefreshButton" Content="Refresh now" Click="OnRefreshClicked" />
+                <Button x:Name="CancelButton" Content="Cancel refresh" IsEnabled="False" Click="OnCancelClicked" />
+            </StackPanel>
+            <InfoBar x:Name="RefreshInfo" IsOpen="False" IsClosable="True" />
+            <TextBlock Text="Quota windows" FontSize="20" FontWeight="SemiBold" />
+            <ItemsControl x:Name="QuotaItems" ItemTemplate="{StaticResource DiagnosticTemplate}" />
+            <TextBlock Text="Source health" FontSize="20" FontWeight="SemiBold" />
+            <TextBlock x:Name="EmptySourcesText" Text="No source results have been published yet." Opacity="0.7" />
+            <ItemsControl x:Name="SourceItems" ItemTemplate="{StaticResource DiagnosticTemplate}" />
+            <Expander Header="Recent refresh events" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                <StackPanel Spacing="8">
+                    <TextBlock Text="Up to 50 events from the latest collector snapshot; this is not a durable incident log." TextWrapping="Wrap" Opacity="0.7" />
+                    <TextBlock x:Name="EventsText" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                </StackPanel>
+            </Expander>
+            <Expander Header="Investigation and recovery" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="These tools inspect local sources. Opening them does not export data, import alternate rollouts, or reset owned history." TextWrapping="Wrap" />
+                    <Button Content="Rollout coverage" Click="OnCoverageClicked" />
+                    <Button Content="Native sources" Click="OnSourcesClicked" />
+                    <Button Content="Settings and data paths" Click="OnSettingsClicked" />
+                    <TextBlock Text="Backups created by local deployment are kept alongside the data folder. For recovery, stop TajsTokens and preserve the entire data directory first; binary rollback does not downgrade the database. Do not copy a live SQLite database without its WAL." TextWrapping="Wrap" Opacity="0.75" />
+                </StackPanel>
+            </Expander>
+        </StackPanel>
+    </ScrollViewer>
+</Page>

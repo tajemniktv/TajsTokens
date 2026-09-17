@@ -80,6 +80,8 @@ public sealed class TelemetryCoordinator
             var startedAt = DateTimeOffset.UtcNow;
             var stopwatch = Stopwatch.StartNew();
             var previous = Latest;
+            var retainedTokenForecast = previous.TokenForecast is { } oldForecast
+                ? oldForecast with { IsStale = true } : null;
             var sources = new List<ProviderHealthSnapshot>(6);
             var events = new List<TelemetryRefreshEvent>();
             while (_backgroundEvents.TryDequeue(out var backgroundEvent))
@@ -127,17 +129,26 @@ public sealed class TelemetryCoordinator
             var quotaResponseHasSupportedWindow = false;
             try
             {
-                freshQuotaSnapshots = await _quotaProvider.GetQuotaSnapshotsAsync(refreshToken);
+                var response = await _quotaProvider.GetQuotaResponseAsync(refreshToken);
+                freshQuotaSnapshots = response.Snapshots;
+                if (freshQuotaSnapshots.Any(item => item.AccountKey != response.AccountKey))
+                    throw new InvalidOperationException("Quota response contains inconsistent backend-account scope.");
+                var compatiblePrevious = previous with
+                {
+                    QuotaSnapshots = previous.QuotaSnapshots.Where(item => item.AccountKey == response.AccountKey).ToArray(),
+                    QuotaLanes = previous.QuotaLanes.Select(lane =>
+                        lane.Snapshot is { } retained && retained.AccountKey != response.AccountKey
+                            ? lane with { Snapshot = null, State = TelemetryHealthState.Unavailable, LastSuccessUtc = null }
+                            : lane).ToArray()
+                };
+                currentForecasts = currentForecasts.Where(item => item.Current.AccountKey == response.AccountKey).ToArray();
                 var supported = freshQuotaSnapshots
                     .Where(snapshot => snapshot.Kind is QuotaWindowKind.FiveHour or QuotaWindowKind.Weekly)
                     .ToArray();
                 quotaResponseHasSupportedWindow = supported.Length > 0;
-                if (quotaResponseHasSupportedWindow)
-                {
-                    quotaSnapshots = MergeQuotaSnapshots(previous.QuotaSnapshots, supported);
-                }
+                quotaSnapshots = MergeQuotaSnapshots(compatiblePrevious.QuotaSnapshots, supported);
 
-                quotaLanes = BuildQuotaLanes(previous, supported, startedAt);
+                quotaLanes = BuildQuotaLanes(compatiblePrevious, supported, startedAt);
                 quotaFresh = quotaResponseHasSupportedWindow && quotaLanes.All(lane => lane.IsFresh || lane.NotReportedByProvider);
                 var liveCount = quotaLanes.Count(lane => lane.State == TelemetryHealthState.Live);
                 var staleCount = quotaLanes.Count(lane => lane.State == TelemetryHealthState.Stale);
@@ -154,6 +165,7 @@ public sealed class TelemetryCoordinator
                         ? $"Partial provider-authoritative quota refresh: {liveCount} live, {staleCount} stale, {unavailableCount} unavailable lane(s). Fresh lanes remain independently usable."
                         : "The app-server responded but did not expose a supported five-hour or weekly window; previous lanes remain stale when available.";
 
+                detail += $" {QuotaAccountScope.Describe(response.AccountKey)}; local rollout work is not account-attributed.";
                 sources.Add(new ProviderHealthSnapshot(
                     "Codex app-server",
                     sourceState,
@@ -231,7 +243,8 @@ public sealed class TelemetryCoordinator
                     scanEvents,
                     quotaLanes,
                     tokenGeneration,
-                    currentForecasts);
+                    currentForecasts,
+                    retainedTokenForecast);
 
                 observatoryTask = _observatoryService.RefreshAsync(refreshToken);
             }
@@ -252,6 +265,16 @@ public sealed class TelemetryCoordinator
                         ? "No local Codex rollout JSONL sources were discovered. Previously normalized history, if any, remains historical rather than live."
                         : $"{observatory.FilesDiscovered} catalog rollout(s), {observatory.FilesScanned} changed file(s) scanned, {observatory.RecordsScanned} new complete record(s), {observatory.RecordsNormalized} normalized, {observatory.SessionsTouched} touched session(s), {FormatByteCount(observatory.BytesObserved)} observed on changed sources." +
                           (observatory.Errors > 0 ? $" {observatory.Errors} file(s) could not be refreshed and will retry." : string.Empty);
+                    if (observatory.Coverage is { } coverage)
+                    {
+                        detail += $" Best-effort path coverage at {coverage.ObservedAtUtc:u}: " +
+                            $"{coverage.AccessibleIndexedPaths}/{coverage.IndexedPaths} indexed paths accessible; " +
+                            $"{coverage.DiscoveredPaths} files in configured discovery roots, {coverage.UnindexedPaths} not indexed; " +
+                            $"{coverage.IndexedOutsideDiscovery} indexed paths outside that discovered set. " +
+                            "Unindexed files may be alternate copies, not missing tasks; they are not automatically imported while the state index is usable. " +
+                            "These path counts do not measure unique work or durable collection completeness. " +
+                            "Use Codex > Rollout coverage for bounded, read-only alternate-file comparisons.";
+                    }
                     sources.Add(new ProviderHealthSnapshot(
                         "Codex rollouts",
                         state,
@@ -396,13 +419,25 @@ public sealed class TelemetryCoordinator
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
-                    currentForecasts = previous.CurrentForecasts
+                    currentForecasts = currentForecasts
                         .Select(item => item with { State = TelemetryHealthState.Stale, Diagnostic = AppendDiagnostic(item.Diagnostic, SummarizeError(exception)) })
                         .ToArray();
                     events.Add(new TelemetryRefreshEvent(DateTimeOffset.UtcNow, "Forecast unavailable", SummarizeError(exception)));
                 }
             }
 
+            TokenWorkloadForecast? tokenForecast = retainedTokenForecast;
+            if (persistenceAvailable && _intelligenceService is not null)
+            {
+                try
+                {
+                    tokenForecast = await _intelligenceService.ForecastTokenWorkloadAsync(DateTimeOffset.UtcNow, refreshToken);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    events.Add(new TelemetryRefreshEvent(DateTimeOffset.UtcNow, "Token forecast unavailable", SummarizeError(exception)));
+                }
+            }
             refreshToken.ThrowIfCancellationRequested();
             stopwatch.Stop();
             events.Add(new TelemetryRefreshEvent(
@@ -422,7 +457,7 @@ public sealed class TelemetryCoordinator
                 events,
                 quotaLanes,
                 tokenGeneration,
-                currentForecasts);
+                currentForecasts, tokenForecast);
 
             // Historical intelligence is derived from already-persisted normalized telemetry. Queue
             // it only after the final telemetry snapshot has been published, and never hold the
@@ -562,7 +597,8 @@ public sealed class TelemetryCoordinator
         IEnumerable<TelemetryRefreshEvent> events,
         IReadOnlyList<QuotaLaneState> quotaLanes,
         TokenAccountingGenerationState? tokenGeneration,
-        IReadOnlyList<CurrentQuotaForecast> currentForecasts)
+        IReadOnlyList<CurrentQuotaForecast> currentForecasts,
+        TokenWorkloadForecast? tokenForecast = null)
     {
         var snapshot = new TelemetrySnapshot(
             DateTimeOffset.UtcNow,
@@ -578,7 +614,8 @@ public sealed class TelemetryCoordinator
         {
             QuotaLanes = quotaLanes,
             CurrentForecasts = currentForecasts,
-            TokenGeneration = tokenGeneration
+            TokenGeneration = tokenGeneration,
+            TokenForecast = tokenForecast
         };
 
         Volatile.Write(ref _latest, snapshot);

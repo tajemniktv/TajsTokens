@@ -7,22 +7,37 @@ public sealed record QuotaWorkloadTrial(QuotaForecastTrial Baseline, string Cand
     double PredictedRemaining, int TrainingSamples, bool UsedWorkloadModel,
     CodexForecastFeatures Features);
 
+public sealed record QuotaWorkloadPrediction(double Remaining, int TrainingSamples, bool Fitted,
+    CodexForecastFeatures Features);
+
 /// <summary>Authoritative-target walk-forward feature ablations. Future workloads never enter a training prefix.</summary>
 public static class QuotaWorkloadBacktester
 {
     public static readonly string[] Candidates = ["pace-ridge", "token-ridge", "activity-ridge", "model-effort-ridge"];
     public const int MinimumTrainingSamples = 12;
 
+    internal static IEnumerable<QuotaForecastTrial> Independent(IEnumerable<QuotaForecastTrial> trials)
+    {
+        DateTimeOffset? previousEnd = null;
+        foreach (var trial in trials.OrderBy(x => x.OriginUtc))
+        {
+            if (previousEnd is not null && trial.OriginUtc < previousEnd) continue;
+            previousEnd = trial.OutcomeUtc;
+            yield return trial;
+        }
+    }
+
     public static IReadOnlyList<QuotaWorkloadTrial> Replay(CodexForecastDataset data, QuotaWindowKind kind,
         string candidate, double? horizonHours, ForecastReplayAvailability availability,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string baselineModel = "legacy-ewma")
     {
         if (!Candidates.Contains(candidate)) throw new ArgumentException("Unknown workload candidate.", nameof(candidate));
         var results = new List<QuotaWorkloadTrial>();
-        foreach (var stream in data.Quota.Where(x => x.Kind == kind && x.Authority == QuotaObservationAuthority.ProviderAuthoritative)
-                     .GroupBy(x => (x.Provider, x.Profile, x.Source)))
+        foreach (var stream in data.Quota.Where(x => x.Kind == kind)
+                     .GroupBy(QuotaHistoryPolicy.Cohort))
         {
-            var baseline = QuotaForecastBacktester.Replay(stream.ToArray(), "legacy-ewma", horizonHours, cancellationToken);
+            var baseline = QuotaForecastBacktester.Replay(stream.ToArray(), baselineModel, horizonHours, cancellationToken);
             var featureRows = baseline.ToDictionary(x => x.OriginUtc,
                 x => CodexForecastFeatureBuilder.Build(data, x.OriginUtc, 2, availability));
             var origins = stream.GroupBy(x => x.CapturedAtUtc).ToDictionary(x => x.Key, x => x.Last());
@@ -33,8 +48,8 @@ public static class QuotaWorkloadBacktester
                     (featureRows[x.OriginUtc].ObservedTokenEvents > 0 &&
                      (candidate != "model-effort-ridge" ||
                       (featureRows[x.OriginUtc].ModelTokenShares.Count > 0 && featureRows[x.OriginUtc].EffortTokenShares.Count > 0)));
-                var training = baseline.Where(x => x.OutcomeUtc <= trial.OriginUtc && x.OriginUtc < trial.OriginUtc && Supported(x))
-                    .OrderByDescending(x => x.OutcomeUtc).Take(120).ToArray();
+                var training = Independent(baseline.Where(x => x.OutcomeUtc <= trial.OriginUtc && x.OriginUtc < trial.OriginUtc && Supported(x)))
+                    .TakeLast(120).ToArray();
                 var prediction = trial.PredictedRemaining;
                 var used = false;
                 if (training.Length >= MinimumTrainingSamples && Supported(trial))
@@ -57,10 +72,43 @@ public static class QuotaWorkloadBacktester
         return results;
     }
 
+    /// <summary>The live counterpart of the full model/effort ablation, fitted only to matured outcomes.</summary>
+    public static QuotaWorkloadPrediction Predict(CodexForecastDataset data, QuotaSnapshot anchor,
+        double horizonHours, double baselinePrediction, IReadOnlyList<QuotaForecastTrial> baseline,
+        IReadOnlyDictionary<DateTimeOffset, CodexForecastFeatures> featureRows,
+        ForecastReplayAvailability availability)
+    {
+        var features = CodexForecastFeatureBuilder.Build(data, anchor.CapturedAtUtc, 2, availability);
+        var origins = data.Quota.GroupBy(x => x.CapturedAtUtc).ToDictionary(x => x.Key, x => x.Last());
+        var training = Independent(baseline.Where(x => x.OutcomeUtc <= anchor.CapturedAtUtc && x.OriginUtc < anchor.CapturedAtUtc &&
+                featureRows[x.OriginUtc].ObservedTokenEvents > 0 && featureRows[x.OriginUtc].ModelTokenShares.Count > 0 &&
+                featureRows[x.OriginUtc].EffortTokenShares.Count > 0))
+            .TakeLast(120).ToArray();
+        QuotaWorkloadPrediction Fallback() => new(baselinePrediction, training.Length, false, features);
+        if (training.Length < MinimumTrainingSamples || features.ObservedTokenEvents == 0 ||
+            features.ModelTokenShares.Count == 0 || features.EffortTokenShares.Count == 0) return Fallback();
+        var models = training.SelectMany(x => featureRows[x.OriginUtc].ModelTokenShares.Keys).Distinct().Order().Take(8).ToArray();
+        var efforts = training.SelectMany(x => featureRows[x.OriginUtc].EffortTokenShares.Keys).Distinct().Order().Take(8).ToArray();
+        // An unseen model/effort is not silently treated as the training cohort's average.
+        if (features.ModelTokenShares.Keys.Except(models).Any() || features.EffortTokenShares.Keys.Except(efforts).Any()) return Fallback();
+        double[] Row(QuotaForecastTrial trial) => Vector(trial.LeadHours, origins[trial.OriginUtc].RemainingPercent!.Value,
+            trial.PredictedRemaining, featureRows[trial.OriginUtc], "model-effort-ridge", models, efforts);
+        var fit = AccountLocalRidge.Fit(training.Select(Row).ToArray(),
+            training.Select(x => x.ObservedRemaining - x.PredictedRemaining).ToArray(), penalty: 10);
+        if (fit is null) return Fallback();
+        var prediction = baselinePrediction + fit.Predict(Vector(horizonHours, anchor.RemainingPercent!.Value,
+            baselinePrediction, features, "model-effort-ridge", models, efforts));
+        return new(Math.Clamp(prediction, 0, anchor.RemainingPercent.Value), training.Length, true, features);
+    }
+
     private static double[] Vector(QuotaForecastTrial trial, double anchorRemaining, CodexForecastFeatures features,
         string candidate, string[] models, string[] efforts)
+        => Vector(trial.LeadHours, anchorRemaining, trial.PredictedRemaining, features, candidate, models, efforts);
+
+    private static double[] Vector(double leadHours, double anchorRemaining, double baselinePrediction, CodexForecastFeatures features,
+        string candidate, string[] models, string[] efforts)
     {
-        var vector = new List<double> { trial.LeadHours, anchorRemaining, trial.PredictedRemaining };
+        var vector = new List<double> { leadHours, anchorRemaining, baselinePrediction };
         if (candidate != "pace-ridge")
             vector.AddRange([Math.Log(1 + features.Tokens), features.CacheReadShare ?? 0, features.ReasoningOutputShare ?? 0,
                 features.CacheReadShare is null ? 1 : 0, features.ReasoningOutputShare is null ? 1 : 0, features.ObservedTokenEvents]);

@@ -26,15 +26,15 @@ public sealed class ScenarioPlannerService
 
         ScenarioWindowEstimate Build(QuotaWindowKind kind)
         {
-            var samples = history.Where(x => x.Kind == kind && x.EndUtc <= now && x.EndUtc > x.StartUtc &&
+            var samples = history.Where(x => x.Kind == kind && x.AccountKey == request.AccountKey && x.EndUtc <= now && x.EndUtc > x.StartUtc &&
                 double.IsFinite(x.QuotaDeltaPercent) && x.QuotaDeltaPercent is >= 0 and <= 100 &&
                 x.RootAgents >= 0 && x.Subagents >= 0 &&
                 (x.ResetUtc is null || x.EndUtc <= x.ResetUtc)).OrderBy(x => x.StartUtc).ToArray();
             ScenarioWindowEstimate Unknown(string reason, int count) => new(kind, false, count, null, null, null, 0, reason);
             if (samples.Length > 0 && now - samples.Max(x => x.EndUtc) > TimeSpan.FromDays(30))
                 return Unknown("History is stale; a usable interval within 30 days is required.", samples.Length);
-            var source = samples.MaxBy(x => x.EndUtc)?.Source;
-            samples = samples.Where(x => x.Source == source).ToArray();
+            var latest = samples.MaxBy(x => x.EndUtc);
+            samples = samples.Where(x => x.Source == latest?.Source && x.AccountKey == latest?.AccountKey).ToArray();
             samples = samples.Where(x => x.EndUtc >= now.AddDays(-30) &&
                 (string.IsNullOrWhiteSpace(request.Model) || string.Equals(x.DominantModel, request.Model, StringComparison.Ordinal)) &&
                 (string.IsNullOrWhiteSpace(request.ReasoningEffort) || string.Equals(x.DominantReasoningEffort, request.ReasoningEffort, StringComparison.Ordinal))).ToArray();

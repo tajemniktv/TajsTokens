@@ -17,9 +17,18 @@ public partial class App : Application
     private Window? _window;
     private DispatcherQueue? _dispatcher;
     private bool _exitRequested;
+    private DogfoodLifetime? _dogfoodLifetime;
+    private IDisposable? _startupLease;
 
     public App()
     {
+        // The deployment-owned child is started while its parent holds this same lease.
+        if (!Environment.GetCommandLineArgs().Contains("--dogfood-start", StringComparer.Ordinal))
+        {
+            _startupLease = TajsTokens.Infrastructure.Persistence.AppStartupLease.TryAcquire(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+            if (_startupLease is null) Environment.Exit(0);
+        }
         InitializeComponent();
         Services = new AppServices();
     }
@@ -29,6 +38,7 @@ public partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         _dispatcher = DispatcherQueue.GetForCurrentThread();
+        _dogfoodLifetime = new DogfoodLifetime(() => RunOnDispatcher(RequestExit));
 
         _trayService.OpenDashboardRequested += (_, _) => ShowDashboard();
         _trayService.RefreshRequested += (_, _) => _ = RefreshFromTrayAsync();
@@ -51,6 +61,9 @@ public partial class App : Application
         }
 
         StartPeriodicCollector();
+        _dogfoodLifetime.MarkReady();
+        _startupLease?.Dispose();
+        _startupLease = null;
     }
 
     private async Task ReconcileStartupRegistrationAsync()
@@ -299,6 +312,7 @@ public partial class App : Application
         if (_window is null)
         {
             _window = new MainWindow();
+            _window.Title = "TajsTokens";
             _window.AppWindow.Closing += OnWindowClosing;
         }
 
@@ -321,6 +335,7 @@ public partial class App : Application
         Services.Telemetry.SnapshotUpdated -= OnSnapshotUpdated;
         Services.SettingsChanged -= OnSettingsChanged;
         _trayService.Dispose();
+        _dogfoodLifetime?.Dispose();
         _window?.Close();
         Exit();
     }

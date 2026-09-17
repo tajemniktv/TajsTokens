@@ -11,6 +11,12 @@
                                         <Setter Target="BurnDetailRow.Height" Value="0" />
                                         <Setter Target="BurnDetails.(Grid.Row)" Value="0" />
                                         <Setter Target="BurnDetails.(Grid.Column)" Value="1" />
+                                        <Setter Target="SummaryThirdColumn.Width" Value="*" />
+                                        <Setter Target="SummaryFourthColumn.Width" Value="*" />
+                                        <Setter Target="SourceSummary.(Grid.Row)" Value="0" />
+                                        <Setter Target="SourceSummary.(Grid.Column)" Value="2" />
+                                        <Setter Target="ActivitySummary.(Grid.Row)" Value="0" />
+                                        <Setter Target="ActivitySummary.(Grid.Column)" Value="3" />
                                     </VisualState.Setters>
                                 </VisualState>
                             </VisualStateGroup>
@@ -20,7 +26,7 @@
             <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
             <StackPanel Spacing="4">
                 <TextBlock Text="Quota burn" FontSize="28" FontWeight="SemiBold" />
-                <TextBlock Text="Inspect quota changes and the local activity recorded alongside them." TextWrapping="Wrap" Opacity="0.7" />
+                <TextBlock Text="When your account's reported quota changed. Times are local; details are optional." TextWrapping="Wrap" Opacity="0.7" />
                 <TextBlock x:Name="StatusText" Text="Loading quota changes…" TextWrapping="Wrap" Opacity="0.6" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
@@ -31,29 +37,35 @@
                 <Button Content="Refresh" Click="OnRefreshClicked" />
             </StackPanel>
         </Grid>
-        <Grid Grid.Row="1" ColumnSpacing="12">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
+        <Grid x:Name="BurnSummary" Grid.Row="1" ColumnSpacing="12" RowSpacing="12">
+            <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /><ColumnDefinition x:Name="SummaryThirdColumn" Width="0" /><ColumnDefinition x:Name="SummaryFourthColumn" Width="0" /></Grid.ColumnDefinitions>
             <Border Padding="16" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                 <StackPanel Spacing="6"><TextBlock Text="Changes loaded" Opacity="0.65" /><TextBlock x:Name="BurnIntervalCountText" Text="—" FontSize="24" FontWeight="SemiBold" /></StackPanel>
             </Border>
             <Border Grid.Column="1" Padding="16" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                 <StackPanel Spacing="6"><TextBlock Text="Largest change" Opacity="0.65" /><TextBlock x:Name="LargestDropText" Text="—" FontSize="24" FontWeight="SemiBold" /></StackPanel>
             </Border>
-            <Border Grid.Column="2" Padding="16" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+            <Border x:Name="SourceSummary" Grid.Row="1" Padding="16" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                 <StackPanel Spacing="6"><TextBlock Text="Evidence source" Opacity="0.65" /><TextBlock x:Name="ResetCountText" Text="—" FontSize="20" FontWeight="SemiBold" TextWrapping="Wrap" /></StackPanel>
             </Border>
-            <Border Grid.Column="3" Padding="16" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+            <Border x:Name="ActivitySummary" Grid.Row="1" Grid.Column="1" Padding="16" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                 <StackPanel Spacing="6"><TextBlock Text="With local activity" Opacity="0.65" /><TextBlock x:Name="CorrelatedIntervalsText" Text="—" FontSize="24" FontWeight="SemiBold" /></StackPanel>
             </Border>
         </Grid>
-        <Pivot Grid.Row="2">
+        <Pivot x:Name="BurnTabs" Grid.Row="2" SelectionChanged="OnTabChanged">
             <PivotItem Header="Usage changes">
                 <Grid RowSpacing="12">
                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                     <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Expander Header="Other observations (diagnostics)" IsExpanded="False" VerticalAlignment="Top">
+                        <StackPanel Spacing="8" MaxWidth="420">
+                        <TextBlock Text="Session logs may repeat the same account change. These observations are kept separately, not added to account usage." TextWrapping="Wrap" />
                         <ComboBox x:Name="SourceFilter" SelectedIndex="0" SelectionChanged="OnFilterChanged" AutomationProperties.Name="Quota evidence source">
-                            <ComboBoxItem Content="Account meter" /><ComboBoxItem Content="Rollout readings" /><ComboBoxItem Content="All sources · separate" />
+                            <ComboBoxItem Content="Account meter · main timeline" /><ComboBoxItem Content="Diagnostic: rollout observations" /><ComboBoxItem Content="Diagnostic: all observations" />
                         </ComboBox>
+                        </StackPanel>
+                        </Expander>
                         <ComboBox x:Name="BurnWindowFilter" SelectedIndex="0" SelectionChanged="OnFilterChanged" AutomationProperties.Name="Quota window">
                             <ComboBoxItem Content="All windows" /><ComboBoxItem Content="5-hour" /><ComboBoxItem Content="Weekly" />
                         </ComboBox>
@@ -67,7 +79,8 @@
                                 <ListView.ItemTemplate><DataTemplate>
                                     <StackPanel Padding="8" Spacing="5">
                                         <TextBlock Text="{Binding Header}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                        <TextBlock Text="{Binding Detail}" Opacity="0.65" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding Detail}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding Scope}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                                     </StackPanel>
                                 </DataTemplate></ListView.ItemTemplate>
                             </ListView>
@@ -80,10 +93,11 @@
                                     <TextBlock x:Name="SelectedIntervalFacts" Text="Its observed change and local activity will appear here." TextWrapping="Wrap" Opacity="0.7" />
                                     <TextBlock Text="Local activity is context, not proof of what caused the quota change." TextWrapping="Wrap" Opacity="0.6" />
                                 </StackPanel>
-                                <Expander Grid.Row="2" Header="Source and interpretation" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" MaxHeight="180">
+                                <Expander x:Name="SourceDetails" Grid.Row="2" Header="Observation details and source" IsExpanded="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" MaxHeight="180">
                                     <ScrollViewer><TextBlock x:Name="IntervalEvidenceText" TextWrapping="Wrap" IsTextSelectionEnabled="True" /></ScrollViewer>
                                 </Expander>
-                                <ListView x:Name="ContributorList" Grid.Row="3" SelectionMode="None" ScrollViewer.IsDeferredScrollingEnabled="True" AutomationProperties.Name="Local activity in selected interval">
+                                <Expander x:Name="ActivityDetails" Grid.Row="3" Header="Local activity during this interval (not quota attribution)" IsExpanded="False" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" VerticalAlignment="Top">
+                                <ListView x:Name="ContributorList" MaxHeight="300" SelectionMode="None" ScrollViewer.IsDeferredScrollingEnabled="True" AutomationProperties.Name="Local activity in selected interval">
                                     <ListView.ItemTemplate><DataTemplate>
                                         <StackPanel Padding="8" Spacing="6">
                                             <TextBlock Text="{Binding Header}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" />
@@ -92,6 +106,7 @@
                                         </StackPanel>
                                     </DataTemplate></ListView.ItemTemplate>
                                 </ListView>
+                                </Expander>
                             </Grid>
                         </Border>
                     </Grid>
@@ -99,11 +114,20 @@
             </PivotItem>
             <PivotItem Header="Reset signals">
                 <Grid RowSpacing="12" Padding="4,12,4,0">
-                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                     <TextBlock Text="Stored reset and re-anchor detections across all sources. These are derived signals, not a count of confirmed account resets. Up to 200 recent signals are shown." TextWrapping="Wrap" Opacity="0.7" />
-                    <ListView x:Name="ResetList" Grid.Row="1" SelectionMode="None">
+                    <ComboBox x:Name="ResetSourceFilter" Grid.Row="1" SelectedIndex="0" SelectionChanged="OnResetFilterChanged" AutomationProperties.Name="Reset signal source">
+                        <ComboBoxItem Content="All sources · separate" /><ComboBoxItem Content="Account meter" /><ComboBoxItem Content="Rollout readings" /><ComboBoxItem Content="Unknown / mixed" />
+                    </ComboBox>
+                    <ListView x:Name="ResetList" Grid.Row="2" SelectionMode="None" AutomationProperties.Name="Reset and re-anchor signals">
                         <ListView.ItemTemplate><DataTemplate>
-                            <Expander Header="{Binding Header}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                            <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Margin="0,4">
+                                <Expander.Header>
+                                    <StackPanel Spacing="6">
+                                        <TextBlock Text="{Binding Header}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                        <TextBlock Text="{Binding Scope}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                    </StackPanel>
+                                </Expander.Header>
                                 <TextBlock Text="{Binding Detail}" Opacity="0.7" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
                             </Expander>
                         </DataTemplate></ListView.ItemTemplate>

@@ -8,8 +8,8 @@ namespace TajsTokens.Infrastructure.Persistence;
 
 public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryRepository, ISessionIngestionCheckpointStore
 {
-    private const int CurrentSchemaVersion = 8;
-    private const int IntelligenceSchemaVersion = 1;
+    private const int CurrentSchemaVersion = 12;
+    private const int IntelligenceSchemaVersion = 3;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _intelligenceInitializeGate = new(1, 1);
     private volatile bool _intelligenceInitialized;
@@ -192,7 +192,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
 
                 PRAGMA user_version = 8;
                 """, cancellationToken);
-            return;
+            version = 8;
         }
 
         if (version == 1)
@@ -352,6 +352,94 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 PRAGMA user_version = 8;
                 """, cancellationToken);
         }
+        if (version < 9)
+        {
+            // Empty storage keys map to unknown, never to the currently authenticated account.
+            // Rebuild atomically because SQLite cannot extend an existing primary key in place.
+            await ExecuteMigrationAsync(connection, """
+                CREATE TABLE quota_snapshots_v9 (
+                    provider TEXT NOT NULL, profile TEXT NOT NULL, kind TEXT NOT NULL,
+                    captured_at_utc TEXT NOT NULL, used_percent REAL, window_minutes INTEGER,
+                    resets_at_utc TEXT, source TEXT NOT NULL, account_key TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY(provider, profile, kind, captured_at_utc, source, account_key)
+                );
+                INSERT INTO quota_snapshots_v9
+                    SELECT provider, profile, kind, captured_at_utc, used_percent, window_minutes,
+                           resets_at_utc, source, '' FROM quota_snapshots;
+                DROP TABLE quota_snapshots;
+                ALTER TABLE quota_snapshots_v9 RENAME TO quota_snapshots;
+                CREATE INDEX idx_quota_snapshots_lookup
+                    ON quota_snapshots(provider, profile, kind, captured_at_utc DESC);
+                CREATE INDEX idx_quota_snapshots_account_lookup
+                    ON quota_snapshots(provider, profile, kind, account_key, source, captured_at_utc DESC);
+
+                CREATE TABLE forecast_snapshots_v9 (
+                    provider TEXT NOT NULL, profile TEXT NOT NULL, kind TEXT NOT NULL,
+                    generated_at_utc TEXT NOT NULL, burn_rate_percent_per_hour REAL,
+                    estimated_exhaustion_at_utc TEXT, survives_until_reset INTEGER,
+                    sustainable_percent_per_hour REAL, confidence REAL NOT NULL,
+                    state TEXT NOT NULL DEFAULT 'Learning', burn_pressure REAL,
+                    projected_remaining_at_reset_percent REAL, trend TEXT,
+                    is_quantized_flat INTEGER NOT NULL DEFAULT 0,
+                    quota_source TEXT, quota_authority TEXT NOT NULL DEFAULT 'Unknown',
+                    quota_captured_at_utc TEXT, quota_window_minutes INTEGER, quota_resets_at_utc TEXT,
+                    evaluation_json TEXT, account_key TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY(provider, profile, kind, generated_at_utc, account_key)
+                );
+                INSERT INTO forecast_snapshots_v9
+                    SELECT provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
+                           estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour,
+                           confidence, state, burn_pressure, projected_remaining_at_reset_percent, trend,
+                           is_quantized_flat, quota_source, quota_authority, quota_captured_at_utc,
+                           quota_window_minutes, quota_resets_at_utc, evaluation_json, '' FROM forecast_snapshots;
+                DROP TABLE forecast_snapshots;
+                ALTER TABLE forecast_snapshots_v9 RENAME TO forecast_snapshots;
+                CREATE INDEX idx_forecast_snapshots_lookup
+                    ON forecast_snapshots(provider, profile, kind, generated_at_utc DESC);
+                PRAGMA user_version = 9;
+                """, cancellationToken);
+        }
+        if (version < 10)
+        {
+            await ExecuteMigrationAsync(connection, """
+                CREATE TABLE quota_snapshots_v10 (
+                    provider TEXT NOT NULL, profile TEXT NOT NULL, kind TEXT NOT NULL,
+                    captured_at_utc TEXT NOT NULL, used_percent REAL, window_minutes INTEGER,
+                    resets_at_utc TEXT, source TEXT NOT NULL, account_key TEXT NOT NULL DEFAULT '',
+                    observation_id TEXT NOT NULL DEFAULT '', source_identity TEXT, session_id TEXT,
+                    limit_id TEXT, plan_type TEXT, lane TEXT, collected_at_utc TEXT,
+                    has_source_timestamp INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY(provider,profile,kind,captured_at_utc,source,account_key,observation_id)
+                );
+                INSERT INTO quota_snapshots_v10(provider,profile,kind,captured_at_utc,used_percent,
+                    window_minutes,resets_at_utc,source,account_key)
+                    SELECT provider,profile,kind,captured_at_utc,used_percent,window_minutes,
+                        resets_at_utc,source,account_key FROM quota_snapshots;
+                DROP TABLE quota_snapshots;
+                ALTER TABLE quota_snapshots_v10 RENAME TO quota_snapshots;
+                CREATE INDEX idx_quota_snapshots_lookup
+                    ON quota_snapshots(provider,profile,kind,captured_at_utc DESC);
+                CREATE INDEX idx_quota_snapshots_account_lookup
+                    ON quota_snapshots(provider,profile,kind,account_key,source,captured_at_utc DESC);
+                PRAGMA user_version = 10;
+                """, cancellationToken);
+        }
+        if (version < 11)
+        {
+            // v10's default incorrectly asserted timestamp provenance on migrated v9 rows.
+            await ExecuteMigrationAsync(connection, """
+                UPDATE quota_snapshots SET has_source_timestamp=0
+                WHERE observation_id='' AND source_identity IS NULL AND collected_at_utc IS NULL;
+                PRAGMA user_version = 11;
+                """, cancellationToken);
+        }
+        if (version < 12)
+        {
+            await ExecuteMigrationAsync(connection, """
+                ALTER TABLE ingestion_checkpoints ADD COLUMN consumed_prefix_sha256 TEXT;
+                PRAGMA user_version = 12;
+                """, cancellationToken);
+        }
     }
 
     /// <summary>
@@ -418,6 +506,23 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
             {
                 throw new InvalidOperationException($"Intelligence schema {version} is newer than supported version {IntelligenceSchemaVersion}.");
             }
+            if (version < 2)
+            {
+                await ExecuteMigrationAsync(connection, """
+                    ALTER TABLE quota_reset_events ADD COLUMN account_key TEXT NOT NULL DEFAULT '';
+                    UPDATE intelligence_schema SET version = 2 WHERE component = 'phase4-intelligence';
+                    """, cancellationToken);
+            }
+
+            if (version < 3)
+            {
+                await ExecuteMigrationAsync(connection, """
+                    UPDATE quota_reset_events
+                    SET event_id = event_id || ':unknown:source:' || hex(source)
+                    WHERE account_key = '' AND instr(event_id, ':unknown:source:') = 0;
+                    UPDATE intelligence_schema SET version = 3 WHERE component = 'phase4-intelligence';
+                    """, cancellationToken);
+            }
 
             _intelligenceInitialized = true;
         }
@@ -446,10 +551,10 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
             INSERT INTO quota_reset_events(
                 event_id, kind, provider, profile, detected_at_utc, effective_at_utc,
                 before_used_percent, after_used_percent, previous_reset_at_utc, current_reset_at_utc,
-                classification, confidence, source, explanation)
+                classification, confidence, source, explanation, account_key)
             VALUES($id, $kind, $provider, $profile, $detected, $effective,
                    $before, $after, $previousReset, $currentReset,
-                   $classification, $confidence, $source, $explanation)
+                   $classification, $confidence, $source, $explanation, $account)
             ON CONFLICT(event_id) DO UPDATE SET
                 kind = excluded.kind,
                 provider = excluded.provider,
@@ -463,7 +568,8 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 classification = excluded.classification,
                 confidence = excluded.confidence,
                 source = excluded.source,
-                explanation = excluded.explanation;
+                explanation = excluded.explanation,
+                account_key = excluded.account_key;
             """;
         command.Parameters.AddWithValue("$id", resetEvent.EventId);
         command.Parameters.AddWithValue("$kind", resetEvent.Kind.ToString());
@@ -479,33 +585,15 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
         command.Parameters.AddWithValue("$confidence", resetEvent.Confidence);
         command.Parameters.AddWithValue("$source", resetEvent.Source);
         command.Parameters.AddWithValue("$explanation", resetEvent.Explanation);
+        command.Parameters.AddWithValue("$account", resetEvent.AccountKey ?? "");
         await command.ExecuteNonQueryAsync(cancellationToken);
         transaction.Commit();
         return existed ? 0 : 1;
     }
 
     public Task UpsertQuotaSnapshotAsync(QuotaSnapshot snapshot, CancellationToken cancellationToken) =>
-        ExecutePreparedCommandAsync(
-            """
-            INSERT INTO quota_snapshots(provider, profile, kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, source)
-            VALUES($provider, $profile, $kind, $captured, $used, $window, $resets, $source)
-            ON CONFLICT(provider, profile, kind, captured_at_utc, source) DO UPDATE SET
-              used_percent = excluded.used_percent,
-              window_minutes = excluded.window_minutes,
-              resets_at_utc = excluded.resets_at_utc;
-            """,
-            cmd =>
-            {
-                cmd.Parameters.AddWithValue("$provider", snapshot.Provider);
-                cmd.Parameters.AddWithValue("$profile", snapshot.Profile);
-                cmd.Parameters.AddWithValue("$kind", snapshot.Kind.ToString());
-                cmd.Parameters.AddWithValue("$captured", SerializeUtc(snapshot.CapturedAtUtc));
-                cmd.Parameters.AddWithValue("$used", DbValue(snapshot.UsedPercent));
-                cmd.Parameters.AddWithValue("$window", DbValue(snapshot.WindowMinutes));
-                cmd.Parameters.AddWithValue("$resets", snapshot.ResetsAtUtc is null ? DBNull.Value : SerializeUtc(snapshot.ResetsAtUtc.Value));
-                cmd.Parameters.AddWithValue("$source", snapshot.Source);
-            },
-            cancellationToken);
+        ExecutePreparedCommandAsync(SqliteQuotaEvidence.InsertSql,
+            command => SqliteQuotaEvidence.Bind(command, snapshot), cancellationToken);
 
     public Task AddTokenUsageAsync(TokenUsage usage, CancellationToken cancellationToken) =>
         ExecutePreparedCommandAsync(
@@ -698,11 +786,11 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
                 estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence,
                 state, burn_pressure, projected_remaining_at_reset_percent, trend, is_quantized_flat,
-                quota_source, quota_authority, quota_captured_at_utc, quota_window_minutes, quota_resets_at_utc, evaluation_json)
+                quota_source, quota_authority, quota_captured_at_utc, quota_window_minutes, quota_resets_at_utc, evaluation_json, account_key)
             VALUES($provider, $profile, $kind, $generated, $burnRate, $exhaustion, $survives, $sustainable, $confidence,
                    $state, $pressure, $remainingAtReset, $trend, $quantizedFlat,
-                   $quotaSource, $quotaAuthority, $quotaCaptured, $quotaWindow, $quotaReset, $evaluation)
-            ON CONFLICT(provider, profile, kind, generated_at_utc) DO UPDATE SET
+                   $quotaSource, $quotaAuthority, $quotaCaptured, $quotaWindow, $quotaReset, $evaluation, $account)
+            ON CONFLICT(provider, profile, kind, generated_at_utc, account_key) DO UPDATE SET
               burn_rate_percent_per_hour = excluded.burn_rate_percent_per_hour,
               estimated_exhaustion_at_utc = excluded.estimated_exhaustion_at_utc,
               survives_until_reset = excluded.survives_until_reset,
@@ -743,6 +831,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 cmd.Parameters.AddWithValue("$quotaWindow", DbValue(snapshot.QuotaWindowMinutes));
                 cmd.Parameters.AddWithValue("$quotaReset", snapshot.QuotaResetsAtUtc is null ? DBNull.Value : SerializeUtc(snapshot.QuotaResetsAtUtc.Value));
                 cmd.Parameters.AddWithValue("$evaluation", forecast.Evidence is null ? DBNull.Value : ForecastEvidenceJson.Serialize(forecast.Evidence));
+                cmd.Parameters.AddWithValue("$account", snapshot.AccountKey ?? "");
             },
             cancellationToken);
 
@@ -753,18 +842,21 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
         int take,
         CancellationToken cancellationToken,
         DateTimeOffset? capturedAtUpperBoundUtc = null,
-        string? source = null)
+        string? source = null,
+        string? accountKey = null)
     {
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, provider, profile, source
+            SELECT kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, provider, profile, source, account_key,
+                   observation_id,source_identity,session_id,limit_id,plan_type,lane,collected_at_utc,has_source_timestamp
             FROM quota_snapshots
             WHERE kind = $kind AND provider = $provider AND profile = $profile
               AND ($capturedAtUpperBound IS NULL OR captured_at_utc <= $capturedAtUpperBound)
               AND ($source IS NULL OR source = $source)
+              AND account_key = $account
             ORDER BY captured_at_utc DESC
             LIMIT $take;
             """;
@@ -773,6 +865,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
         command.Parameters.AddWithValue("$profile", profile);
         command.Parameters.AddWithValue("$take", Math.Max(0, take));
         command.Parameters.AddWithValue("$source", DbValue(source));
+        command.Parameters.AddWithValue("$account", accountKey ?? "");
         command.Parameters.AddWithValue(
             "$capturedAtUpperBound",
             capturedAtUpperBoundUtc is null ? DBNull.Value : SerializeUtc(capturedAtUpperBoundUtc.Value));
@@ -781,7 +874,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            results.Add(new QuotaSnapshot(
+            results.Add(SqliteQuotaEvidence.Read(new QuotaSnapshot(
                 Enum.Parse<QuotaWindowKind>(reader.GetString(0)),
                 ParseUtc(reader.GetString(1)),
                 reader.IsDBNull(2) ? null : reader.GetDouble(2),
@@ -789,7 +882,8 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 reader.IsDBNull(4) ? null : ParseUtc(reader.GetString(4)),
                 reader.GetString(5),
                 reader.GetString(6),
-                reader.GetString(7)));
+                reader.GetString(7),
+                reader.GetString(8) is { Length: > 0 } account ? account : null), reader, 9));
         }
 
         return results;
@@ -810,7 +904,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
             SELECT provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
                    estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence,
                    state, burn_pressure, projected_remaining_at_reset_percent, trend, is_quantized_flat,
-                   quota_source, quota_authority, quota_captured_at_utc, quota_window_minutes, quota_resets_at_utc, evaluation_json
+                   quota_source, quota_authority, quota_captured_at_utc, quota_window_minutes, quota_resets_at_utc, evaluation_json, account_key
             FROM forecast_snapshots
             WHERE kind = $kind AND provider = $provider AND profile = $profile
             ORDER BY generated_at_utc DESC
@@ -850,7 +944,8 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 reader.IsDBNull(15) || !Enum.TryParse<QuotaObservationAuthority>(reader.GetString(15), out var authority) ? QuotaObservationAuthority.Unknown : authority,
                 reader.IsDBNull(16) ? null : ParseUtc(reader.GetString(16)),
                 reader.IsDBNull(17) ? null : reader.GetInt32(17),
-                reader.IsDBNull(18) ? null : ParseUtc(reader.GetString(18))));
+                reader.IsDBNull(18) ? null : ParseUtc(reader.GetString(18)),
+                reader.GetString(20) is { Length: > 0 } account ? account : null));
         }
 
         return results;
@@ -863,7 +958,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
 
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT file_path, last_byte_offset, updated_at_utc, last_session_id, parser_version, source_identity
+            SELECT file_path, last_byte_offset, updated_at_utc, last_session_id, parser_version, source_identity, consumed_prefix_sha256
             FROM ingestion_checkpoints
             WHERE file_path = $path;
             """;
@@ -881,20 +976,22 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
             ParseUtc(reader.GetString(2)),
             reader.IsDBNull(3) ? null : reader.GetString(3),
             reader.GetString(4),
-            reader.IsDBNull(5) ? null : reader.GetString(5));
+            reader.IsDBNull(5) ? null : reader.GetString(5))
+        { ConsumedPrefixSha256 = reader.IsDBNull(6) ? null : reader.GetString(6) };
     }
 
     public Task SaveCheckpointAsync(FileIngestionCheckpoint checkpoint, CancellationToken cancellationToken) =>
         ExecutePreparedCommandAsync(
             """
-            INSERT INTO ingestion_checkpoints(file_path, last_byte_offset, updated_at_utc, last_session_id, parser_version, source_identity)
-            VALUES($path, $offset, $updated, $session, $parser, $identity)
+            INSERT INTO ingestion_checkpoints(file_path, last_byte_offset, updated_at_utc, last_session_id, parser_version, source_identity, consumed_prefix_sha256)
+            VALUES($path, $offset, $updated, $session, $parser, $identity, $prefix)
             ON CONFLICT(file_path) DO UPDATE SET
               last_byte_offset = excluded.last_byte_offset,
               updated_at_utc = excluded.updated_at_utc,
               last_session_id = excluded.last_session_id,
               parser_version = excluded.parser_version,
-              source_identity = excluded.source_identity;
+              source_identity = excluded.source_identity,
+              consumed_prefix_sha256 = excluded.consumed_prefix_sha256;
             """,
             cmd =>
             {
@@ -904,6 +1001,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 cmd.Parameters.AddWithValue("$session", DbValue(checkpoint.LastSessionId));
                 cmd.Parameters.AddWithValue("$parser", checkpoint.ParserVersion);
                 cmd.Parameters.AddWithValue("$identity", DbValue(checkpoint.SourceIdentity));
+                cmd.Parameters.AddWithValue("$prefix", DbValue(checkpoint.ConsumedPrefixSha256));
             },
             cancellationToken);
 

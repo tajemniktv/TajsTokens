@@ -1,5 +1,4 @@
 using Microsoft.UI.Xaml;
-using System.Collections.ObjectModel;
 using Microsoft.UI.Xaml.Controls;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
@@ -8,227 +7,151 @@ namespace TajsTokens.App.Pages;
 
 public sealed partial class UsagePage : Page
 {
-    private CancellationTokenSource? _pageCancellation;
-    private bool _isLoaded;
-    private long _loadGeneration;
-    private readonly ObservableCollection<DimensionRow> _dimensionRows = [];
+    public event EventHandler<string>? ThreadRequested;
+    public void SelectThread(string threadId)
+    {
+        _hasResult = false;
+        _model = _repository = null;
+        _session = null;
+        _thread = threadId;
+        _from = _to = null;
+        // Called while detached, before Loaded starts the scoped query.
+        RangeCombo.SelectedIndex = 4;
+        ViewCombo.SelectedIndex = 4;
+        SearchBox.Text = "";
+    }
+    private bool _loaded;
+    private bool _hasResult;
+    private bool _settingRange;
+    private CancellationTokenSource? _request;
+    private IReadOnlyList<UsageRow> _rows = [];
+    private string? _model, _repository, _session, _thread;
+    private DateTimeOffset? _from, _to;
+    private string _group = "Model";
+    private IntelligenceQuery? _displayedQuery;
 
     public UsagePage()
     {
         InitializeComponent();
-        DimensionList.ItemsSource = _dimensionRows;
-        Loaded += OnLoaded;
-        Unloaded += OnUnloaded;
+        Loaded += async (_, _) => { _loaded = true; if (!_hasResult) await LoadAsync(); };
+        Unloaded += (_, _) => { _loaded = false; _request?.Cancel(); };
     }
 
-    private App App => (App)Application.Current;
-
-    private async void OnLoaded(object sender, RoutedEventArgs e)
+    private async Task LoadAsync()
     {
-        _isLoaded = true;
-        var previous = Interlocked.Exchange(ref _pageCancellation, new CancellationTokenSource());
-        previous?.Cancel();
-        previous?.Dispose();
-        var generation = Interlocked.Increment(ref _loadGeneration);
-        await LoadAsync(_pageCancellation.Token, generation);
-    }
-
-    private void OnUnloaded(object sender, RoutedEventArgs e)
-    {
-        _isLoaded = false;
-        Interlocked.Increment(ref _loadGeneration);
-        var cancellation = Interlocked.Exchange(ref _pageCancellation, null);
-        cancellation?.Cancel();
-        cancellation?.Dispose();
-    }
-
-    private async void OnRefreshClicked(object sender, RoutedEventArgs e)
-    {
-        var cancellation = _pageCancellation;
-        if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested)
-        {
-            return;
-        }
-
-        var generation = Interlocked.Increment(ref _loadGeneration);
-        await LoadAsync(cancellation.Token, generation);
-    }
-
-    private async Task LoadAsync(CancellationToken cancellationToken, long generation)
-    {
-        if (!_isLoaded)
-        {
-            return;
-        }
-
+        if (!_loaded) return;
+        _hasResult = false;
+        _request?.Cancel();
+        var request = new CancellationTokenSource();
+        _request = request;
+        RowsList.ItemsSource = null;
+        _rows = [];
+        SummaryText.Text = DetailText.Text = "";
+        DrillButton.IsEnabled = false;
+        OpenThreadButton.IsEnabled = false;
+        StatusText.Text = "Reading local history…";
         try
         {
-            StatusText.Text = "Aggregating local telemetry…";
+            _group = ((ComboBoxItem)ViewCombo.SelectedItem).Tag.ToString()!;
+            var range = ((ComboBoxItem)RangeCombo.SelectedItem).Tag.ToString();
             var now = DateTimeOffset.UtcNow;
-            var days = ParseDays();
-            var requestedBucket = ParseBucket();
-            var query = new IntelligenceQuery(now.AddDays(-days), now, requestedBucket, 720);
-            var dashboard = await Task.Run(
-                () => App.Services.Intelligence.QueryAsync(query, cancellationToken),
-                cancellationToken);
-
-            cancellationToken.ThrowIfCancellationRequested();
-            if (!_isLoaded || generation != Volatile.Read(ref _loadGeneration))
+            var from = _from ?? (range == "all" ? DateTimeOffset.UnixEpoch : now.AddDays(-int.Parse(range!)));
+            var size = Enum.TryParse<AnalyticsBucketSize>(_group, out var bucket) ? bucket : AnalyticsBucketSize.Month;
+            var query = new IntelligenceQuery(from, _to ?? now, size, 2000)
+            { UsageOnly = true, Model = _model, Repository = _repository, SessionId = _session, ThreadId = _thread };
+            var service = ((App)Application.Current).Services.Intelligence;
+            var data = await Task.Run(() => service.QueryAsync(query, request.Token), request.Token);
+            if (!_loaded || _request != request || request.IsCancellationRequested) return;
+            _displayedQuery = data.Query;
+            var time = _group is "Hour" or "Day" or "Month";
+            _rows = time
+                ? data.UsageHistory.Select(x => new UsageRow(x.StartUtc.ToString(data.Query.BucketSize == AnalyticsBucketSize.Month ? "yyyy-MM" : data.Query.BucketSize == AnalyticsBucketSize.Day ? "yyyy-MM-dd" : "yyyy-MM-dd HH:mm"), x.NativeTokens, x.UncachedInputTokens, x.NonReasoningOutputTokens, x.CacheReadTokens, x.CacheWriteTokens, x.ReasoningOutputTokens, x.ActiveSessions, x.StartUtc, x.EndUtc)).ToArray()
+                : data.Dimensions.Where(x => x.Dimension == _group).Select(x => new UsageRow(x.Value, x.NativeTokens, x.UncachedInputTokens, x.NonReasoningOutputTokens, x.CacheReadTokens, x.CacheWriteTokens, x.ReasoningOutputTokens, x.Sessions, ThreadId: x.ThreadId)).ToArray();
+            SummaryText.Text = $"{Count(data.UsageHistory.Sum(x => x.NativeTokens))} recorded tokens · {data.Dimensions.Count(x => x.Dimension == "Session"):N0} sessions";
+            var filters = string.Join(" · ", new[] { _model, _repository, _session, _thread is null ? null : $"Thread {_thread}" }.Where(x => x is not null));
+            StatusText.Text = $"{data.Query.FromUtc:yyyy-MM-dd HH:mm} → {data.Query.ToUtc:yyyy-MM-dd HH:mm} UTC · {_rows.Count:N0} rows" +
+                (time ? $" · {data.Query.BucketSize} buckets (coarsened when necessary)" : "") +
+                (filters.Length > 0 ? $" · {filters}" : " · All local Codex activity") +
+                (_rows.Count == 0 ? " · No recorded activity in this scope." : "");
+            RenderRows();
+            _hasResult = true;
+        }
+        catch (OperationCanceledException) when (request.IsCancellationRequested) { }
+        catch (Exception e)
+        {
+            if (_loaded && _request == request)
             {
-                return;
+                var detail = e.GetBaseException().Message.ReplaceLineEndings(" ").Trim();
+                StatusText.Text = "Usage unavailable: " + (detail.Length > 260 ? detail[..260] + "…" : detail);
             }
-
-            Render(dashboard);
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        finally { if (_request == request) _request = null; request.Dispose(); }
+    }
+
+    private void RenderRows()
+    {
+        if (!_loaded) return;
+        var rows = _rows.Where(x => x.Label.Contains(SearchBox.Text, StringComparison.OrdinalIgnoreCase));
+        RowsList.ItemsSource = (SortCombo.SelectedIndex == 0 ? rows.OrderByDescending(x => x.Total) : rows.OrderBy(x => x.Label, StringComparer.OrdinalIgnoreCase)).ToArray();
+        DrillButton.IsEnabled = false;
+        DetailText.Text = "";
+    }
+    private async void OnQueryChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_settingRange) return;
+        _hasResult = false;
+        if (ReferenceEquals(sender, RangeCombo)) _from = _to = null;
+        await LoadAsync();
+    }
+    private void OnViewChanged(object sender, SelectionChangedEventArgs e) => RenderRows();
+    private void OnSearchChanged(object sender, TextChangedEventArgs e) => RenderRows();
+    private async void OnRefreshClicked(object sender, RoutedEventArgs e) => await LoadAsync();
+    private async void OnClearClicked(object sender, RoutedEventArgs e)
+    {
+        _model = _repository = _session = _thread = null; _from = _to = null;
+        _settingRange = true;
+        if (RangeCombo.SelectedIndex == 5) RangeCombo.SelectedIndex = 2;
+        _settingRange = false;
+        SearchBox.Text = ""; await LoadAsync();
+    }
+    private void OnRowSelected(object sender, SelectionChangedEventArgs e)
+    {
+        var row = RowsList.SelectedItem as UsageRow;
+        DrillButton.IsEnabled = row is not null;
+        OpenThreadButton.IsEnabled = row?.ThreadId is not null && _group == "Session";
+        DetailText.Text = row is null ? "" : $"{row.Label}\nInput {row.Input:N0} · output {row.Output:N0} · cache read {row.Cache:N0} · cache write {row.Write:N0} · reasoning {row.Reasoning:N0} · total {row.Total:N0}" +
+            $" · reported minus bucket sum: {row.Total - row.Input - row.Output - row.Cache - row.Write - row.Reasoning:N0}";
+    }
+    private async void OnDrillClicked(object sender, RoutedEventArgs e)
+    {
+        if (RowsList.SelectedItem is not UsageRow row || _displayedQuery is null) return;
+        if (_group == "Model") _model = row.Label;
+        else if (_group == "Session repository") _repository = row.Label;
+        else if (_group == "Session") _session = row.Label;
+        else if (row.Start is { } start && row.End is { } end)
         {
+            _from = start > _displayedQuery.FromUtc ? start : _displayedQuery.FromUtc;
+            _to = end < _displayedQuery.ToUtc ? end : _displayedQuery.ToUtc;
+            _settingRange = true;
+            RangeCombo.SelectedIndex = 5;
+            _settingRange = false;
         }
-        catch (Exception exception)
-        {
-            if (_isLoaded && generation == Volatile.Read(ref _loadGeneration))
-            {
-                StatusText.Text = $"Usage analytics unavailable: {Summarize(exception.Message)}";
-            }
-        }
+        SearchBox.Text = "";
+        await LoadAsync();
     }
-
-    private void Render(IntelligenceDashboard dashboard)
+    private void OnOpenThreadClicked(object sender, RoutedEventArgs e)
     {
-        var totalTokens = dashboard.UsageHistory.Sum(bucket => bucket.NativeTokens);
-        var rootTokens = dashboard.UsageHistory.Sum(bucket => bucket.RootTokens);
-        var subagentTokens = dashboard.UsageHistory.Sum(bucket => bucket.SubagentTokens);
-        var fiveHourDelta = dashboard.UsageHistory.Sum(bucket => bucket.FiveHourQuotaDelta ?? 0);
-        var weeklyDelta = dashboard.UsageHistory.Sum(bucket => bucket.WeeklyQuotaDelta ?? 0);
-
-        var integrityDelta = dashboard.UsageHistory.Sum(bucket => bucket.IntegrityDelta);
-        NativeTokensText.Text = integrityDelta == 0
-            ? FormatCount(totalTokens)
-            : $"{FormatCount(totalTokens)}  Δ {FormatSignedCount(integrityDelta)}";
-        RoleTokensText.Text = $"{FormatCount(rootTokens)} / {FormatCount(subagentTokens)}";
-        FiveHourDeltaText.Text = fiveHourDelta > 0 ? $"+{fiveHourDelta:0.#} pp" : "No observed rise";
-        WeeklyDeltaText.Text = weeklyDelta > 0 ? $"+{weeklyDelta:0.#} pp" : "No observed rise";
-
-        HistoryList.ItemsSource = dashboard.UsageHistory.Count == 0
-            ? new[] { new HistoryRow("No history", "—", "No native Codex token events are available in this range yet.") }
-            : dashboard.UsageHistory.Select(bucket => new HistoryRow(
-                FormatBucket(bucket.StartUtc, dashboard.Query.BucketSize),
-                FormatCount(bucket.NativeTokens),
-                $"root {FormatCount(bucket.RootTokens)} · subagents {FormatCount(bucket.SubagentTokens)} · " +
-                $"sessions {bucket.ActiveSessions:N0} · compactions {bucket.Compactions:N0}" +
-                (bucket.FiveHourQuotaDelta is double five ? $" · 5h +{five:0.#}pp" : string.Empty) +
-                (bucket.WeeklyQuotaDelta is double week ? $" · weekly +{week:0.#}pp" : string.Empty))).ToArray();
-
-        var desiredDimensions = dashboard.Dimensions.Count == 0
-            ? [new DimensionRow("History", "No breakdowns", "—")]
-            : dashboard.Dimensions.Select(item =>
-            {
-                var integrity = item.IntegrityExact ? string.Empty : $" · reported/disjoint Δ {FormatSignedCount(item.IntegrityDelta)}";
-                return new DimensionRow(item.Dimension, item.Value,
-                    $"{FormatCount(item.NativeTokens)} · {item.Sessions:N0} session(s) · cache {FormatPercent(item.CacheReadTokens, item.UncachedInputTokens + item.CacheReadTokens)}{integrity}");
-            }).ToArray();
-        SyncDimensionRows(desiredDimensions);
-
-        var maxHeat = dashboard.Heatmap.Count == 0 ? 0L : dashboard.Heatmap.Max(cell => cell.NativeTokens);
-        HeatmapList.ItemsSource = dashboard.Heatmap.Count == 0
-            ? new[] { new HeatmapRow("No heatmap", 0, "—") }
-            : dashboard.Heatmap
-                .OrderBy(cell => ((int)cell.Day + 6) % 7)
-                .ThenBy(cell => cell.Hour)
-                .Select(cell => new HeatmapRow(
-                    $"{cell.Day} {cell.Hour:00}:00 UTC",
-                    maxHeat <= 0 ? 0 : 100d * cell.NativeTokens / maxHeat,
-                    $"{FormatCount(cell.NativeTokens)} · {cell.ActiveBuckets}h"))
-                .ToArray();
-
-        StatusText.Text =
-            $"{dashboard.Query.FromUtc.ToLocalTime():g} → {dashboard.Query.ToUtc.ToLocalTime():g} · " +
-            $"{dashboard.Query.BucketSize.ToString().ToLowerInvariant()} buckets · {dashboard.UsageHistory.Count:N0} populated bucket(s). " +
-            (integrityDelta == 0 ? "Reported/disjoint token integrity is exact for this range. " : $"Reported/disjoint token Δ {FormatSignedCount(integrityDelta)} for this range. ") +
-            "Native Codex accounting is the active local-history source; repository attribution is session/workspace scoped and remote/cloud-only activity is not included until remote coverage exists.";
+        if (_group == "Session" && RowsList.SelectedItem is UsageRow { ThreadId: { } threadId })
+            ThreadRequested?.Invoke(this, threadId);
     }
-
-    private void SyncDimensionRows(IReadOnlyList<DimensionRow> desired)
+    private static string Count(long n) => n switch { >= 1_000_000_000 => $"{n / 1e9:0.00}B", >= 1_000_000 => $"{n / 1e6:0.00}M", >= 1000 => $"{n / 1e3:0.0}K", _ => n.ToString("N0") };
+    private sealed record UsageRow(string Label, long Total, long Input, long Output, long Cache, long Write, long Reasoning, int Sessions, DateTimeOffset? Start = null, DateTimeOffset? End = null, string? ThreadId = null)
     {
-        for (var index = 0; index < desired.Count; index++)
-        {
-            var row = desired[index];
-            if (index < _dimensionRows.Count && SameDimensionKey(_dimensionRows[index], row))
-            {
-                if (_dimensionRows[index] != row) _dimensionRows[index] = row;
-                continue;
-            }
-
-            var existingIndex = -1;
-            for (var candidate = index + 1; candidate < _dimensionRows.Count; candidate++)
-            {
-                if (SameDimensionKey(_dimensionRows[candidate], row)) { existingIndex = candidate; break; }
-            }
-
-            if (existingIndex >= 0)
-            {
-                _dimensionRows.Move(existingIndex, index);
-                if (_dimensionRows[index] != row) _dimensionRows[index] = row;
-            }
-            else _dimensionRows.Insert(index, row);
-        }
-        while (_dimensionRows.Count > desired.Count) _dimensionRows.RemoveAt(_dimensionRows.Count - 1);
+        public string InputText => Count(Input);
+        public string OutputText => Count(Output);
+        public string CacheText => Count(Cache);
+        public string WriteText => Count(Write);
+        public string ReasoningText => Count(Reasoning);
+        public string TotalText => Count(Total);
     }
-
-    private static bool SameDimensionKey(DimensionRow left, DimensionRow right) =>
-        string.Equals(left.Dimension, right.Dimension, StringComparison.Ordinal) &&
-        string.Equals(left.Value, right.Value, StringComparison.Ordinal);
-
-    private int ParseDays()
-    {
-        if (RangeCombo.SelectedItem is ComboBoxItem item && int.TryParse(item.Tag?.ToString(), out var days))
-        {
-            return Math.Clamp(days, 1, 3650);
-        }
-        return 7;
-    }
-
-    private AnalyticsBucketSize ParseBucket()
-    {
-        if (BucketCombo.SelectedItem is ComboBoxItem item &&
-            Enum.TryParse<AnalyticsBucketSize>(item.Tag?.ToString(), out var bucket))
-        {
-            return bucket;
-        }
-        return AnalyticsBucketSize.Hour;
-    }
-
-    private static string FormatBucket(DateTimeOffset value, AnalyticsBucketSize size) => size switch
-    {
-        AnalyticsBucketSize.Minute => value.ToLocalTime().ToString("ddd HH:mm"),
-        AnalyticsBucketSize.Hour => value.ToLocalTime().ToString("ddd HH:00"),
-        _ => value.ToLocalTime().ToString("yyyy-MM-dd")
-    };
-
-    private static string FormatPercent(long numerator, long denominator) =>
-        denominator <= 0 ? "n/a" : $"{100d * numerator / denominator:0.#}%";
-
-    private static string FormatSignedCount(long value) =>
-        value > 0 ? $"+{FormatCount(value)}" : FormatCount(value);
-
-    private static string FormatCount(long value)
-    {
-        var absolute = Math.Abs((double)value);
-        return absolute switch
-        {
-            >= 1_000_000_000 => $"{value / 1_000_000_000d:0.00}B",
-            >= 1_000_000 => $"{value / 1_000_000d:0.0}M",
-            >= 1_000 => $"{value / 1_000d:0.0}K",
-            _ => value.ToString("N0")
-        };
-    }
-
-    private static string Summarize(string value)
-    {
-        value = value.ReplaceLineEndings(" ").Trim();
-        return value.Length <= 260 ? value : value[..260] + "…";
-    }
-
-    private sealed record HistoryRow(string Label, string Tokens, string Detail);
-    private sealed record DimensionRow(string Dimension, string Value, string Detail);
-    private sealed record HeatmapRow(string Label, double Intensity, string Detail);
 }
