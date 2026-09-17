@@ -239,8 +239,18 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
             resetsAt,
             "codex",
             "default",
-            source));
+            source)
+        {
+            LimitId = ReadString(limits, "limitId"),
+            PlanType = ReadString(limits, "planType"),
+            Lane = propertyName,
+            CollectedAtUtc = capturedAtUtc
+        });
     }
+
+    private static string? ReadString(JsonElement element, string propertyName) =>
+        element.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() : null;
 
     private static double? ReadDouble(JsonElement element, string propertyName)
     {

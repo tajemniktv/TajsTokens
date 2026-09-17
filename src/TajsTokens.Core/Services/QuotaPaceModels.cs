@@ -6,7 +6,7 @@ namespace TajsTokens.Core.Services;
 /// <summary>Time-based candidates shared by production and walk-forward evaluation.</summary>
 public static class QuotaPaceModels
 {
-    public static readonly string[] Candidates = ["persistence", "legacy-ewma", "epoch", "recent-30m", "recent-2h", "recent-6h", "recent-24h", "damped-2h", "damped-6h"];
+    public static readonly string[] Candidates = ["persistence", "legacy-ewma", "time-ewma-2h", "time-ewma-6h", "epoch", "recent-30m", "recent-2h", "recent-6h", "recent-24h", "damped-2h", "damped-6h"];
 
     public static double ProjectRemaining(IReadOnlyList<QuotaSnapshot> epoch, string model, double leadHours)
     {
@@ -24,6 +24,24 @@ public static class QuotaPaceModels
     {
         if (epoch.Count < 2 || model == "persistence") return 0;
         var latest = epoch[^1];
+        if (model is "time-ewma-2h" or "time-ewma-6h")
+        {
+            // Integrate interval rates against elapsed-time weights. Flat polling does not apply
+            // a fixed per-poll decay, and minute-scale rounded-meter jumps do not get a full vote.
+            var tau = model == "time-ewma-2h" ? 2d : 6d;
+            var weightedMovement = 0d;
+            var exposure = 0d;
+            for (var i = 1; i < epoch.Count; i++)
+            {
+                var hours = (epoch[i].CapturedAtUtc - epoch[i - 1].CapturedAtUtc).TotalHours;
+                if (hours <= 0) continue;
+                var age = (latest.CapturedAtUtc - epoch[i].CapturedAtUtc).TotalHours;
+                var weight = Math.Exp(-age / tau) * tau * (1 - Math.Exp(-hours / tau));
+                weightedMovement += Math.Max(0, epoch[i].UsedPercent!.Value - epoch[i - 1].UsedPercent!.Value) / hours * weight;
+                exposure += weight;
+            }
+            return exposure > 0 ? weightedMovement / exposure : 0;
+        }
         if (model == "legacy-ewma")
         {
             double? rate = null;

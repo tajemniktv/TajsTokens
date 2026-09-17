@@ -116,7 +116,7 @@ public sealed class QuotaAccountScopeTests : IDisposable
         Assert.Null(forecast.AccountKey);
         Assert.Equal(2, forecast.Forecast.BurnRatePercentPerHour);
         Assert.Empty(await repository.GetRecentQuotaSnapshotsAsync(QuotaWindowKind.FiveHour, "codex", "default", 10, default, accountKey: "A"));
-        Assert.Equal(9L, await ScalarAsync("PRAGMA user_version"));
+        Assert.Equal(10L, await ScalarAsync("PRAGMA user_version"));
     }
 
     [Fact]
@@ -152,7 +152,7 @@ public sealed class QuotaAccountScopeTests : IDisposable
         Assert.Equal(0L, await ScalarAsync("SELECT COUNT(*) FROM pragma_table_info('quota_snapshots') WHERE name='account_key'"));
         await ExecuteAsync("ALTER TABLE forecast_snapshots ADD COLUMN evaluation_json TEXT;");
         await new SqliteTelemetryRepository(Database).InitializeAsync(default);
-        Assert.Equal(9L, await ScalarAsync("PRAGMA user_version"));
+        Assert.Equal(10L, await ScalarAsync("PRAGMA user_version"));
     }
 
     private async Task CreateVersionEightAsync(bool malformed)
@@ -173,6 +173,44 @@ public sealed class QuotaAccountScopeTests : IDisposable
                 VALUES('codex','default','FiveHour','2026-09-08T12:00:00.0000000+00:00',2,0,'Learning',0,'Unknown');
             PRAGMA user_version=8;
             """);
+    }
+
+    [Fact]
+    public async Task TokenForecastUsesRolloutsWithoutQuotaAccountOrQuotaRows()
+    {
+        var repository = new SqliteTelemetryRepository(Database);
+        var intelligence = new SqliteIntelligenceService(Database, repository);
+        await repository.InitializeAsync(default);
+        using (var store = new SqliteCodexObservatoryStore(Database)) await store.InitializeAsync(default);
+        using (var connection = new SqliteConnection($"Data Source={Database}"))
+        {
+            await connection.OpenAsync();
+            using var transaction = connection.BeginTransaction();
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = """
+                INSERT INTO codex_native_token_events(source_event_id,source_file,session_id,observed_at_utc,
+                    model,reasoning_effort,counter_epoch,uncached_input_tokens,cache_read_tokens,cache_write_tokens,
+                    non_reasoning_output_tokens,reasoning_output_tokens,reported_total_tokens,captured_at_utc)
+                VALUES($id,'fixture.jsonl','fixture-session',$at,'fixture-model','high',0,1000,0,0,0,0,1000,$captured);
+                """;
+            command.Parameters.AddWithValue("$id", "");
+            command.Parameters.AddWithValue("$at", "");
+            command.Parameters.AddWithValue("$captured", Now.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+            for (var i = 0; i < 80; i++)
+            {
+                command.Parameters["$id"].Value = $"fixture-{i}";
+                command.Parameters["$at"].Value = Now.AddMinutes(-1200 + i * 15).ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+                await command.ExecuteNonQueryAsync();
+            }
+            transaction.Commit();
+        }
+        var forecast = await intelligence.ForecastTokenWorkloadAsync(Now, default);
+        Assert.Equal(0L, await ScalarAsync("SELECT COUNT(*) FROM quota_snapshots"));
+        Assert.Equal(80, forecast.TokenEvents);
+        Assert.Equal(2, forecast.Predictions.Count);
+        Assert.True(forecast.Predictions[0].TrainingSamples >= 20);
+        Assert.True(forecast.Predictions[0].ExpectedTokens > 0);
     }
 
     private async Task ExecuteAsync(string sql)

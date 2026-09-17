@@ -463,28 +463,8 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
     public async Task UpsertQuotaSnapshotAsync(QuotaSnapshot snapshot, CancellationToken cancellationToken)
     {
         await EnsureInitializedAsync(cancellationToken);
-        await ExecuteAsync(
-            """
-            INSERT INTO quota_snapshots(provider, profile, kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, source, account_key)
-            VALUES($provider, $profile, $kind, $captured, $used, $window, $resets, $source, $account)
-            ON CONFLICT(provider, profile, kind, captured_at_utc, source, account_key) DO UPDATE SET
-              used_percent = excluded.used_percent,
-              window_minutes = excluded.window_minutes,
-              resets_at_utc = excluded.resets_at_utc;
-            """,
-            command =>
-            {
-                command.Parameters.AddWithValue("$provider", snapshot.Provider);
-                command.Parameters.AddWithValue("$profile", snapshot.Profile);
-                command.Parameters.AddWithValue("$kind", snapshot.Kind.ToString());
-                command.Parameters.AddWithValue("$captured", SerializeUtc(snapshot.CapturedAtUtc));
-                command.Parameters.AddWithValue("$used", DbValue(snapshot.UsedPercent));
-                command.Parameters.AddWithValue("$window", DbValue(snapshot.WindowMinutes));
-                command.Parameters.AddWithValue("$resets", snapshot.ResetsAtUtc is null ? DBNull.Value : SerializeUtc(snapshot.ResetsAtUtc.Value));
-                command.Parameters.AddWithValue("$source", snapshot.Source);
-                command.Parameters.AddWithValue("$account", snapshot.AccountKey ?? "");
-            },
-            cancellationToken);
+        await ExecuteAsync(SqliteQuotaEvidence.InsertSql,
+            command => SqliteQuotaEvidence.Bind(command, snapshot), cancellationToken);
     }
 
     public async Task ApplyCumulativeTokenObservationAsync(CodexTokenCountObservation observation, CancellationToken cancellationToken)

@@ -13,6 +13,16 @@ public sealed record QuotaSnapshot(
     string Source,
     string? AccountKey = null)
 {
+    // Optional native provenance. Null on legacy rows means unavailable, not inferred.
+    public string? ObservationId { get; init; }
+    public string? SourceIdentity { get; init; }
+    public string? SessionId { get; init; }
+    public string? LimitId { get; init; }
+    public string? PlanType { get; init; }
+    public string? Lane { get; init; }
+    public DateTimeOffset? CollectedAtUtc { get; init; }
+    public bool HasSourceTimestamp { get; init; } = true;
+
     public double? RemainingPercent => UsedPercent is null
         ? null
         : Math.Clamp(100d - UsedPercent.Value, 0d, 100d);

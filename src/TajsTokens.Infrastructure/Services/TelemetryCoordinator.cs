@@ -423,6 +423,18 @@ public sealed class TelemetryCoordinator
                 }
             }
 
+            TokenWorkloadForecast? tokenForecast = null;
+            if (tokenFresh && persistenceAvailable && _intelligenceService is not null)
+            {
+                try
+                {
+                    tokenForecast = await _intelligenceService.ForecastTokenWorkloadAsync(DateTimeOffset.UtcNow, refreshToken);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    events.Add(new TelemetryRefreshEvent(DateTimeOffset.UtcNow, "Token forecast unavailable", SummarizeError(exception)));
+                }
+            }
             refreshToken.ThrowIfCancellationRequested();
             stopwatch.Stop();
             events.Add(new TelemetryRefreshEvent(
@@ -442,7 +454,7 @@ public sealed class TelemetryCoordinator
                 events,
                 quotaLanes,
                 tokenGeneration,
-                currentForecasts);
+                currentForecasts, tokenForecast);
 
             // Historical intelligence is derived from already-persisted normalized telemetry. Queue
             // it only after the final telemetry snapshot has been published, and never hold the
@@ -582,7 +594,8 @@ public sealed class TelemetryCoordinator
         IEnumerable<TelemetryRefreshEvent> events,
         IReadOnlyList<QuotaLaneState> quotaLanes,
         TokenAccountingGenerationState? tokenGeneration,
-        IReadOnlyList<CurrentQuotaForecast> currentForecasts)
+        IReadOnlyList<CurrentQuotaForecast> currentForecasts,
+        TokenWorkloadForecast? tokenForecast = null)
     {
         var snapshot = new TelemetrySnapshot(
             DateTimeOffset.UtcNow,
@@ -598,7 +611,8 @@ public sealed class TelemetryCoordinator
         {
             QuotaLanes = quotaLanes,
             CurrentForecasts = currentForecasts,
-            TokenGeneration = tokenGeneration
+            TokenGeneration = tokenGeneration,
+            TokenForecast = tokenForecast
         };
 
         Volatile.Write(ref _latest, snapshot);

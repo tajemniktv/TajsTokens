@@ -8,7 +8,13 @@ public sealed record IntelligenceQuery(
     AnalyticsBucketSize BucketSize = AnalyticsBucketSize.Hour,
     int MaxBuckets = 720,
     QuotaObservationAuthority? BurnAuthority = null,
-    QuotaWindowKind? BurnKind = null);
+    QuotaWindowKind? BurnKind = null)
+{
+    public bool UsageOnly { get; init; }
+    public string? Model { get; init; }
+    public string? Repository { get; init; }
+    public string? SessionId { get; init; }
+}
 
 public sealed record UsageHistoryBucket(
     DateTimeOffset StartUtc,
@@ -161,7 +167,10 @@ public sealed record IntelligenceDashboard(
     IReadOnlyList<QuotaBurnInterval> QuotaBurnIntervals,
     IReadOnlyList<QuotaResetEvent> ResetEvents,
     IReadOnlyList<ForecastSnapshot> FiveHourForecasts,
-    IReadOnlyList<ForecastSnapshot> WeeklyForecasts);
+    IReadOnlyList<ForecastSnapshot> WeeklyForecasts)
+{
+    public string? QuotaHistorySummary { get; init; }
+}
 
 public sealed record IntelligenceRefreshResult(
     int ForecastsPersisted,

@@ -20,7 +20,7 @@ public sealed class QuotaResetDetector
         var events = new List<QuotaResetEvent>();
         foreach (var group in snapshots
                      .Where(snapshot => snapshot.Kind is QuotaWindowKind.FiveHour or QuotaWindowKind.Weekly)
-                     .GroupBy(snapshot => (snapshot.Provider, snapshot.Profile, snapshot.Kind, snapshot.Source, snapshot.AccountKey)))
+                     .GroupBy(QuotaHistoryPolicy.Cohort))
         {
             var ordered = group.OrderBy(snapshot => snapshot.CapturedAtUtc).ToArray();
             for (var index = 1; index < ordered.Length; index++)

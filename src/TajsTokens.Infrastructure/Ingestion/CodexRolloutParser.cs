@@ -126,7 +126,14 @@ internal sealed partial class CodexRolloutParser
                     sourceRecordId + ":ctx", state.OwnSessionId!, state.OwnSessionId, timestamp,
                     state.CurrentModel, lastInput, contextWindow, false, recordBytes);
 
-            var quotaSnapshots = ParseRateLimits(payload, timestamp);
+            var quotaSnapshots = ParseRateLimits(payload, timestamp).Select(snapshot => snapshot with
+            {
+                ObservationId = sourceRecordId + ":" + snapshot.Lane,
+                SourceIdentity = state.SourceIdentity,
+                SessionId = state.OwnSessionId,
+                CollectedAtUtc = DateTimeOffset.UtcNow,
+                HasSourceTimestamp = sourceTimestamp is not null
+            }).ToArray();
             var usageEvent = new UsageEvent(sourceRecordId + ":token", state.OwnSessionId!, timestamp, "token_count", "Codex token/quota observation", null);
             return new ParsedRolloutRecord(
                 sourceRecordId, eventClass, recordBytes, timestamp, state.OwnSessionId,
@@ -216,23 +223,20 @@ internal sealed partial class CodexRolloutParser
                 _ => null
             };
 
-            // The shared quota table currently has one identity per known kind/timestamp. Persisting
-            // multiple arbitrary lanes as Unknown would silently collide, so keep them out until the
-            // canonical quota model gains lane-aware identity.
-            if (kind is null)
-            {
-                continue;
-            }
-
             results.Add(new QuotaSnapshot(
-                kind.Value,
+                kind ?? QuotaWindowKind.Unknown,
                 timestamp,
                 used,
                 window,
                 ReadTimestamp(property.Value, "resets_at"),
                 "codex",
                 "default",
-                $"codex-rollout:{property.Name}"));
+                $"codex-rollout:{property.Name}")
+            {
+                LimitId = ReadString(limits, "limit_id"),
+                PlanType = ReadString(limits, "plan_type"),
+                Lane = property.Name
+            });
         }
 
         return results;

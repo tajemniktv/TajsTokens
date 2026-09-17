@@ -8,7 +8,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 
 public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryRepository, ISessionIngestionCheckpointStore
 {
-    private const int CurrentSchemaVersion = 9;
+    private const int CurrentSchemaVersion = 10;
     private const int IntelligenceSchemaVersion = 2;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _intelligenceInitializeGate = new(1, 1);
@@ -399,6 +399,31 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 PRAGMA user_version = 9;
                 """, cancellationToken);
         }
+        if (version < 10)
+        {
+            await ExecuteMigrationAsync(connection, """
+                CREATE TABLE quota_snapshots_v10 (
+                    provider TEXT NOT NULL, profile TEXT NOT NULL, kind TEXT NOT NULL,
+                    captured_at_utc TEXT NOT NULL, used_percent REAL, window_minutes INTEGER,
+                    resets_at_utc TEXT, source TEXT NOT NULL, account_key TEXT NOT NULL DEFAULT '',
+                    observation_id TEXT NOT NULL DEFAULT '', source_identity TEXT, session_id TEXT,
+                    limit_id TEXT, plan_type TEXT, lane TEXT, collected_at_utc TEXT,
+                    has_source_timestamp INTEGER NOT NULL DEFAULT 1,
+                    PRIMARY KEY(provider,profile,kind,captured_at_utc,source,account_key,observation_id)
+                );
+                INSERT INTO quota_snapshots_v10(provider,profile,kind,captured_at_utc,used_percent,
+                    window_minutes,resets_at_utc,source,account_key)
+                    SELECT provider,profile,kind,captured_at_utc,used_percent,window_minutes,
+                        resets_at_utc,source,account_key FROM quota_snapshots;
+                DROP TABLE quota_snapshots;
+                ALTER TABLE quota_snapshots_v10 RENAME TO quota_snapshots;
+                CREATE INDEX idx_quota_snapshots_lookup
+                    ON quota_snapshots(provider,profile,kind,captured_at_utc DESC);
+                CREATE INDEX idx_quota_snapshots_account_lookup
+                    ON quota_snapshots(provider,profile,kind,account_key,source,captured_at_utc DESC);
+                PRAGMA user_version = 10;
+                """, cancellationToken);
+        }
     }
 
     /// <summary>
@@ -541,28 +566,8 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
     }
 
     public Task UpsertQuotaSnapshotAsync(QuotaSnapshot snapshot, CancellationToken cancellationToken) =>
-        ExecutePreparedCommandAsync(
-            """
-            INSERT INTO quota_snapshots(provider, profile, kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, source, account_key)
-            VALUES($provider, $profile, $kind, $captured, $used, $window, $resets, $source, $account)
-            ON CONFLICT(provider, profile, kind, captured_at_utc, source, account_key) DO UPDATE SET
-              used_percent = excluded.used_percent,
-              window_minutes = excluded.window_minutes,
-              resets_at_utc = excluded.resets_at_utc;
-            """,
-            cmd =>
-            {
-                cmd.Parameters.AddWithValue("$provider", snapshot.Provider);
-                cmd.Parameters.AddWithValue("$profile", snapshot.Profile);
-                cmd.Parameters.AddWithValue("$kind", snapshot.Kind.ToString());
-                cmd.Parameters.AddWithValue("$captured", SerializeUtc(snapshot.CapturedAtUtc));
-                cmd.Parameters.AddWithValue("$used", DbValue(snapshot.UsedPercent));
-                cmd.Parameters.AddWithValue("$window", DbValue(snapshot.WindowMinutes));
-                cmd.Parameters.AddWithValue("$resets", snapshot.ResetsAtUtc is null ? DBNull.Value : SerializeUtc(snapshot.ResetsAtUtc.Value));
-                cmd.Parameters.AddWithValue("$source", snapshot.Source);
-                cmd.Parameters.AddWithValue("$account", snapshot.AccountKey ?? "");
-            },
-            cancellationToken);
+        ExecutePreparedCommandAsync(SqliteQuotaEvidence.InsertSql,
+            command => SqliteQuotaEvidence.Bind(command, snapshot), cancellationToken);
 
     public Task AddTokenUsageAsync(TokenUsage usage, CancellationToken cancellationToken) =>
         ExecutePreparedCommandAsync(
@@ -819,7 +824,8 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
 
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, provider, profile, source, account_key
+            SELECT kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, provider, profile, source, account_key,
+                   observation_id,source_identity,session_id,limit_id,plan_type,lane,collected_at_utc,has_source_timestamp
             FROM quota_snapshots
             WHERE kind = $kind AND provider = $provider AND profile = $profile
               AND ($capturedAtUpperBound IS NULL OR captured_at_utc <= $capturedAtUpperBound)
@@ -842,7 +848,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            results.Add(new QuotaSnapshot(
+            results.Add(SqliteQuotaEvidence.Read(new QuotaSnapshot(
                 Enum.Parse<QuotaWindowKind>(reader.GetString(0)),
                 ParseUtc(reader.GetString(1)),
                 reader.IsDBNull(2) ? null : reader.GetDouble(2),
@@ -851,7 +857,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 reader.GetString(5),
                 reader.GetString(6),
                 reader.GetString(7),
-                reader.GetString(8) is { Length: > 0 } account ? account : null));
+                reader.GetString(8) is { Length: > 0 } account ? account : null), reader, 9));
         }
 
         return results;

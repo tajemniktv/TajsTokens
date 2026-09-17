@@ -9,6 +9,54 @@ namespace TajsTokens.Core.Tests;
 public sealed class SqliteIntelligenceServiceTests
 {
     [Fact]
+    public async Task UsageReport_PartialBucketsAndFilteredDimensionsReconcileWithoutTopTwentyTruncation()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (!File.Exists(Path.Combine(root.FullName, "PROJECT.md"))) root = root.Parent!;
+        var directory = Path.Combine(root.FullName, ".codex", "temp", "usage-report-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        try
+        {
+            var database = Path.Combine(directory, "telemetry.db");
+            var repository = new SqliteTelemetryRepository(database);
+            var store = new SqliteCodexObservatoryStore(database);
+            await repository.InitializeAsync(CancellationToken.None);
+            await store.InitializeAsync(CancellationToken.None);
+            var start = DateTimeOffset.Parse("2026-09-08T12:30:00Z");
+            for (var i = 0; i < 25; i++)
+            {
+                var id = "session-" + i;
+                await store.UpsertSessionAsync(new CodexSession(id, null, i % 2 == 0 ? "project-a" : "project-b", start, start, "completed"), CancellationToken.None);
+                await store.ApplyCumulativeTokenObservationAsync(Tokens(id, id, start.AddMinutes(1), 100, 60, 20, 120), CancellationToken.None);
+            }
+            var service = new SqliteIntelligenceService(database, repository);
+            var query = new IntelligenceQuery(start, start.AddHours(1), AnalyticsBucketSize.Hour) { UsageOnly = true };
+            var retained = await service.QueryAsync(query with { FromUtc = DateTimeOffset.UnixEpoch }, CancellationToken.None);
+            Assert.Equal(DateTimeOffset.UnixEpoch, retained.Query.FromUtc);
+            Assert.Equal(AnalyticsBucketSize.Month, retained.Query.BucketSize);
+            Assert.Equal(3000, retained.UsageHistory.Sum(x => x.NativeTokens));
+            foreach (var size in new[] { AnalyticsBucketSize.Hour, AnalyticsBucketSize.Day, AnalyticsBucketSize.Month })
+            {
+                var all = await service.QueryAsync(query with { BucketSize = size }, CancellationToken.None);
+                Assert.Equal(3000, Assert.Single(all.UsageHistory).NativeTokens);
+                Assert.Equal(25, all.Dimensions.Count(x => x.Dimension == "Session"));
+                Assert.Equal(3000, all.Dimensions.Where(x => x.Dimension == "Session").Sum(x => x.NativeTokens));
+                Assert.All(all.Dimensions, x => Assert.True(x.IntegrityExact));
+                Assert.Empty(all.QuotaBurnIntervals);
+            }
+            var project = await service.QueryAsync(query with { Repository = "project-a" }, CancellationToken.None);
+            Assert.Equal(1560, Assert.Single(project.UsageHistory).NativeTokens);
+            Assert.Equal(13, project.Dimensions.Count(x => x.Dimension == "Session"));
+            var session = await service.QueryAsync(query with { Repository = "project-a", SessionId = "session-0", Model = "gpt-5.6-luna" }, CancellationToken.None);
+            Assert.Equal(120, Assert.Single(session.UsageHistory).NativeTokens);
+            var excluded = await service.QueryAsync(query with { Repository = "project-b", SessionId = "session-0" }, CancellationToken.None);
+            Assert.Empty(excluded.UsageHistory);
+            Assert.Empty(excluded.Dimensions);
+        }
+        finally { SqliteConnection.ClearAllPools(); Directory.Delete(directory, true); }
+    }
+
+    [Fact]
     public async Task BurnIntervals_NeverBridgeSources_AndFiltersApplyToIntervals()
     {
         var directory = Directory.CreateTempSubdirectory("tajstokens-burn-sources-");
@@ -364,13 +412,17 @@ public sealed class SqliteIntelligenceServiceTests
             Assert.Equal(current.CapturedAtUtc, saved.QuotaCapturedAtUtc);
             Assert.Equal(current.WindowMinutes, saved.QuotaWindowMinutes);
             Assert.Equal(current.ResetsAtUtc, saved.QuotaResetsAtUtc);
-            Assert.Equal(generation.Forecast, saved.Forecast);
+            Assert.Equivalent(generation.Forecast, saved.Forecast, strict: true);
+            var horizons = Assert.IsAssignableFrom<IReadOnlyList<QuotaHorizonPrediction>>(saved.Forecast.Evidence!.HorizonPredictions);
+            Assert.Equal(2, horizons.Count);
+            Assert.Equal(75, horizons[0].RemainingPercent, 6);
+            Assert.False(horizons[0].UsesWorkload);
 
             var dashboard = await intelligence.QueryAsync(
                 new IntelligenceQuery(start.AddHours(-1), newerEmbedded.CapturedAtUtc.AddHours(1), AnalyticsBucketSize.Hour, 24),
                 CancellationToken.None);
             var savedThroughDashboard = Assert.Single(dashboard.FiveHourForecasts);
-            Assert.Equal(saved, savedThroughDashboard);
+            Assert.Equivalent(saved, savedThroughDashboard, strict: true);
         }
         finally
         {
@@ -619,7 +671,13 @@ public sealed class SqliteIntelligenceServiceTests
             "codex",
             "default",
             source,
-            source == "app-server" || source.StartsWith("codex-app-server:", StringComparison.Ordinal) ? "fixture-account" : null);
+            source == "app-server" || source.StartsWith("codex-app-server:", StringComparison.Ordinal) ? "fixture-account" : null)
+        {
+            ObservationId = source.Contains("rollout", StringComparison.Ordinal) ? "fixture:" + captured.ToString("O") : null,
+            SourceIdentity = source.Contains("rollout", StringComparison.Ordinal) ? "fixture-source" : null,
+            SessionId = source.Contains("rollout", StringComparison.Ordinal) ? "fixture-session" : null,
+            CollectedAtUtc = captured
+        };
 
     private static QuotaSnapshot QuotaWithoutReset(
         QuotaWindowKind kind,

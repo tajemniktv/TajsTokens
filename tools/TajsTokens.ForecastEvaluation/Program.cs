@@ -34,27 +34,59 @@ if (args.Length == 3 && args[0] == "--inventory")
     NativeInventory.Run(args[1], args[2]);
     return;
 }
-if (args.Length == 2 && args[0] == "--evaluate")
+if (args.Length == 2 && args[0] == "--tokens")
+{
+    var data = await new SqliteForecastDatasetReader(args[1]).ReadAsync("codex", "default",
+        DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture), DateTimeOffset.UtcNow,
+        CancellationToken.None, includeQuota: false);
+    var timer = System.Diagnostics.Stopwatch.StartNew();
+    foreach (var score in TokenWorkloadPredictionService.EvaluateScores(data))
+        Console.WriteLine(FormattableString.Invariant($"{score.HorizonHours},{score.Model},{score.Origins},{score.MeanAbsoluteError:F0},{score.RootMeanSquaredError:F0},{score.IntervalOrigins},{score.IntervalCoverage:F3},{score.WorkloadOrigins}"));
+    Console.WriteLine($"evaluation_ms={timer.ElapsedMilliseconds}");
+    timer.Restart();
+    var forecast = TokenWorkloadPredictionService.Predict(data, data.CapturedAtUtc);
+    Console.WriteLine($"sessions={forecast.Sessions}; observations={forecast.TokenEvents}; live_ms={timer.ElapsedMilliseconds}");
+    foreach (var prediction in forecast.Predictions)
+        Console.WriteLine(FormattableString.Invariant($"Token +{prediction.HorizonHours}h: {prediction.ExpectedTokens:F0}; model={prediction.Model}; train={prediction.TrainingSamples}; validation={prediction.ValidationSamples}"));
+    return;
+}
+if (args.Length == 2 && args[0] is "--evaluate" or "--quota")
 {
     var data = await new SqliteForecastDatasetReader(args[1]).ReadAsync("codex", "default",
         DateTimeOffset.Parse("2026-01-01T00:00:00Z", CultureInfo.InvariantCulture), DateTimeOffset.UtcNow, CancellationToken.None);
-    var report = QuotaForecastEvaluation.Evaluate(data);
+    var report = QuotaForecastEvaluation.Evaluate(data, includeTokenEvaluation: args[0] != "--quota");
     Console.WriteLine(report.Methodology);
+    Console.WriteLine(report.QuotaHistorySummary);
     Console.WriteLine($"quota={report.AuthoritativeQuotaObservations}; workload={report.WorkloadObservations}; tokens={report.TokenObservations}; effort={report.TokensWithEffort}; collected={report.TokensWithCollectionTime}");
     var accounts = report.Scores.Select(x => x.AccountKey).Distinct().ToList();
-    Console.WriteLine("account_cohort,kind,model,target,availability,n,epochs,MAE,RMSE,band_n,coverage,fitted");
-    foreach (var score in report.Scores)
-        Console.WriteLine(FormattableString.Invariant($"{(score.AccountKey is null ? "unknown" : $"cohort-{accounts.IndexOf(score.AccountKey) + 1}")},{score.Kind},{score.Model},{score.Target},{score.Availability},{score.Origins},{score.ResetGenerations},{score.MeanAbsoluteError:F3},{score.RootMeanSquaredError:F3},{score.IntervalOrigins},{score.IntervalCoverage:F3},{score.FittedOrigins}"));
+    var cohorts = report.Scores.Select(x => x.HistoryCohort).Distinct().ToList();
+    Console.WriteLine("cohort,account_cohort,source,kind,model,target,availability,n,nonoverlap,epochs,MAE,RMSE,band_n,coverage,fitted");
+    foreach (var score in report.Scores.Where(x => x.Origins > 0))
+        Console.WriteLine(FormattableString.Invariant($"cohort-{cohorts.IndexOf(score.HistoryCohort) + 1},{(score.AccountKey is null ? "unknown" : $"account-{accounts.IndexOf(score.AccountKey) + 1}")},{score.Source},{score.Kind},{score.Model},{score.Target},{score.Availability},{score.Origins},{score.NonOverlappingOrigins},{score.ResetGenerations},{score.MeanAbsoluteError:F3},{score.RootMeanSquaredError:F3},{score.IntervalOrigins},{score.IntervalCoverage:F3},{score.FittedOrigins}"));
+    if (args[0] == "--quota") return;
+    Console.WriteLine(TokenWorkloadPredictionService.Methodology);
+    Console.WriteLine("token_horizon,model,n,MAE_tokens,RMSE_tokens,band_n,coverage,workload_origins");
+    foreach (var score in report.TokenScores)
+        Console.WriteLine(FormattableString.Invariant($"{score.HorizonHours},{score.Model},{score.Origins},{score.MeanAbsoluteError:F0},{score.RootMeanSquaredError:F0},{score.IntervalOrigins},{score.IntervalCoverage:F3},{score.WorkloadOrigins}"));
+    var tokenTimer = System.Diagnostics.Stopwatch.StartNew();
+    var tokenForecast = TokenWorkloadPredictionService.Predict(data, data.Tokens.Max(x => x.ObservedAtUtc));
+    Console.WriteLine($"Token production: sessions={tokenForecast.Sessions}; observations={tokenForecast.TokenEvents}; elapsed_ms={tokenTimer.ElapsedMilliseconds}");
+    foreach (var prediction in tokenForecast.Predictions)
+        Console.WriteLine(FormattableString.Invariant($"Token +{prediction.HorizonHours}h: {prediction.ExpectedTokens:F0}; model={prediction.Model}; train={prediction.TrainingSamples}; validation={prediction.ValidationSamples}"));
     var scenarioHistory = CodexScenarioHistoryBuilder.Build(data);
     var scenario = new ScenarioPlannerService().Estimate(new ScenarioRequest(0.5, 1, 0), scenarioHistory, data.CapturedAtUtc);
     Console.WriteLine($"Scenario 5h: {scenario.FiveHour.Explanation}");
     Console.WriteLine($"Scenario weekly: {scenario.Weekly.Explanation}");
-    foreach (var stream in data.Quota.GroupBy(x => (x.Kind, x.Source, x.AccountKey)))
+    foreach (var stream in data.Quota.Where(x => x.Authority == QuotaObservationAuthority.ProviderAuthoritative)
+                 .GroupBy(QuotaHistoryPolicy.Cohort))
     {
         var productionRows = stream.OrderBy(x => x.CapturedAtUtc).ToArray();
         var timer = System.Diagnostics.Stopwatch.StartNew();
         var forecast = new ForecastingService().BuildForecast(productionRows, productionRows[^1].CapturedAtUtc);
+        var predictions = QuotaPredictionService.Predict(data with { Quota = productionRows }, productionRows[^1], productionRows[^1].CapturedAtUtc);
         Console.WriteLine($"Production {stream.Key.Kind} {(stream.Key.AccountKey is null ? "unknown" : $"cohort-{accounts.IndexOf(stream.Key.AccountKey) + 1}")}: {forecast.State}; model={forecast.Evidence?.Model}; calibration={forecast.Evidence?.CalibrationEpochs}; elapsed_ms={timer.ElapsedMilliseconds}");
+        foreach (var prediction in predictions)
+            Console.WriteLine($"  +{prediction.HorizonHours}h: {prediction.RemainingPercent:0.##}% remaining; model={prediction.Model}; train={prediction.TrainingSamples}; validation={prediction.ValidationSamples}");
     }
     return;
 }

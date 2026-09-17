@@ -198,6 +198,7 @@ public sealed class ForecastingServiceTests
         var forecast = _service.BuildForecast(snapshots, now);
 
         Assert.Equal(ForecastState.IdleWithinMeterPrecision, forecast.State);
+        Assert.Equal("not-estimated", forecast.Evidence!.Model);
         Assert.True(forecast.IsQuantizedFlat);
         Assert.Null(forecast.BurnRatePercentPerHour);
         Assert.Null(forecast.EstimatedExhaustionAtUtc);

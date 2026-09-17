@@ -17,6 +17,7 @@ public sealed record TelemetrySnapshot(
     public IReadOnlyList<QuotaLaneState> QuotaLanes { get; init; } = [];
     public IReadOnlyList<CurrentQuotaForecast> CurrentForecasts { get; init; } = [];
     public TokenAccountingGenerationState? TokenGeneration { get; init; }
+    public TokenWorkloadForecast? TokenForecast { get; init; }
 
     public static TelemetrySnapshot Empty { get; } = new(
         DateTimeOffset.MinValue,

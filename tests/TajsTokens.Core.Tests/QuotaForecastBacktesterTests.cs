@@ -9,6 +9,59 @@ public sealed class QuotaForecastBacktesterTests
     private static readonly DateTimeOffset Start = DateTimeOffset.Parse("2026-08-01T00:00:00Z");
 
     [Fact]
+    public void OneSecondResetJitterRetainsLearningAndWalkForwardTargets()
+    {
+        var steady = Enumerable.Range(0, 49).Select(i => Point(i / 12d, 10 + i)).ToArray();
+        var jitter = steady.Select((row, i) => row with { ResetsAtUtc = row.ResetsAtUtc!.Value.AddSeconds(i % 2) }).ToArray();
+        Assert.Single(QuotaForecastBacktester.SplitEpochs(jitter));
+        var forecast = new ForecastingService().BuildForecast(jitter, jitter[^1].CapturedAtUtc);
+        Assert.NotEqual(ForecastState.Learning, forecast.State);
+        Assert.Equal(49, forecast.Evidence!.ObservationCount);
+        Assert.Equal(4, forecast.Evidence.ObservedHours);
+        Assert.Equal(steady[^1].ResetsAtUtc, jitter[^1].ResetsAtUtc);
+        foreach (var model in new[] { "persistence", "epoch", "legacy-ewma" })
+        {
+            var expected = QuotaForecastBacktester.Replay(steady, model, 0.5);
+            var actual = QuotaForecastBacktester.Replay(jitter, model, 0.5);
+            Assert.NotEmpty(actual);
+            Assert.Equal(expected.Select(x => (x.OriginUtc, x.OutcomeUtc, x.PredictedRemaining, x.ObservedRemaining)),
+                actual.Select(x => (x.OriginUtc, x.OutcomeUtc, x.PredictedRemaining, x.ObservedRemaining)));
+            // Appending future data cannot change already matured predictions.
+            var prefix = QuotaForecastBacktester.Replay(jitter.Take(25).ToArray(), model, 0.5);
+            Assert.Equal(prefix, actual.Where(x => x.OutcomeUtc <= jitter[24].CapturedAtUtc));
+        }
+    }
+
+    [Fact]
+    public void JitterToleranceDoesNotChainOrCrossDropsMetadataOrElapsedBoundaries()
+    {
+        var drift = Enumerable.Range(0, 4).Select(i => Point(i, 10 + i) with
+            { ResetsAtUtc = Start.AddHours(5).AddSeconds(i) }).ToArray();
+        Assert.Equal(new[] { 2, 2 }, QuotaForecastBacktester.SplitEpochs(drift).Select(x => x.Count));
+        var first = Point(0, 50);
+        foreach (var changed in new[]
+        {
+            Point(1, 5) with { ResetsAtUtc = first.ResetsAtUtc!.Value.AddSeconds(1) },
+            Point(1, 60) with { PlanType = "new-plan" },
+            Point(1, 60) with { WindowMinutes = 301 },
+            Point(1, 60) with { LimitId = "other" },
+            Point(5, 60) with { CapturedAtUtc = Start.AddHours(5).AddMilliseconds(500), ResetsAtUtc = Start.AddHours(5).AddSeconds(1) }
+        }) Assert.Equal(2, QuotaForecastBacktester.SplitEpochs([first, changed]).Count);
+    }
+
+    [Fact]
+    public void JitterDoesNotManufactureIndependentCalibrationGenerations()
+    {
+        var trials = Enumerable.Range(0, 10).Select(i => new QuotaForecastTrial("epoch", "2h",
+            Start.AddDays(-2).AddMinutes(i), Start.AddDays(-2).AddHours(2).AddMinutes(i),
+            Start.AddDays(-1).AddSeconds(i % 2), 2, 60, 50, null, null, 0, null, false, null)).ToArray();
+        Assert.Single(QuotaForecastBacktester.ResetGenerations(trials));
+        var errors = QuotaForecastBacktester.CalibrationErrors(trials, Start, Start.AddHours(5), 2);
+        Assert.Single(errors);
+        Assert.Null(QuotaForecastBacktester.ErrorRadius(errors));
+    }
+
+    [Fact]
     public void ReanchorsAndUnannouncedDropsTerminateSegments()
     {
         var rows = new[] { Point(0, 10), Point(1, 50), Point(2, 5), Point(3, 15) };

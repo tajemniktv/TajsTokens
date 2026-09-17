@@ -255,17 +255,7 @@ internal sealed class SqliteCodexIngestionBatchWriter(
 
             foreach (var snapshot in record.QuotaSnapshots)
             {
-                Set(quota, "$provider", snapshot.Provider);
-                Set(quota, "$profile", snapshot.Profile);
-                Set(quota, "$kind", snapshot.Kind.ToString());
-                Set(quota, "$captured", SerializeUtc(snapshot.CapturedAtUtc));
-                Set(quota, "$used", DbValue(snapshot.UsedPercent));
-                Set(quota, "$window", DbValue(snapshot.WindowMinutes));
-                Set(quota, "$resets", snapshot.ResetsAtUtc is null
-                    ? DBNull.Value
-                    : SerializeUtc(snapshot.ResetsAtUtc.Value));
-                Set(quota, "$source", snapshot.Source);
-                Set(quota, "$account", snapshot.AccountKey ?? "");
+                SqliteQuotaEvidence.Bind(quota, snapshot);
                 await quota.ExecuteNonQueryAsync(cancellationToken);
             }
 
@@ -348,14 +338,7 @@ internal sealed class SqliteCodexIngestionBatchWriter(
             """, "$id", "$session", "$time", "$type", "$summary", "$delta");
 
     private static SqliteCommand BuildQuotaCommand(SqliteConnection connection, SqliteTransaction transaction) =>
-        BuildCommand(connection, transaction, """
-            INSERT INTO quota_snapshots(provider, profile, kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, source, account_key)
-            VALUES($provider, $profile, $kind, $captured, $used, $window, $resets, $source, $account)
-            ON CONFLICT(provider, profile, kind, captured_at_utc, source, account_key) DO UPDATE SET
-              used_percent = excluded.used_percent,
-              window_minutes = excluded.window_minutes,
-              resets_at_utc = excluded.resets_at_utc;
-            """, "$provider", "$profile", "$kind", "$captured", "$used", "$window", "$resets", "$source", "$account");
+        BuildCommand(connection, transaction, SqliteQuotaEvidence.InsertSql);
 
     private static SqliteCommand BuildContextCommand(SqliteConnection connection, SqliteTransaction transaction) =>
         BuildCommand(connection, transaction, """

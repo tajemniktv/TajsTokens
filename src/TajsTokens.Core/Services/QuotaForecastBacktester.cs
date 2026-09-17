@@ -29,6 +29,9 @@ public static class QuotaForecastBacktester
 {
     public const int MinimumCalibrationEpochs = 8;
     public const double NominalCoverage = 0.8;
+    // Observed app-server reset timestamps alternate by one second. This is a derived
+    // segmentation tolerance, never a normalization of provider facts or anchor identity.
+    private static readonly TimeSpan ResetJitterTolerance = TimeSpan.FromSeconds(1);
 
     // Keep the incumbent until comparable, matured account-local target outcomes support a switch.
     public static string DefaultModel(QuotaSnapshot anchor) => "legacy-ewma";
@@ -43,7 +46,7 @@ public static class QuotaForecastBacktester
         if (scores.Length == 0) return fallback;
         var best = scores.Min(x => x.Error);
         // A 10% practical-equivalence band avoids changing models for tiny noisy wins.
-        var preferred = new[] { fallback, "persistence", "epoch", "recent-2h", "recent-30m", "recent-6h", "recent-24h", "damped-2h", "damped-6h", "legacy-ewma" };
+        var preferred = new[] { fallback, "persistence", "time-ewma-2h", "time-ewma-6h", "epoch", "recent-2h", "recent-30m", "recent-6h", "recent-24h", "damped-2h", "damped-6h", "legacy-ewma" };
         return preferred.First(model => scores.Any(x => x.Model == model && x.Error <= best * 1.1 + 0.1));
     }
 
@@ -84,6 +87,7 @@ public static class QuotaForecastBacktester
         var result = new List<IReadOnlyList<QuotaSnapshot>>();
         List<QuotaSnapshot>? current = null;
         QuotaSnapshot? previous = null;
+        DateTimeOffset minimumReset = default, maximumReset = default;
         foreach (var row in snapshots.OrderBy(x => x.CapturedAtUtc))
         {
             if (previous is not null && (row.Provider != previous.Provider || row.Profile != previous.Profile ||
@@ -97,11 +101,16 @@ public static class QuotaForecastBacktester
                 previous = row;
                 continue;
             }
-            if (current is null || previous is null || row.ResetsAtUtc != previous.ResetsAtUtc ||
-                row.WindowMinutes != previous.WindowMinutes || row.UsedPercent < previous.UsedPercent)
+            var reset = row.ResetsAtUtc!.Value;
+            if (current is null || previous is null ||
+                reset - minimumReset > ResetJitterTolerance || maximumReset - reset > ResetJitterTolerance ||
+                row.CapturedAtUtc > minimumReset ||
+                QuotaHistoryPolicy.Cohort(row) != QuotaHistoryPolicy.Cohort(previous) ||
+                row.UsedPercent < previous.UsedPercent)
             {
                 current = [];
                 result.Add(current);
+                minimumReset = maximumReset = reset;
             }
             // Ambiguous equal-time readings are not slope intervals. A conflicting one starts
             // a new segment, preventing any pre-conflict history from contributing afterwards.
@@ -110,7 +119,10 @@ public static class QuotaForecastBacktester
                 if (row.UsedPercent == current[^1].UsedPercent) continue;
                 current = [];
                 result.Add(current);
+                minimumReset = maximumReset = reset;
             }
+            minimumReset = reset < minimumReset ? reset : minimumReset;
+            maximumReset = reset > maximumReset ? reset : maximumReset;
             current.Add(row);
             previous = row;
         }
@@ -176,12 +188,28 @@ public static class QuotaForecastBacktester
         return trials;
     }
 
+    public static IReadOnlyList<IReadOnlyList<QuotaForecastTrial>> ResetGenerations(IEnumerable<QuotaForecastTrial> trials)
+    {
+        var groups = new List<IReadOnlyList<QuotaForecastTrial>>();
+        List<QuotaForecastTrial>? current = null;
+        foreach (var trial in trials.OrderBy(x => x.ResetUtc))
+        {
+            if (current is null || trial.ResetUtc - current[0].ResetUtc > ResetJitterTolerance)
+            {
+                current = [];
+                groups.Add(current);
+            }
+            current.Add(trial);
+        }
+        return groups;
+    }
+
     public static IReadOnlyList<double> CalibrationErrors(IEnumerable<QuotaForecastTrial> trials,
-        DateTimeOffset origin, DateTimeOffset reset, double leadHours) => trials
-        .Where(x => x.OutcomeUtc < origin && x.ResetUtc < origin && x.ResetUtc != reset &&
-                    x.LeadHours >= leadHours / 2 && x.LeadHours <= leadHours * 2)
-        // One score per reset generation, not hundreds of correlated polling samples.
-        .GroupBy(x => x.ResetUtc)
+        DateTimeOffset origin, DateTimeOffset reset, double leadHours) => ResetGenerations(trials
+        .Where(x => x.OutcomeUtc < origin && x.ResetUtc < origin - ResetJitterTolerance &&
+                    (x.ResetUtc - reset).Duration() > ResetJitterTolerance &&
+                    x.LeadHours >= leadHours / 2 && x.LeadHours <= leadHours * 2))
+        // One score per jitter-bounded reset generation, not correlated polling samples.
         .Select(g => g.OrderBy(x => Math.Abs(x.LeadHours - leadHours)).ThenByDescending(x => x.OriginUtc).First())
         .OrderByDescending(x => x.ResetUtc).Take(40)
         .Select(x => Math.Abs(x.PredictedRemaining - x.ObservedRemaining)).ToArray();
