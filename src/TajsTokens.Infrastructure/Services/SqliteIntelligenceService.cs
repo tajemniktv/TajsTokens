@@ -701,7 +701,8 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                    COALESCE(SUM(e.cache_write_tokens), 0),
                    COALESCE(SUM(e.non_reasoning_output_tokens), 0),
                    COALESCE(SUM(e.reasoning_output_tokens), 0),
-                   COUNT(DISTINCT e.session_id)
+                   COUNT(DISTINCT e.session_id),
+                   {(dimension == "Session" ? "(SELECT NULLIF(s.thread_id, '') FROM sessions s WHERE s.session_id = e.session_id)" : "NULL")}
             FROM codex_native_token_events e
             {join}
             WHERE e.observed_at_utc >= $from AND e.observed_at_utc < $to {UsageFilterSql}
@@ -724,7 +725,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 reader.GetInt64(4),
                 reader.GetInt64(5),
                 reader.GetInt64(6),
-                reader.GetInt32(7)));
+                reader.GetInt32(7)) { ThreadId = reader.IsDBNull(8) ? null : reader.GetString(8) });
         }
     }
 
@@ -1089,6 +1090,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
     private const string UsageFilterSql = """
         AND ($model IS NULL OR COALESCE(NULLIF(e.model, ''), '(unknown)') = $model)
         AND ($session IS NULL OR e.session_id = $session)
+        AND ($thread IS NULL OR EXISTS(SELECT 1 FROM sessions s WHERE s.session_id=e.session_id AND s.thread_id=$thread))
         AND ($repository IS NULL OR COALESCE((SELECT NULLIF(s.repository, '') FROM sessions s WHERE s.session_id = e.session_id), '(unknown)') = $repository)
         """;
 
@@ -1096,6 +1098,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
     {
         command.Parameters.AddWithValue("$model", (object?)query.Model ?? DBNull.Value);
         command.Parameters.AddWithValue("$session", (object?)query.SessionId ?? DBNull.Value);
+        command.Parameters.AddWithValue("$thread", (object?)query.ThreadId ?? DBNull.Value);
         command.Parameters.AddWithValue("$repository", (object?)query.Repository ?? DBNull.Value);
     }
 

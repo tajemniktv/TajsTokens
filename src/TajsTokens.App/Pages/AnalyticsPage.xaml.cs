@@ -14,6 +14,7 @@ public sealed partial class AnalyticsPage : Page
     private long _selectionGeneration;
     private IReadOnlyList<ResetRow> _resetRows = [];
     private string _burnStatus = "Loading quota changes…";
+    private string? _loadError;
 
     public AnalyticsPage()
     {
@@ -100,13 +101,15 @@ public sealed partial class AnalyticsPage : Page
         {
             if (_isLoaded && generation == Volatile.Read(ref _loadGeneration))
             {
-                StatusText.Text = $"Quota intelligence unavailable: {Summarize(exception.Message)}";
+                _loadError = $"Quota intelligence unavailable: {Summarize(exception.Message)} · displayed results may be stale.";
+                StatusText.Text = _loadError;
             }
         }
     }
 
     private void Render(IntelligenceDashboard dashboard)
     {
+        _loadError = null;
         var selectedId = (BurnIntervalList.SelectedItem as BurnIntervalRow)?.IntervalId;
         _intervalsById.Clear();
         foreach (var interval in dashboard.QuotaBurnIntervals)
@@ -128,7 +131,7 @@ public sealed partial class AnalyticsPage : Page
             interval.IntervalId,
             $"{interval.StartUtc.ToLocalTime():dd MMM HH:mm:ss} → {interval.EndUtc.ToLocalTime():dd MMM HH:mm:ss}",
             $"{FormatKind(interval.Kind)} · {interval.BeforeUsedPercent:0.#}% → {interval.AfterUsedPercent:0.#}% used (+{interval.DeltaUsedPercent:0.#} pp)",
-            (QuotaSnapshot.ClassifyAuthority(interval.AfterSource) == QuotaObservationAuthority.ProviderAuthoritative ? "Account meter" : "Rollout reading") +
+            SourceLabel(interval.AfterSource) +
             $" · {QuotaAccountScope.Describe(interval.AccountKey)}"))
             .ToArray();
         BurnIntervalList.ItemsSource = burnRows.Length == 0
@@ -156,7 +159,7 @@ public sealed partial class AnalyticsPage : Page
                 $"{reset.EffectiveAtUtc.ToLocalTime():g} · {FormatKind(reset.Kind)} · {FormatClassification(reset.Classification)}",
                 $"{FormatNullablePercent(reset.BeforeUsedPercent)} → {FormatNullablePercent(reset.AfterUsedPercent)} used · " +
                 $"{reset.Explanation}\nPrevious reset: {FormatReset(reset.PreviousResetAtUtc)}\nNew reset: {FormatReset(reset.CurrentResetAtUtc)}\nSignal ID: {reset.EventId}",
-                $"{reset.Source} · {QuotaAccountScope.Describe(reset.AccountKey)}", reset.Source))
+                Scope: $"{reset.Source} · {QuotaAccountScope.Describe(reset.AccountKey)}", Source: reset.Source))
                 .ToArray();
         RenderResets();
 
@@ -171,7 +174,7 @@ public sealed partial class AnalyticsPage : Page
     {
         if (BurnSummary is null || BurnTabs is null) return;
         BurnSummary.Visibility = BurnTabs.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
-        if (BurnTabs.SelectedIndex == 0) StatusText.Text = _burnStatus;
+        if (BurnTabs.SelectedIndex == 0) StatusText.Text = _loadError ?? _burnStatus;
         else RenderResets();
     }
 
@@ -181,13 +184,27 @@ public sealed partial class AnalyticsPage : Page
     {
         if (ResetList is null || ResetSourceFilter is null) return;
         var rows = _resetRows.Where(row => ResetSourceFilter.SelectedIndex == 0 ||
-            (QuotaSnapshot.ClassifyAuthority(row.Source) == QuotaObservationAuthority.ProviderAuthoritative
-                ? ResetSourceFilter.SelectedIndex == 1 : ResetSourceFilter.SelectedIndex == 2)).ToArray();
+            ResetSourceFilter.SelectedIndex == (DisplayAuthority(row.Source) switch
+            {
+                QuotaObservationAuthority.ProviderAuthoritative => 1,
+                QuotaObservationAuthority.EmbeddedObservation => 2,
+                _ => 3
+            })).ToArray();
         ResetList.ItemsSource = rows.Length > 0 ? rows :
             new[] { new ResetRow("No reset signals in this view", "Try another source or a longer range. Missing evidence is not proof that no reset occurred.") };
         if (BurnTabs?.SelectedIndex == 1)
-            StatusText.Text = $"{rows.Length:N0} signals in this view · up to 200 loaded across sources. Signals are not a count of confirmed account resets.";
+            StatusText.Text = _loadError ?? $"{rows.Length:N0} signals in this view · up to 200 loaded across sources. Signals are not a count of confirmed account resets.";
     }
+
+    private static QuotaObservationAuthority DisplayAuthority(string source) =>
+        source.Contains('→') ? QuotaObservationAuthority.Unknown : QuotaSnapshot.ClassifyAuthority(source);
+
+    private static string SourceLabel(string source) => DisplayAuthority(source) switch
+    {
+        QuotaObservationAuthority.ProviderAuthoritative => "Account meter",
+        QuotaObservationAuthority.EmbeddedObservation => "Rollout reading",
+        _ => "Unknown / mixed source"
+    };
 
     private void OnFilterChanged(object sender, SelectionChangedEventArgs e) =>
         OnRefreshClicked(sender, new RoutedEventArgs());

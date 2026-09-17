@@ -27,7 +27,7 @@ public sealed class SqliteIntelligenceServiceTests
             for (var i = 0; i < 25; i++)
             {
                 var id = "session-" + i;
-                await store.UpsertSessionAsync(new CodexSession(id, null, i % 2 == 0 ? "project-a" : "project-b", start, start, "completed"), CancellationToken.None);
+                await store.UpsertSessionAsync(new CodexSession(id, i == 0 ? "different-thread-id" : null, i % 2 == 0 ? "project-a" : "project-b", start, start, "completed"), CancellationToken.None);
                 await store.ApplyCumulativeTokenObservationAsync(Tokens(id, id, start.AddMinutes(1), 100, 60, 20, 120), CancellationToken.None);
             }
             var service = new SqliteIntelligenceService(database, repository);
@@ -51,6 +51,12 @@ public sealed class SqliteIntelligenceServiceTests
             Assert.Equal(13, project.Dimensions.Count(x => x.Dimension == "Session"));
             var session = await service.QueryAsync(query with { Repository = "project-a", SessionId = "session-0", Model = "gpt-5.6-luna" }, CancellationToken.None);
             Assert.Equal(120, Assert.Single(session.UsageHistory).NativeTokens);
+            Assert.Equal("different-thread-id", Assert.Single(session.Dimensions, x => x.Dimension == "Session").ThreadId);
+            var thread = await service.QueryAsync(query with { ThreadId = "different-thread-id" }, CancellationToken.None);
+            Assert.Equal(120, Assert.Single(thread.UsageHistory).NativeTokens);
+            Assert.Equal(120, thread.Heatmap.Sum(x => x.NativeTokens));
+            Assert.Empty((await service.QueryAsync(query with { ThreadId = "session-0" }, CancellationToken.None)).UsageHistory);
+            Assert.Null(Assert.Single(project.Dimensions, x => x.Dimension == "Session" && x.Value == "session-2").ThreadId);
             var excluded = await service.QueryAsync(query with { Repository = "project-b", SessionId = "session-0" }, CancellationToken.None);
             Assert.Empty(excluded.UsageHistory);
             Assert.Empty(excluded.Dimensions);

@@ -99,6 +99,8 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
     public async Task MigrationTenIsTransactionalAndDoesNotInventLegacyProvenance()
     {
         await Execute("""
+            CREATE TABLE ingestion_checkpoints(file_path TEXT PRIMARY KEY, last_byte_offset INTEGER,
+                updated_at_utc TEXT, last_session_id TEXT, parser_version TEXT, source_identity TEXT);
             CREATE TABLE quota_snapshots(provider TEXT NOT NULL,profile TEXT NOT NULL,kind TEXT NOT NULL,
                 captured_at_utc TEXT NOT NULL,used_percent REAL,window_minutes INTEGER,resets_at_utc TEXT,
                 source TEXT NOT NULL,account_key TEXT NOT NULL DEFAULT '',
@@ -115,7 +117,7 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
         await Execute("DROP TABLE quota_snapshots_v10;");
         await repository.InitializeAsync(default);
         await repository.InitializeAsync(default);
-        Assert.Equal(11L, await Scalar("PRAGMA user_version;"));
+        Assert.Equal(12L, await Scalar("PRAGMA user_version;"));
         var row = Assert.Single(await repository.GetRecentQuotaSnapshotsAsync(QuotaWindowKind.FiveHour, "codex", "default", 10, default));
         Assert.Equal(12.375, row.UsedPercent);
         Assert.Null(row.CollectedAtUtc); Assert.Null(row.ObservationId); Assert.Null(row.LimitId);
@@ -124,7 +126,7 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
         await repository.UpsertQuotaSnapshotAsync(row, default);
         Assert.Equal(1L, await Scalar("SELECT COUNT(*) FROM quota_snapshots;"));
         // Repair the already-shipped v10 default too, not just new v9 upgrades.
-        await Execute("UPDATE quota_snapshots SET has_source_timestamp=1; PRAGMA user_version=10;");
+        await Execute("UPDATE quota_snapshots SET has_source_timestamp=1; ALTER TABLE ingestion_checkpoints DROP COLUMN consumed_prefix_sha256; PRAGMA user_version=10;");
         await repository.InitializeAsync(default);
         Assert.Equal(0L, await Scalar("SELECT has_source_timestamp FROM quota_snapshots;"));
     }

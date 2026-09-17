@@ -124,12 +124,13 @@ public sealed partial class OverviewViewModel : ObservableObject
             }
 
             RenderQuota(QuotaWindowKind.FiveHour, snapshot);
-            if (snapshot.TokenDataFresh && snapshot.TokenForecast is { } tokenForecast)
+            if (snapshot.TokenForecast is { } tokenForecast)
             {
                 TokenForecastText = tokenForecast.Predictions.Count > 0
                     ? string.Join("\n", tokenForecast.Predictions.Select(x => $"Next {(x.HorizonHours < 1 ? $"{x.HorizonHours * 60:0} min" : $"{x.HorizonHours:0.#}h")}: ~{FormatTokenCount((long)x.ExpectedTokens)} recorded tokens"))
                     : "No recent token activity to anchor a forecast.";
-                TokenForecastEvidence = $"{tokenForecast.Sessions:N0} sessions · {tokenForecast.TokenEvents:N0} token observations. " +
+                if (tokenForecast.IsStale) TokenForecastText = "Stale prediction — refresh failed\n" + TokenForecastText;
+                TokenForecastEvidence = $"Generated {tokenForecast.GeneratedAtUtc.ToLocalTime():g} · {tokenForecast.Sessions:N0} sessions · {tokenForecast.TokenEvents:N0} token observations. " +
                     string.Join("\n", tokenForecast.Predictions.Select(x => $"{x.Model}: {x.Explanation}" +
                         (x.LowerTokens is { } low && x.UpperTokens is { } high ? $" Range {low:N0}–{high:N0} tokens." : ""))) +
                     "\n" + tokenForecast.Methodology;
@@ -137,7 +138,7 @@ public sealed partial class OverviewViewModel : ObservableObject
             else
             {
                 TokenForecastText = "Token prediction unavailable for this refresh.";
-                TokenForecastEvidence = "Requires a successful local token-history refresh, not a quota account or completed quota resets.";
+                TokenForecastEvidence = "Requires a successful recorded-history query, not a quota account or completed quota resets.";
             }
             if (IsSuperseded(snapshotTicks))
             {

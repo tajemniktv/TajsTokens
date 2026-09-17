@@ -44,7 +44,7 @@ public sealed class QuotaAccountScopeTests : IDisposable
     public async Task ObservatoryFirstInitializationMigratesOldQuotaSchema()
     {
         await new SqliteTelemetryRepository(Database).InitializeAsync(default);
-        await ExecuteAsync("DROP TABLE quota_snapshots; DROP TABLE forecast_snapshots;");
+        await ExecuteAsync("DROP TABLE quota_snapshots; DROP TABLE forecast_snapshots; DROP TABLE ingestion_checkpoints;");
         await CreateVersionEightAsync(false);
         using var store = new SqliteCodexObservatoryStore(Database);
         await store.InitializeAsync(default);
@@ -144,7 +144,7 @@ public sealed class QuotaAccountScopeTests : IDisposable
         Assert.Null(forecast.AccountKey);
         Assert.Equal(2, forecast.Forecast.BurnRatePercentPerHour);
         Assert.Empty(await repository.GetRecentQuotaSnapshotsAsync(QuotaWindowKind.FiveHour, "codex", "default", 10, default, accountKey: "A"));
-        Assert.Equal(11L, await ScalarAsync("PRAGMA user_version"));
+        Assert.Equal(12L, await ScalarAsync("PRAGMA user_version"));
     }
 
     [Fact]
@@ -180,12 +180,14 @@ public sealed class QuotaAccountScopeTests : IDisposable
         Assert.Equal(0L, await ScalarAsync("SELECT COUNT(*) FROM pragma_table_info('quota_snapshots') WHERE name='account_key'"));
         await ExecuteAsync("ALTER TABLE forecast_snapshots ADD COLUMN evaluation_json TEXT;");
         await new SqliteTelemetryRepository(Database).InitializeAsync(default);
-        Assert.Equal(11L, await ScalarAsync("PRAGMA user_version"));
+        Assert.Equal(12L, await ScalarAsync("PRAGMA user_version"));
     }
 
     private async Task CreateVersionEightAsync(bool malformed)
     {
         await ExecuteAsync($"""
+            CREATE TABLE ingestion_checkpoints(file_path TEXT PRIMARY KEY, last_byte_offset INTEGER,
+                updated_at_utc TEXT, last_session_id TEXT, parser_version TEXT, source_identity TEXT);
             CREATE TABLE quota_snapshots(provider TEXT,profile TEXT,kind TEXT,captured_at_utc TEXT,used_percent REAL,
                 window_minutes INTEGER,resets_at_utc TEXT,source TEXT,PRIMARY KEY(provider,profile,kind,captured_at_utc,source));
             INSERT INTO quota_snapshots VALUES('codex','default','FiveHour','2026-09-08T12:00:00.0000000+00:00',20,300,

@@ -1159,6 +1159,16 @@ counters and unimplemented concepts such as TT. A checklist or chat proposal is 
 
 ### Recorded-token prediction contract
 
+Owned schema 12 adds a SHA-256 fingerprint of consumed rollout bytes to ingestion checkpoints.
+Before resuming a changed file, ingestion verifies its consumed prefix, including in-place workspace
+relinks that preserve the filesystem identity. A mismatch (or legacy unverified checkpoint) starts
+a replacement generation; the existing batch writer retires old token/counter, workload, quota,
+context and usage projections for that file before replay. Source files remain read-only. Verification
+reads the consumed prefix once per changed-file ingestion pass (linear I/O); checkpoint hashing is
+incremental within the pass. A process-local cache skips rehashing when identity, checkpoint, size
+and write time are unchanged. This is not an atomic snapshot of a concurrently rewritten external file. Empty
+replacement files cannot activate a new parsed generation until a complete record arrives.
+
 Token forecasts target the sum of recorded native token increments (including cached input) in
 the next interval, conditional on recent installation-local activity. Zero means no tokens were
 recorded, not proof of no account activity. This is neither whole-account accounting nor a

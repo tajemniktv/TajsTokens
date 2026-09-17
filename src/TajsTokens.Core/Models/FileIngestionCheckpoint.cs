@@ -6,4 +6,7 @@ public sealed record FileIngestionCheckpoint(
     DateTimeOffset UpdatedAtUtc,
     string? LastSessionId,
     string ParserVersion,
-    string? SourceIdentity);
+    string? SourceIdentity)
+{
+    public string? ConsumedPrefixSha256 { get; init; }
+}

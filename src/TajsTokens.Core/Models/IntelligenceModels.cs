@@ -14,6 +14,7 @@ public sealed record IntelligenceQuery(
     public string? Model { get; init; }
     public string? Repository { get; init; }
     public string? SessionId { get; init; }
+    public string? ThreadId { get; init; }
 }
 
 public sealed record UsageHistoryBucket(
@@ -49,6 +50,7 @@ public sealed record UsageDimensionTotal(
     long ReasoningOutputTokens,
     int Sessions)
 {
+    public string? ThreadId { get; init; }
     public long DisjointTokens => checked(
         UncachedInputTokens + CacheReadTokens + CacheWriteTokens + NonReasoningOutputTokens + ReasoningOutputTokens);
     public long IntegrityDelta => checked(NativeTokens - DisjointTokens);

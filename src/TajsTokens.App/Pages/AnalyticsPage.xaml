@@ -117,7 +117,7 @@
                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
                     <TextBlock Text="Stored reset and re-anchor detections across all sources. These are derived signals, not a count of confirmed account resets. Up to 200 recent signals are shown." TextWrapping="Wrap" Opacity="0.7" />
                     <ComboBox x:Name="ResetSourceFilter" Grid.Row="1" SelectedIndex="0" SelectionChanged="OnResetFilterChanged" AutomationProperties.Name="Reset signal source">
-                        <ComboBoxItem Content="All sources · separate" /><ComboBoxItem Content="Account meter" /><ComboBoxItem Content="Rollout readings" />
+                        <ComboBoxItem Content="All sources · separate" /><ComboBoxItem Content="Account meter" /><ComboBoxItem Content="Rollout readings" /><ComboBoxItem Content="Unknown / mixed" />
                     </ComboBox>
                     <ListView x:Name="ResetList" Grid.Row="2" SelectionMode="None" AutomationProperties.Name="Reset and re-anchor signals">
                         <ListView.ItemTemplate><DataTemplate>

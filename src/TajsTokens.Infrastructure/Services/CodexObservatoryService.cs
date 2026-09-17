@@ -205,7 +205,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
 
                 var infoAfter = new FileInfo(thread.RolloutPath);
                 infoAfter.Refresh();
-                var sourceIdentity = CodexSessionIngestionService.GetSourceIdentity(thread.RolloutPath);
+                var sourceIdentity = result.SourceIdentity ?? CodexSessionIngestionService.GetSourceIdentity(thread.RolloutPath);
                 var touchedSessionId = result.SessionId ?? thread.ThreadId;
                 await _store.UpsertRolloutFileAsync(
                     sourceIdentity,
@@ -371,20 +371,10 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
                 }
 
                 bytes = checked(bytes + info.Length);
-                var sourceIdentity = CodexSessionIngestionService.GetSourceIdentity(file);
                 var filenameSessionId = CodexRolloutParser.ExtractSessionIdFromFileName(file);
 
-                // The fallback path retains the conservative pre-ingestion identity refresh because
-                // it has no provider-owned catalog telling us whether an EOF file moved/archived.
-                await _store.UpsertRolloutFileAsync(
-                    sourceIdentity,
-                    file,
-                    filenameSessionId,
-                    info.Length,
-                    DateTimeOffset.UtcNow,
-                    cancellationToken);
-
                 var result = await _ingestionService.IngestAsync(file, cancellationToken);
+                var sourceIdentity = result.SourceIdentity ?? CodexSessionIngestionService.GetSourceIdentity(file);
                 recordsScanned += result.RecordsScanned;
                 normalized += result.RecordsNormalized;
 

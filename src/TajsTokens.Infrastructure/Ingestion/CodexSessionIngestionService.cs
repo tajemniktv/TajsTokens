@@ -20,6 +20,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
     private readonly ICodexObservatoryStore? _observatoryStore;
     private readonly ICodexIngestionBatchWriter? _ingestionBatchWriter;
     private readonly CodexRolloutParser _parser = new();
+    private readonly Dictionary<string, (string Identity, long Offset, string Hash, long Length, DateTime Written)> _verifiedPrefixes = new(StringComparer.OrdinalIgnoreCase);
 
     public CodexSessionIngestionService(
         ICodexSessionEventProvider sessionEventProvider,
@@ -63,10 +64,47 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         var parserVersion = _observatoryStore is null ? BoundaryParserVersion : TypedParserVersion;
         var existing = await _checkpointStore.GetCheckpointAsync(filePath, cancellationToken);
         var sourceIdentity = GetSourceIdentity(filePath);
+        var initialInfo = new FileInfo(filePath);
+        var initialLength = initialInfo.Length;
+        var initialWritten = initialInfo.LastWriteTimeUtc;
+        using var prefixHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        await using var prefixStream = new FileStream(filePath, FileMode.Open, FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan);
+        var hashBuffer = new byte[65536];
+        async Task<string> HashThroughAsync(long offset)
+        {
+            if (prefixStream.Position > offset)
+            {
+                prefixStream.Position = 0;
+                prefixHash.GetHashAndReset();
+            }
+            while (prefixStream.Position < offset)
+            {
+                var read = await prefixStream.ReadAsync(hashBuffer.AsMemory(0,
+                    (int)Math.Min(hashBuffer.Length, offset - prefixStream.Position)), cancellationToken);
+                if (read == 0) throw new IOException("Rollout changed while verifying its byte checkpoint; retry required.");
+                prefixHash.AppendData(hashBuffer, 0, read);
+            }
+            return Convert.ToHexString(prefixHash.GetCurrentHash());
+        }
+        var sameFile = existing?.SourceIdentity is { } previousIdentity &&
+            (previousIdentity == sourceIdentity || previousIdentity.StartsWith(sourceIdentity + ":generation:", StringComparison.Ordinal));
+        var cachedPrefix = existing?.ConsumedPrefixSha256 is { } knownHash &&
+            _verifiedPrefixes.TryGetValue(filePath, out var verified) &&
+            verified == (existing.SourceIdentity, existing.LastByteOffset, knownHash, initialLength, initialWritten);
+        var existingPrefix = existing is null ? null : cachedPrefix ? existing.ConsumedPrefixSha256 :
+            await HashThroughAsync(Math.Min(existing.LastByteOffset, prefixStream.Length));
         var canResume = existing is not null &&
                         string.Equals(existing.ParserVersion, parserVersion, StringComparison.Ordinal) &&
-                        existing.SourceIdentity is not null &&
-                        string.Equals(existing.SourceIdentity, sourceIdentity, StringComparison.Ordinal);
+                        sameFile && existing.LastByteOffset <= prefixStream.Length &&
+                        existing.ConsumedPrefixSha256 is not null &&
+                        existing.ConsumedPrefixSha256 == existingPrefix;
+
+        if (canResume) sourceIdentity = existing!.SourceIdentity!;
+        else if (sameFile)
+            // New generation retires the old projections before replay, even when the OS file ID
+            // survived an in-place rewrite. Legacy unverified checkpoints take this path once.
+            sourceIdentity += ":generation:" + existingPrefix;
 
         var fromOffset = canResume ? existing!.LastByteOffset : 0;
         if (new FileInfo(filePath).Length < fromOffset)
@@ -153,6 +191,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                     existing?.LastSessionId,
                     parserVersion,
                     sourceIdentity,
+                    await HashThroughAsync(lastCompleteRecordOffset),
                     cancellationToken);
             }
         }
@@ -162,6 +201,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             sourceIdentity,
             filePath,
             cancellationToken);
+        var finalPrefix = canResume && recordsScanned == 0 ? existingPrefix! : await HashThroughAsync(lastCompleteRecordOffset);
         await SaveCheckpointAsync(
             filePath,
             lastCompleteRecordOffset,
@@ -169,11 +209,18 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             existing?.LastSessionId,
             parserVersion,
             sourceIdentity,
+            finalPrefix,
             cancellationToken);
+
+        var finalInfo = new FileInfo(filePath);
+        if (finalInfo.Length == initialLength && finalInfo.LastWriteTimeUtc == initialWritten)
+            _verifiedPrefixes[filePath] = (sourceIdentity, lastCompleteRecordOffset, finalPrefix, initialLength, initialWritten);
+        else _verifiedPrefixes.Remove(filePath);
 
         var normalized = _observatoryStore is null ? recordsScanned : normalizedRecords;
         return new CodexIngestionResult(recordsScanned, normalized, state.OwnSessionId ?? existing?.LastSessionId)
         {
+            SourceIdentity = sourceIdentity,
             LastCompleteRecordOffset = lastCompleteRecordOffset,
             SourceLength = TryGetFileSize(filePath)
         };
@@ -264,6 +311,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         string? previousSessionId,
         string parserVersion,
         string sourceIdentity,
+        string consumedPrefixSha256,
         CancellationToken cancellationToken)
     {
         if (_observatoryStore is not null)
@@ -284,7 +332,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                 DateTimeOffset.UtcNow,
                 state.OwnSessionId ?? previousSessionId,
                 parserVersion,
-                sourceIdentity),
+                sourceIdentity) { ConsumedPrefixSha256 = consumedPrefixSha256 },
             cancellationToken);
     }
 

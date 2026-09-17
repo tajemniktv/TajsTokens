@@ -31,18 +31,18 @@ public sealed partial class CodexPage : Page
     private void OnWorkViewClicked(object sender, RoutedEventArgs e) => ShowUsage(false);
     private void OnUsageViewClicked(object sender, RoutedEventArgs e) => ShowUsage(true);
 
-    private void ShowUsage(bool show, string? sessionId = null)
+    private void ShowUsage(bool show, string? threadId = null)
     {
         if (show && _usagePage is null)
         {
             _usagePage = new UsagePage();
-            _usagePage.ThreadRequested += async (_, threadId) =>
+            _usagePage.ThreadRequested += async (_, requestedThreadId) =>
             {
                 ShowUsage(false);
-                await LoadThreadAsync(threadId);
+                await LoadThreadAsync(requestedThreadId);
             };
         }
-        if (show && sessionId is not null) _usagePage!.SelectSession(sessionId);
+        if (show && threadId is not null) _usagePage!.SelectThread(threadId);
         // Detach the report while browsing so its existing unload/cancellation lifecycle runs.
         UsageHost.Content = show ? _usagePage : null;
         UsageHost.Visibility = show ? Visibility.Visible : Visibility.Collapsed;

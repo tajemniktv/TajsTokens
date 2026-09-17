@@ -48,7 +48,7 @@ The stable per-user layout is:
 
 Launch **TajsTokens** from the Start menu. Its shortcut always targets `current`; the existing
 launch-at-login preference is preserved and reconciled by the app. File properties and the
-window title include the Git commit and `clean`/`dirty` state (tracked changes and untracked
+Settings build identity include the Git commit and `clean`/`dirty` state (tracked changes and untracked
 non-ignored files). Both apps use the same versioned `current/build-identity.json` contract:
 schema version, app name, identity, configuration, runtime, build timestamp, and file hashes.
 Without usable Git metadata the identity explicitly says `git-unknown`.

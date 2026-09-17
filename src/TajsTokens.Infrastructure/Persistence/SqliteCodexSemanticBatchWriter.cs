@@ -146,6 +146,24 @@ internal sealed class SqliteCodexIngestionBatchWriter(
                          SELECT 1 FROM rollout_files
                          WHERE file_path = $file AND source_identity <> $identity);
 
+                   DELETE FROM codex_workload_observations
+                   WHERE source_identity IN (SELECT source_identity FROM rollout_files
+                       WHERE file_path = $file AND source_identity <> $identity);
+
+                   DELETE FROM quota_snapshots
+                   WHERE source_identity IN (SELECT source_identity FROM rollout_files
+                       WHERE file_path = $file AND source_identity <> $identity);
+
+                   DELETE FROM context_observations
+                   WHERE event_id IN (SELECT source_record_id || ':ctx' FROM rollout_records
+                       WHERE file_path = $file AND source_identity <> $identity);
+
+                   DELETE FROM usage_events
+                   WHERE event_id IN (SELECT source_record_id FROM rollout_records
+                       WHERE file_path = $file AND source_identity <> $identity)
+                      OR event_id IN (SELECT source_record_id || ':token' FROM rollout_records
+                       WHERE file_path = $file AND source_identity <> $identity);
+
                    DELETE FROM codex_parser_state
                    WHERE source_identity IN (
                        SELECT source_identity FROM rollout_files

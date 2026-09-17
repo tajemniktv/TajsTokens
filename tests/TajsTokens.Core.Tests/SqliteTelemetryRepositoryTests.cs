@@ -38,7 +38,7 @@ public sealed class SqliteTelemetryRepositoryTests
             {
                 await connection.OpenAsync();
 
-                Assert.Equal(11, await ReadSchemaVersionAsync(connection));
+                Assert.Equal(12, await ReadSchemaVersionAsync(connection));
                 var tables = await ReadTableNamesAsync(connection);
                 foreach (var expected in s_foundationTables)
                 {
@@ -78,6 +78,8 @@ public sealed class SqliteTelemetryRepositoryTests
                     );
                     INSERT INTO quota_snapshots(provider, profile, kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, source)
                     VALUES('codex', 'default', 'FiveHour', '2026-08-31T20:00:00.0000000+00:00', 42, 300, NULL, 'fixture');
+                    CREATE TABLE ingestion_checkpoints(file_path TEXT PRIMARY KEY, last_byte_offset INTEGER,
+                        updated_at_utc TEXT, last_session_id TEXT, parser_version TEXT, source_identity TEXT);
                     PRAGMA user_version = 2;
                     """;
                 await command.ExecuteNonQueryAsync();
@@ -89,7 +91,7 @@ public sealed class SqliteTelemetryRepositoryTests
             await using (var migrated = new SqliteConnection($"Data Source={path}"))
             {
                 await migrated.OpenAsync();
-                Assert.Equal(11, await ReadSchemaVersionAsync(migrated));
+                Assert.Equal(12, await ReadSchemaVersionAsync(migrated));
                 Assert.Contains("repositories", await ReadTableNamesAsync(migrated));
                 Assert.Contains("workspaces", await ReadTableNamesAsync(migrated));
                 Assert.Contains("forecast_snapshots", await ReadTableNamesAsync(migrated));
@@ -153,6 +155,8 @@ public sealed class SqliteTelemetryRepositoryTests
                         quota_captured_at_utc TEXT,
                         PRIMARY KEY(provider, profile, kind, generated_at_utc)
                     );
+                    CREATE TABLE ingestion_checkpoints(file_path TEXT PRIMARY KEY, last_byte_offset INTEGER,
+                        updated_at_utc TEXT, last_session_id TEXT, parser_version TEXT, source_identity TEXT);
                     PRAGMA user_version = 6;
                     """;
                 await command.ExecuteNonQueryAsync();
@@ -174,7 +178,7 @@ public sealed class SqliteTelemetryRepositoryTests
 
             await using var migrated = new SqliteConnection($"Data Source={path}");
             await migrated.OpenAsync();
-            Assert.Equal(11, await ReadSchemaVersionAsync(migrated));
+            Assert.Equal(12, await ReadSchemaVersionAsync(migrated));
             var snapshots = await repository.GetRecentQuotaSnapshotsAsync(
                 QuotaWindowKind.FiveHour,
                 "codex",
@@ -224,6 +228,8 @@ public sealed class SqliteTelemetryRepositoryTests
                         provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
                         estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence)
                     VALUES('codex', 'default', 'FiveHour', '2026-08-31T20:00:00.0000000+00:00', 12, NULL, 1, 20, 0.5);
+                    CREATE TABLE ingestion_checkpoints(file_path TEXT PRIMARY KEY, last_byte_offset INTEGER,
+                        updated_at_utc TEXT, last_session_id TEXT, parser_version TEXT, source_identity TEXT);
                     PRAGMA user_version = 3;
                     """;
                 await command.ExecuteNonQueryAsync();

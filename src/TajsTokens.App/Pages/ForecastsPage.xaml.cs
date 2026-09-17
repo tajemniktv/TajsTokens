@@ -100,10 +100,11 @@ public sealed partial class ForecastsPage : Page
     {
         QuotaHistoryText.Text = dashboard.QuotaHistorySummary ?? "Historical quota evidence is unavailable.";
         var snapshot = App.Services.Telemetry.Latest;
-        var tokens = snapshot.TokenDataFresh ? snapshot.TokenForecast : null;
+        var tokens = snapshot.TokenForecast;
         TokenPredictionText.Text = tokens?.Predictions is { Count: > 0 } predictions
             ? string.Join("\n", predictions.Select(x => $"Next {Horizon(x.HorizonHours)}  ·  ~{CompactTokens(x.ExpectedTokens)} tokens"))
             : "No current token workload prediction. Refresh telemetry; this does not require quota-account history.";
+        if (tokens?.IsStale == true) TokenPredictionText.Text = "Stale prediction — refresh failed\n" + TokenPredictionText.Text;
         TokenPredictionRange.Text = tokens is not null
             ? string.Join("\n", tokens.Predictions.Select(x => x.LowerTokens is { } low && x.UpperTokens is { } high
                 ? $"{Horizon(x.HorizonHours)} range: {CompactTokens(low)}–{CompactTokens(high)} tokens · empirical 80%-target, not a guarantee"
@@ -162,7 +163,7 @@ public sealed partial class ForecastsPage : Page
         var filtered = _history.Where(x => WindowFilter.SelectedIndex == 0 ||
             x.Forecast.Kind == (WindowFilter.SelectedIndex == 1 ? QuotaWindowKind.FiveHour : QuotaWindowKind.Weekly)).ToArray();
         var visible = HistoryDensity.SelectedIndex == 0
-            ? filtered.GroupBy(x => (x.Provider, x.Profile, x.Forecast.Kind, x.AccountKey, x.QuotaSource,
+            ? filtered.GroupBy(x => (x.Provider, x.Profile, x.Forecast.Kind, x.AccountKey, x.QuotaSource, x.QuotaWindowMinutes,
                     x.Forecast.Evidence?.AnchorLimitId, x.Forecast.Evidence?.AnchorPlanType,
                     Hour: x.Forecast.GeneratedAtUtc.UtcTicks / TimeSpan.TicksPerHour))
                 .Select(g => g.First()).OrderByDescending(x => x.Forecast.GeneratedAtUtc).ToArray()
@@ -181,6 +182,7 @@ public sealed partial class ForecastsPage : Page
                     : "") +
                 $"{f.Evidence?.WorkloadStatus}\nSource: {snapshot.QuotaSource ?? "not recorded"}\n{QuotaAccountScope.Describe(snapshot.AccountKey)}\n" +
                 $"Quota observed: {snapshot.QuotaCapturedAtUtc?.ToLocalTime().ToString("g") ?? "not recorded"}\n" +
+                $"Native window: {snapshot.QuotaWindowMinutes?.ToString() ?? "not recorded"} minutes\n" +
                 $"Reset: {snapshot.QuotaResetsAtUtc?.ToLocalTime().ToString("g") ?? "not recorded"}";
             var summary = $"{QuotaAccountScope.Describe(snapshot.AccountKey)}\n" +
                 $"Pace: {(f.BurnRatePercentPerHour is double pace ? $"{pace:0.##} quota points/hour" : "not established")}\n" +
@@ -257,7 +259,7 @@ public sealed partial class ForecastsPage : Page
                     $"Recorded tokens · {Horizon(score.HorizonHours)} · reconstructed rollout history",
                     score.Model,
                     $"Mean error {CompactTokens(score.MeanAbsoluteError)} tokens · {score.Origins:N0} held-out origins",
-                    $"MAE {score.MeanAbsoluteError:N0} tokens · RMSE {score.RootMeanSquaredError:N0} · reconstructed rollout history · {score.WorkloadOrigins} workload-model predictions" +
+                    $"MAE {CompactTokens(score.MeanAbsoluteError)} tokens · RMSE {CompactTokens(score.RootMeanSquaredError)} tokens · reconstructed rollout history · {score.WorkloadOrigins} workload-model predictions" +
                     (score.IntervalOrigins > 0 ? $" · band coverage {score.IntervalCoverage:P0} on {score.IntervalOrigins} origins" : ""))))
                 .ToArray();
             EvaluationGroup.ItemsSource = _evaluationRows.Select(x => x.Group).Distinct().OrderBy(x => x).ToArray();

@@ -8,7 +8,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 
 public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryRepository, ISessionIngestionCheckpointStore
 {
-    private const int CurrentSchemaVersion = 11;
+    private const int CurrentSchemaVersion = 12;
     private const int IntelligenceSchemaVersion = 3;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _intelligenceInitializeGate = new(1, 1);
@@ -431,6 +431,13 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 UPDATE quota_snapshots SET has_source_timestamp=0
                 WHERE observation_id='' AND source_identity IS NULL AND collected_at_utc IS NULL;
                 PRAGMA user_version = 11;
+                """, cancellationToken);
+        }
+        if (version < 12)
+        {
+            await ExecuteMigrationAsync(connection, """
+                ALTER TABLE ingestion_checkpoints ADD COLUMN consumed_prefix_sha256 TEXT;
+                PRAGMA user_version = 12;
                 """, cancellationToken);
         }
     }
@@ -951,7 +958,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
 
         var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT file_path, last_byte_offset, updated_at_utc, last_session_id, parser_version, source_identity
+            SELECT file_path, last_byte_offset, updated_at_utc, last_session_id, parser_version, source_identity, consumed_prefix_sha256
             FROM ingestion_checkpoints
             WHERE file_path = $path;
             """;
@@ -969,20 +976,22 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
             ParseUtc(reader.GetString(2)),
             reader.IsDBNull(3) ? null : reader.GetString(3),
             reader.GetString(4),
-            reader.IsDBNull(5) ? null : reader.GetString(5));
+            reader.IsDBNull(5) ? null : reader.GetString(5))
+        { ConsumedPrefixSha256 = reader.IsDBNull(6) ? null : reader.GetString(6) };
     }
 
     public Task SaveCheckpointAsync(FileIngestionCheckpoint checkpoint, CancellationToken cancellationToken) =>
         ExecutePreparedCommandAsync(
             """
-            INSERT INTO ingestion_checkpoints(file_path, last_byte_offset, updated_at_utc, last_session_id, parser_version, source_identity)
-            VALUES($path, $offset, $updated, $session, $parser, $identity)
+            INSERT INTO ingestion_checkpoints(file_path, last_byte_offset, updated_at_utc, last_session_id, parser_version, source_identity, consumed_prefix_sha256)
+            VALUES($path, $offset, $updated, $session, $parser, $identity, $prefix)
             ON CONFLICT(file_path) DO UPDATE SET
               last_byte_offset = excluded.last_byte_offset,
               updated_at_utc = excluded.updated_at_utc,
               last_session_id = excluded.last_session_id,
               parser_version = excluded.parser_version,
-              source_identity = excluded.source_identity;
+              source_identity = excluded.source_identity,
+              consumed_prefix_sha256 = excluded.consumed_prefix_sha256;
             """,
             cmd =>
             {
@@ -992,6 +1001,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 cmd.Parameters.AddWithValue("$session", DbValue(checkpoint.LastSessionId));
                 cmd.Parameters.AddWithValue("$parser", checkpoint.ParserVersion);
                 cmd.Parameters.AddWithValue("$identity", DbValue(checkpoint.SourceIdentity));
+                cmd.Parameters.AddWithValue("$prefix", DbValue(checkpoint.ConsumedPrefixSha256));
             },
             cancellationToken);
 

@@ -101,7 +101,9 @@
                                 <DataTemplate x:DataType="models:TokenSummaryCard">
                                     <Grid Margin="0,2">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                        <TextBlock Text="{x:Bind Label}" ToolTipService.ToolTip="{x:Bind Detail}" VerticalAlignment="Center" />
+                                        <Expander Header="{x:Bind Label}" IsExpanded="False" HorizontalAlignment="Stretch">
+                                            <TextBlock Text="{x:Bind Detail}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                        </Expander>
                                         <TextBlock Grid.Column="1" Text="{x:Bind Value}" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" Margin="12,0,0,0" />
                                     </Grid>
                                 </DataTemplate>

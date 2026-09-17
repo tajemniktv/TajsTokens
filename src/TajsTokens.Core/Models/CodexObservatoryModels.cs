@@ -5,6 +5,7 @@ public sealed record CodexIngestionResult(
     int RecordsNormalized,
     string? SessionId)
 {
+    public string? SourceIdentity { get; init; }
     public long LastCompleteRecordOffset { get; init; }
     public long SourceLength { get; init; }
 
