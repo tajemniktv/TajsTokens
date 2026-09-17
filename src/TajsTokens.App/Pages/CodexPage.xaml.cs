@@ -26,6 +26,31 @@ public sealed partial class CodexPage : Page
     private IReadOnlyList<CodexThreadItemPresentation> _allPresentations = Array.Empty<CodexThreadItemPresentation>();
     private bool _showExecutionDetails;
     private bool _isNarrow;
+    private UsagePage? _usagePage;
+
+    private void OnWorkViewClicked(object sender, RoutedEventArgs e) => ShowUsage(false);
+    private void OnUsageViewClicked(object sender, RoutedEventArgs e) => ShowUsage(true);
+
+    private void ShowUsage(bool show, string? sessionId = null)
+    {
+        if (show && _usagePage is null)
+        {
+            _usagePage = new UsagePage();
+            _usagePage.ThreadRequested += async (_, threadId) =>
+            {
+                ShowUsage(false);
+                await LoadThreadAsync(threadId);
+            };
+        }
+        if (show && sessionId is not null) _usagePage!.SelectSession(sessionId);
+        // Detach the report while browsing so its existing unload/cancellation lifecycle runs.
+        UsageHost.Content = show ? _usagePage : null;
+        UsageHost.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        BrowserSplitView.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
+        BrowserControls.Visibility = StatusText.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
+        WorkViewButton.IsChecked = !show;
+        UsageViewButton.IsChecked = show;
+    }
     private ListView? _conversationList;
     private readonly Dictionary<string, TreeViewNode> _threadNodes = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<TreeViewNode, TreeViewNode?> _treeParents = [];
@@ -433,6 +458,15 @@ public sealed partial class CodexPage : Page
         var inspect = new Button { Content = "Inspect source data", Tag = thread?.ThreadId };
         inspect.Click += OnInspectSourceClicked;
         toolbar.Children.Add(inspect);
+        if (thread is not null)
+        {
+            var usage = new Button { Content = "View token usage" };
+            usage.Click += (_, _) =>
+            {
+                ShowUsage(true, thread.ThreadId);
+            };
+            toolbar.Children.Add(usage);
+        }
         DetailPanel.Children.Add(toolbar);
 
         var preferredSource = result.HistorySources.FirstOrDefault(source =>

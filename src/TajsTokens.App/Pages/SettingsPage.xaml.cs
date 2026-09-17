@@ -13,6 +13,8 @@ public sealed partial class SettingsPage : Page
     public SettingsPage()
     {
         InitializeComponent();
+        BuildVersionText.Text = $"Build {System.Reflection.Assembly.GetExecutingAssembly().GetCustomAttributes(false)
+            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "unknown"}";
         Loaded += OnLoaded;
     }
 

@@ -7,8 +7,8 @@
     xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
     mc:Ignorable="d">
 
-    <ScrollViewer HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled">
-        <Grid Padding="20" RowSpacing="14" MinWidth="520">
+    <ScrollViewer x:Name="OverviewViewport" HorizontalContentAlignment="Stretch" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled">
+        <Grid x:Name="OverviewContent" Padding="24" RowSpacing="20" HorizontalAlignment="Left">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
@@ -35,86 +35,90 @@
                 </StackPanel>
             </Grid>
 
-            <Grid Grid.Row="1" ColumnSpacing="12">
+            <Grid x:Name="QuotaLayout" Grid.Row="1" ColumnSpacing="16" RowSpacing="16">
+                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition x:Name="QuotaSecondColumn" Width="0" />
                 </Grid.ColumnDefinitions>
 
-                <Border Grid.Column="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="14" Padding="18">
+                <Border Grid.Column="0" VerticalAlignment="Top" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="14" Padding="22">
                     <StackPanel Spacing="7">
                         <TextBlock Text="{Binding FiveHourQuota.Title}" FontWeight="SemiBold" FontSize="18" />
-                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Remaining:" FontSize="16" /><TextBlock Text="{Binding FiveHourQuota.RemainingPercent}" FontSize="16" FontWeight="SemiBold" /></StackPanel>
+                        <TextBlock Text="{Binding FiveHourQuota.RemainingPercent}" FontSize="40" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock Text="remaining quota" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Reset in:" /><TextBlock Text="{Binding FiveHourQuota.ResetCountdown}" /></StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Pace:" /><TextBlock Text="{Binding FiveHourQuota.BurnRate}" TextWrapping="Wrap" /></StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Window forecast:" /><TextBlock Text="{Binding FiveHourQuota.PredictedExhaustion}" TextWrapping="Wrap" /></StackPanel>
-                        <Expander Header="Evidence and uncertainty" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                            <TextBlock Text="{Binding FiveHourQuota.GaugeText}" Opacity="0.75" TextWrapping="Wrap" />
+                        <Expander Header="Conditional outlook and evidence" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                            <StackPanel Spacing="12">
+                                <TextBlock Text="{Binding FiveHourQuota.PredictedExhaustion}" FontSize="18" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding FiveHourQuota.BurnRate}" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding FiveHourQuota.GaugeText}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                            </StackPanel>
                         </Expander>
                         <InfoBar IsOpen="True" IsClosable="False" Severity="{Binding FiveHourQuota.Severity}" Message="{Binding FiveHourQuota.SurvivalMessage}" />
                     </StackPanel>
                 </Border>
 
-                <Border Grid.Column="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="14" Padding="18">
+                <Border x:Name="WeeklyCard" Grid.Row="1" VerticalAlignment="Top" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="14" Padding="22">
                     <StackPanel Spacing="7">
                         <TextBlock Text="{Binding WeeklyQuota.Title}" FontWeight="SemiBold" FontSize="18" />
-                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Remaining:" FontSize="16" /><TextBlock Text="{Binding WeeklyQuota.RemainingPercent}" FontSize="16" FontWeight="SemiBold" /></StackPanel>
+                        <TextBlock Text="{Binding WeeklyQuota.RemainingPercent}" FontSize="40" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <TextBlock Text="remaining quota" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Reset in:" /><TextBlock Text="{Binding WeeklyQuota.ResetCountdown}" /></StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Pace:" /><TextBlock Text="{Binding WeeklyQuota.BurnRate}" TextWrapping="Wrap" /></StackPanel>
-                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Window forecast:" /><TextBlock Text="{Binding WeeklyQuota.PredictedExhaustion}" TextWrapping="Wrap" /></StackPanel>
-                        <Expander Header="Evidence and uncertainty" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                            <TextBlock Text="{Binding WeeklyQuota.GaugeText}" Opacity="0.75" TextWrapping="Wrap" />
+                        <Expander Header="Conditional outlook and evidence" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                            <StackPanel Spacing="12">
+                                <TextBlock Text="{Binding WeeklyQuota.PredictedExhaustion}" FontSize="18" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding WeeklyQuota.BurnRate}" TextWrapping="Wrap" />
+                                <TextBlock Text="{Binding WeeklyQuota.GaugeText}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                            </StackPanel>
                         </Expander>
                         <InfoBar IsOpen="True" IsClosable="False" Severity="{Binding WeeklyQuota.Severity}" Message="{Binding WeeklyQuota.SurvivalMessage}" />
                     </StackPanel>
                 </Border>
             </Grid>
 
-            <Grid Grid.Row="2" ColumnSpacing="12">
+            <Grid x:Name="UsageLayout" Grid.Row="2" ColumnSpacing="16" RowSpacing="16">
+                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="2*" />
-                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="1.3*" />
+                    <ColumnDefinition x:Name="UsageSecondColumn" Width="0" />
                 </Grid.ColumnDefinitions>
-                <Border Grid.Column="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="14" Padding="18">
+                <Border Grid.Column="0" VerticalAlignment="Top" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="14" Padding="22">
                     <StackPanel Spacing="10">
                         <TextBlock Text="Hourly token usage" FontWeight="SemiBold" FontSize="18" />
-                        <ScrollViewer HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Auto" VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
-                            <ItemsControl ItemsSource="{Binding HistoryPoints}">
-                                <ItemsControl.ItemsPanel>
-                                    <ItemsPanelTemplate><StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Bottom" /></ItemsPanelTemplate>
-                                </ItemsControl.ItemsPanel>
-                                <ItemsControl.ItemTemplate>
-                                    <DataTemplate x:DataType="models:ForecastPoint">
-                                        <StackPanel VerticalAlignment="Bottom" Spacing="4" ToolTipService.ToolTip="{x:Bind Tooltip}">
-                                            <Border Width="20" Height="{x:Bind Value}" Background="{ThemeResource AccentFillColorDefaultBrush}" CornerRadius="7" VerticalAlignment="Bottom" />
-                                            <TextBlock Text="{x:Bind Label}" FontSize="10" HorizontalAlignment="Center" />
-                                        </StackPanel>
-                                    </DataTemplate>
-                                </ItemsControl.ItemTemplate>
-                            </ItemsControl>
+                        <ScrollViewer HorizontalContentAlignment="Stretch" HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Auto" VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
+                            <Grid x:Name="HourlyChart" MinWidth="480" Height="180" ColumnSpacing="6" />
                         </ScrollViewer>
                         <TextBlock Text="{Binding HistoryCaption}" Opacity="0.75" TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
-                <Border Grid.Column="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="14" Padding="18">
+                <Border x:Name="TokenCard" Grid.Row="1" VerticalAlignment="Top" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="14" Padding="22">
                     <StackPanel Spacing="10">
-                        <TextBlock Text="Token summary" FontWeight="SemiBold" FontSize="18" />
+                        <TextBlock Text="Recorded tokens" FontWeight="SemiBold" FontSize="18" />
+                        <TextBlock Text="All loaded local history · not account-wide usage" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                         <ItemsControl ItemsSource="{Binding TokenSummaryCards}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="models:TokenSummaryCard">
                                     <Grid Margin="0,2">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                        <StackPanel><TextBlock Text="{x:Bind Label}" FontWeight="SemiBold" /><TextBlock Text="{x:Bind Detail}" Opacity="0.7" FontSize="11" TextWrapping="Wrap" /></StackPanel>
+                                        <TextBlock Text="{x:Bind Label}" ToolTipService.ToolTip="{x:Bind Detail}" VerticalAlignment="Center" />
                                         <TextBlock Grid.Column="1" Text="{x:Bind Value}" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center" Margin="12,0,0,0" />
                                     </Grid>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>
+                        <TextBlock Text="Usage prediction" FontWeight="SemiBold" Margin="0,8,0,0" />
+                        <TextBlock Text="{Binding TokenForecastText}" FontSize="18" TextWrapping="Wrap" />
+                        <TextBlock Text="Includes cached input. This is not a quota estimate." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                        <Expander Header="Prediction evidence" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                            <TextBlock Text="{Binding TokenForecastEvidence}" Opacity="0.75" TextWrapping="Wrap" />
+                        </Expander>
                     </StackPanel>
                 </Border>
             </Grid>
 
-            <Grid Grid.Row="3" ColumnSpacing="12">
+            <Expander Grid.Row="3" Header="{Binding CollectionHealthText}" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+            <Grid ColumnSpacing="12">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="*" />
@@ -148,6 +152,7 @@
                     </StackPanel>
                 </Border>
             </Grid>
+            </Expander>
         </Grid>
     </ScrollViewer>
 </Page>

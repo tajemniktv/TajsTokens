@@ -18,6 +18,7 @@
                 <TextBlock Text="Runtime behavior, collection cadence, notifications, and local data settings. Changes are persisted under LocalAppData."
                            Opacity="0.75"
                            TextWrapping="Wrap" />
+                <TextBlock x:Name="BuildVersionText" TextWrapping="Wrap" IsTextSelectionEnabled="True" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </StackPanel>
 
             <InfoBar x:Name="StatusInfoBar"

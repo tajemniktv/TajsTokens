@@ -302,8 +302,7 @@ public partial class App : Application
         if (_window is null)
         {
             _window = new MainWindow();
-            _window.Title = $"TajsTokens — {System.Reflection.Assembly.GetExecutingAssembly().GetCustomAttributes(false)
-                .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "unknown build"}";
+            _window.Title = "TajsTokens";
             _window.AppWindow.Closing += OnWindowClosing;
         }
 

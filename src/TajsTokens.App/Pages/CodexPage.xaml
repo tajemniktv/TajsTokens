@@ -94,6 +94,7 @@
     <Grid Padding="24" RowSpacing="14">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
@@ -104,11 +105,11 @@
             </Grid.ColumnDefinitions>
             <StackPanel Spacing="4">
                 <TextBlock Text="Codex" FontSize="28" FontWeight="SemiBold" />
-                <TextBlock Text="One readable view of local Codex usage, workspaces, threads, subagents and source-native history. Content is inspected on demand and is not copied into TajsTokens storage."
+                <TextBlock Text="Explore your work or see where your tokens went. Local Codex history on this computer."
                            Opacity="0.72" TextWrapping="Wrap" />
                 <TextBlock x:Name="StatusText" Text="Loading Codex…" Opacity="0.72" Margin="0,8,0,0" TextWrapping="Wrap" />
             </StackPanel>
-            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
+            <StackPanel x:Name="BrowserControls" Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
                 <StackPanel Spacing="2">
                     <TextBlock Text="Usage range" FontSize="11" Opacity="0.7" />
                     <ComboBox x:Name="RangeCombo" Width="128" SelectedIndex="1"
@@ -139,8 +140,13 @@
             </StackPanel>
         </Grid>
 
+        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
+            <ToggleButton x:Name="WorkViewButton" Content="Work &amp; threads" IsChecked="True" Click="OnWorkViewClicked" />
+            <ToggleButton x:Name="UsageViewButton" Content="Usage breakdown" Click="OnUsageViewClicked" />
+        </StackPanel>
+        <ContentControl x:Name="UsageHost" Grid.Row="2" Visibility="Collapsed" HorizontalContentAlignment="Stretch" VerticalContentAlignment="Stretch" />
         <SplitView x:Name="BrowserSplitView"
-                   Grid.Row="1"
+                   Grid.Row="2"
                    DisplayMode="Inline"
                    IsPaneOpen="True"
                    OpenPaneLength="330"

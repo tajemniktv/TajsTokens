@@ -1,5 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Automation;
 using TajsTokens.App.ViewModels;
 using TajsTokens.Core.Models;
 
@@ -19,12 +21,14 @@ public sealed partial class OverviewPage : Page
 
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
+        OverviewViewport.SizeChanged += OnViewportSizeChanged;
     }
 
     public OverviewViewModel ViewModel { get; }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        ApplyLayout(OverviewViewport.ActualWidth);
         _app.Services.Telemetry.SnapshotUpdated += OnSnapshotUpdated;
 
         var latest = _app.Services.Telemetry.Latest;
@@ -33,6 +37,7 @@ public sealed partial class OverviewPage : Page
             try
             {
                 await ViewModel.ApplySnapshotAsync(latest, CancellationToken.None);
+                RenderChart();
             }
             catch (OperationCanceledException)
             {
@@ -57,6 +62,7 @@ public sealed partial class OverviewPage : Page
         try
         {
             await ViewModel.ApplySnapshotAsync(snapshot, CancellationToken.None);
+            RenderChart();
         }
         catch (OperationCanceledException)
         {
@@ -66,6 +72,48 @@ public sealed partial class OverviewPage : Page
         {
             var detail = exception.GetBaseException().Message.ReplaceLineEndings(" ").Trim();
             ViewModel.StatusText = $"Snapshot render failed: {(detail.Length <= 240 ? detail : detail[..240] + "…")}";
+        }
+    }
+
+    private void OnViewportSizeChanged(object sender, SizeChangedEventArgs e) => ApplyLayout(e.NewSize.Width);
+
+    private void ApplyLayout(double width)
+    {
+        if (!double.IsFinite(width) || width <= 0) return;
+        // Constrain the scroll content to its actual viewport, not its children's desired width.
+        // Use the available page width (after navigation), as the Codex browser does.
+        OverviewContent.Width = width;
+        var wide = width >= 960;
+        QuotaSecondColumn.Width = wide ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        UsageSecondColumn.Width = QuotaSecondColumn.Width;
+        Grid.SetRow(WeeklyCard, wide ? 0 : 1);
+        Grid.SetColumn(WeeklyCard, wide ? 1 : 0);
+        Grid.SetRow(TokenCard, wide ? 0 : 1);
+        Grid.SetColumn(TokenCard, wide ? 1 : 0);
+        QuotaLayout.ColumnSpacing = UsageLayout.ColumnSpacing = wide ? 16 : 0;
+        QuotaLayout.RowSpacing = UsageLayout.RowSpacing = wide ? 0 : 16;
+    }
+
+    private void RenderChart()
+    {
+        HourlyChart.Children.Clear();
+        HourlyChart.ColumnDefinitions.Clear();
+        foreach (var point in ViewModel.HistoryPoints)
+        {
+            var column = HourlyChart.ColumnDefinitions.Count;
+            HourlyChart.ColumnDefinitions.Add(new ColumnDefinition());
+            var item = new StackPanel { VerticalAlignment = VerticalAlignment.Bottom, Spacing = 8 };
+            item.Children.Add(new TextBlock { Text = point.Amount, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center });
+            item.Children.Add(new Border
+            {
+                Height = point.Value, MaxWidth = 44, CornerRadius = new CornerRadius(4, 4, 0, 0),
+                Background = (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"]
+            });
+            item.Children.Add(new TextBlock { Text = point.Label, FontSize = 12, HorizontalAlignment = HorizontalAlignment.Center });
+            ToolTipService.SetToolTip(item, point.Tooltip);
+            AutomationProperties.SetName(item, point.Tooltip);
+            Grid.SetColumn(item, column);
+            HourlyChart.Children.Add(item);
         }
     }
 }

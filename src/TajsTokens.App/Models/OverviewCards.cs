@@ -14,7 +14,7 @@ public sealed record QuotaCardViewModel(
 
 public sealed record TokenSummaryCard(string Label, string Value, string Detail);
 
-public sealed record ForecastPoint(string Label, double Value, string Tooltip);
+public sealed record ForecastPoint(string Label, double Value, string Tooltip, string Amount);
 
 public sealed record DataSourceStatusCard(string Name, string State, string Detail);
 
