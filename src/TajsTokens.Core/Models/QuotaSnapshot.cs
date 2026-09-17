@@ -21,7 +21,7 @@ public sealed record QuotaSnapshot(
     public string? PlanType { get; init; }
     public string? Lane { get; init; }
     public DateTimeOffset? CollectedAtUtc { get; init; }
-    public bool HasSourceTimestamp { get; init; } = true;
+    public bool HasSourceTimestamp { get; init; }
 
     public double? RemainingPercent => UsedPercent is null
         ? null

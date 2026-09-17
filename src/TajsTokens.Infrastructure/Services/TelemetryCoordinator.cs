@@ -80,6 +80,8 @@ public sealed class TelemetryCoordinator
             var startedAt = DateTimeOffset.UtcNow;
             var stopwatch = Stopwatch.StartNew();
             var previous = Latest;
+            var retainedTokenForecast = previous.TokenForecast is { } oldForecast
+                ? oldForecast with { IsStale = true } : null;
             var sources = new List<ProviderHealthSnapshot>(6);
             var events = new List<TelemetryRefreshEvent>();
             while (_backgroundEvents.TryDequeue(out var backgroundEvent))
@@ -241,7 +243,8 @@ public sealed class TelemetryCoordinator
                     scanEvents,
                     quotaLanes,
                     tokenGeneration,
-                    currentForecasts);
+                    currentForecasts,
+                    retainedTokenForecast);
 
                 observatoryTask = _observatoryService.RefreshAsync(refreshToken);
             }
@@ -423,8 +426,8 @@ public sealed class TelemetryCoordinator
                 }
             }
 
-            TokenWorkloadForecast? tokenForecast = null;
-            if (tokenFresh && persistenceAvailable && _intelligenceService is not null)
+            TokenWorkloadForecast? tokenForecast = retainedTokenForecast;
+            if (persistenceAvailable && _intelligenceService is not null)
             {
                 try
                 {

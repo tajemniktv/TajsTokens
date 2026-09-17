@@ -16,6 +16,17 @@ public static class QuotaWorkloadBacktester
     public static readonly string[] Candidates = ["pace-ridge", "token-ridge", "activity-ridge", "model-effort-ridge"];
     public const int MinimumTrainingSamples = 12;
 
+    internal static IEnumerable<QuotaForecastTrial> Independent(IEnumerable<QuotaForecastTrial> trials)
+    {
+        DateTimeOffset? previousEnd = null;
+        foreach (var trial in trials.OrderBy(x => x.OriginUtc))
+        {
+            if (previousEnd is not null && trial.OriginUtc < previousEnd) continue;
+            previousEnd = trial.OutcomeUtc;
+            yield return trial;
+        }
+    }
+
     public static IReadOnlyList<QuotaWorkloadTrial> Replay(CodexForecastDataset data, QuotaWindowKind kind,
         string candidate, double? horizonHours, ForecastReplayAvailability availability,
         CancellationToken cancellationToken = default,
@@ -37,8 +48,8 @@ public static class QuotaWorkloadBacktester
                     (featureRows[x.OriginUtc].ObservedTokenEvents > 0 &&
                      (candidate != "model-effort-ridge" ||
                       (featureRows[x.OriginUtc].ModelTokenShares.Count > 0 && featureRows[x.OriginUtc].EffortTokenShares.Count > 0)));
-                var training = baseline.Where(x => x.OutcomeUtc <= trial.OriginUtc && x.OriginUtc < trial.OriginUtc && Supported(x))
-                    .OrderByDescending(x => x.OutcomeUtc).Take(120).ToArray();
+                var training = Independent(baseline.Where(x => x.OutcomeUtc <= trial.OriginUtc && x.OriginUtc < trial.OriginUtc && Supported(x)))
+                    .TakeLast(120).ToArray();
                 var prediction = trial.PredictedRemaining;
                 var used = false;
                 if (training.Length >= MinimumTrainingSamples && Supported(trial))
@@ -69,10 +80,10 @@ public static class QuotaWorkloadBacktester
     {
         var features = CodexForecastFeatureBuilder.Build(data, anchor.CapturedAtUtc, 2, availability);
         var origins = data.Quota.GroupBy(x => x.CapturedAtUtc).ToDictionary(x => x.Key, x => x.Last());
-        var training = baseline.Where(x => x.OutcomeUtc <= anchor.CapturedAtUtc && x.OriginUtc < anchor.CapturedAtUtc &&
+        var training = Independent(baseline.Where(x => x.OutcomeUtc <= anchor.CapturedAtUtc && x.OriginUtc < anchor.CapturedAtUtc &&
                 featureRows[x.OriginUtc].ObservedTokenEvents > 0 && featureRows[x.OriginUtc].ModelTokenShares.Count > 0 &&
-                featureRows[x.OriginUtc].EffortTokenShares.Count > 0)
-            .OrderByDescending(x => x.OutcomeUtc).Take(120).ToArray();
+                featureRows[x.OriginUtc].EffortTokenShares.Count > 0))
+            .TakeLast(120).ToArray();
         QuotaWorkloadPrediction Fallback() => new(baselinePrediction, training.Length, false, features);
         if (training.Length < MinimumTrainingSamples || features.ObservedTokenEvents == 0 ||
             features.ModelTokenShares.Count == 0 || features.EffortTokenShares.Count == 0) return Fallback();

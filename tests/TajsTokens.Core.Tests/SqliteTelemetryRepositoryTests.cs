@@ -24,7 +24,7 @@ public sealed class SqliteTelemetryRepositoryTests
     ];
 
     [Fact]
-    public async Task InitializeAsync_CreatesCompleteVersion7FoundationSchema()
+    public async Task InitializeAsync_CreatesCompleteCurrentFoundationSchema()
     {
         var directory = CreateTempDirectory();
         var path = Path.Combine(directory, "telemetry.db");
@@ -38,7 +38,7 @@ public sealed class SqliteTelemetryRepositoryTests
             {
                 await connection.OpenAsync();
 
-                Assert.Equal(10, await ReadSchemaVersionAsync(connection));
+                Assert.Equal(11, await ReadSchemaVersionAsync(connection));
                 var tables = await ReadTableNamesAsync(connection);
                 foreach (var expected in s_foundationTables)
                 {
@@ -89,7 +89,7 @@ public sealed class SqliteTelemetryRepositoryTests
             await using (var migrated = new SqliteConnection($"Data Source={path}"))
             {
                 await migrated.OpenAsync();
-                Assert.Equal(10, await ReadSchemaVersionAsync(migrated));
+                Assert.Equal(11, await ReadSchemaVersionAsync(migrated));
                 Assert.Contains("repositories", await ReadTableNamesAsync(migrated));
                 Assert.Contains("workspaces", await ReadTableNamesAsync(migrated));
                 Assert.Contains("forecast_snapshots", await ReadTableNamesAsync(migrated));
@@ -174,7 +174,7 @@ public sealed class SqliteTelemetryRepositoryTests
 
             await using var migrated = new SqliteConnection($"Data Source={path}");
             await migrated.OpenAsync();
-            Assert.Equal(10, await ReadSchemaVersionAsync(migrated));
+            Assert.Equal(11, await ReadSchemaVersionAsync(migrated));
             var snapshots = await repository.GetRecentQuotaSnapshotsAsync(
                 QuotaWindowKind.FiveHour,
                 "codex",

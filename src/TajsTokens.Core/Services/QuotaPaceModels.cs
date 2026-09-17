@@ -3,7 +3,11 @@ using TajsTokens.Core.Models;
 
 namespace TajsTokens.Core.Services;
 
-/// <summary>Time-based candidates shared by production and walk-forward evaluation.</summary>
+/// <summary>
+/// Point estimates of observed meter movement, shared by production and walk-forward evaluation.
+/// Zero is not a measurement of exact physical consumption: the production forecast explicitly
+/// censors an all-flat epoch, and horizon bands include meter-resolution uncertainty when calibrated.
+/// </summary>
 public static class QuotaPaceModels
 {
     public static readonly string[] Candidates = ["persistence", "legacy-ewma", "time-ewma-2h", "time-ewma-6h", "epoch", "recent-30m", "recent-2h", "recent-6h", "recent-24h", "damped-2h", "damped-6h"];

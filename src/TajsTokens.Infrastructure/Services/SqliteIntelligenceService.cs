@@ -74,6 +74,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
     {
         await EnsureInitializedAsync(cancellationToken);
         var results = new List<CurrentQuotaForecast>();
+        var datasets = new Dictionary<(string Provider, string Profile, string Account, DateTimeOffset At), CodexForecastDataset>();
         foreach (var lane in quotaLanes.Where(lane => lane.Snapshot is not null))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -124,17 +125,13 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 current.CapturedAtUtc,
                 current.Source,
                 current.AccountKey);
-            var anchored = history
+            var compatible = history
                 .Where(item => QuotaHistoryPolicy.Cohort(item) == QuotaHistoryPolicy.Cohort(current))
                 .Where(item => item.CapturedAtUtc <= current.CapturedAtUtc)
-                .GroupBy(item => item.CapturedAtUtc)
-                .Select(group => group
-                    .OrderByDescending(item => item.Authority)
-                    .First())
                 .Where(item => item.CapturedAtUtc != current.CapturedAtUtc)
-                .Append(current)
-                .OrderBy(item => item.CapturedAtUtc)
-                .ToArray();
+                .Append(current);
+            // Invalid/conflicting observations remain boundaries, never deleted gaps bridged by a slope.
+            var anchored = QuotaHistoryPolicy.ReplayRows(QuotaHistoryPolicy.Describe(compatible, nowUtc));
 
             try
             {
@@ -145,9 +142,14 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                     string workloadStatus;
                     try
                     {
-                        var dataset = await new SqliteForecastDatasetReader(_databasePath).ReadAsync(
-                            current.Provider, current.Profile, current.CapturedAtUtc.AddDays(-14),
-                            current.CapturedAtUtc, cancellationToken, current.AccountKey);
+                        var key = (current.Provider, current.Profile, current.AccountKey, current.CapturedAtUtc);
+                        if (!datasets.TryGetValue(key, out var dataset))
+                        {
+                            dataset = await new SqliteForecastDatasetReader(_databasePath).ReadAsync(
+                                current.Provider, current.Profile, current.CapturedAtUtc.AddDays(-14),
+                                current.CapturedAtUtc, cancellationToken, current.AccountKey);
+                            datasets.Add(key, dataset);
+                        }
                         predictions = QuotaPredictionService.Predict(dataset, current, nowUtc, cancellationToken);
                         workloadStatus = predictions.Count == 0
                             ? "Short-horizon prediction is learning from this account and reset window."
@@ -220,14 +222,14 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             var dimensions = hasNativeEvents
                 ? await LoadDimensionsAsync(connection, effective, cancellationToken)
                 : [];
-            if (effective.UsageOnly)
-            {
-                await CommitReadSnapshotAsync(connection, cancellationToken);
-                return new IntelligenceDashboard(effective, usage, dimensions, [], [], [], [], []);
-            }
             var heatmap = hasNativeEvents
                 ? await LoadHeatmapAsync(connection, effective, cancellationToken)
                 : [];
+            if (effective.UsageOnly)
+            {
+                await CommitReadSnapshotAsync(connection, cancellationToken);
+                return new IntelligenceDashboard(effective, usage, dimensions, heatmap, [], [], [], []);
+            }
             var quotaHistory = await LoadQuotaSnapshotsAsync(connection, effective.FromUtc.AddDays(-7),
                 effective.ToUtc, cancellationToken, preserveSources: true, authority: effective.BurnAuthority);
             var burnIntervals = await LoadQuotaBurnIntervalsAsync(
@@ -732,13 +734,14 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         CancellationToken cancellationToken)
     {
         var command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = $"""
             SELECT CAST(strftime('%w', e.observed_at_utc) AS INTEGER),
                    CAST(strftime('%H', e.observed_at_utc) AS INTEGER),
                    COALESCE(SUM(e.reported_total_tokens), 0),
                    COUNT(DISTINCT strftime('%Y-%m-%dT%H', e.observed_at_utc))
             FROM codex_native_token_events e
             WHERE e.observed_at_utc >= $from AND e.observed_at_utc < $to
+            {UsageFilterSql}
             GROUP BY 1, 2
             ORDER BY 1, 2;
             """;
@@ -746,6 +749,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         command.Parameters.AddWithValue("$to", SerializeUtc(query.ToUtc));
 
         var results = new List<UsageHeatmapCell>();
+        BindUsageFilters(command, query);
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {

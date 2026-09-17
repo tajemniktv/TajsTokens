@@ -103,7 +103,7 @@ public sealed class SqliteCodexIngestionBatchWriterTests
                 captured.AddHours(5),
                 "codex",
                 "codex",
-                "codex-app-server:codex", "fixture-account");
+                "codex-app-server:codex", "fixture-account") { HasSourceTimestamp = true };
             var current = new QuotaSnapshot(
                 QuotaWindowKind.FiveHour,
                 captured,
@@ -112,7 +112,7 @@ public sealed class SqliteCodexIngestionBatchWriterTests
                 captured.AddHours(5),
                 "codex",
                 "codex",
-                "codex-app-server:codex", "fixture-account");
+                "codex-app-server:codex", "fixture-account") { HasSourceTimestamp = true };
             await repository.UpsertQuotaSnapshotAsync(previous, CancellationToken.None);
             if (providerFirst)
             {

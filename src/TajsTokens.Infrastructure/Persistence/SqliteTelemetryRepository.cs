@@ -8,7 +8,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 
 public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryRepository, ISessionIngestionCheckpointStore
 {
-    private const int CurrentSchemaVersion = 10;
+    private const int CurrentSchemaVersion = 11;
     private const int IntelligenceSchemaVersion = 3;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _intelligenceInitializeGate = new(1, 1);
@@ -408,7 +408,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                     resets_at_utc TEXT, source TEXT NOT NULL, account_key TEXT NOT NULL DEFAULT '',
                     observation_id TEXT NOT NULL DEFAULT '', source_identity TEXT, session_id TEXT,
                     limit_id TEXT, plan_type TEXT, lane TEXT, collected_at_utc TEXT,
-                    has_source_timestamp INTEGER NOT NULL DEFAULT 1,
+                    has_source_timestamp INTEGER NOT NULL DEFAULT 0,
                     PRIMARY KEY(provider,profile,kind,captured_at_utc,source,account_key,observation_id)
                 );
                 INSERT INTO quota_snapshots_v10(provider,profile,kind,captured_at_utc,used_percent,
@@ -422,6 +422,15 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 CREATE INDEX idx_quota_snapshots_account_lookup
                     ON quota_snapshots(provider,profile,kind,account_key,source,captured_at_utc DESC);
                 PRAGMA user_version = 10;
+                """, cancellationToken);
+        }
+        if (version < 11)
+        {
+            // v10's default incorrectly asserted timestamp provenance on migrated v9 rows.
+            await ExecuteMigrationAsync(connection, """
+                UPDATE quota_snapshots SET has_source_timestamp=0
+                WHERE observation_id='' AND source_identity IS NULL AND collected_at_utc IS NULL;
+                PRAGMA user_version = 11;
                 """, cancellationToken);
         }
     }

@@ -24,6 +24,40 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task ReaderBoundsInactiveLifetimeMetadataButKeepsActiveSessionPrefix()
+    {
+        using var store = new SqliteCodexObservatoryStore(Database);
+        await store.InitializeAsync(default);
+        await store.UpsertRolloutFileAsync("generation", Path.Combine(_directory, "rollout.jsonl"), "active", 100, Start, default);
+        await Execute("""
+            WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<100001)
+            INSERT INTO codex_workload_observations(source_record_id,source_identity,source_file,start_byte_offset,end_byte_offset,
+                session_id,event_type,observed_at_utc,captured_at_utc,contract_version)
+            SELECT 'old-'||x,'generation','fixture',0,1,'inactive','session_meta','2020-01-01T00:00:00.0000000+00:00','2020-01-01T00:00:00.0000000+00:00','fixture' FROM n;
+            INSERT INTO codex_workload_observations(source_record_id,source_identity,source_file,start_byte_offset,end_byte_offset,
+                session_id,event_type,observed_at_utc,captured_at_utc,contract_version)
+            VALUES('prefix','generation','fixture',0,1,'active','session_meta','2020-01-01T00:00:00.0000000+00:00','2020-01-01T00:00:00.0000000+00:00','fixture'),
+                ('recent','generation','fixture',1,2,'active','task_started','2026-09-01T10:00:00.0000000+00:00','2026-09-01T10:00:00.0000000+00:00','fixture');
+            """);
+        var data = await new SqliteForecastDatasetReader(Database).ReadAsync("codex", "default", Start.AddDays(-30), Start.AddHours(1), default, includeQuota: false);
+        Assert.Equal(new[] { "prefix", "recent" }, data.Workload.Select(x => x.SourceRecordId));
+    }
+
+    [Fact]
+    public async Task FallbackRetryIdentityKeepsDistinctSourceAndSessionAlternatives()
+    {
+        var repository = new SqliteTelemetryRepository(Database);
+        await repository.InitializeAsync(default);
+        var row = Point("unused", 12) with { ObservationId = null };
+        foreach (var alternative in new[] { row, row with { SourceIdentity = "other" }, row with { SessionId = "other" } })
+        {
+            await repository.UpsertQuotaSnapshotAsync(alternative, default);
+            await repository.UpsertQuotaSnapshotAsync(alternative, default);
+        }
+        Assert.Equal(3L, await Scalar("SELECT COUNT(*) FROM quota_snapshots;"));
+    }
+
+    [Fact]
     public async Task AllWritersPreserveAlternativesProvenanceAndFirstCollectionOnRetry()
     {
         var repository = new SqliteTelemetryRepository(Database);
@@ -81,11 +115,18 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
         await Execute("DROP TABLE quota_snapshots_v10;");
         await repository.InitializeAsync(default);
         await repository.InitializeAsync(default);
-        Assert.Equal(10L, await Scalar("PRAGMA user_version;"));
+        Assert.Equal(11L, await Scalar("PRAGMA user_version;"));
         var row = Assert.Single(await repository.GetRecentQuotaSnapshotsAsync(QuotaWindowKind.FiveHour, "codex", "default", 10, default));
         Assert.Equal(12.375, row.UsedPercent);
         Assert.Null(row.CollectedAtUtc); Assert.Null(row.ObservationId); Assert.Null(row.LimitId);
-        Assert.Equal("legacy-missing-provenance", Assert.Single(QuotaHistoryPolicy.Describe([row], Start)).Reason);
+        Assert.False(row.HasSourceTimestamp);
+        Assert.Equal("missing-event-time", Assert.Single(QuotaHistoryPolicy.Describe([row], Start)).Reason);
+        await repository.UpsertQuotaSnapshotAsync(row, default);
+        Assert.Equal(1L, await Scalar("SELECT COUNT(*) FROM quota_snapshots;"));
+        // Repair the already-shipped v10 default too, not just new v9 upgrades.
+        await Execute("UPDATE quota_snapshots SET has_source_timestamp=1; PRAGMA user_version=10;");
+        await repository.InitializeAsync(default);
+        Assert.Equal(0L, await Scalar("SELECT has_source_timestamp FROM quota_snapshots;"));
     }
 
     [Fact]
@@ -126,7 +167,7 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
         used, 300, Start.AddHours(5), "codex", "default", "codex-rollout:primary")
     {
         ObservationId = id, SourceIdentity = "generation", SessionId = "session", LimitId = "codex",
-        PlanType = "pro", Lane = "primary", CollectedAtUtc = Start.AddDays(1)
+        PlanType = "pro", Lane = "primary", CollectedAtUtc = Start.AddDays(1), HasSourceTimestamp = true
     };
     public void Dispose()
     {

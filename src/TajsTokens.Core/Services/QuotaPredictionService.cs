@@ -11,7 +11,7 @@ public sealed record QuotaPredictionTrial(QuotaForecastTrial Observation, QuotaH
 /// </summary>
 public static class QuotaPredictionService
 {
-    public const string PolicyVersion = "quota-workload/v3";
+    public const string PolicyVersion = "quota-workload/v4";
     public const string FallbackModel = "time-ewma-2h";
     public const int MinimumSelectionSamples = 6;
     public const int MinimumIntervalSamples = 20;
@@ -89,9 +89,11 @@ public static class QuotaPredictionService
             var baseline = estimates[selected];
             var workload = QuotaWorkloadBacktester.Predict(data, anchor, lead, estimates[FallbackModel], labels, featureRows, availability);
             var validation = Independent(points.Where(x => x.Label!.OutcomeUtc <= anchor.CapturedAtUtc && x.Workload.Fitted)).TakeLast(48).ToArray();
-            var baselineError = validation.Length > 0 ? validation.Average(x => Math.Abs(x.BasePrediction - x.Label!.ObservedRemaining)) : (double?)null;
+            var baselineError = validation.Length > 0 ? Error(FallbackModel, validation) : (double?)null;
+            var selectedError = validation.Length > 0 ? Error(selected, validation) : (double?)null;
             var workloadError = validation.Length > 0 ? validation.Average(x => Math.Abs(x.Workload.Remaining - x.Label!.ObservedRemaining)) : (double?)null;
-            var useWorkload = workload.Fitted && validation.Length >= MinimumSelectionSamples && workloadError + 0.05 < baselineError * 0.9;
+            var useWorkload = workload.Fitted && validation.Length >= MinimumSelectionSamples &&
+                workloadError + 0.05 < baselineError * 0.9 && workloadError + 0.05 < selectedError * 0.9;
             var prediction = useWorkload ? workload.Remaining : baseline;
             var errors = matured.Select(x => Math.Abs(x.Prediction.RemainingPercent - x.Label!.ObservedRemaining)).Order().ToArray();
             double? radius = errors.Length >= MinimumIntervalSamples

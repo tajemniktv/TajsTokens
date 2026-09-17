@@ -789,6 +789,24 @@ contract or a replacement for the read-only Codex source boundaries above.
 
 ## Documentation rule
 
+### Recorded-token prediction contract
+
+Token forecasts target the sum of recorded native token increments (including cached input) in
+the next interval, conditional on recent installation-local activity. Zero means no tokens were
+recorded, not proof of no account activity. This is neither whole-account accounting nor a
+subscription-quota or price conversion. Chronological held-out targets exclude future tokens,
+completions, and model changes from inputs. Backfilled history supports retrospective learning,
+not claims that a past app had collected it. A retained result after refresh failure is explicitly
+stale and retains its original generation time.
+
+Owned schema 11 corrects the timestamp-provenance flag on legacy rows migrated by schema 10;
+legacy evidence is retained but cannot silently become eligible account-local training history.
+Unknown/malformed/conflicting observations terminate usable pace segments. Overlapping workload
+outcomes cannot satisfy the independent training threshold. Flat-meter point estimates are not
+exact zero consumption; all-flat production epochs remain precision-limited with no survival claim.
+The statistical replacement of point-estimate baselines with a censored-likelihood model remains
+research, not an implemented or calibrated model.
+
 Keep this document authoritative for product goals, architecture, retention decisions, and source semantics. Keep `plan.md` authoritative for implementation sequence, open work, and acceptance evidence. Keep `AGENTS.md` focused on how contributors work. Update the relevant documents together when scope or architecture changes; a task checklist is not a new source contract.
 
 Do not introduce additional competing roadmaps or architecture specifications without a concrete need. Mark dated observations and superseded decisions explicitly; do not silently reinterpret older audit counts as current state.

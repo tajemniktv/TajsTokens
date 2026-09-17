@@ -86,6 +86,18 @@ public sealed class QuotaPredictionServiceTests
     }
 
     [Fact]
+    public void WorkloadTrainingRequiresNonOverlappingOutcomes()
+    {
+        var quota = Enumerable.Range(0, 120).Select(i => Point(i * 0.5, i * 0.5)).ToArray();
+        var trials = QuotaForecastBacktester.Replay(quota, "time-ewma-2h", 24);
+        Assert.True(trials.Count > 12);
+        var workload = QuotaWorkloadBacktester.Replay(Data(quota), QuotaWindowKind.Weekly, "pace-ridge", 24,
+            ForecastReplayAvailability.ReconstructedEventTime, baselineModel: "time-ewma-2h");
+        Assert.NotEmpty(workload);
+        Assert.All(workload, trial => { Assert.True(trial.TrainingSamples < 12); Assert.False(trial.UsedWorkloadModel); });
+    }
+
+    [Fact]
     public void LegacyEvidenceJsonRemainsReadable()
     {
         var evidence = JsonSerializer.Deserialize<ForecastEvidence>("""
@@ -97,7 +109,7 @@ public sealed class QuotaPredictionServiceTests
     }
 
     private static QuotaSnapshot Point(double hours, double used) => new(QuotaWindowKind.Weekly,
-        Start.AddHours(hours), used, 10080, Start.AddDays(7), "codex", "default", "codex-app-server:account/rateLimits", "fixture-account");
+        Start.AddHours(hours), used, 10080, Start.AddDays(7), "codex", "default", "codex-app-server:account/rateLimits", "fixture-account") { HasSourceTimestamp = true };
 
     private static CodexForecastDataset Data(IReadOnlyList<QuotaSnapshot> quota) => new(quota, [], [], [], Start, "synthetic");
 
