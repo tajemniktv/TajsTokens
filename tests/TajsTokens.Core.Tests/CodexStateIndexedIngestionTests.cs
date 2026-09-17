@@ -80,7 +80,8 @@ public sealed class CodexStateIndexedIngestionTests
             Assert.Equal(1, first.Coverage.IndexedOutsideDiscovery);
             Assert.DoesNotContain(alternatePath, ingestion.Paths);
             var warm = await service.RefreshAsync(CancellationToken.None);
-            Assert.Equal(first.Coverage, warm.Coverage);
+            // Warm refresh deliberately reuses the last coverage scan until reconciliation.
+            Assert.Same(first.Coverage, warm.Coverage);
             await File.WriteAllTextAsync(Path.Combine(sessions.FullName, "another.jsonl"), "{}\n");
             time.Advance(TimeSpan.FromMinutes(5));
             var later = await service.RefreshAsync(CancellationToken.None);

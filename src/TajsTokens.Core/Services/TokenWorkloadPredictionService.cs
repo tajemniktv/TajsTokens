@@ -65,7 +65,8 @@ public static class TokenWorkloadPredictionService
     private static (IReadOnlyList<TokenForecastTrial> Trials, TokenHorizonPrediction? Current, IReadOnlyList<Point> Points) Evaluate(
         CodexForecastDataset data, double horizon, DateTimeOffset? now, CancellationToken cancellationToken)
     {
-        if (!double.IsFinite(horizon) || horizon <= 0 || horizon > 24) throw new ArgumentOutOfRangeException(nameof(horizon));
+        if (!double.IsFinite(horizon) || horizon <= 0 || horizon > 24 || TimeSpan.FromHours(horizon).Ticks == 0)
+            throw new ArgumentOutOfRangeException(nameof(horizon));
         var tokens = data.Tokens.Where(x => x.ReportedTotalTokens >= 0).OrderBy(x => x.ObservedAtUtc).ToArray();
         if (tokens.Length < 2) return ([], null, []);
         var sums = new decimal[tokens.Length + 1];

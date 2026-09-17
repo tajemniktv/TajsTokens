@@ -69,7 +69,7 @@ if (args.Length == 2 && args[0] is "--evaluate" or "--quota")
     foreach (var score in report.TokenScores)
         Console.WriteLine(FormattableString.Invariant($"{score.HorizonHours},{score.Model},{score.Origins},{score.MeanAbsoluteError:F0},{score.RootMeanSquaredError:F0},{score.IntervalOrigins},{score.IntervalCoverage:F3},{score.WorkloadOrigins}"));
     var tokenTimer = System.Diagnostics.Stopwatch.StartNew();
-    var tokenForecast = TokenWorkloadPredictionService.Predict(data, data.Tokens.Max(x => x.ObservedAtUtc));
+    var tokenForecast = TokenWorkloadPredictionService.Predict(data, data.CapturedAtUtc);
     Console.WriteLine($"Token production: sessions={tokenForecast.Sessions}; observations={tokenForecast.TokenEvents}; elapsed_ms={tokenTimer.ElapsedMilliseconds}");
     foreach (var prediction in tokenForecast.Predictions)
         Console.WriteLine(FormattableString.Invariant($"Token +{prediction.HorizonHours}h: {prediction.ExpectedTokens:F0}; model={prediction.Model}; train={prediction.TrainingSamples}; validation={prediction.ValidationSamples}"));

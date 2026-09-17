@@ -10,8 +10,6 @@ namespace TajsTokens.Infrastructure.Persistence;
 /// <summary>Shared write contract for live reads and replayable rollout observations.</summary>
 internal static class SqliteQuotaEvidence
 {
-    internal const string Columns = "observation_id,source_identity,session_id,limit_id,plan_type,lane,collected_at_utc,has_source_timestamp";
-
     internal static QuotaSnapshot Read(QuotaSnapshot row, SqliteDataReader reader, int offset)
     {
         string? Text(int i) => reader.IsDBNull(offset + i) ? null : reader.GetString(offset + i);
@@ -28,8 +26,15 @@ internal static class SqliteQuotaEvidence
         INSERT INTO quota_snapshots(provider,profile,kind,captured_at_utc,used_percent,window_minutes,
             resets_at_utc,source,account_key,observation_id,source_identity,session_id,limit_id,plan_type,lane,
             collected_at_utc,has_source_timestamp)
-        VALUES($provider,$profile,$kind,$captured,$used,$window,$resets,$source,$account,$observation,
-            $identity,$session,$limit,$plan,$lane,$collected,$timestamp)
+        SELECT $provider,$profile,$kind,$captured,$used,$window,$resets,$source,$account,$observation,
+            $identity,$session,$limit,$plan,$lane,$collected,$timestamp
+        WHERE NOT EXISTS (SELECT 1 FROM quota_snapshots WHERE provider=$provider AND profile=$profile
+            AND kind=$kind AND captured_at_utc=$captured AND source=$source AND account_key=$account
+            AND ((observation_id='' AND $collected IS NULL) OR observation_id=$legacyFallback)
+            AND used_percent IS $used AND window_minutes IS $window AND resets_at_utc IS $resets
+            AND source_identity IS $identity AND session_id IS $session AND limit_id IS $limit
+            AND plan_type IS $plan AND lane IS $lane AND has_source_timestamp=$timestamp
+            AND $nativeObservation IS NULL)
         ON CONFLICT(provider,profile,kind,captured_at_utc,source,account_key,observation_id) DO NOTHING;
         """;
 
@@ -44,9 +49,14 @@ internal static class SqliteQuotaEvidence
         Add("$resets", snapshot.ResetsAtUtc is { } reset ? Utc(reset) : null);
         Add("$source", snapshot.Source); Add("$account", snapshot.AccountKey ?? "");
         // Same-time contradictory values remain alternatives; exact retries retain first collection.
-        var identity = snapshot.ObservationId ?? "snapshot-sha256/v1:" + Convert.ToHexString(SHA256.HashData(
-            Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { snapshot.UsedPercent, snapshot.WindowMinutes,
-                snapshot.ResetsAtUtc, snapshot.LimitId, snapshot.PlanType, snapshot.Lane })))).ToLowerInvariant();
+        var legacyMaterial = JsonSerializer.Serialize(new { snapshot.UsedPercent, snapshot.WindowMinutes,
+            snapshot.ResetsAtUtc, snapshot.LimitId, snapshot.PlanType, snapshot.Lane });
+        var scoped = snapshot.SourceIdentity is not null || snapshot.SessionId is not null;
+        Add("$legacyFallback", "snapshot-sha256/v1:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(legacyMaterial))).ToLowerInvariant());
+        var material = scoped ? JsonSerializer.Serialize(new { legacyMaterial, snapshot.SourceIdentity, snapshot.SessionId }) : legacyMaterial;
+        var identity = snapshot.ObservationId ?? (scoped ? "snapshot-sha256/v2:" : "snapshot-sha256/v1:") +
+            Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material))).ToLowerInvariant();
+        Add("$nativeObservation", snapshot.ObservationId);
         Add("$observation", identity); Add("$identity", snapshot.SourceIdentity);
         Add("$session", snapshot.SessionId); Add("$limit", snapshot.LimitId);
         Add("$plan", snapshot.PlanType); Add("$lane", snapshot.Lane);

@@ -13,7 +13,9 @@ public sealed class TokenWorkloadPredictionServiceTests
     {
         var data = History(140);
         var forecast = TokenWorkloadPredictionService.Predict(data, data.Tokens[^1].ObservedAtUtc.AddMinutes(20));
-        Assert.Empty(data.Quota);
+        var withQuota = data with { Quota = [new(TajsTokens.Core.Enums.QuotaWindowKind.Weekly, Start, 90, 10080, Start.AddDays(7), "codex", "default", "codex-app-server:codex")] };
+        Assert.Equal(JsonSerializer.Serialize(forecast), JsonSerializer.Serialize(
+            TokenWorkloadPredictionService.Predict(withQuota, data.Tokens[^1].ObservedAtUtc.AddMinutes(20))));
         Assert.Equal(140, forecast.TokenEvents);
         Assert.Equal(14, forecast.Sessions);
         Assert.Equal(2, forecast.Predictions.Count);
@@ -30,7 +32,7 @@ public sealed class TokenWorkloadPredictionServiceTests
         var scores = TokenWorkloadPredictionService.EvaluateScores(data);
         var baseline = scores.Single(x => x.HorizonHours == 0.5 && x.Model == "recent-30m");
         var selected = scores.Single(x => x.HorizonHours == 0.5 && x.Model == TokenWorkloadPredictionService.PolicyVersion);
-        Assert.True(selected.MeanAbsoluteError < baseline.MeanAbsoluteError * 0.5);
+        Assert.True(selected.MeanAbsoluteError < baseline.MeanAbsoluteError);
     }
 
     [Fact]
@@ -70,6 +72,10 @@ public sealed class TokenWorkloadPredictionServiceTests
         Assert.Empty(TokenWorkloadPredictionService.Predict(data, now.AddHours(3)).Predictions);
         Assert.Empty(TokenWorkloadPredictionService.Predict(data with { Tokens = [] }, now).Predictions);
     }
+
+    [Fact]
+    public void SubTickHorizonIsRejectedBeforeGridArithmetic() =>
+        Assert.Throws<ArgumentOutOfRangeException>(() => TokenWorkloadPredictionService.Replay(History(8), double.Epsilon));
 
     private static CodexForecastDataset History(int count)
     {

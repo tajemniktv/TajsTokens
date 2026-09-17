@@ -149,9 +149,10 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
             if (catalog is null) return null;
         }
 
-        if (minimumUpdatedAtMs == 0)
+        reconciliationDue |= !string.Equals(_lastStateCatalogPath, catalog.DatabasePath, StringComparison.OrdinalIgnoreCase);
+        if (reconciliationDue)
         {
-            var discovered = DiscoverFiles().ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var discovered = DiscoverFiles(cancellationToken).ToHashSet(StringComparer.OrdinalIgnoreCase);
             var indexed = catalog.Threads.Select(thread => thread.RolloutPath)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             _lastCoverage = new CodexCollectionCoverage(
@@ -256,7 +257,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
         }
 
         // Failed/cancelled full passes do not defer reconciliation: retry on the next refresh.
-        if (minimumUpdatedAtMs == 0 && earliestUnappliedUpdatedAtMs is null)
+        if (reconciliationDue && earliestUnappliedUpdatedAtMs is null)
         {
             _lastStateReconciliation = reconciliationStarted;
             _lastStateCatalogPath = catalog.DatabasePath;
@@ -349,7 +350,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
     private async Task<CodexObservatoryRefreshResult> RefreshFromFilesystemAsync(
         CancellationToken cancellationToken)
     {
-        var files = DiscoverFiles();
+        var files = DiscoverFiles(cancellationToken);
         var filesScanned = 0;
         var recordsScanned = 0;
         var normalized = 0;

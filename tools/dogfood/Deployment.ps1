@@ -55,6 +55,7 @@ function Stop-App {
             throw "Unmanaged TajsTokens process $($process.Id) at '$path'. Exit it explicitly before deploying."
         }
     }
+    if ($processes.Count -gt 1) { throw 'Exit extra TajsTokens instances before deploying; no app has been asked to stop.' }
     $signals = @()
     try {
         foreach ($process in $processes) {
@@ -73,7 +74,8 @@ function Stop-App {
 
 function Start-App([string]$Directory) {
     $exe = Join-Path $Directory 'TajsTokens.App.exe'
-    $process = Start-Process -FilePath $exe -WorkingDirectory $Directory -WindowStyle Hidden -PassThru
+    $process = Start-Process -FilePath $exe -ArgumentList '--dogfood-start' -WorkingDirectory $Directory -WindowStyle Hidden -PassThru
+    try {
     $deadline = [DateTime]::UtcNow.AddSeconds(45)
     $ready = $false
     while ([DateTime]::UtcNow -lt $deadline) {
@@ -94,6 +96,12 @@ function Start-App([string]$Directory) {
     try { if (!$signal.WaitOne(0)) { throw 'App withdrew readiness during startup.' } }
     finally { $signal.Dispose() }
     Write-Host "Dogfood app ready: PID $($process.Id), $exe"
+    } catch {
+        # Only the deployment-owned child may be terminated after failed startup.
+        # Pre-existing user instances remain protected by Stop-App's graceful-only policy.
+        if (-not $process.HasExited) { $process.Kill(); $process.WaitForExit() }
+        throw
+    } finally { $process.Dispose() }
 }
 
 function Validate-Publish([string]$Directory) {
@@ -138,6 +146,8 @@ if ($env:DogfoodEnabled -eq 'false' -or $env:Dogfood -eq 'false') {
 New-Item -ItemType Directory -Path $root -Force | Out-Null
 Assert-PlainTree $root
 $lock = $null
+$startupLock = $null
+$stage = $null
 try {
     # FileShare.None is cross-process and cross-checkout; a crashed deploy releases it.
     $lock = [IO.File]::Open((Join-Path $root 'deploy.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
@@ -178,6 +188,9 @@ try {
             if ((Get-Sha256 (Join-Path $pending $file.path)) -ne $file.sha256) { throw "Install copy hash mismatch: $($file.path)" }
         }
     }
+    # Ordinary app startup takes the same exclusive lease before opening/migrating data.
+    # Hold it until swaps and the deployment-owned child's readiness have completed.
+    $startupLock = [IO.File]::Open((Join-Path $root 'startup.lock'), 'OpenOrCreate', 'ReadWrite', 'None')
     $wasRunning = [bool](Get-AppProcesses)
     Stop-App
     $backup = Join-Path $root "backups/$id"
@@ -192,16 +205,16 @@ try {
                 Copy-Item -LiteralPath $source -Destination $backup
             }
         }
-    } catch {
-        if ($wasRunning -and (Test-Path -LiteralPath $current)) { Start-App $current }
-        throw
-    }
     $hadCurrent = Test-Path -LiteralPath $current
     @{ schemaVersion = 1; id = $id; rollback = [bool]$Rollback; backup = $backup; hadCurrent = $hadCurrent;
        installed = $current; previous = $previous; pending = $pending; retired = (Join-Path $root "retained/$id") } |
         ConvertTo-Json | Set-Content -LiteralPath $journal -Encoding UTF8
     $retired = Join-Path $root "retained/$id"
     New-Item -ItemType Directory -Path (Split-Path $retired) -Force | Out-Null
+    } catch {
+        if ($wasRunning -and (Test-Path -LiteralPath $current)) { Start-App $current }
+        throw
+    }
     $oldMoved = $false
     $newMoved = $false
     try {
@@ -236,10 +249,20 @@ try {
         if (-not $Rollback -and (Test-Path -LiteralPath $retired) -and -not (Test-Path -LiteralPath $previous)) {
             Move-InstallDirectory $retired $previous
         }
+        if ($Rollback -and $newMoved -and -not (Test-Path -LiteralPath $previous)) {
+            Move-InstallDirectory (Join-Path $root "retained/failed-$id") $previous
+        }
         Remove-Item -LiteralPath $journal
         throw "Deployment failed; prior binaries restored where available. Data and backup preserved (no automatic DB downgrade): $failure"
     }
 } finally {
+    if ($startupLock) { $startupLock.Dispose() }
     $lock.Dispose()
+    if ($stage -and (Test-Path -LiteralPath $stage)) {
+        $stagingRoot = [IO.Path]::GetFullPath((Join-Path $repo '.codex/temp/dogfood/staging')) + [IO.Path]::DirectorySeparatorChar
+        if (-not [IO.Path]::GetFullPath($stage).StartsWith($stagingRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe publish staging cleanup path' }
+        Assert-PlainTree $stage
+        Remove-Item -LiteralPath $stage -Recurse -Force
+    }
 }
 }

@@ -18,9 +18,17 @@ public partial class App : Application
     private DispatcherQueue? _dispatcher;
     private bool _exitRequested;
     private DogfoodLifetime? _dogfoodLifetime;
+    private IDisposable? _startupLease;
 
     public App()
     {
+        // The deployment-owned child is started while its parent holds this same lease.
+        if (!Environment.GetCommandLineArgs().Contains("--dogfood-start", StringComparer.Ordinal))
+        {
+            _startupLease = TajsTokens.Infrastructure.Persistence.AppStartupLease.TryAcquire(
+                Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData));
+            if (_startupLease is null) Environment.Exit(0);
+        }
         InitializeComponent();
         Services = new AppServices();
     }
@@ -54,6 +62,8 @@ public partial class App : Application
 
         StartPeriodicCollector();
         _dogfoodLifetime.MarkReady();
+        _startupLease?.Dispose();
+        _startupLease = null;
     }
 
     private async Task ReconcileStartupRegistrationAsync()

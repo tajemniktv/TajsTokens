@@ -24,6 +24,28 @@ public sealed class CodexRolloutInspectionTests : IDisposable
     }
 
     [Fact]
+    public void ExternalSqliteHomeUsesGlobalConfigBeforeEnvironmentWithoutMovingRolloutRoots()
+    {
+        var external = Path.Combine(_directory, "external");
+        Assert.Equal(external, CodexSqliteHome.Resolve(_directory, external));
+        File.WriteAllText(Path.Combine(_directory, "config.toml"), "sqlite_home = 'configured'\n[profiles.other]\nsqlite_home = 'not-selected'\n");
+        Assert.Equal(Path.Combine(_directory, "configured"), CodexSqliteHome.Resolve(_directory, external));
+        File.WriteAllText(Path.Combine(_directory, "config.toml"), "sqlite_home = [invalid");
+        Assert.Null(CodexSqliteHome.Resolve(_directory, external));
+    }
+
+    [Fact]
+    public async Task ParserSupportedOwnerVariantsAndBlankLinesRemainComparable()
+    {
+        var metadata = $"{{\"type\":\"SESSION_META\",\"session_id\":\"{ThreadId}\"}}\n";
+        await WritePairAsync(" \t\r\n" + metadata + Event(1), metadata + Event(1));
+        var result = await CompareAsync();
+        Assert.True(result.OwnershipEstablished);
+        Assert.Equal(CodexRolloutComparisonKind.IdenticalOwnedRecords, result.Kind);
+        Assert.Equal(2, result.CommonOwnedRecords);
+    }
+
+    [Fact]
     public async Task SameCompleteBytes_AreIdenticalWithoutChangingFiles()
     {
         var content = Meta(ThreadId) + Event(1);

@@ -244,7 +244,8 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
             LimitId = ReadString(limits, "limitId"),
             PlanType = ReadString(limits, "planType"),
             Lane = propertyName,
-            CollectedAtUtc = capturedAtUtc
+            CollectedAtUtc = capturedAtUtc,
+            HasSourceTimestamp = true // This live response was observed at capturedAtUtc, unlike legacy/backfilled rows.
         });
     }
 

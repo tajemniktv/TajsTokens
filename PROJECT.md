@@ -402,7 +402,7 @@ passes retry on the next refresh; successful scans do not copy current model/eff
 Outstanding integration decisions: prove account/installation scoping before attributing local
 work to a quota account; audit source-generation replacement and rollout-only coverage before
 claiming exhaustive discovery; expose retained-versus-native coverage without inventing equality.
-This slice does not authorize additional durable fields, data deletion, or a schema migration.
+This integration-map research alone does not authorize additional durable fields, data deletion, or a schema migration. The separately implemented account-scope migration below is not part of that research-only restriction.
 
 #### Native index versus rollout path coverage follow-up
 
@@ -1156,6 +1156,25 @@ contributor workflow; move feature-specific policy and changing implementation d
 The contributor guide owns operational procedures. Update README.md only for actual user-facing
 feature/behavior, requirements or setup changes; exclude roadmaps, internal thresholds, audit
 counters and unimplemented concepts such as TT. A checklist or chat proposal is not source evidence.
+
+### Recorded-token prediction contract
+
+Token forecasts target the sum of recorded native token increments (including cached input) in
+the next interval, conditional on recent installation-local activity. Zero means no tokens were
+recorded, not proof of no account activity. This is neither whole-account accounting nor a
+subscription-quota or price conversion. Chronological held-out targets exclude future tokens,
+completions, and model changes from inputs. Backfilled history supports retrospective learning,
+not claims that a past app had collected it. A retained result after refresh failure is explicitly
+stale and retains its original generation time.
+
+Owned schema 11 corrects the timestamp-provenance flag on legacy rows migrated by schema 10;
+legacy evidence is retained but cannot silently become eligible account-local training history.
+Unknown/malformed/conflicting observations terminate usable pace segments. Overlapping workload
+outcomes cannot satisfy the independent training threshold. Flat-meter point estimates are not
+exact zero consumption; all-flat production epochs remain precision-limited with no survival claim.
+The statistical replacement of point-estimate baselines with a censored-likelihood model remains
+research, not an implemented or calibrated model.
+
 
 Do not introduce additional competing roadmaps or architecture specifications without a concrete need. Mark dated observations and superseded decisions explicitly; do not silently reinterpret older audit counts as current state.
 

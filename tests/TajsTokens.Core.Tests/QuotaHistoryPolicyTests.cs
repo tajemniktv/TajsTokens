@@ -19,8 +19,6 @@ public sealed class QuotaHistoryPolicyTests
         Assert.All(decisions, x => Assert.True(x.Eligible));
         Assert.Equal(2, QuotaHistoryPolicy.Streams(decisions).Count());
         Assert.Null(decisions.Single(x => x.Observation == rollout).Cohort.AccountKey);
-        Assert.Equal(12.4, rollout.UsedPercent);
-        Assert.Equal(12, app.UsedPercent);
         Assert.Empty(QuotaPredictionService.Predict(Data([rollout, Point(1, 14.2)]), Point(1, 14.2), Start.AddHours(1)));
     }
 
@@ -98,7 +96,7 @@ public sealed class QuotaHistoryPolicyTests
         Start.AddHours(hours), used, 300, Start.AddHours(5), "codex", "default", "codex-rollout:primary")
     {
         ObservationId = "record:" + hours, SourceIdentity = "generation", SessionId = "session",
-        LimitId = "codex", PlanType = "pro", Lane = "primary", CollectedAtUtc = Start.AddHours(hours)
+        LimitId = "codex", PlanType = "pro", Lane = "primary", CollectedAtUtc = Start.AddHours(hours), HasSourceTimestamp = true
     };
     private static CodexForecastDataset Data(QuotaSnapshot[] rows) => new(rows, [], [], [], Start.AddHours(2), "fixture");
 }

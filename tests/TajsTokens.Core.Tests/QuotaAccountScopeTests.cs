@@ -24,6 +24,34 @@ public sealed class QuotaAccountScopeTests : IDisposable
     }
 
     [Fact]
+    public async Task UnknownSourceResetIdsRemainSeparateAndLegacyRetryIsIdempotent()
+    {
+        var a = Point(Now.AddHours(-1), 90, null);
+        var b = a with { CapturedAtUtc = Now, UsedPercent = 5 };
+        var events = new QuotaResetDetector().Detect([a, b,
+            a with { Source = "other-source" }, b with { Source = "other-source" }]);
+        Assert.Equal(2, events.Select(x => x.EventId).Distinct().Count());
+        var repository = new SqliteTelemetryRepository(Database);
+        await repository.InitializeAsync(default);
+        foreach (var item in events) await repository.UpsertQuotaResetEventAsync(item, default);
+        await ExecuteAsync("UPDATE quota_reset_events SET event_id=substr(event_id,1,instr(event_id,':unknown:source:')-1) WHERE source <> 'other-source'; UPDATE intelligence_schema SET version=2 WHERE component='phase4-intelligence';");
+        repository = new SqliteTelemetryRepository(Database);
+        foreach (var item in events) await repository.UpsertQuotaResetEventAsync(item, default);
+        Assert.Equal(2L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events"));
+    }
+
+    [Fact]
+    public async Task ObservatoryFirstInitializationMigratesOldQuotaSchema()
+    {
+        await new SqliteTelemetryRepository(Database).InitializeAsync(default);
+        await ExecuteAsync("DROP TABLE quota_snapshots; DROP TABLE forecast_snapshots;");
+        await CreateVersionEightAsync(false);
+        using var store = new SqliteCodexObservatoryStore(Database);
+        await store.InitializeAsync(default);
+        Assert.Equal(1L, await ScalarAsync("SELECT COUNT(*) FROM pragma_table_info('quota_snapshots') WHERE name='account_key'"));
+    }
+
+    [Fact]
     public void ProviderKeepsOnlyStablePseudonymIncludingEmptyWindowResponses()
     {
         var first = Response("\"accountId\":\"sanitized-account-A\",", true);
@@ -116,7 +144,7 @@ public sealed class QuotaAccountScopeTests : IDisposable
         Assert.Null(forecast.AccountKey);
         Assert.Equal(2, forecast.Forecast.BurnRatePercentPerHour);
         Assert.Empty(await repository.GetRecentQuotaSnapshotsAsync(QuotaWindowKind.FiveHour, "codex", "default", 10, default, accountKey: "A"));
-        Assert.Equal(10L, await ScalarAsync("PRAGMA user_version"));
+        Assert.Equal(11L, await ScalarAsync("PRAGMA user_version"));
     }
 
     [Fact]
@@ -152,7 +180,7 @@ public sealed class QuotaAccountScopeTests : IDisposable
         Assert.Equal(0L, await ScalarAsync("SELECT COUNT(*) FROM pragma_table_info('quota_snapshots') WHERE name='account_key'"));
         await ExecuteAsync("ALTER TABLE forecast_snapshots ADD COLUMN evaluation_json TEXT;");
         await new SqliteTelemetryRepository(Database).InitializeAsync(default);
-        Assert.Equal(10L, await ScalarAsync("PRAGMA user_version"));
+        Assert.Equal(11L, await ScalarAsync("PRAGMA user_version"));
     }
 
     private async Task CreateVersionEightAsync(bool malformed)
@@ -236,7 +264,7 @@ public sealed class QuotaAccountScopeTests : IDisposable
             (window ? "\"primary\":{\"usedPercent\":20,\"windowDurationMins\":300}" : "") + "}}}", Now);
 
     private static QuotaSnapshot Point(DateTimeOffset captured, double used, string? account) =>
-        new(QuotaWindowKind.FiveHour, captured, used, 300, Now.AddHours(5), "codex", "default", "codex-app-server:codex", account);
+        new(QuotaWindowKind.FiveHour, captured, used, 300, Now.AddHours(5), "codex", "default", "codex-app-server:codex", account) { HasSourceTimestamp = true };
     private static QuotaLaneState Lane(QuotaSnapshot snapshot) =>
         new(snapshot.Kind, snapshot.Provider, snapshot.Profile, snapshot, TelemetryHealthState.Live, snapshot.CapturedAtUtc);
 

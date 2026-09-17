@@ -26,7 +26,7 @@ public sealed class ScenarioPlannerService
 
         ScenarioWindowEstimate Build(QuotaWindowKind kind)
         {
-            var samples = history.Where(x => x.Kind == kind && (request.AccountKey is null || x.AccountKey == request.AccountKey) && x.EndUtc <= now && x.EndUtc > x.StartUtc &&
+            var samples = history.Where(x => x.Kind == kind && x.AccountKey == request.AccountKey && x.EndUtc <= now && x.EndUtc > x.StartUtc &&
                 double.IsFinite(x.QuotaDeltaPercent) && x.QuotaDeltaPercent is >= 0 and <= 100 &&
                 x.RootAgents >= 0 && x.Subagents >= 0 &&
                 (x.ResetUtc is null || x.EndUtc <= x.ResetUtc)).OrderBy(x => x.StartUtc).ToArray();

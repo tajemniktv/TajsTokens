@@ -12,7 +12,8 @@ public sealed class SqliteIntelligenceServiceTests
     public async Task UsageReport_PartialBucketsAndFilteredDimensionsReconcileWithoutTopTwentyTruncation()
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);
-        while (!File.Exists(Path.Combine(root.FullName, "PROJECT.md"))) root = root.Parent!;
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "PROJECT.md"))) root = root.Parent;
+        if (root is null) throw new InvalidOperationException("Repository root is required for project-local test files.");
         var directory = Path.Combine(root.FullName, ".codex", "temp", "usage-report-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         try
@@ -46,12 +47,14 @@ public sealed class SqliteIntelligenceServiceTests
             }
             var project = await service.QueryAsync(query with { Repository = "project-a" }, CancellationToken.None);
             Assert.Equal(1560, Assert.Single(project.UsageHistory).NativeTokens);
+            Assert.Equal(1560, project.Heatmap.Sum(x => x.NativeTokens));
             Assert.Equal(13, project.Dimensions.Count(x => x.Dimension == "Session"));
             var session = await service.QueryAsync(query with { Repository = "project-a", SessionId = "session-0", Model = "gpt-5.6-luna" }, CancellationToken.None);
             Assert.Equal(120, Assert.Single(session.UsageHistory).NativeTokens);
             var excluded = await service.QueryAsync(query with { Repository = "project-b", SessionId = "session-0" }, CancellationToken.None);
             Assert.Empty(excluded.UsageHistory);
             Assert.Empty(excluded.Dimensions);
+            Assert.Empty(excluded.Heatmap);
         }
         finally { SqliteConnection.ClearAllPools(); Directory.Delete(directory, true); }
     }
@@ -676,7 +679,7 @@ public sealed class SqliteIntelligenceServiceTests
             ObservationId = source.Contains("rollout", StringComparison.Ordinal) ? "fixture:" + captured.ToString("O") : null,
             SourceIdentity = source.Contains("rollout", StringComparison.Ordinal) ? "fixture-source" : null,
             SessionId = source.Contains("rollout", StringComparison.Ordinal) ? "fixture-session" : null,
-            CollectedAtUtc = captured
+            CollectedAtUtc = captured, HasSourceTimestamp = true
         };
 
     private static QuotaSnapshot QuotaWithoutReset(

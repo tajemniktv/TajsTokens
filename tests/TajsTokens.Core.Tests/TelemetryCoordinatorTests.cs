@@ -11,6 +11,33 @@ public sealed class TelemetryCoordinatorTests : IDisposable
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "TajsTokens.Tests", Guid.NewGuid().ToString("N"));
 
     [Fact]
+    public async Task TokenForecastUsesPersistedHistoryWhenAccountingFailsAndRetainsStaleResultOnQueryFailure()
+    {
+        var tokens = new SequencedTokscaleProvider(
+            [_ => Task.FromResult<IReadOnlyList<TokenUsage>>([]),
+             _ => Task.FromException<IReadOnlyList<TokenUsage>>(new IOException("offline")),
+             _ => Task.FromException<IReadOnlyList<TokenUsage>>(new IOException("offline"))],
+            [_ => Task.FromResult<IReadOnlyList<TokenTimeBucket>>([]),
+             _ => Task.FromResult<IReadOnlyList<TokenTimeBucket>>([]),
+             _ => Task.FromResult<IReadOnlyList<TokenTimeBucket>>([])]);
+        var quota = new SequencedQuotaProvider(Enumerable.Range(0, 3).Select(_ =>
+            (Func<CancellationToken, Task<IReadOnlyList<QuotaSnapshot>>>)(_ => Task.FromResult<IReadOnlyList<QuotaSnapshot>>([]))));
+        var intelligence = new BlockingIntelligenceService();
+        intelligence.Release.TrySetResult(true);
+        var coordinator = CreateCoordinator(tokens, quota, intelligence);
+        var first = await coordinator.RefreshAsync(RefreshTrigger.Manual, default);
+        Assert.False(first.TokenForecast!.IsStale);
+        intelligence.FailTokenForecast = true;
+        var failed = await coordinator.RefreshAsync(RefreshTrigger.Manual, default);
+        Assert.True(failed.TokenForecast!.IsStale);
+        Assert.Equal(first.TokenForecast.GeneratedAtUtc, failed.TokenForecast.GeneratedAtUtc);
+        intelligence.FailTokenForecast = false;
+        var recovered = await coordinator.RefreshAsync(RefreshTrigger.Manual, default);
+        Assert.False(recovered.TokenForecast!.IsStale);
+        Assert.Equal(3, intelligence.TokenForecastCalls);
+    }
+
+    [Fact]
     public async Task RolloutCoverageAppearsInDiagnosticsWithoutCallingAlternativesMissingTasks()
     {
         var tokens = new SequencedTokscaleProvider(
@@ -283,8 +310,14 @@ public sealed class TelemetryCoordinatorTests : IDisposable
 
     private sealed class BlockingIntelligenceService : IIntelligenceService
     {
-        public Task<TokenWorkloadForecast> ForecastTokenWorkloadAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken) =>
-            Task.FromResult(new TokenWorkloadForecast(nowUtc, null, 0, 0, [], "test fixture"));
+        public bool FailTokenForecast { get; set; }
+        public int TokenForecastCalls { get; private set; }
+        public Task<TokenWorkloadForecast> ForecastTokenWorkloadAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken)
+        {
+            TokenForecastCalls++;
+            return FailTokenForecast ? Task.FromException<TokenWorkloadForecast>(new IOException("query failed"))
+                : Task.FromResult(new TokenWorkloadForecast(nowUtc, null, 0, 0, [], "test fixture"));
+        }
         public Task<ForecastEvaluationReport> EvaluateForecastsAsync(string provider, string profile,
             DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken cancellationToken) =>
             throw new NotSupportedException("This coordinator test double does not run historical evaluation.");
