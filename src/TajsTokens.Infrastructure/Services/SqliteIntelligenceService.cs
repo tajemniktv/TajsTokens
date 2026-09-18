@@ -23,10 +23,13 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
     private readonly ForecastingService _forecasting = new();
     private readonly ScenarioPlannerService _scenarioPlanner = new();
     private readonly Func<string, CancellationToken, Task>? _queryStageObserver;
+    private readonly Func<IReadOnlyList<RolloutAccountAssociation>> _accountAssociations = () => [];
 
-    public SqliteIntelligenceService(string databasePath, SqliteTelemetryRepository telemetryRepository)
-        : this(databasePath, telemetryRepository, null)
+    public SqliteIntelligenceService(string databasePath, SqliteTelemetryRepository telemetryRepository,
+        Func<IReadOnlyList<RolloutAccountAssociation>>? accountAssociations = null)
+        : this(databasePath, telemetryRepository, queryStageObserver: null)
     {
+        _accountAssociations = accountAssociations ?? (() => []);
     }
 
     internal SqliteIntelligenceService(
@@ -134,8 +137,8 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                         var key = (current.Provider, current.Profile, current.AccountKey, current.CapturedAtUtc);
                         if (!datasets.TryGetValue(key, out var dataset))
                         {
-                            dataset = await new SqliteForecastDatasetReader(_databasePath).ReadAsync(
-                                current.Provider, current.Profile, current.CapturedAtUtc.AddDays(-14),
+                            dataset = await new SqliteForecastDatasetReader(_databasePath, _accountAssociations()).ReadAsync(
+                                current.Provider, current.Profile, current.CapturedAtUtc.AddDays(-120),
                                 current.CapturedAtUtc, cancellationToken, current.AccountKey);
                             datasets.Add(key, dataset);
                         }
@@ -434,7 +437,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         await EnsureInitializedAsync(cancellationToken);
         using var observatory = new SqliteCodexObservatoryStore(_databasePath);
         await observatory.InitializeAsync(cancellationToken);
-        var data = await new SqliteForecastDatasetReader(_databasePath).ReadAsync(provider, profile, fromUtc, toUtc, cancellationToken);
+        var data = await new SqliteForecastDatasetReader(_databasePath, _accountAssociations()).ReadAsync(provider, profile, fromUtc, toUtc, cancellationToken);
         return await Task.Run(() => QuotaForecastEvaluation.Evaluate(data, cancellationToken), cancellationToken);
     }
 

@@ -6,7 +6,7 @@ using TajsTokens.Core.Models;
 namespace TajsTokens.Infrastructure.Services;
 
 /// <summary>One read transaction over durable, content-free evidence. Never queries raw Codex payloads.</summary>
-public sealed class SqliteForecastDatasetReader(string databasePath)
+public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyList<RolloutAccountAssociation>? accountAssociations = null)
 {
     public async Task<CodexForecastDataset> ReadAsync(string provider, string profile,
         DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken cancellationToken, string? accountKey = null,
@@ -35,6 +35,8 @@ public sealed class SqliteForecastDatasetReader(string databasePath)
         command.Parameters.AddWithValue("$profile", profile);
         command.Parameters.AddWithValue("$account", accountKey ?? (object)DBNull.Value);
         command.Parameters.AddWithValue("$includeQuota", includeQuota ? 1 : 0);
+        command.Parameters.AddWithValue("$asserted", accountAssociations?.Any(x => x.IsValid && x.Provider == provider &&
+            x.Profile == profile && x.AccountKey == accountKey && x.AssertedAtUtc <= toUtc) == true ? 1 : 0);
         command.CommandText = $"""
             SELECT kind,captured_at_utc,used_percent,window_minutes,resets_at_utc,source,{(hasAccountKey ? "account_key" : "''")},
                 {(hasProvenance ? "observation_id,source_identity,session_id,limit_id,plan_type,lane,collected_at_utc,has_source_timestamp" : "NULL,NULL,NULL,NULL,NULL,NULL,NULL,0")}
@@ -42,7 +44,7 @@ public sealed class SqliteForecastDatasetReader(string databasePath)
               AND captured_at_utc >= $from AND captured_at_utc <= $to
               AND (source LIKE 'codex-app-server:%' OR source LIKE 'codex-rollout:%')
               {(hasProvenance ? "AND (source_identity IS NULL OR EXISTS(SELECT 1 FROM rollout_files f WHERE f.source_identity=quota_snapshots.source_identity))" : "")}
-              AND ($account IS NULL OR {(hasAccountKey ? "account_key=$account" : "0")})
+              AND ($account IS NULL OR {(hasAccountKey ? "account_key=$account OR ($asserted=1 AND (account_key IS NULL OR account_key=''))" : "0")})
             ORDER BY captured_at_utc LIMIT 500001;
             """;
         var quota = new List<QuotaSnapshot>();
@@ -104,6 +106,7 @@ public sealed class SqliteForecastDatasetReader(string databasePath)
         if (context.Count > 500000) throw new InvalidOperationException("Context replay exceeds 500,000 rows; narrow the range.");
         transaction.Commit();
         return new CodexForecastDataset(quota, workload, tokens, context, captured,
-            "Quota history includes app-server and rollout evidence; eligibility is decided by quota-history/v1. Legacy missing provenance remains unknown. Workload is local installation history, not verified account identity. Backfilled event-time reconstruction and strict collection-time replay are separate modes.");
+            "Quota history includes app-server and rollout evidence; eligibility is decided by quota-history/v1. Legacy missing provenance remains unknown. Workload is local installation history, not verified account identity. Backfilled event-time reconstruction and strict collection-time replay are separate modes.")
+        { AccountAssociations = accountAssociations ?? [] };
     }
 }

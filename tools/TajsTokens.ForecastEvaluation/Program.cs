@@ -6,6 +6,16 @@ using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
+IReadOnlyList<RolloutAccountAssociation> associations = [];
+if (args.Length == 4 && args[2] == "--settings" && args[0] is "--cost" or "--composed" or "--composed-strict")
+{
+    var settings = System.Text.Json.JsonSerializer.Deserialize<RuntimeSettings>(File.ReadAllText(args[3]))
+        ?? throw new ArgumentException("Settings file is empty.");
+    if (settings.SchemaVersion > RuntimeSettings.CurrentSchemaVersion) throw new ArgumentException("Unsupported settings schema.");
+    associations = settings.RolloutAccountAssociations ?? [];
+    args = args[..2];
+}
+
 if (args.Length == 2 && args[0] == "--transfer")
 {
     var data = await new SqliteForecastDatasetReader(args[1]).ReadAsync("codex", "default",
@@ -20,22 +30,23 @@ if (args.Length == 2 && args[0] == "--transfer")
     return;
 }
 
-if (args.Length == 2 && args[0] == "--composed")
+if (args.Length == 2 && args[0] is "--composed" or "--composed-strict")
 {
-    var data = await new SqliteForecastDatasetReader(args[1]).ReadAsync("codex", "default",
+    var data = await new SqliteForecastDatasetReader(args[1], associations).ReadAsync("codex", "default",
         DateTimeOffset.UnixEpoch.AddDays(1), DateTimeOffset.UtcNow, CancellationToken.None);
-    var report = ComposedQuotaEvaluator.Evaluate(data);
+    var report = ComposedQuotaEvaluator.Evaluate(data, availability: args[0] == "--composed-strict"
+        ? ForecastReplayAvailability.CollectedByOrigin : ForecastReplayAvailability.ReconstructedEventTime);
     Console.WriteLine(report.Version + ": " + report.Methodology);
-    Console.WriteLine("cohort,horizon,model,train,heldout,generations,missing_composition,forecast_loss,cost_only_loss,pace_loss,incumbent_loss,displayed_MAE");
+    Console.WriteLine("cohort,horizon,model,train,heldout,generations,missing_composition,forecast_loss,cost_only_loss,pace_loss,incumbent_loss,displayed_MAE,asserted_train");
     var cohorts = report.Scores.Select(x => x.Cohort).Distinct().ToList();
     foreach (var score in report.Scores)
-        Console.WriteLine(FormattableString.Invariant($"cohort-{cohorts.IndexOf(score.Cohort) + 1},{score.HorizonHours},{score.CostModel},{score.TrainingIntervals},{score.HeldOutIntervals},{score.ResetGenerations},{score.MissingComposition},{score.IntervalLoss:F4},{score.CostOnlyIntervalLoss:F4},{score.PaceIntervalLoss:F4},{score.IncumbentIntervalLoss:F4},{score.DisplayedDeltaMae:F4}"));
+        Console.WriteLine(FormattableString.Invariant($"cohort-{cohorts.IndexOf(score.Cohort) + 1},{score.HorizonHours},{score.CostModel},{score.TrainingIntervals},{score.HeldOutIntervals},{score.ResetGenerations},{score.MissingComposition},{score.IntervalLoss:F4},{score.CostOnlyIntervalLoss:F4},{score.PaceIntervalLoss:F4},{score.IncumbentIntervalLoss:F4},{score.DisplayedDeltaMae:F4},{score.AssertedTrainingIntervals}"));
     return;
 }
 
 if (args.Length == 2 && args[0] is "--cost" or "--cost-owned-rollouts")
 {
-    var data = await new SqliteForecastDatasetReader(args[1]).ReadAsync("codex", "default",
+    var data = await new SqliteForecastDatasetReader(args[1], associations).ReadAsync("codex", "default",
         DateTimeOffset.UnixEpoch.AddDays(1), DateTimeOffset.UtcNow, CancellationToken.None);
     var report = QuotaCostEvaluation.Evaluate(data, userConfirmedRolloutOwnership: args[0] == "--cost-owned-rollouts");
     Console.WriteLine(report.Version + $" (snapshot {report.DatasetCapturedAtUtc:O}): " + report.Methodology);

@@ -6,6 +6,7 @@ public sealed record ComposedQuotaTrial(DateTimeOffset OriginUtc, DateTimeOffset
     double PredictedRemaining, PredictedWorkload Workload)
 {
     public double? IncumbentIntervalLoss { get; init; }
+    public ForecastReplayAvailability Availability { get; init; }
 }
 
 public sealed record ComposedQuotaScore(QuotaHistoryCohort Cohort, double HorizonHours, string CostModel,
@@ -14,6 +15,8 @@ public sealed record ComposedQuotaScore(QuotaHistoryCohort Cohort, double Horizo
     double? DisplayedDeltaMae, IReadOnlyList<ComposedQuotaTrial> Trials)
 {
     public double? IncumbentIntervalLoss { get; init; }
+    public ForecastReplayAvailability Availability { get; init; }
+    public int AssertedTrainingIntervals { get; init; }
 }
 
 public sealed record ComposedQuotaEvaluation(string Version, string Methodology, IReadOnlyList<ComposedQuotaScore> Scores);

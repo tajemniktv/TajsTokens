@@ -115,6 +115,50 @@ public sealed partial class SettingsPage : Page
         DataFolderText.Text = App.Services.DataFolder;
         DatabasePathText.Text = App.Services.DatabasePath;
         SettingsSchemaText.Text = $"Settings schema v{settings.SchemaVersion} · poll range 15–3600 s";
+        RolloutOwnershipText.Text = $"{settings.RolloutAccountAssociations.Length} bounded source/session associations. Attribution remains user-asserted, not provider-verified.";
+        RevokeRolloutsButton.IsEnabled = settings.RolloutAccountAssociations.Length > 0;
+    }
+
+    private async void OnAssociateRolloutsClicked(object sender, RoutedEventArgs e)
+    {
+        var accounts = App.Services.Telemetry.Latest.QuotaLanes.Where(x => x.IsFresh && x.Snapshot?.AccountKey is not null)
+            .Select(x => x.Snapshot!.AccountKey!).Distinct().ToArray();
+        if (accounts.Length == 0)
+        {
+            ShowStatus(InfoBarSeverity.Warning, "No recorded account", "Refresh account quota first; no current login will be guessed.");
+            return;
+        }
+        var baseline = App.Services.Settings;
+        var choice = new ComboBox { ItemsSource = accounts.Select(QuotaAccountScope.Describe).ToArray(), SelectedIndex = accounts.Length == 1 ? 0 : -1 };
+        var content = new StackPanel { Spacing = 12 };
+        content.Children.Add(new TextBlock { Text = "I confirm all retained rollout histories belong to the account selected below. This adds revocable, bounded user assertions, not native account facts. Existing associations are replaced.", TextWrapping = TextWrapping.Wrap });
+        content.Children.Add(choice);
+        var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "Associate rollout history", Content = content,
+            PrimaryButtonText = "Confirm association", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close };
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary || choice.SelectedIndex < 0) return;
+        var account = accounts[choice.SelectedIndex];
+        AssociateRolloutsButton.IsEnabled = false;
+        try
+        {
+            if (!App.Services.Telemetry.Latest.QuotaLanes.Any(x => x.IsFresh && x.Snapshot?.AccountKey == account))
+                throw new InvalidOperationException("The selected account is no longer current. Refresh and confirm again.");
+            var assertions = await App.Services.PrepareRolloutAccountAssociationsAsync(account, CancellationToken.None);
+            var result = await App.TryApplySettingsAsync(baseline, baseline with { RolloutAccountAssociations = assertions });
+            RenderSettings();
+            ShowStatus(result.Success ? InfoBarSeverity.Success : InfoBarSeverity.Error, "Historical ownership",
+                result.Success ? $"Saved {assertions.Length} user-asserted associations. Re-run model evaluation; native data is unchanged." : result.Error!);
+        }
+        catch (Exception exception) { ShowStatus(InfoBarSeverity.Error, "Association not saved", exception.Message); }
+        finally { AssociateRolloutsButton.IsEnabled = true; }
+    }
+
+    private async void OnRevokeRolloutsClicked(object sender, RoutedEventArgs e)
+    {
+        var baseline = App.Services.Settings;
+        var result = await App.TryApplySettingsAsync(baseline, baseline with { RolloutAccountAssociations = [] });
+        RenderSettings();
+        ShowStatus(result.Success ? InfoBarSeverity.Success : InfoBarSeverity.Error, "Historical ownership",
+            result.Success ? "Associations revoked. Future modelling will no longer use them; native observations are unchanged." : result.Error!);
     }
 
     private static bool TryParseThresholds(string? text, out int[] thresholds, out string? error)

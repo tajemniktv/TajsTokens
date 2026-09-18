@@ -43,6 +43,14 @@ tests earlier-regime weights with destination scaling against destination-local 
 explicitly reports when account-linked compatible regimes are absent. Neither command sends
 messages or changes source data. These calculations are also available in Model evaluation.
 
+Use `--composed-strict` for collection-time evaluation. Live promotion requires it as well as
+the retrospective `--composed` win; backfilled observations cannot become prospective evidence.
+For private ownership-aware experiments, append `--settings <path-to-settings.json>` to `--cost`,
+`--composed` or `--composed-strict`. This reads explicit saved associations without saving settings
+or changing native account IDs. Create/revoke bounded associations in Settings → Historical
+rollout ownership. Asserted history supplements compatible training only; validation remains
+native-account evidence and requires stronger gates. Keep settings and account identities local.
+
 ### Application build
 
 ```powershell

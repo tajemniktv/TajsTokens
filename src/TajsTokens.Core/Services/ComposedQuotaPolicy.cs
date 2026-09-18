@@ -12,38 +12,44 @@ public static class ComposedQuotaPolicy
         var prefix = data with
         {
             CapturedAtUtc = anchor.CapturedAtUtc,
-            Quota = data.Quota.Where(x => QuotaHistoryPolicy.Cohort(x) == QuotaHistoryPolicy.Cohort(anchor) &&
+            Quota = data.Quota.Where(x => (QuotaHistoryPolicy.Cohort(x) == QuotaHistoryPolicy.Cohort(anchor) ||
+                RolloutAccountAssociationPolicy.Resolve(x, data.AccountAssociations, anchor.CapturedAtUtc)?.AccountKey == anchor.AccountKey) &&
                 x.CapturedAtUtc <= anchor.CapturedAtUtc && (x.CollectedAtUtc is null || x.CollectedAtUtc <= anchor.CapturedAtUtc)).ToArray(),
             Tokens = data.Tokens.Where(x => x.ObservedAtUtc <= anchor.CapturedAtUtc && x.CapturedAtUtc <= anchor.CapturedAtUtc).ToArray(),
             Workload = data.Workload.Where(x => x.ObservedAtUtc <= anchor.CapturedAtUtc && x.CapturedAtUtc <= anchor.CapturedAtUtc).ToArray(),
             Context = data.Context.Where(x => x.ObservedAtUtc <= anchor.CapturedAtUtc && x.CapturedAtUtc <= anchor.CapturedAtUtc).ToArray()
         };
         var cost = QuotaCostEvaluation.Evaluate(prefix, cancellationToken);
-        var eligible = cost.Scores.Where(x => x.MaterialWin && x.CandidateShiftResets.Count == 0 &&
+        var eligible = cost.Scores.Where(x => x.Cohort == QuotaHistoryPolicy.Cohort(anchor) && x.MaterialWin && x.CandidateShiftResets.Count == 0 &&
             x.Candidate is "total" or "categories" or "model-effort").ToArray();
-        if (eligible.Length == 0) return incumbent;
+        if (eligible.Length == 0 && prefix.AccountAssociations.Count == 0) return incumbent;
         var evaluation = ComposedQuotaEvaluator.Evaluate(prefix, cancellationToken);
+        var strict = ComposedQuotaEvaluator.Evaluate(prefix, cancellationToken, ForecastReplayAvailability.CollectedByOrigin);
         var observations = QuotaCostObservationBuilder.Build(prefix, cancellationToken);
         return incumbent.Select(baseline =>
         {
-            var candidates = evaluation.Scores.Where(score => score.HorizonHours == baseline.HorizonHours &&
-                eligible.Any(c => c.HorizonHours == score.HorizonHours && c.Candidate == score.CostModel) &&
-                SupportsSelection(score, anchor.CapturedAtUtc)).OrderBy(x => x.IntervalLoss).ToArray();
+            var candidates = evaluation.Scores.Where(score => score.Cohort == QuotaHistoryPolicy.Cohort(anchor) && score.HorizonHours == baseline.HorizonHours &&
+                (eligible.Any(c => c.HorizonHours == score.HorizonHours && c.Candidate == score.CostModel) ||
+                 SupportsAssertedCost(score, evaluation.Scores)) &&
+                SupportsSelection(score, anchor.CapturedAtUtc) && strict.Scores.Any(s => s.Cohort == score.Cohort &&
+                    s.HorizonHours == score.HorizonHours && s.CostModel == score.CostModel && SupportsStrictSelection(s, anchor.CapturedAtUtc)))
+                .OrderBy(x => x.IntervalLoss).ToArray();
             if (candidates.Length == 0) return baseline;
             var selected = candidates[0];
-            var total = evaluation.Scores.FirstOrDefault(x => x.HorizonHours == selected.HorizonHours && x.CostModel == "total");
+            var liveEvidence = strict.Scores.Single(x => x.Cohort == selected.Cohort && x.HorizonHours == selected.HorizonHours && x.CostModel == selected.CostModel);
+            var total = evaluation.Scores.FirstOrDefault(x => x.Cohort == selected.Cohort && x.HorizonHours == selected.HorizonHours && x.CostModel == "total");
             if (selected.CostModel != "total" && (total?.IntervalLoss is not { } totalLoss ||
                 selected.IntervalLoss + 0.1 >= totalLoss || selected.IntervalLoss >= totalLoss * 0.9)) return baseline;
             var workload = TokenWorkloadPredictionService.PredictHorizon(prefix, anchor.CapturedAtUtc,
                 baseline.HorizonHours, ForecastReplayAvailability.CollectedByOrigin, cancellationToken)?.Composition;
             if (workload is null) return baseline;
-            var training = observations.Where(x => x.HorizonHours == baseline.HorizonHours).OrderBy(x => x.StartUtc).Take(20).ToArray();
+            var training = QuotaCostTrainingPolicy.Select(observations, selected.Cohort, baseline.HorizonHours, selected.AssertedTrainingIntervals > 0);
             if (training.Length < 20) return baseline;
             if (workload.ModelShares.Keys.Except(training.SelectMany(x => x.Features.ModelTokenShares.Keys)).Any() ||
                 workload.EffortShares.Keys.Except(training.SelectMany(x => x.Features.EffortTokenShares.Keys)).Any()) return baseline;
-            var fit = QuotaCostEvaluation.FitFrozen(training, selected.CostModel, cancellationToken);
+            var fit = QuotaCostEvaluation.FitFrozen(training, selected.CostModel.Replace("asserted-", "", StringComparison.Ordinal), cancellationToken);
             var predicted = fit(ComposedQuotaEvaluator.Project(training[0], workload));
-            var errors = QuotaResetGenerationPolicy.Group(selected.Trials.Where(x => x.ResetUtc < anchor.CapturedAtUtc), x => x.ResetUtc)
+            var errors = QuotaResetGenerationPolicy.Group(liveEvidence.Trials.Where(x => x.ResetUtc < anchor.CapturedAtUtc - QuotaResetGenerationPolicy.Tolerance), x => x.ResetUtc)
                 .Select(g => g.Max(x => Math.Abs(x.PredictedDelta - x.ObservedDelta))).Order().ToArray();
             if (errors.Length < 8) return baseline;
             var radius = Math.Max(1, errors[Math.Min(errors.Length - 1, (int)Math.Ceiling((errors.Length + 1) * 0.8) - 1)]);
@@ -58,7 +64,7 @@ public static class ComposedQuotaPolicy
                 UpperRemainingPercent = Math.Min(anchor.RemainingPercent.Value, remaining + radius),
                 IntervalSamples = errors.Length,
                 Explanation = "Origin-only predicted workload composition through frozen account/cohort-local cost weights earned selection over pace and incumbent. " +
-                    $"{selected.HeldOutIntervals} held-out outcomes; {selected.ResetGenerations} reset generations. " +
+                    $"{selected.HeldOutIntervals} retrospective outcomes; {liveEvidence.HeldOutIntervals} collection-time outcomes across {liveEvidence.ResetGenerations} reset generations; {selected.AssertedTrainingIntervals} user-asserted training intervals. " +
                     "Empirical 80%-target range from completed-generation maximum errors; not an exhaustion probability or guarantee. " +
                     "Unobserved account activity remains unexplained; unsupported/stale composition falls back to the incumbent."
             };
@@ -78,5 +84,28 @@ public static class ComposedQuotaPolicy
         return loss + 0.1 < incumbentLoss && loss < incumbentLoss * 0.9 &&
             loss + 0.1 < paceLoss && loss < paceLoss * 0.9 &&
             generations.Count(g => g.Average(x => x.IntervalLoss) < g.Average(x => x.IncumbentIntervalLoss!.Value)) > generations.Count / 2;
+    }
+
+    public static bool SupportsStrictSelection(ComposedQuotaScore score, DateTimeOffset origin) =>
+        score.Availability == ForecastReplayAvailability.CollectedByOrigin &&
+        score.Trials.All(x => x.Availability == ForecastReplayAvailability.CollectedByOrigin &&
+            x.Workload.Availability == ForecastReplayAvailability.CollectedByOrigin) && SupportsSelection(score, origin) &&
+        QuotaResetGenerationPolicy.Group(score.Trials, x => x.ResetUtc).OrderByDescending(g => g.Max(x => x.OutcomeUtc)).Take(2)
+            .All(g => g.Average(x => x.IntervalLoss) <= g.Average(x => x.IncumbentIntervalLoss!.Value) &&
+                g.Average(x => x.IntervalLoss) <= g.Average(x => x.PaceIntervalLoss)) &&
+        (score.AssertedTrainingIntervals == 0 || score.HeldOutIntervals >= 32 &&
+            QuotaResetGenerationPolicy.Group(score.Trials, x => x.ResetUtc).Count >= 12);
+
+    private static bool SupportsAssertedCost(ComposedQuotaScore score, IReadOnlyList<ComposedQuotaScore> all)
+    {
+        if (score.AssertedTrainingIntervals == 0 || score.Cohort.AccountKey is null) return false;
+        var local = all.FirstOrDefault(x => x.Cohort == score.Cohort && x.HorizonHours == score.HorizonHours && x.CostModel == "total");
+        if (local is null || score.Trials.Count < 16) return false;
+        var lookup = local.Trials.ToDictionary(x => x.OriginUtc);
+        if (score.Trials.Any(x => !lookup.ContainsKey(x.OriginUtc))) return false;
+        var generations = QuotaResetGenerationPolicy.Group(score.Trials, x => x.ResetUtc);
+        var loss = generations.Average(g => g.Average(x => x.CostOnlyIntervalLoss));
+        var baseline = generations.Average(g => g.Average(x => lookup[x.OriginUtc].CostOnlyIntervalLoss));
+        return loss + 0.1 < baseline && loss < baseline * 0.9;
     }
 }

@@ -10,6 +10,13 @@ public sealed record QuotaCostObservation(
     double? MeanTtftMilliseconds, int RuntimeSamples,
     IReadOnlyList<string> QualityFlags)
 {
+    public DateTimeOffset? EvidenceAvailableAtUtc { get; init; }
+    public DateTimeOffset? OriginCollectedAtUtc { get; init; }
+    public DateTimeOffset? OriginEvidenceAvailableAtUtc { get; init; }
+    public DateTimeOffset? OutcomeCollectedAtUtc { get; init; }
+    public string? EffectiveAccountKey { get; init; }
+    public QuotaAccountAttribution Attribution { get; init; }
+    public string? AccountAssociationId { get; init; }
     public double ObservedDelta => EndUsed - StartUsed;
     public double IntervalLoss(double prediction) => Math.Max(0, Math.Max(LowerDelta - prediction, prediction - UpperDelta));
 }

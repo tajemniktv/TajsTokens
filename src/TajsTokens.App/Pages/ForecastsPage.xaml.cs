@@ -251,6 +251,7 @@ public sealed partial class ForecastsPage : Page
                 EvaluationMethodText.Text += $"\n\n{cost.Version}: {cost.Methodology}\n" +
                     string.Join(" · ", cost.QualityCounts.Select(x => $"{x.Key}: {x.Value:N0}"));
             if (report.ComposedQuota is { } composed) EvaluationMethodText.Text += "\n\n" + composed.Methodology;
+            if (report.ComposedQuotaStrict is { } strict) EvaluationMethodText.Text += "\n\n" + strict.Methodology;
             if (report.QuotaTransfer is { } transfer) EvaluationMethodText.Text += "\n\n" + transfer.Methodology +
                 (transfer.Scores.Count == 0 ? " No compatible recorded-account regimes in this range; transfer and TT remain unsupported." : "");
             _evaluationRows = report.Scores.Select(score => new EvaluationRow(
@@ -282,14 +283,16 @@ public sealed partial class ForecastsPage : Page
                     $"{score.CandidateShiftResets.Count} candidate residual shifts; no automatic alerts or retraining. " +
                     (score.BandSamples > 0 ? $"Band/target intersection {score.BandIntersectsTargetRate:P0} on {score.BandSamples} intervals; not latent coverage. " : "Insufficient generations for bands. ") +
                     "Frozen coefficients: " + string.Join("; ", score.Coefficients.Select(x => $"{x.Key}={x.Value:0.####}")))))
-                .Concat((report.ComposedQuota?.Scores ?? []).Select(score => new EvaluationRow(
-                    $"End-to-end quota forecast · {FormatKind(score.Cohort.Kind)} · {Horizon(score.HorizonHours)} · {score.Cohort.Source} · {QuotaAccountScope.Describe(score.Cohort.AccountKey)} · {QuotaHistoryPolicy.DescribeCohort(score.Cohort)}",
+                .Concat((report.ComposedQuota?.Scores ?? []).Concat(report.ComposedQuotaStrict?.Scores ?? []).Select(score => new EvaluationRow(
+                    $"End-to-end quota forecast · {score.Availability} · {FormatKind(score.Cohort.Kind)} · {Horizon(score.HorizonHours)} · {score.Cohort.Source} · {QuotaAccountScope.Describe(score.Cohort.AccountKey)} · {QuotaHistoryPolicy.DescribeCohort(score.Cohort)}",
                     score.CostModel,
                     score.HeldOutIntervals == 0 ? "Insufficient chronological history" :
                         $"Forecast interval loss {score.IntervalLoss:0.###}pp · {score.HeldOutIntervals} held-out intervals / {score.ResetGenerations} resets",
                     $"Actual-work cost loss {score.CostOnlyIntervalLoss:0.###}pp versus forecast loss {score.IntervalLoss:0.###}pp. " +
                     $"Pace {score.PaceIntervalLoss:0.###}pp; incumbent policy {score.IncumbentIntervalLoss:0.###}pp; displayed-delta MAE {score.DisplayedDeltaMae:0.###}pp. " +
-                    $"{score.MissingComposition} intervals withheld for missing/stale composition. {report.ComposedQuota!.Methodology}")))
+                    $"Training: {score.AssertedTrainingIntervals} user-asserted intervals; remaining training and all validation are native cohort evidence. " +
+                    $"{score.MissingComposition} intervals withheld for missing/stale composition or unavailable training/meters. " +
+                    (score.Availability == ForecastReplayAvailability.CollectedByOrigin ? report.ComposedQuotaStrict!.Methodology : report.ComposedQuota!.Methodology))))
                 .Concat((report.QuotaTransfer?.Scores ?? []).Select(score => new EvaluationRow(
                     $"Regime transfer research · {Horizon(score.HorizonHours)} · {score.Source.Source} · {QuotaHistoryPolicy.DescribeCohort(score.Source)} → {QuotaHistoryPolicy.DescribeCohort(score.Destination)}",
                     score.Model,

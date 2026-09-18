@@ -95,6 +95,7 @@ public sealed class RuntimeSettingsStore
         return settings with
         {
             SchemaVersion = RuntimeSettings.CurrentSchemaVersion,
+            RolloutAccountAssociations = (settings.RolloutAccountAssociations ?? []).Where(x => x is not null && x.IsValid).Distinct().ToArray(),
             PollIntervalSeconds = Math.Clamp(settings.PollIntervalSeconds, 15, 3600),
             LowQuotaThresholds = RuntimeSettings.NormalizeLowQuotaThresholds(settings.LowQuotaThresholds),
             CodexCliCommand = string.IsNullOrWhiteSpace(settings.CodexCliCommand)

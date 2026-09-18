@@ -20,6 +20,23 @@ public sealed class ComposedQuotaPolicyTests
         var score = new ComposedQuotaScore(cohort, 0.5, "total", 20, 16, 8, 0, 0.1, 0.1, 1, 0.1, trials)
         { IncumbentIntervalLoss = 1 };
         Assert.True(ComposedQuotaPolicy.SupportsSelection(score, now));
+        Assert.False(ComposedQuotaPolicy.SupportsStrictSelection(score, now));
+        var strict = score with
+        {
+            Availability = ForecastReplayAvailability.CollectedByOrigin,
+            Trials = trials.Select(x => x with
+            {
+                Availability = ForecastReplayAvailability.CollectedByOrigin,
+                Workload = x.Workload with { Availability = ForecastReplayAvailability.CollectedByOrigin }
+            }).ToArray()
+        };
+        Assert.True(ComposedQuotaPolicy.SupportsStrictSelection(strict, now));
+        Assert.False(ComposedQuotaPolicy.SupportsStrictSelection(strict with
+        {
+            Trials = strict.Trials.Select(x => x.ResetUtc == now ? x with { IntervalLoss = 1.1 } : x).ToArray()
+        }, now));
+        Assert.False(ComposedQuotaPolicy.SupportsStrictSelection(strict with { AssertedTrainingIntervals = 10 }, now));
+        Assert.False(ComposedQuotaPolicy.SupportsStrictSelection(strict with { Trials = trials }, now));
         Assert.False(ComposedQuotaPolicy.SupportsSelection(score, now.AddDays(1)));
         Assert.False(ComposedQuotaPolicy.SupportsSelection(score with
         { Trials = trials.Select(x => x with { ResetUtc = now }).ToArray() }, now));

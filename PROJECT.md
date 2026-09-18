@@ -117,6 +117,34 @@ The user confirmed on 2026-09-18 that all retained JSONL rollouts belong to thei
 inventing native account IDs or pooling repeated session/source readings. Default diagnostics
 say "native account ID absent", not that the rollouts belong to another account.
 
+**Ownership and promotion hardening:** runtime settings schema 4 separately persists explicit,
+revocable account associations, bounded by source identity, session and event-time range.
+Settings → Historical rollout ownership asks the user to select a recorded account and confirm;
+it never rewrites native `AccountKey`. Overlapping contradictory assertions fail closed.
+Compatible asserted intervals may supplement the frozen native training set (at most 120,
+deduplicated by interval overlap, strictly preceding native training). Plan, bucket, window,
+provider, profile and asserted account must match; unknown plan/bucket cannot bridge cohorts.
+Assertions never supply validation targets or provider-verified attribution. The annotation-only
+`--cost-owned-rollouts` flag does not create an association.
+
+Live composed promotion now requires both reconstructed-event-time and strict `CollectedByOrigin`
+paired wins. Strict evaluation requires all frozen training inputs, including any assertion,
+available by each origin, a collected origin meter and an outcome collected within five minutes
+of its event. Missing collection time fails closed. The last two validation generations must
+not contradict the overall advantage over incumbent and pace. Native candidates require at
+least 16 strict targets across eight reset generations; asserted-history candidates require 32
+across twelve, plus a native-target cost advantage over native-only total-token training.
+Empirical ranges use completed strict-validation generations. A later historical import or
+ownership assertion cannot retroactively qualify earlier origins. Live native reads retain a
+bounded 120-day lookback so these weekly-generation gates are achievable; existing row limits
+and incumbent fallback remain in effect.
+
+Review validation (2026-09-18): 360 Core tests passed; Windows Debug build passed without
+warnings/errors and installed/restarted daily build `20260918T101858499Z-3b94f55e`.
+Read-only retained-data backtests yielded 26 reconstructed half-hour outcomes across two
+resets, versus five strict outcomes across one reset. No candidate can promote. Ownership
+associations were not auto-created; the user selects the recorded target explicitly in Settings.
+
 Initial read-only retained-data evaluation found 316 usable targets, mostly session-separated
 rollout cohorts without native account IDs. The app-server weekly half-hour cohort supplied 20 training
 and 28 held-out targets spanning only two held-out reset generations. Interval loss was

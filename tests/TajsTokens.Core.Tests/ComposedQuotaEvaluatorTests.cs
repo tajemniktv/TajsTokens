@@ -6,6 +6,39 @@ namespace TajsTokens.Core.Tests;
 
 public sealed class ComposedQuotaEvaluatorTests
 {
+    internal static CodexForecastDataset TimelyData()
+    {
+        var start = DateTimeOffset.Parse("2026-09-01T00:00:00Z");
+        return new(Enumerable.Range(0, 65).Select(i => new QuotaSnapshot(QuotaWindowKind.Weekly,
+            start.AddMinutes(i * 15), i, 10080, start.AddDays(7), "codex", "default", "codex-app-server:codex", "account")
+            { HasSourceTimestamp = true, CollectedAtUtc = start.AddMinutes(i * 15), PlanType = "pro", LimitId = "codex" }).ToArray(),
+            [], Enumerable.Range(0, 65).Select(i => new CodexPredictiveTokenEvent("s", start.AddMinutes(i * 15),
+                start.AddMinutes(i * 15), "m", "high", 10000, 0, 0, 0, 0, 10000)).ToArray(), [], start.AddDays(1), "fixture");
+    }
+
+    [Fact]
+    public void StrictEvaluationRequiresTrainingAvailableAtOriginAndTimelyMeters()
+    {
+        var data = TimelyData();
+        var strict = ComposedQuotaEvaluator.Evaluate(data, availability: ForecastReplayAvailability.CollectedByOrigin);
+        var trials = strict.Scores.Single(x => x.HorizonHours == 0.5 && x.CostModel == "total").Trials;
+        Assert.NotEmpty(trials);
+        Assert.All(trials, x =>
+        {
+            Assert.Equal(ForecastReplayAvailability.CollectedByOrigin, x.Availability);
+            Assert.Equal(ForecastReplayAvailability.CollectedByOrigin, x.Workload.Availability);
+        });
+        var delayedTraining = data with { Tokens = data.Tokens.Select((x, i) => i < 40 ? x with { CapturedAtUtc = data.CapturedAtUtc } : x).ToArray() };
+        var unknownTraining = data with { Tokens = data.Tokens.Select((x, i) => i == 2 ? x with { CapturedAtUtc = null } : x).ToArray() };
+        var delayedMeters = data with { Quota = data.Quota.Select(x => x with { CollectedAtUtc = data.CapturedAtUtc }).ToArray() };
+        foreach (var unavailable in new[] { delayedTraining, unknownTraining, delayedMeters })
+        {
+            Assert.NotEmpty(ComposedQuotaEvaluator.Evaluate(unavailable).Scores.Single(x => x.HorizonHours == 0.5 && x.CostModel == "total").Trials);
+            Assert.Empty(ComposedQuotaEvaluator.Evaluate(unavailable, availability: ForecastReplayAvailability.CollectedByOrigin)
+                .Scores.Single(x => x.HorizonHours == 0.5 && x.CostModel == "total").Trials);
+        }
+    }
+
     [Fact]
     public void ForecastAndCostOnlyErrorsAreSeparateAndFutureWorkCannotChangePrediction()
     {

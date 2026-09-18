@@ -24,6 +24,45 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task AssociationsPersistSeparatelyAndOnlyWidenMatchingAccountReads()
+    {
+        var repository = new SqliteTelemetryRepository(Database);
+        await repository.InitializeAsync(default);
+        using var observatory = new SqliteCodexObservatoryStore(Database);
+        await observatory.InitializeAsync(default);
+        await observatory.UpsertRolloutFileAsync("generation", Path.Combine(_directory, "rollout.jsonl"), "session", 100, Start, default);
+        var embedded = Point("asserted", 12);
+        await repository.UpsertQuotaSnapshotAsync(embedded, default);
+        await repository.UpsertQuotaSnapshotAsync(embedded with { Source = "codex-app-server:codex", AccountKey = "known",
+            ObservationId = null, SourceIdentity = null, SessionId = null }, default);
+        var association = new RolloutAccountAssociation("assertion", "codex", "default", "generation", "session", Start, Start, "known", Start);
+        var path = Path.Combine(_directory, "settings.json");
+        await File.WriteAllTextAsync(path, "{\"SchemaVersion\":3,\"PollIntervalSeconds\":120}");
+        var store = new RuntimeSettingsStore(path);
+        var previous = store.Load();
+        Assert.Empty(previous.RolloutAccountAssociations);
+        store.Save(previous with { RolloutAccountAssociations = [association] });
+        var saved = store.Load();
+        Assert.Equal(RuntimeSettings.CurrentSchemaVersion, saved.SchemaVersion);
+        Assert.Equal(120, saved.PollIntervalSeconds);
+        Assert.Equal(association, Assert.Single(saved.RolloutAccountAssociations));
+        var original = await new SqliteForecastDatasetReader(Database).ReadAsync("codex", "default", Start.AddHours(-1), Start.AddHours(1), default, "known");
+        Assert.Single(original.Quota);
+        var associated = await new SqliteForecastDatasetReader(Database, saved.RolloutAccountAssociations)
+            .ReadAsync("codex", "default", Start.AddHours(-1), Start.AddHours(1), default, "known");
+        Assert.Equal(2, associated.Quota.Count);
+        Assert.Null(associated.Quota.Single(x => x.ObservationId == "asserted").AccountKey);
+        var unrelated = await new SqliteForecastDatasetReader(Database, saved.RolloutAccountAssociations)
+            .ReadAsync("codex", "default", Start.AddHours(-1), Start.AddHours(1), default, "other");
+        Assert.Empty(unrelated.Quota);
+        store.Save(saved with { RolloutAccountAssociations = [] });
+        var revoked = store.Load();
+        Assert.Empty(revoked.RolloutAccountAssociations);
+        Assert.Equal(120, revoked.PollIntervalSeconds);
+        Assert.Equal(2L, await Scalar("SELECT COUNT(*) FROM quota_snapshots;"));
+    }
+
+    [Fact]
     public async Task ReaderBoundsInactiveLifetimeMetadataButKeepsActiveSessionPrefix()
     {
         using var store = new SqliteCodexObservatoryStore(Database);

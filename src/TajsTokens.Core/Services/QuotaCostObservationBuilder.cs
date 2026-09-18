@@ -63,12 +63,34 @@ public static class QuotaCostObservationBuilder
                 var lower = Math.Max(0, Math.Max(0, end.UsedPercent!.Value - halfWidth) - Math.Min(100, start.UsedPercent!.Value + halfWidth));
                 var upper = Math.Max(0, Math.Min(100, end.UsedPercent.Value + halfWidth) - Math.Max(0, start.UsedPercent.Value - halfWidth));
                 var prefix = epoch.Take(i + 1).ToArray();
+                var association = RolloutAccountAssociationPolicy.Resolve(start, data.AccountAssociations, data.CapturedAtUtc);
+                if (association is not null && association.Id != RolloutAccountAssociationPolicy.Resolve(end, data.AccountAssociations, data.CapturedAtUtc)?.Id)
+                    association = null;
+                if (association is not null) flags.Add("user-asserted-account-association");
+                // Availability includes every retained source family used by the cost features,
+                // including old session metadata. Missing capture times are unknown, not event time.
+                DateTimeOffset?[] collected = epoch.Take(i + 1).Append(end).Select(x => x.CollectedAtUtc)
+                    .Concat(tokens.Select(x => x.CapturedAtUtc))
+                    .Concat(data.Workload.Where(x => x.ObservedAtUtc <= end.CapturedAtUtc).Select(x => (DateTimeOffset?)x.CapturedAtUtc))
+                    .Concat(data.Context.Where(x => x.ObservedAtUtc > start.CapturedAtUtc && x.ObservedAtUtc <= end.CapturedAtUtc).Select(x => x.CapturedAtUtc)).ToArray();
+                if (association is not null) collected = collected.Append((DateTimeOffset?)association.AssertedAtUtc).ToArray();
                 result.Add(new(stream.Key, epoch[0].CapturedAtUtc, epoch[0].ResetsAtUtc!.Value,
                     start.CapturedAtUtc, end.CapturedAtUtc, horizon, start.UsedPercent.Value, end.UsedPercent.Value,
                     lower, upper, rounded ? "app-server-rounding-envelope" : "unknown-precision-1pp-endpoint-sensitivity",
                     start.RemainingPercent!.Value - QuotaPaceModels.ProjectRemaining(prefix, "legacy-ewma", hours),
                     categories, features, runtime.Length > 0 ? runtime.Average(x => (double)x.TimeToFirstTokenMilliseconds!.Value) : null,
-                    runtime.Length, flags));
+                    runtime.Length, flags)
+                {
+                    EvidenceAvailableAtUtc = collected.All(x => x is not null) ? collected.Max() : null,
+                    OriginCollectedAtUtc = start.CollectedAtUtc,
+                    OriginEvidenceAvailableAtUtc = prefix.All(x => x.CollectedAtUtc is not null)
+                        ? prefix.Max(x => x.CollectedAtUtc) : null,
+                    OutcomeCollectedAtUtc = end.CollectedAtUtc,
+                    EffectiveAccountKey = stream.Key.AccountKey ?? association?.AccountKey,
+                    Attribution = stream.Key.AccountKey is not null ? QuotaAccountAttribution.ProviderVerified :
+                        association is not null ? QuotaAccountAttribution.UserAsserted : QuotaAccountAttribution.Unattributed,
+                    AccountAssociationId = association?.Id
+                });
             }
         }
         return result;

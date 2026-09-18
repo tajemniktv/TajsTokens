@@ -55,7 +55,7 @@ public sealed class AppServices
         CodexObservatory = observatory.Service;
         CodexRolloutInspection = observatory.RolloutInspection;
 
-        Intelligence = new SqliteIntelligenceService(DatabasePath, Repository);
+        Intelligence = new SqliteIntelligenceService(DatabasePath, Repository, () => Settings.RolloutAccountAssociations);
         Telemetry = new TelemetryCoordinator(
             CodexTokenAccountingProvider,
             CodexQuotaProvider,
@@ -88,6 +88,14 @@ public sealed class AppServices
     public ICodexObservatoryService CodexObservatory { get; }
     public ICodexRolloutInspection CodexRolloutInspection { get; }
     public IIntelligenceService Intelligence { get; }
+    public async Task<RolloutAccountAssociation[]> PrepareRolloutAccountAssociationsAsync(string accountKey,
+        CancellationToken cancellationToken)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var data = await new SqliteForecastDatasetReader(DatabasePath).ReadAsync("codex", "default",
+            DateTimeOffset.UnixEpoch.AddDays(1), now, cancellationToken);
+        return RolloutAccountAssociationPolicy.Create(data, accountKey, now).ToArray();
+    }
     public TelemetryCoordinator Telemetry { get; }
     public QuotaAlertEngine AlertEngine { get; }
     public Exception? StartupPersistenceError { get; }

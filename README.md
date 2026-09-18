@@ -24,6 +24,9 @@ outlooks and usage predictions—with freshness and uncertainty kept visible.
   quota drops separately from reset-time shifts. Account readings are the default; rollout
   observations remain separate diagnostics, with explicit observation times and detailed deadlines.
 - **Diagnostics:** check source health, collection coverage and why a forecast is unavailable.
+- **Historical rollout ownership:** explicitly associate retained histories with a recorded account
+  in Settings, or revoke the association. User assertions remain separate from native account IDs;
+  live learning still requires independently collected validation evidence.
 - **Data Explorer:** inspect Codex SQLite data read-only and compare selected sources.
 - **Codex CLI Harness:** explicitly run a configured local CLI and inspect its output.
 

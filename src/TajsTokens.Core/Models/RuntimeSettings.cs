@@ -6,7 +6,8 @@ public sealed record RuntimeSettings
 {
     private static readonly int[] s_defaultThresholdValues = [30, 20, 10, 5];
 
-    public const int CurrentSchemaVersion = 3;
+    public const int CurrentSchemaVersion = 4;
+    public RolloutAccountAssociation[] RolloutAccountAssociations { get; init; } = [];
     public static IReadOnlyList<int> DefaultLowQuotaThresholds { get; } = Array.AsReadOnly(s_defaultThresholdValues);
 
     public int SchemaVersion { get; init; } = CurrentSchemaVersion;

@@ -18,7 +18,10 @@ public sealed record CodexForecastDataset(
     IReadOnlyList<CodexPredictiveTokenEvent> Tokens,
     IReadOnlyList<CodexContextObservation> Context,
     DateTimeOffset CapturedAtUtc,
-    string Coverage);
+    string Coverage)
+{
+    public IReadOnlyList<RolloutAccountAssociation> AccountAssociations { get; init; } = [];
+}
 
 /// <summary>Derived features known at one origin, not durable source observations.</summary>
 public sealed record CodexForecastFeatures(

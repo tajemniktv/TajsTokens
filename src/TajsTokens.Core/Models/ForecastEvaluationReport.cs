@@ -24,5 +24,6 @@ public sealed record ForecastEvaluationReport(
     public int HistoricalQuotaObservations { get; init; }
     public QuotaCostReport? QuotaCost { get; init; }
     public ComposedQuotaEvaluation? ComposedQuota { get; init; }
+    public ComposedQuotaEvaluation? ComposedQuotaStrict { get; init; }
     public QuotaTransferEvaluation? QuotaTransfer { get; init; }
 }

@@ -71,6 +71,7 @@ public static class QuotaForecastEvaluation
             HistoricalQuotaObservations = history.Count(x => x.Eligible),
             QuotaCost = QuotaCostEvaluation.Evaluate(data, cancellationToken),
             ComposedQuota = ComposedQuotaEvaluator.Evaluate(data, cancellationToken),
+            ComposedQuotaStrict = ComposedQuotaEvaluator.Evaluate(data, cancellationToken, ForecastReplayAvailability.CollectedByOrigin),
             QuotaTransfer = QuotaTransferEvaluator.Evaluate(data, cancellationToken)
         };
     }
