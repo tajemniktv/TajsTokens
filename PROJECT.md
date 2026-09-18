@@ -71,6 +71,71 @@ work are in [Current work](#current-work); dated audits below describe captured 
 
 ## Current work
 
+### Quota-cost calibration experiment (2026-09-18)
+
+Implemented the evaluation-first scope agreed in `.codex/ROADMAP.md`; this section remains
+the product authority. `QuotaCostObservationBuilder` derives non-overlapping 30-minute and
+two-hour targets over the existing read-only `SqliteForecastDatasetReader`. Targets use
+actual `(start, end]` workload, retain full quota cohorts and reset boundaries, and exclude
+cached rollout repeats, invalid/conflicting crossings and saturation. Intervening incompatible
+cohort observations prevent A/B/A metadata from being bridged. Sources/horizons can overlap
+and their counts must not be summed as independent account evidence.
+
+`QuotaCostEvaluation` compares persistence, incumbent pace, total tokens, nonnegative
+category weights, category/model/effort weights, and separate context/activity/TTFT/UTC-week
+ablations. The first 20 matured disjoint intervals freeze fitting, vocabulary and scaling;
+later targets cannot retrain away a residual shift. Regularization is fixed in the versioned
+policy, not tuned on held-out outcomes. No intercept assigns account movement to elapsed time;
+optional covariates interact with recorded workload. Missing context/runtime and account
+attribution remain explicit. Native generation throughput is not inferred from unmatched
+aggregate output and wall-time observations; that covariate remains unsupported.
+
+Training minimizes squared distance to a meter envelope plus ridge penalty. App-server integer
+readings use corroborated half-point endpoint rounding envelopes; this is not a guarantee of
+backend precision or accounting lag. Fractional/embedded readings retain their numeric values
+and use an explicitly unverified one-point-per-endpoint sensitivity allowance, not an inferred
+provider step. Those sensitivity cohorts cannot earn a material-win label. Equal readings
+never become exact-zero targets. Saturation needs one-sided censoring and is withheld for now.
+
+Forecasts → Model evaluation now includes separately labelled **Cost calibration (actual work,
+not forecast)** groups, frozen coefficients, interval loss, displayed-delta MAE, generation
+counts, residual quantiles and unexplained positive movement. Read-only CLI `--cost` provides
+aggregate comparisons without raw account/session identifiers. Derived reports are versioned
+and rebuilt, not new durable source tables. Optional bands need eight earlier completed
+held-out generations; reported intersection with target envelopes is not latent coverage or a
+probability. Candidate shifts require two same-direction shifted generations against a frozen
+three-generation reference; they generate no notifications and do not rewrite regime history.
+
+A cost-only win needs at least 16 held-out targets in three reset generations, known account,
+supported precision, and a material generation-average advantage over pace/total and the
+candidate's simpler parent. It must also win on most generations. That is a diagnostic gate,
+not production selection. Actual workload inputs make these errors fundamentally different
+from end-to-end forecast errors; existing live quota prediction is unchanged.
+
+The user confirmed on 2026-09-18 that all retained JSONL rollouts belong to their account.
+`--cost-owned-rollouts` records that explicit user assertion in evaluation provenance without
+inventing native account IDs or pooling repeated session/source readings. Default diagnostics
+say "native account ID absent", not that the rollouts belong to another account.
+
+Initial read-only retained-data evaluation found 316 usable targets, mostly session-separated
+rollout cohorts without native account IDs. The app-server weekly half-hour cohort supplied 20 training
+and 28 held-out targets spanning only two held-out reset generations. Interval loss was
+1.308pp for pace, 0.310pp for total tokens, 0.258pp for model/effort and 0.120pp for the context
+ablation. No candidate earned promotion or calibrated bands. This is a dated local snapshot,
+not universal cost weights or a provider-load finding.
+
+Validation: all 349 Core tests passed, including eight targeted calibration regressions for
+alignment, censoring, reset/cohort isolation, ownership provenance, leakage, sparse data and
+replicated shifts. Final read-only snapshot at 2026-09-18 09:17 UTC contained 318 targets;
+growth reflects ongoing normal collection. Windows Debug build passed with zero warnings/errors
+and dogfooded/restarted build `20260918T091810528Z-85fd9411`. App startup was acknowledged;
+the new evaluation view has build proof, not a completed native visual acceptance pass.
+
+**Conditional next work:** once independent active-regime history passes the cost gate, evaluate
+predicted workload composition → cost → quota end to end before changing live outlooks.
+Cross-regime transfer/TT remains evidence-gated research, not a shipped unit. No active prompts,
+automatic messages, external uploads, crowdsourcing, pricing or hidden-runtime probes were added.
+
 ### Reset identity and review hardening (2026-09-18)
 
 Quota burn's reset history defaults to account-meter quota drops. Reset-time shifts have a
@@ -170,7 +235,7 @@ dated audits elsewhere in this document are evidence, not a queue to rerun.
 | Collection and coverage | `CodexSessionIngestionService`, `CodexRolloutParser`, observatory/semantic stores: incremental content-free evidence, native identity, replay/checkpoints and historical effort repair. `CodexStateCatalog` accelerates acquisition; `CodexRolloutComparisonReader` inspects alternate files without importing or deleting them. |
 | Native work and accounting | `ICodexThreadReadModel`, `CodexThreadObservabilityService`, `CodexThreadReadModelPolicy`: workspace/root/subagent navigation, source alternatives and bounded local detail. Native rollout accounting is the default; optional Tokscale comparison/fallback remains explicit. |
 | Usage prediction | `TokenWorkloadPredictionService`: retrospective rollout-trained token predictions, no quota-row/account dependency; current Overview/Forecasts display and evaluation. |
-| Quota intelligence | `QuotaHistoryPolicy`, `SqliteIntelligenceService`, `SqliteForecastDatasetReader`, Core quota/scenario services: provenance-aware rollout/app-server history, explainable eligibility, burn history, saved/current outlooks and source-isolated backtests. Current anchors remain fresh/account-scoped. Inferred regime detection and cross-cohort calibration transfer are not implemented. |
+| Quota intelligence | `QuotaHistoryPolicy`, `SqliteIntelligenceService`, `SqliteForecastDatasetReader`, Core quota/scenario services: provenance-aware rollout/app-server history, explainable eligibility, burn history, saved/current outlooks and source-isolated backtests. Current anchors remain fresh/account-scoped. Cost/residual-shift diagnostics were added on 2026-09-18; production regime adaptation and cross-cohort calibration transfer are not implemented. |
 | Diagnostics and operation | `TelemetryDiagnosticsPresenter` / `DiagnosticsPage` reuse shared collection health and bounded events. `SqliteTelemetryRepository`, `AppDataLocation`, `RuntimeSettingsStore` and `tools/dogfood` own data, settings, upgrades and recovery. |
 
 Last implementation milestone (2026-09-09): **313 Core tests passed** in 48 seconds; Windows Debug

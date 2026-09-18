@@ -20,6 +20,25 @@ This is the current implementation layout. Product and source semantics are defi
 
 ## Build
 
+### Read-only quota-cost evaluation
+
+```powershell
+dotnet run --project tools/TajsTokens.ForecastEvaluation -- --cost "$env:LOCALAPPDATA/Programs/TajemnikTV/TajsTokens/data/telemetry.db"
+```
+
+This reads the retained database in one transaction and prints aggregate, cohort-separated
+cost diagnostics. It does not migrate/replay sources, change live predictions, or deploy the
+app. For private output, redirect to `.codex/temp/`. The snapshot time and policy version are
+printed. Use `--cost-owned-rollouts` instead of `--cost` only when the user explicitly confirms
+all retained rollouts belong to their account; this records the assertion without rewriting
+native IDs or pooling session histories. No credentials or message content are read/exported.
+
+The same cost comparisons appear under Forecasts → Model evaluation, separately labelled
+from quota and token forecasts. Missing precision/coverage and sparse generations are not
+calibration successes. See PROJECT.md for model gates and interpretation.
+
+### Application build
+
 ```powershell
 dotnet restore TajsTokens.slnx
 dotnet build TajsTokens.slnx -c Debug

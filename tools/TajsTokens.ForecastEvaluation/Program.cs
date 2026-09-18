@@ -6,6 +6,21 @@ using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
+if (args.Length == 2 && args[0] is "--cost" or "--cost-owned-rollouts")
+{
+    var data = await new SqliteForecastDatasetReader(args[1]).ReadAsync("codex", "default",
+        DateTimeOffset.UnixEpoch.AddDays(1), DateTimeOffset.UtcNow, CancellationToken.None);
+    var report = QuotaCostEvaluation.Evaluate(data, userConfirmedRolloutOwnership: args[0] == "--cost-owned-rollouts");
+    Console.WriteLine(report.Version + $" (snapshot {report.DatasetCapturedAtUtc:O}): " + report.Methodology);
+    Console.WriteLine(report.Coverage);
+    Console.WriteLine($"observations={report.Observations}; " + string.Join("; ", report.QualityCounts.Select(x => $"{x.Key}={x.Value}")));
+    Console.WriteLine("cohort,source,window,horizon,model,train,train_generations,heldout,heldout_generations,interval_loss,displayed_MAE,generation_loss,residual_p10,residual_median,residual_p90,unexplained_lower,bands,intersection_rate,material_win,shift_candidates,status");
+    var cohorts = report.Scores.Select(x => x.Cohort).Distinct().ToList();
+    foreach (var score in report.Scores)
+        Console.WriteLine(FormattableString.Invariant($"cohort-{cohorts.IndexOf(score.Cohort) + 1},{score.Cohort.Source},{score.Cohort.Kind},{score.HorizonHours},{score.Candidate},{score.TrainingSamples},{score.TrainingGenerations},{score.HeldOutSamples},{score.HeldOutGenerations},{score.IntervalLoss:F4},{score.DisplayedDeltaMae:F4},{score.GenerationMeanIntervalLoss:F4},{score.ResidualP10:F4},{score.ResidualMedian:F4},{score.ResidualP90:F4},{score.UnexplainedPositiveMovement:F4},{score.BandSamples},{score.BandIntersectsTargetRate:F4},{score.MaterialWin},{score.CandidateShiftResets.Count},{score.Status}"));
+    return;
+}
+
 if ((args.Length == 4 && args[0] == "--prepare") || (args.Length == 3 && args[0] == "--backfill"))
 {
     var destination = Path.GetFullPath(args[^1]);

@@ -22,4 +22,5 @@ public sealed record ForecastEvaluationReport(
     public IReadOnlyList<TokenForecastScore> TokenScores { get; init; } = [];
     public string? QuotaHistorySummary { get; init; }
     public int HistoricalQuotaObservations { get; init; }
+    public QuotaCostReport? QuotaCost { get; init; }
 }

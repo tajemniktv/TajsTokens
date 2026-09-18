@@ -244,6 +244,9 @@ public sealed partial class ForecastsPage : Page
             if (!_isLoaded || cancellation.IsCancellationRequested || generation != Volatile.Read(ref _evaluationGeneration)) return;
             EvaluationStatusText.Text = $"Evaluated {from.ToLocalTime():d}–{now.ToLocalTime():d} · {report.Scores.Count:N0} quota comparisons · {report.TokenScores.Count:N0} token comparisons. Select a cohort below; lower error is better within the same target.";
             EvaluationMethodText.Text = $"{report.QuotaHistorySummary} {report.WorkloadObservations:N0} native workload observations · {report.TokensWithEffort:N0}/{report.TokenObservations:N0} token records with effort. {report.Methodology}";
+            if (report.QuotaCost is { } cost)
+                EvaluationMethodText.Text += $"\n\n{cost.Version}: {cost.Methodology}\n" +
+                    string.Join(" · ", cost.QualityCounts.Select(x => $"{x.Key}: {x.Value:N0}"));
             _evaluationRows = report.Scores.Select(score => new EvaluationRow(
                 $"{FormatKind(score.Kind)} · {score.Target} · {score.Source} · {QuotaAccountScope.Describe(score.AccountKey)} · {QuotaHistoryPolicy.DescribeCohort(score.HistoryCohort)} · {score.Availability}",
                 score.Model,
@@ -261,6 +264,18 @@ public sealed partial class ForecastsPage : Page
                     $"Mean error {CompactTokens(score.MeanAbsoluteError)} tokens · {score.Origins:N0} held-out origins",
                     $"MAE {CompactTokens(score.MeanAbsoluteError)} tokens · RMSE {CompactTokens(score.RootMeanSquaredError)} tokens · reconstructed rollout history · {score.WorkloadOrigins} workload-model predictions" +
                     (score.IntervalOrigins > 0 ? $" · band coverage {score.IntervalCoverage:P0} on {score.IntervalOrigins} origins" : ""))))
+                .Concat((report.QuotaCost?.Scores ?? []).Select(score => new EvaluationRow(
+                    $"Cost calibration (actual work, not forecast) · {FormatKind(score.Cohort.Kind)} · {Horizon(score.HorizonHours)} · {score.Cohort.Source} · {QuotaAccountScope.Describe(score.Cohort.AccountKey)} · {QuotaHistoryPolicy.DescribeCohort(score.Cohort)}",
+                    score.Candidate,
+                    score.HeldOutSamples == 0 ? "Insufficient independent history for held-out cost calibration" :
+                        $"Interval loss {score.IntervalLoss:0.###}pp · {score.HeldOutSamples:N0} held-out intervals · {score.HeldOutGenerations} reset generations",
+                    $"{score.Status} · training {score.TrainingSamples} intervals / {score.TrainingGenerations} generations. " +
+                    $"Displayed-delta MAE {score.DisplayedDeltaMae:0.###}pp; generation-average interval loss {score.GenerationMeanIntervalLoss:0.###}pp. " +
+                    $"Residual p10 / median / p90: {score.ResidualP10:0.###} / {score.ResidualMedian:0.###} / {score.ResidualP90:0.###}pp. " +
+                    $"Mean unexplained movement above envelope lower bound: {score.UnexplainedPositiveMovement:0.###}pp. Not causal attribution. " +
+                    $"{score.CandidateShiftResets.Count} candidate residual shifts; no automatic alerts or retraining. " +
+                    (score.BandSamples > 0 ? $"Band/target intersection {score.BandIntersectsTargetRate:P0} on {score.BandSamples} intervals; not latent coverage. " : "Insufficient generations for bands. ") +
+                    "Frozen coefficients: " + string.Join("; ", score.Coefficients.Select(x => $"{x.Key}={x.Value:0.####}")))))
                 .ToArray();
             EvaluationGroup.ItemsSource = _evaluationRows.Select(x => x.Group).Distinct().OrderBy(x => x).ToArray();
             EvaluationGroup.SelectedIndex = _evaluationRows.Count > 0 ? 0 : -1;
