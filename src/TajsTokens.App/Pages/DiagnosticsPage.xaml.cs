@@ -95,6 +95,29 @@ public sealed partial class DiagnosticsPage : Page
     }
 
     private void OnCancelClicked(object sender, RoutedEventArgs e) => _refreshCancellation?.Cancel();
+    private async void OnServerReadClicked(object sender, RoutedEventArgs e) => await ReadServerEvidenceAsync(false);
+    private async void OnServerCollectClicked(object sender, RoutedEventArgs e) => await ReadServerEvidenceAsync(true);
+    private async Task ReadServerEvidenceAsync(bool collect)
+    {
+        if (!ServerReadButton.IsEnabled) return;
+        ServerReadButton.IsEnabled = ServerCollectButton.IsEnabled = false;
+        ServerEvidenceText.Text = collect ? "Fetching bounded, read-only server reports…" : "Comparing retained evidence…";
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+        try
+        {
+            var report = await Task.Run(async () =>
+            {
+                if (collect) await App.Services.ServerEvidence.CollectAsync(true, timeout.Token);
+                return await App.Services.ServerEvidence.CompareAsync(timeout.Token);
+            });
+            if (_loaded) ServerEvidenceText.Text = App.Services.ServerEvidence.Status + "\n\n" + report.ToDisplayText();
+        }
+        catch (Exception)
+        {
+            if (_loaded) ServerEvidenceText.Text = "Comparison unavailable or timed out. Retained evidence was not replaced.";
+        }
+        finally { ServerReadButton.IsEnabled = ServerCollectButton.IsEnabled = true; }
+    }
     private void OnCoverageClicked(object sender, RoutedEventArgs e) => ((App)Application.Current).Navigate(typeof(CodexRolloutCoveragePage));
     private void OnSourcesClicked(object sender, RoutedEventArgs e) => ((App)Application.Current).Navigate(typeof(CodexSourcesPage));
     private void OnSettingsClicked(object sender, RoutedEventArgs e) => ((App)Application.Current).Navigate(typeof(SettingsPage));

@@ -71,6 +71,45 @@ work are in [Current work](#current-work); dated audits below describe captured 
 
 ## Current work
 
+**Provider-native server evidence (2026-09-18):** separate app-server acquisition now retains
+backend account token activity and optional per-thread estimated credits/model-effort-speed
+token groups. Current quota remains the provider-fresh anchor; local rollout accounting is
+unchanged. Owned schema 13 adds immutable content-free fetch observations, typed capability
+states, source contract/client versions and before/after account pseudonym brackets. Usage
+responses have no account ID: stable brackets are explicitly **server-correlated**, not native
+provider verification or permission to rewrite rollout AccountKeys.
+
+The existing collector schedules bounded reads at most every 30 minutes per process, after
+publishing normal telemetry. Diagnostics exposes on-demand fetch, retained capability states,
+lifetime/day/thread comparisons and repeated local event-fingerprint candidates. The local
+probe observed account activity (159 daily buckets), but all six sampled thread estimates were
+unavailable. Plan history and grouped analytics exist in current upstream's authenticated TUI
+backend client, not the installed/upstream app-server protocol. The user explicitly chose to
+keep authentication owned by Codex: those surfaces are **NoSupportedSeam**, not zero or a
+claimed backend 404. No browser, auth-file, credential-export or direct-HTTP path was added.
+
+The explicit single-account assertion has now been saved against a fresh bracketed current
+account for 356 bounded retained source/session ranges, through the existing revocable Settings
+association owner. Native account IDs and collection times remain untouched. No inference from
+numeric similarity creates an association. Native, server-correlated, user-declared and
+unattributed/conflicting evidence remain distinguishable; only the existing assertion training
+path is eligible for research, under its existing stronger promotion gates.
+
+New comparisons found concrete local/server mismatches: on 2026-09-09 two physical local sources
+retain identical event fingerprints and each equals the backend day total. These are exposed
+as duplicate candidates, not automatically removed. A separate ownership-aware reconciliation
+decision is needed before changing historical accounting. No provider credits→allowance mapping
+or new historical quota labels are available yet; TT and forecasting policy remain unchanged.
+Exact contracts, limits, observed results and unavailable work are in
+[Codex server usage evidence](docs/source-notes/CODEX_SERVER_USAGE.md).
+
+Validation: 373 tests passed; Windows Debug build had zero warnings/errors and dogfooded
+`20260918T112251487Z-45eb7aad`. Automatic and explicit persisted acquisition worked against the
+existing database. Re-evaluation retained 262 user-associated historical cost observations;
+native cost validation still spans only two resets, strict composed validation only one.
+Five compatible asserted training intervals have no strict held-out outcomes yet. No model
+earned promotion; no server evidence was inserted into quota labels or model features.
+
 **Product presentation pass (2026-09-18):** Overview puts remaining-quota gauges, status,
 local reset timestamps and conditional outlooks above evidence. Healthy cards no longer carry
 permanent InfoBars; omitted windows become a secondary strip. Startup explicitly says it is

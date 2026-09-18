@@ -156,7 +156,7 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
         await Execute("DROP TABLE quota_snapshots_v10;");
         await repository.InitializeAsync(default);
         await repository.InitializeAsync(default);
-        Assert.Equal(12L, await Scalar("PRAGMA user_version;"));
+        Assert.Equal(13L, await Scalar("PRAGMA user_version;"));
         var row = Assert.Single(await repository.GetRecentQuotaSnapshotsAsync(QuotaWindowKind.FiveHour, "codex", "default", 10, default));
         Assert.Equal(12.375, row.UsedPercent);
         Assert.Null(row.CollectedAtUtc); Assert.Null(row.ObservationId); Assert.Null(row.LimitId);

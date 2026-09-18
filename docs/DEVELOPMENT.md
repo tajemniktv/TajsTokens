@@ -160,3 +160,28 @@ dotnet test tests/TajsTokens.Core.Tests/TajsTokens.Core.Tests.csproj -c Debug
 ```powershell
 dotnet run --project src/TajsTokens.App/TajsTokens.App.csproj -p:DogfoodEnabled=false
 ```
+## Provider-native evidence diagnostics
+
+The evaluation CLI also exposes separate server evidence (no credentials or browser access):
+
+```powershell
+dotnet run --project tools/TajsTokens.ForecastEvaluation -- --server-evidence <telemetry.db>
+dotnet run --project tools/TajsTokens.ForecastEvaluation -- --probe-server-evidence <telemetry.db>
+dotnet run --project tools/TajsTokens.ForecastEvaluation -- --collect-server-evidence <telemetry.db>
+```
+
+The first command reads retained evidence only. The probe makes bounded app-server requests and
+compares them with the database without writing/migrating it. Collection persists the content-free
+reports and may migrate owned schema to 13; use a current application, not an older running binary.
+Optional third argument is an existing settings path to include user-declared association counts.
+Normal application collection uses the same service on a 30-minute in-process backoff.
+
+`--declare-current-rollouts <telemetry.db> <settings.json>` is an explicit ownership action, not a
+read-only diagnostic: after a fresh account bracket, it saves bounded assertions through the existing
+settings owner. Use only when the user has declared those retained histories belong to the current
+account. Preserve the original settings; restart the application to reload an out-of-process change.
+Settings → Historical rollout ownership can revoke assertions. No native account fields are rewritten.
+
+See [source contracts and limitations](source-notes/CODEX_SERVER_USAGE.md). Binary rollback never
+downgrades the database; an older binary may reject schema 13. Preserve the complete data directory
+and use the deployment backup/recovery procedure rather than deleting server evidence tables.

@@ -206,7 +206,7 @@ public sealed class QuotaAccountScopeTests : IDisposable
         Assert.Null(forecast.AccountKey);
         Assert.Equal(2, forecast.Forecast.BurnRatePercentPerHour);
         Assert.Empty(await repository.GetRecentQuotaSnapshotsAsync(QuotaWindowKind.FiveHour, "codex", "default", 10, default, accountKey: "A"));
-        Assert.Equal(12L, await ScalarAsync("PRAGMA user_version"));
+        Assert.Equal(13L, await ScalarAsync("PRAGMA user_version"));
     }
 
     [Fact]
@@ -242,7 +242,7 @@ public sealed class QuotaAccountScopeTests : IDisposable
         Assert.Equal(0L, await ScalarAsync("SELECT COUNT(*) FROM pragma_table_info('quota_snapshots') WHERE name='account_key'"));
         await ExecuteAsync("ALTER TABLE forecast_snapshots ADD COLUMN evaluation_json TEXT;");
         await new SqliteTelemetryRepository(Database).InitializeAsync(default);
-        Assert.Equal(12L, await ScalarAsync("PRAGMA user_version"));
+        Assert.Equal(13L, await ScalarAsync("PRAGMA user_version"));
     }
 
     private async Task CreateVersionEightAsync(bool malformed)

@@ -7,9 +7,9 @@ using TajsTokens.Core.Services;
 
 namespace TajsTokens.Infrastructure.Persistence;
 
-public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryRepository, ISessionIngestionCheckpointStore
+public sealed partial class SqliteTelemetryRepository(string databasePath) : ITelemetryRepository, ISessionIngestionCheckpointStore
 {
-    private const int CurrentSchemaVersion = 12;
+    private const int CurrentSchemaVersion = 13;
     private const int IntelligenceSchemaVersion = 5;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _intelligenceInitializeGate = new(1, 1);
@@ -439,6 +439,25 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
             await ExecuteMigrationAsync(connection, """
                 ALTER TABLE ingestion_checkpoints ADD COLUMN consumed_prefix_sha256 TEXT;
                 PRAGMA user_version = 12;
+                """, cancellationToken);
+        }
+        if (version < 13)
+        {
+            await ExecuteMigrationAsync(connection, """
+                CREATE TABLE IF NOT EXISTS codex_server_evidence (
+                    observation_id TEXT PRIMARY KEY,
+                    surface TEXT NOT NULL,
+                    thread_id TEXT,
+                    correlated_account_key TEXT,
+                    fetch_started_at_utc TEXT NOT NULL,
+                    collected_at_utc TEXT NOT NULL,
+                    contract_version TEXT NOT NULL,
+                    state TEXT NOT NULL,
+                    evidence_json TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_codex_server_evidence_scope
+                    ON codex_server_evidence(surface, correlated_account_key, thread_id, collected_at_utc DESC);
+                PRAGMA user_version = 13;
                 """, cancellationToken);
         }
     }

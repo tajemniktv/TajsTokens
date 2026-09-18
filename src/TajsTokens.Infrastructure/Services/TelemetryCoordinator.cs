@@ -18,6 +18,7 @@ public sealed class TelemetryCoordinator
     private readonly SqliteTelemetryRepository _repository;
     private readonly ICodexObservatoryService? _observatoryService;
     private readonly IIntelligenceService? _intelligenceService;
+    private readonly CodexServerEvidenceService? _serverEvidence;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
     private readonly SemaphoreSlim _intelligenceRefreshGate = new(1, 1);
     private readonly ConcurrentQueue<TelemetryRefreshEvent> _backgroundEvents = new();
@@ -32,13 +33,15 @@ public sealed class TelemetryCoordinator
         ICodexQuotaProvider quotaProvider,
         SqliteTelemetryRepository repository,
         ICodexObservatoryService? observatoryService = null,
-        IIntelligenceService? intelligenceService = null)
+        IIntelligenceService? intelligenceService = null,
+        CodexServerEvidenceService? serverEvidence = null)
     {
         _tokenProvider = tokenProvider;
         _quotaProvider = quotaProvider;
         _repository = repository;
         _observatoryService = observatoryService;
         _intelligenceService = intelligenceService;
+        _serverEvidence = serverEvidence;
     }
 
     public TelemetrySnapshot Latest => Volatile.Read(ref _latest);
@@ -469,6 +472,11 @@ public sealed class TelemetryCoordinator
                 QueueIntelligenceRefresh(cancellationToken);
             }
 
+            // Independent, throttled server evidence cannot delay or replace current quota anchors.
+            // The service coalesces concurrent requests and owns its 30-minute backoff.
+            if (persistenceAvailable && _serverEvidence is not null)
+                _ = CollectServerEvidenceAsync(cancellationToken);
+
             return publishedSnapshot;
         }
         finally
@@ -484,6 +492,12 @@ public sealed class TelemetryCoordinator
 
             _refreshGate.Release();
         }
+    }
+
+    private async Task CollectServerEvidenceAsync(CancellationToken token)
+    {
+        try { await _serverEvidence!.CollectAsync(false, token); }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
     }
 
     public async Task RunPeriodicAsync(TimeSpan interval, CancellationToken cancellationToken)

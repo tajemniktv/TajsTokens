@@ -48,6 +48,8 @@ public sealed class AppServices
             () => Settings.TokscaleReconciliationEnabled,
             () => Settings.TokscaleFallbackEnabled);
         CodexQuotaProvider = new CodexAppServerQuotaProvider();
+        ServerEvidence = new CodexServerEvidenceService(DatabasePath, Repository, new CodexAppServerEvidenceProvider(),
+            () => Settings.RolloutAccountAssociations);
 
         var observatory = CodexObservatoryRuntimeFactory.Create(DatabasePath, Repository);
         ObservatoryStore = observatory.Store;
@@ -61,7 +63,7 @@ public sealed class AppServices
             CodexQuotaProvider,
             Repository,
             CodexObservatory,
-            Intelligence);
+            Intelligence, ServerEvidence);
         AlertEngine = new QuotaAlertEngine(Settings.LowQuotaThresholds);
     }
 
@@ -84,6 +86,7 @@ public sealed class AppServices
     public ICodexTokenAccountingProvider NativeCodexAccountingProvider { get; }
     public ICodexTokenAccountingProvider CodexTokenAccountingProvider { get; }
     public ICodexQuotaProvider CodexQuotaProvider { get; }
+    public CodexServerEvidenceService ServerEvidence { get; }
     public ICodexSessionIngestionService CodexSessionIngestion { get; }
     public ICodexObservatoryService CodexObservatory { get; }
     public ICodexRolloutInspection CodexRolloutInspection { get; }

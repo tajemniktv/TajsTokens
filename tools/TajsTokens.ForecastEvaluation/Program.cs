@@ -6,6 +6,12 @@ using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
+if (args.Length >= 2 && args[0] is "--server-evidence" or "--probe-server-evidence" or "--collect-server-evidence" or "--declare-current-rollouts")
+{
+    await ServerEvidenceCli.RunAsync(args);
+    return;
+}
+
 IReadOnlyList<RolloutAccountAssociation> associations = [];
 if (args.Length == 4 && args[2] == "--settings" && args[0] is "--cost" or "--composed" or "--composed-strict")
 {

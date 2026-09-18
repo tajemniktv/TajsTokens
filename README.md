@@ -25,6 +25,9 @@ outlooks and usage predictions—with freshness and uncertainty kept visible.
   quota drops separately from reset-time shifts. Account readings are the default; rollout
   observations remain separate diagnostics, with explicit observation times and detailed deadlines.
 - **Advanced → Diagnostics / Model lab:** check source health, collection coverage and prediction evidence.
+- **Provider-native account evidence:** Diagnostics compares backend account activity with retained local
+  tokens and reads optional thread credit estimates. Missing estimates remain unavailable; credits are
+  not quota percentages. Experimental plan history is not yet exposed through Codex's supported app-server seam.
 - **Historical rollout ownership:** explicitly associate retained histories with a recorded account
   in Settings, or revoke the association. User assertions remain separate from native account IDs;
   live learning still requires independently collected validation evidence.
