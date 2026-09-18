@@ -9,6 +9,55 @@ namespace TajsTokens.Core.Tests;
 
 public sealed class SqliteCodexIngestionBatchWriterTests
 {
+    [Fact]
+    public async Task ReplacementRetiresDerivedResetsAndRefreshRestoresOnlySurvivingEvidence()
+    {
+        var root = new DirectoryInfo(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "PROJECT.md"))) root = root.Parent;
+        var directory = Directory.CreateDirectory(Path.Combine(root!.FullName, ".codex", "temp", "reset-replacement-" + Guid.NewGuid().ToString("N")));
+        try
+        {
+            var database = Path.Combine(directory.FullName, "telemetry.db");
+            var file = Path.Combine(directory.FullName, "rollout.jsonl");
+            var repository = new SqliteTelemetryRepository(database);
+            await repository.InitializeIntelligenceAsync(default);
+            var store = new SqliteCodexObservatoryStore(database);
+            await store.InitializeAsync(default);
+            var writer = new SqliteCodexIngestionBatchWriter(database, store);
+            var at = DateTimeOffset.Parse("2026-09-01T10:00:00Z");
+            ParsedRolloutRecord Row(string id, string generation, DateTimeOffset time, double used)
+            {
+                var record = BuildRecord(id, file, time, 100, 40, 20, 5, used);
+                return record with { QuotaSnapshots = record.QuotaSnapshots.Select(q => q with
+                {
+                    ObservationId = id, SourceIdentity = generation, SessionId = "session-a",
+                    HasSourceTimestamp = true, ResetsAtUtc = at.AddHours(5)
+                }).ToArray() };
+            }
+            var other = new QuotaSnapshot(QuotaWindowKind.FiveHour, at, 90, 300, at.AddHours(5),
+                "codex", "default", "codex-app-server:codex", "unrelated") { HasSourceTimestamp = true };
+            await repository.UpsertQuotaSnapshotAsync(other, default);
+            await repository.UpsertQuotaSnapshotAsync(other with { CapturedAtUtc = at.AddMinutes(1), UsedPercent = 5 }, default);
+            await writer.WriteBatchAsync("A", file, 256, [Row("a1", "A", at, 90), Row("a2", "A", at.AddMinutes(1), 5)], default);
+            var intelligence = new TajsTokens.Infrastructure.Services.SqliteIntelligenceService(database, repository);
+            await intelligence.RefreshAsync(default);
+            await using var connection = new SqliteConnection($"Data Source={database}");
+            await connection.OpenAsync();
+            Assert.Equal(2, await CountAsync(connection, "quota_reset_events"));
+            await writer.WriteBatchAsync("B", file, 128, [Row("b1", "B", at.AddMinutes(2), 20)], default);
+            // Invalidation commits with retirement, before any intelligence refresh can run.
+            Assert.Equal(0, await CountAsync(connection, "quota_reset_events"));
+            Assert.Equal(3, await CountAsync(connection, "quota_snapshots"));
+            await intelligence.RefreshAsync(default);
+            Assert.Equal(1, await CountAsync(connection, "quota_reset_events"));
+            var owner = connection.CreateCommand();
+            owner.CommandText = "SELECT account_key FROM quota_reset_events;";
+            Assert.Equal("unrelated", await owner.ExecuteScalarAsync());
+            Assert.Equal(0, (await intelligence.RefreshAsync(default)).ResetEventsDetected);
+        }
+        finally { SqliteConnection.ClearAllPools(); directory.Delete(true); }
+    }
+
     [Theory]
     [InlineData("C:/x")]
     [InlineData("C:/same")]

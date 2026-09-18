@@ -3,8 +3,6 @@ using TajsTokens.Core.Models;
 
 namespace TajsTokens.Core.Services;
 
-public sealed record QuotaHistoryCohort(string Provider, string Profile, QuotaWindowKind Kind,
-    string Source, string? AccountKey, string? LimitId, string? PlanType, string? SessionId, int? WindowMinutes);
 public sealed record QuotaHistoryDecision(QuotaSnapshot Observation, QuotaHistoryCohort Cohort,
     bool Eligible, string Reason);
 

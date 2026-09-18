@@ -144,7 +144,7 @@ public sealed record ScenarioHistorySample(
     DateTimeOffset? ResetUtc = null,
     string Source = "",
     string? AccountKey = null,
-    TajsTokens.Core.Services.QuotaHistoryCohort? Cohort = null);
+    QuotaHistoryCohort? Cohort = null);
 
 public sealed record ScenarioWindowEstimate(
     QuotaWindowKind Kind,

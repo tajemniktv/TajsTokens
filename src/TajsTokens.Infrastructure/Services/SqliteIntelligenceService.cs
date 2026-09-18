@@ -21,7 +21,6 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
     private readonly string _databasePath;
     private readonly SqliteTelemetryRepository _telemetryRepository;
     private readonly ForecastingService _forecasting = new();
-    private readonly QuotaResetDetector _resetDetector = new();
     private readonly ScenarioPlannerService _scenarioPlanner = new();
     private readonly Func<string, CancellationToken, Task>? _queryStageObserver;
 
@@ -49,17 +48,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        var groups = await LoadRecentQuotaGroupsAsync(512, cancellationToken);
-        var resetEventsDetected = 0;
-        foreach (var group in groups)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var ordered = group.OrderBy(snapshot => snapshot.CapturedAtUtc).ToArray();
-            foreach (var resetEvent in _resetDetector.Detect(ordered))
-            {
-                resetEventsDetected += await _telemetryRepository.UpsertQuotaResetEventAsync(resetEvent, cancellationToken);
-            }
-        }
+        var resetEventsDetected = await _telemetryRepository.RefreshQuotaResetEventsAsync(cancellationToken);
 
         // Current forecasts are owned by BuildAndPersistCurrentForecastsAsync and anchored to the
         // coordinator's provider-authoritative current lanes. Historical refresh must not recompute
@@ -451,44 +440,6 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
 
     private Task EnsureInitializedAsync(CancellationToken cancellationToken) =>
         _telemetryRepository.InitializeIntelligenceAsync(cancellationToken);
-
-    private async Task<IReadOnlyList<IReadOnlyList<QuotaSnapshot>>> LoadRecentQuotaGroupsAsync(
-        int perGroup,
-        CancellationToken cancellationToken)
-    {
-        await using var connection = new SqliteConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
-        var command = connection.CreateCommand();
-        command.CommandText = """
-            WITH ranked AS (
-                SELECT kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, provider, profile, source, account_key,
-                       observation_id,source_identity,session_id,limit_id,plan_type,lane,collected_at_utc,has_source_timestamp,
-                       ROW_NUMBER() OVER (
-                           PARTITION BY provider, profile, kind, source, account_key, limit_id, plan_type, session_id, window_minutes
-                           ORDER BY captured_at_utc DESC) AS rn
-                FROM quota_snapshots
-                WHERE kind IN ('FiveHour', 'Weekly')
-            )
-            SELECT kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, provider, profile, source, account_key,
-                   observation_id,source_identity,session_id,limit_id,plan_type,lane,collected_at_utc,has_source_timestamp
-            FROM ranked
-            WHERE rn <= $take
-            ORDER BY provider, profile, kind, captured_at_utc;
-            """;
-        command.Parameters.AddWithValue("$take", Math.Clamp(perGroup, 2, 2048));
-
-        var rows = new List<QuotaSnapshot>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            rows.Add(ReadQuotaSnapshot(reader));
-        }
-
-        return rows
-            .GroupBy(QuotaHistoryPolicy.Cohort)
-            .Select(group => (IReadOnlyList<QuotaSnapshot>)CanonicalizeQuotaSnapshots(group).ToArray())
-            .ToArray();
-    }
 
     private static IntelligenceQuery NormalizeQuery(IntelligenceQuery query)
     {

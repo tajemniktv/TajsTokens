@@ -87,6 +87,17 @@ old cache and version remain retryable. The rebuild reads retained quota history
 it is not restricted to the ordinary recent-refresh limit. Old derived events whose inputs are
 no longer retained cannot be reconstructed; deployment backups retain the previous database.
 
+Intelligence component schema 5 extends this to ongoing retirement: deleting retained quota
+evidence invalidates the entire derived reset cache in the same SQLite transaction and persists
+a rebuild marker. Until the next successful refresh the cache is empty, not stale. Refresh
+rebuilds all retained eligible history when marked, restoring unrelated historical events as
+well; ordinary refreshes retain the existing 512-observations-per-stream bound. Evidence reads,
+event writes and clearing the marker share one writer transaction so ingestion cannot race a
+stale refresh into the cache. Failed retirement rolls back invalidation; failed refresh retains
+the marker for retry, including after restart. This deliberately coarse invalidation avoids
+inventing source-generation ownership for events derived from adjacent observations.
+`QuotaHistoryCohort` is a shared model contract under `Core.Models`; policy remains in Services.
+
 Disposable staging deletion failures warn rather than overriding a successful deployment or
 its original failure; cleanup still refuses unsafe paths/reparse points. First-run process
 inspection tolerates processes exiting during enumeration. Read-only rollout comparison rejects

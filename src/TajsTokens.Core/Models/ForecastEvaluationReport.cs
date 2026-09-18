@@ -10,7 +10,7 @@ public sealed record ForecastEvaluationScore(
     int EtaOrigins, double? EtaBracketMeanAbsoluteHours, int FittedOrigins = 0,
     string? AccountKey = null)
 {
-    public TajsTokens.Core.Services.QuotaHistoryCohort? HistoryCohort { get; init; }
+    public QuotaHistoryCohort? HistoryCohort { get; init; }
     public int NonOverlappingOrigins { get; init; }
 }
 

@@ -10,7 +10,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryRepository, ISessionIngestionCheckpointStore
 {
     private const int CurrentSchemaVersion = 12;
-    private const int IntelligenceSchemaVersion = 4;
+    private const int IntelligenceSchemaVersion = 5;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _intelligenceInitializeGate = new(1, 1);
     private volatile bool _intelligenceInitialized;
@@ -525,8 +525,31 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                     """, cancellationToken);
             }
 
-            if (version < 4)
-                await RebuildResetEventsAsync(connection, cancellationToken);
+            if (version < 5)
+            {
+                await ExecuteMigrationAsync(connection, """
+                    CREATE TABLE IF NOT EXISTS quota_reset_cache_state (
+                        singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+                        needs_rebuild INTEGER NOT NULL
+                    );
+                    INSERT INTO quota_reset_cache_state VALUES(1, 1)
+                    ON CONFLICT(singleton) DO UPDATE SET needs_rebuild = 1;
+                    CREATE TRIGGER IF NOT EXISTS invalidate_reset_cache_after_quota_delete
+                    AFTER DELETE ON quota_snapshots
+                    WHEN (SELECT needs_rebuild FROM quota_reset_cache_state WHERE singleton = 1) = 0
+                    BEGIN
+                        DELETE FROM quota_reset_events;
+                        UPDATE quota_reset_cache_state SET needs_rebuild = 1 WHERE singleton = 1;
+                    END;
+                    """, cancellationToken);
+                using var transaction = connection.BeginTransaction();
+                await RefreshResetEventsAsync(connection, transaction, rebuild: true, cancellationToken);
+                var updateVersion = connection.CreateCommand();
+                updateVersion.Transaction = transaction;
+                updateVersion.CommandText = "UPDATE intelligence_schema SET version = 5 WHERE component = 'phase4-intelligence';";
+                await updateVersion.ExecuteNonQueryAsync(cancellationToken);
+                transaction.Commit();
+            }
 
             _intelligenceInitialized = true;
         }
@@ -603,38 +626,67 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
         return existed ? 0 : 1;
     }
 
-    private static async Task RebuildResetEventsAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    public async Task<int> RefreshQuotaResetEventsAsync(CancellationToken cancellationToken)
     {
-        // Recompute all retained evidence, not just the bounded recent refresh. Replacement and
-        // version advancement are atomic, so interruption leaves the old cache retryable.
+        await InitializeIntelligenceAsync(cancellationToken);
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        // IMMEDIATE writer transaction serializes evidence reads and cache writes with ingestion.
+        // A replacement either precedes this refresh or invalidates its output after it commits.
         using var transaction = connection.BeginTransaction();
+        var state = connection.CreateCommand();
+        state.Transaction = transaction;
+        state.CommandText = "SELECT needs_rebuild FROM quota_reset_cache_state WHERE singleton = 1;";
+        var rebuild = Convert.ToInt32(await state.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) != 0;
+        var count = await RefreshResetEventsAsync(connection, transaction, rebuild, cancellationToken);
+        transaction.Commit();
+        return count;
+    }
+
+    private static async Task<int> RefreshResetEventsAsync(SqliteConnection connection, SqliteTransaction transaction,
+        bool rebuild, CancellationToken cancellationToken)
+    {
         var read = connection.CreateCommand();
         read.Transaction = transaction;
-        read.CommandText = """
+        read.CommandText = rebuild ? """
             SELECT kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, provider, profile, source, account_key,
                    observation_id,source_identity,session_id,limit_id,plan_type,lane,collected_at_utc,has_source_timestamp
             FROM quota_snapshots ORDER BY captured_at_utc;
+            """ : """
+            WITH ranked AS (
+                SELECT *, ROW_NUMBER() OVER (
+                    PARTITION BY provider, profile, kind, source, account_key, limit_id, plan_type, session_id, window_minutes
+                    ORDER BY captured_at_utc DESC) AS rn
+                FROM quota_snapshots WHERE kind IN ('FiveHour', 'Weekly')
+            )
+            SELECT kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, provider, profile, source, account_key,
+                   observation_id,source_identity,session_id,limit_id,plan_type,lane,collected_at_utc,has_source_timestamp
+            FROM ranked WHERE rn <= 512 ORDER BY captured_at_utc;
             """;
         var rows = new List<QuotaSnapshot>();
         await using (var reader = await read.ExecuteReaderAsync(cancellationToken))
             while (await reader.ReadAsync(cancellationToken))
                 rows.Add(ReadQuotaSnapshot(reader));
-        var clear = connection.CreateCommand();
-        clear.Transaction = transaction;
-        clear.CommandText = "DELETE FROM quota_reset_events;";
-        await clear.ExecuteNonQueryAsync(cancellationToken);
+        if (rebuild)
+        {
+            var clear = connection.CreateCommand();
+            clear.Transaction = transaction;
+            clear.CommandText = "DELETE FROM quota_reset_events;";
+            await clear.ExecuteNonQueryAsync(cancellationToken);
+        }
         var eligible = QuotaHistoryPolicy.ReplayRows(QuotaHistoryPolicy.Streams(
             QuotaHistoryPolicy.Describe(rows, DateTimeOffset.UtcNow)).SelectMany(x => x));
+        var count = 0;
         foreach (var reset in new QuotaResetDetector().Detect(eligible))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            await WriteQuotaResetEventAsync(connection, transaction, reset, cancellationToken);
+            count += await WriteQuotaResetEventAsync(connection, transaction, reset, cancellationToken);
         }
-        var version = connection.CreateCommand();
-        version.Transaction = transaction;
-        version.CommandText = "UPDATE intelligence_schema SET version = 4 WHERE component = 'phase4-intelligence';";
-        await version.ExecuteNonQueryAsync(cancellationToken);
-        transaction.Commit();
+        var clean = connection.CreateCommand();
+        clean.Transaction = transaction;
+        clean.CommandText = "UPDATE quota_reset_cache_state SET needs_rebuild = 0 WHERE singleton = 1;";
+        await clean.ExecuteNonQueryAsync(cancellationToken);
+        return count;
     }
 
     public Task UpsertQuotaSnapshotAsync(QuotaSnapshot snapshot, CancellationToken cancellationToken) =>

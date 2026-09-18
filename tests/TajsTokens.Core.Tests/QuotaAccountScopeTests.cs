@@ -61,11 +61,44 @@ public sealed class QuotaAccountScopeTests : IDisposable
         Assert.Equal(1L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events WHERE event_id='legacy-event'"));
         await ExecuteAsync("DROP TRIGGER fail_reset_rebuild;");
         await new SqliteTelemetryRepository(Database).InitializeIntelligenceAsync(default);
-        Assert.Equal(4L, await ScalarAsync("SELECT version FROM intelligence_schema"));
+        Assert.Equal(5L, await ScalarAsync("SELECT version FROM intelligence_schema"));
         Assert.Equal(2L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events"));
         Assert.Equal(0L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events WHERE event_id NOT LIKE 'quota-reset-v2-%'"));
         Assert.Equal(524L, await ScalarAsync("SELECT COUNT(*) FROM quota_snapshots"));
         await new SqliteTelemetryRepository(Database).InitializeIntelligenceAsync(default);
+        Assert.Equal(2L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events"));
+    }
+
+    [Fact]
+    public async Task ResetCacheInvalidationRollsBackWithEvidenceAndRebuildFailureRemainsRetryable()
+    {
+        var repository = new SqliteTelemetryRepository(Database);
+        await repository.InitializeIntelligenceAsync(default);
+        var first = Point(Now.AddDays(-10), 90, "keep") with { ResetsAtUtc = Now.AddDays(-9) };
+        await repository.UpsertQuotaSnapshotAsync(first, default);
+        await repository.UpsertQuotaSnapshotAsync(first with { CapturedAtUtc = first.CapturedAtUtc.AddMinutes(1), UsedPercent = 5 }, default);
+        await repository.UpsertQuotaSnapshotAsync(Point(Now, 10, "delete"), default);
+        await repository.RefreshQuotaResetEventsAsync(default);
+        Assert.Equal(1L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events"));
+        await ExecuteAsync("BEGIN; DELETE FROM quota_snapshots WHERE account_key='delete'; ROLLBACK;");
+        Assert.Equal(1L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events"));
+        Assert.Equal(0L, await ScalarAsync("SELECT needs_rebuild FROM quota_reset_cache_state"));
+        // Push the surviving transition outside the bounded ordinary refresh.
+        for (var i = 0; i < 520; i++)
+            await repository.UpsertQuotaSnapshotAsync(Point(Now.AddMinutes(-520 + i), 20, "keep"), default);
+        await ExecuteAsync("DELETE FROM quota_snapshots WHERE account_key='delete'; CREATE TRIGGER fail_refresh BEFORE INSERT ON quota_reset_events BEGIN SELECT RAISE(ABORT, 'fixture failure'); END;");
+        Assert.Equal(0L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events"));
+        await Assert.ThrowsAsync<SqliteException>(() => repository.RefreshQuotaResetEventsAsync(default));
+        Assert.Equal(1L, await ScalarAsync("SELECT needs_rebuild FROM quota_reset_cache_state"));
+        await ExecuteAsync("DROP TRIGGER fail_refresh;");
+        // A new repository simulates restarting after invalidation/failure.
+        repository = new SqliteTelemetryRepository(Database);
+        await repository.RefreshQuotaResetEventsAsync(default);
+        // The old full reset plus the later window re-anchor both survive the full rebuild.
+        Assert.Equal(2L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events"));
+        Assert.Equal(1L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events WHERE classification='FullReset'"));
+        Assert.Equal(0L, await ScalarAsync("SELECT needs_rebuild FROM quota_reset_cache_state"));
+        Assert.Equal(0, await repository.RefreshQuotaResetEventsAsync(default));
         Assert.Equal(2L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events"));
     }
 
