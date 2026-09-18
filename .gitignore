@@ -3,7 +3,7 @@ obj/
 .vs/
 TestResults/
 artifacts/
-.codex/temp/
+.codex/
 *.user
 *.suo
 *.db
