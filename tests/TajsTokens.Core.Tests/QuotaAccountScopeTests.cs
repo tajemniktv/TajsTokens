@@ -106,7 +106,7 @@ public sealed class QuotaAccountScopeTests : IDisposable
     public async Task ObservatoryFirstInitializationMigratesOldQuotaSchema()
     {
         await new SqliteTelemetryRepository(Database).InitializeAsync(default);
-        await ExecuteAsync("DROP TABLE quota_snapshots; DROP TABLE forecast_snapshots; DROP TABLE ingestion_checkpoints;");
+        await ExecuteAsync("DROP TABLE quota_snapshots; DROP TABLE forecast_snapshots; DROP TABLE ingestion_checkpoints; DROP TABLE codex_server_evidence;");
         await CreateVersionEightAsync(false);
         using var store = new SqliteCodexObservatoryStore(Database);
         await store.InitializeAsync(default);
@@ -206,7 +206,7 @@ public sealed class QuotaAccountScopeTests : IDisposable
         Assert.Null(forecast.AccountKey);
         Assert.Equal(2, forecast.Forecast.BurnRatePercentPerHour);
         Assert.Empty(await repository.GetRecentQuotaSnapshotsAsync(QuotaWindowKind.FiveHour, "codex", "default", 10, default, accountKey: "A"));
-        Assert.Equal(13L, await ScalarAsync("PRAGMA user_version"));
+        Assert.Equal(14L, await ScalarAsync("PRAGMA user_version"));
     }
 
     [Fact]
@@ -242,7 +242,7 @@ public sealed class QuotaAccountScopeTests : IDisposable
         Assert.Equal(0L, await ScalarAsync("SELECT COUNT(*) FROM pragma_table_info('quota_snapshots') WHERE name='account_key'"));
         await ExecuteAsync("ALTER TABLE forecast_snapshots ADD COLUMN evaluation_json TEXT;");
         await new SqliteTelemetryRepository(Database).InitializeAsync(default);
-        Assert.Equal(13L, await ScalarAsync("PRAGMA user_version"));
+        Assert.Equal(14L, await ScalarAsync("PRAGMA user_version"));
     }
 
     private async Task CreateVersionEightAsync(bool malformed)

@@ -18,14 +18,14 @@ public sealed partial class SqliteTelemetryRepository
         {
             if (row.ContractVersion != CodexServerEvidenceParser.Contract || row.FetchStartedAtUtc > row.CollectedAtUtc)
                 throw new ArgumentException("Invalid server evidence provenance.");
-            var json = JsonSerializer.Serialize(row);
-            if (json.Length > 2 * 1024 * 1024) throw new ArgumentException("Evidence exceeds storage bound.");
+            if (JsonSerializer.Serialize(row).Length > 2 * 1024 * 1024) throw new ArgumentException("Evidence exceeds storage bound.");
+            var (json, setId) = await CodexServerEvidenceStorage.PackAsync(connection, transaction, row, token);
             using var command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = """
                 INSERT INTO codex_server_evidence(observation_id,surface,thread_id,correlated_account_key,
-                    fetch_started_at_utc,collected_at_utc,contract_version,state,evidence_json)
-                VALUES($id,$surface,$thread,$account,$started,$collected,$contract,$state,$json)
+                    fetch_started_at_utc,collected_at_utc,contract_version,state,evidence_json,activity_bucket_set_id)
+                VALUES($id,$surface,$thread,$account,$started,$collected,$contract,$state,$json,$set)
                 ON CONFLICT(observation_id) DO NOTHING;
                 """;
             command.Parameters.AddWithValue("$id", row.Id);
@@ -37,11 +37,16 @@ public sealed partial class SqliteTelemetryRepository
             command.Parameters.AddWithValue("$contract", row.ContractVersion);
             command.Parameters.AddWithValue("$state", row.State.ToString());
             command.Parameters.AddWithValue("$json", json);
+            command.Parameters.AddWithValue("$set", setId ?? (object)DBNull.Value);
             await command.ExecuteNonQueryAsync(token);
             // An identical retry is idempotent; a conflicting reuse of identity is not a silent rewrite.
             command.CommandText = "SELECT evidence_json FROM codex_server_evidence WHERE observation_id=$id;";
             if (!string.Equals((string?)await command.ExecuteScalarAsync(token), json, StringComparison.Ordinal))
                 throw new InvalidOperationException("Server observation identity collision; transaction rolled back.");
+            command.CommandText = "SELECT activity_bucket_set_id FROM codex_server_evidence WHERE observation_id=$id;";
+            var savedSet = await command.ExecuteScalarAsync(token);
+            if ((savedSet is DBNull ? null : (long?)savedSet) != setId)
+                throw new InvalidOperationException("Server observation bucket identity collision; transaction rolled back.");
         }
         transaction.Commit();
     }

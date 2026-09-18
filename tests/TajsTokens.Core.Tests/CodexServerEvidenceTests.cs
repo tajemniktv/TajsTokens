@@ -86,7 +86,8 @@ public sealed class CodexServerEvidenceTests : IDisposable
         Assert.Equal(AccountEvidenceClass.ServerCorrelated, stable.AccountEvidence);
         Assert.Equal("account-A", stable.CorrelatedAccountKey);
         var changed = CodexAppServerEvidenceProvider.Correlate(ThreadRow(), "account-A", "account-B");
-        Assert.Equal(ServerEvidenceState.Conflict, changed.State);
+        Assert.Equal(ServerEvidenceState.Available, changed.State);
+        Assert.Equal(AccountEvidenceClass.Conflicting, changed.AccountEvidence);
         Assert.Null(changed.CorrelatedAccountKey);
         Assert.NotNull(changed.ThreadUsage); // preserve mismatch as evidence
         var unknown = CodexAppServerEvidenceProvider.Correlate(ThreadRow(), "account-A", null);
@@ -112,8 +113,11 @@ public sealed class CodexServerEvidenceTests : IDisposable
         Assert.Equal(row.Detail, Assert.Single(report.LatestObservations).Detail);
     }
 
-    [Fact]
-    public async Task ComparisonRetainsMismatchAndLatestNullDoesNotReuseSuccess()
+    [Theory]
+    [InlineData(false, ServerEvidenceState.Unavailable)]
+    [InlineData(true, ServerEvidenceState.Unavailable)]
+    [InlineData(true, ServerEvidenceState.Error)]
+    public async Task ComparisonRetainsMismatchAndLatestNullDoesNotReuseSuccess(bool loseCorrelation, ServerEvidenceState state)
     {
         var repository = new SqliteTelemetryRepository(Database);
         await repository.InitializeAsync(default);
@@ -131,14 +135,126 @@ public sealed class CodexServerEvidenceTests : IDisposable
         Assert.Equal(100, comparison.ServerTokens);
         Assert.Equal(80, comparison.LocalTokens);
         Assert.Equal(.8, comparison.LocalToServerRatio);
-        var nullRow = CodexAppServerEvidenceProvider.Correlate(Parse("""{"result":{"threadUsage":null}}""", Thread), "A", "A")
-            with { CollectedAtUtc = Now.AddMinutes(1) };
+        var nullRow = CodexAppServerEvidenceProvider.Correlate(Parse("""{"result":{"threadUsage":null}}""", Thread), "A", loseCorrelation ? null : "A")
+            with { CollectedAtUtc = Now.AddMinutes(1), State = state };
         await repository.SaveServerEvidenceAsync(new([nullRow]), default);
         var later = await service.CompareAsync(default);
-        Assert.Equal(ServerEvidenceState.Unavailable, Assert.Single(later.LatestObservations).State);
+        Assert.Equal(state, Assert.Single(later.LatestObservations).State);
         Assert.Empty(later.Comparisons);
         Assert.Equal(2L, await Scalar("SELECT COUNT(*) FROM codex_server_evidence"));
         Assert.Equal(80L, await Scalar("SELECT SUM(reported_total_tokens) FROM codex_native_token_events"));
+    }
+
+    [Theory]
+    [InlineData(ServerEvidenceState.Unavailable)]
+    [InlineData(ServerEvidenceState.Unsupported)]
+    [InlineData(ServerEvidenceState.Error)]
+    public void AccountConflictDoesNotReplaceProviderOutcome(ServerEvidenceState state)
+    {
+        var original = ThreadRow() with { State = state, Detail = "Provider outcome.", CorrelatedAccountKey = "old" };
+        var result = CodexAppServerEvidenceProvider.Correlate(original, "A", "B");
+        Assert.Equal(state, result.State);
+        Assert.Equal(AccountEvidenceClass.Conflicting, result.AccountEvidence);
+        Assert.Null(result.CorrelatedAccountKey);
+        Assert.StartsWith(original.Detail, result.Detail);
+    }
+
+    [Fact]
+    public async Task NormalizationPreservesFetchesRevisionsOmissionsEmptyNullAndAtomicRetries()
+    {
+        var repository = new SqliteTelemetryRepository(Database);
+        await repository.InitializeAsync(default);
+        var first = Parse("""{"result":{"summary":{"lifetimeTokens":300},"dailyUsageBuckets":[{"startDate":"2026-09-16","tokens":100},{"startDate":"2026-09-17","tokens":200}]}}""");
+        var revised = first with { Id = "revised", CollectedAtUtc = Now.AddMinutes(1), Activity = first.Activity! with
+            { DailyUsageBuckets = [new("2026-09-16", 100), new("2026-09-17", 201)] } };
+        var omitted = revised with { Id = "omitted", CollectedAtUtc = Now.AddMinutes(2), Activity = revised.Activity! with
+            { DailyUsageBuckets = [new("2026-09-17", 201)] } };
+        var empty = first with { Id = "empty", CollectedAtUtc = Now.AddMinutes(3), Activity = first.Activity! with { DailyUsageBuckets = [] } };
+        var missing = empty with { Id = "missing", CollectedAtUtc = Now.AddMinutes(4), Activity = empty.Activity! with { DailyUsageBuckets = null } };
+        foreach (var row in new[] { first, first with { Id = "repeat" }, revised, omitted, empty, missing })
+        {
+            await repository.SaveServerEvidenceAsync(new([row]), default);
+            var latest = Assert.Single((await Service(repository).CompareAsync(default)).LatestObservations);
+            Assert.Equal(JsonSerializer.Serialize(row.Activity), JsonSerializer.Serialize(latest.Activity));
+        }
+        Assert.Equal(6L, await Scalar("SELECT COUNT(*) FROM codex_server_evidence"));
+        Assert.Equal(3L, await Scalar("SELECT COUNT(*) FROM codex_account_day_values"));
+        Assert.Equal(4L, await Scalar("SELECT COUNT(*) FROM codex_account_bucket_sets"));
+        Assert.Equal(5L, await Scalar("SELECT COUNT(*) FROM codex_account_bucket_members"));
+        await repository.SaveServerEvidenceAsync(new([first]), default);
+        var collision = first with { Activity = first.Activity! with { DailyUsageBuckets = [new("2026-09-17", 999)] } };
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SaveServerEvidenceAsync(new([collision]), default));
+        Assert.Equal(3L, await Scalar("SELECT COUNT(*) FROM codex_account_day_values"));
+        Assert.Equal(4L, await Scalar("SELECT COUNT(*) FROM codex_account_bucket_sets"));
+    }
+
+    [Fact]
+    public async Task LegacyMigrationIsLosslessAndReadOnlyComparisonWorksBeforeMigration()
+    {
+        var repository = new SqliteTelemetryRepository(Database);
+        await repository.InitializeAsync(default);
+        await Execute("ALTER TABLE codex_server_evidence DROP COLUMN activity_bucket_set_id; PRAGMA user_version=13;");
+        var row = Parse("""{"result":{"summary":{"lifetimeTokens":1},"dailyUsageBuckets":[{"startDate":"2026-09-17","tokens":1}]}}""");
+        using (var connection = new SqliteConnection("Data Source=" + Database))
+        {
+            await connection.OpenAsync();
+            using var command = connection.CreateCommand();
+            command.CommandText = "INSERT INTO codex_server_evidence VALUES($id,'AccountActivity',NULL,NULL,'2026-09-18','2026-09-18',$contract,'Available',$json);";
+            command.Parameters.AddWithValue("$id", row.Id);
+            command.Parameters.AddWithValue("$contract", row.ContractVersion);
+            command.Parameters.AddWithValue("$json", JsonSerializer.Serialize(row));
+            await command.ExecuteNonQueryAsync();
+        }
+        Assert.Equal(JsonSerializer.Serialize(row), JsonSerializer.Serialize(Assert.Single((await Service(repository).CompareAsync(default)).LatestObservations)));
+        await repository.InitializeAsync(default);
+        Assert.Equal(14L, await Scalar("PRAGMA user_version"));
+        Assert.Equal(JsonSerializer.Serialize(row), JsonSerializer.Serialize(Assert.Single((await Service(repository).CompareAsync(default)).LatestObservations)));
+        await repository.SaveServerEvidenceAsync(new([row]), default);
+        Assert.Equal(1L, await Scalar("SELECT COUNT(*) FROM codex_server_evidence"));
+        Assert.Equal(1L, await Scalar("SELECT COUNT(*) FROM codex_account_day_values"));
+    }
+
+    [Fact]
+    public async Task FailedNormalizationMigrationRollsBackSchemaAndCanRetry()
+    {
+        var repository = new SqliteTelemetryRepository(Database);
+        await repository.InitializeAsync(default);
+        await Execute("""
+            ALTER TABLE codex_server_evidence DROP COLUMN activity_bucket_set_id;
+            PRAGMA user_version=13;
+            INSERT INTO codex_server_evidence VALUES('bad','AccountActivity',NULL,NULL,'2026-09-18','2026-09-18','fixture','Error','invalid JSON');
+            """);
+        await Assert.ThrowsAsync<JsonException>(() => repository.InitializeAsync(default));
+        Assert.Equal(13L, await Scalar("PRAGMA user_version"));
+        Assert.Equal(0L, await Scalar("SELECT COUNT(*) FROM pragma_table_info('codex_server_evidence') WHERE name='activity_bucket_set_id'"));
+        Assert.Equal("invalid JSON", await Scalar("SELECT evidence_json FROM codex_server_evidence WHERE observation_id='bad'"));
+        await Execute("DELETE FROM codex_server_evidence WHERE observation_id='bad';");
+        await repository.InitializeAsync(default);
+        Assert.Equal(14L, await Scalar("PRAGMA user_version"));
+    }
+
+    [Fact]
+    public async Task BufferedTransportRetainsMultipleLinesBoundsAndRejectsServerRequests()
+    {
+        var large = new string('x', CodexEvidenceTransport.MaxLineCharacters);
+        using var writer = new StringWriter();
+        var transport = new CodexEvidenceTransport(new StringReader(large + "\nsecond\r\n"), writer);
+        Assert.Equal(large, await transport.ReadLineAsync(default));
+        Assert.Equal("second", await transport.ReadLineAsync(default));
+        await Assert.ThrowsAsync<IOException>(() => transport.ReadLineAsync(default));
+        var excessive = new CodexEvidenceTransport(new StringReader(large + "x\n"), writer);
+        await Assert.ThrowsAsync<IOException>(() => excessive.ReadLineAsync(default));
+        using var request = JsonDocument.Parse("""{"id":"server-1","method":"future/capability","params":{"secret":"do not echo"}}""");
+        Assert.True(await transport.RejectServerRequestAsync(request.RootElement, default));
+        using var response = JsonDocument.Parse(writer.ToString());
+        Assert.Equal("server-1", response.RootElement.GetProperty("id").GetString());
+        Assert.Equal(-32601, response.RootElement.GetProperty("error").GetProperty("code").GetInt32());
+        Assert.DoesNotContain("secret", writer.ToString());
+        using var ordinary = JsonDocument.Parse("""{"id":1,"result":{}}""");
+        Assert.False(await transport.RejectServerRequestAsync(ordinary.RootElement, default));
+        using var canceled = new CancellationTokenSource();
+        canceled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => transport.ReadLineAsync(canceled.Token));
     }
 
     private static CodexServerObservation Parse(string json, string? thread = null) => CodexServerEvidenceParser.ParseUsage(json, thread, Now.AddSeconds(-1), Now, "0.154.0");

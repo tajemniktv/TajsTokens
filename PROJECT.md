@@ -71,6 +71,25 @@ work are in [Current work](#current-work); dated audits below describe captured 
 
 ## Current work
 
+**Server-evidence review hardening (2026-09-18):** latest attempts now use surface/thread
+identity regardless of account-correlation outcome; historical successes cannot survive a newer
+failed/null attempt as current thread estimates. Account attribution conflict no longer replaces
+the provider's usage outcome. Schema 14 losslessly shares daily values and ordered bucket sets
+across small immutable fetch observations, retaining revisions, missing/empty distinctions and
+all original provenance. No history expiry, rollout normalization or forecasting change is added.
+App-server transport uses bounded chunk buffering and rejects unsupported server requests.
+CLI modes explicitly reject unknown input before side effects. Main-window restored size and
+maximized preference are saved separately in `data/window-state.json`; first use defaults to
+1200×850 and restored sizes are clamped to the current display work area.
+
+Validation: 382 Core tests and a zero-warning/error Windows build passed; daily build
+`20260918T115908848Z-c94e7474` was deployed/restarted. A content-hash comparison verified all
+18 pre-migration logical server observations unchanged. The next live collection reused the
+same 159 daily values/one bucket set; account fetch JSON fell from about 8,157 to 1,052 characters.
+Quota history was inspected at 700×650, 1000×700, 1200×850 and maximized; narrow details remain
+reachable by outer scrolling. The fixed-height Pivot was left unchanged. A graceful restart
+verified both maximized preference and the prior restored size. This is not exhaustive DPI testing.
+
 **Provider-native server evidence (2026-09-18):** separate app-server acquisition now retains
 backend account token activity and optional per-thread estimated credits/model-effort-speed
 token groups. Current quota remains the provider-fresh anchor; local rollout accounting is

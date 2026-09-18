@@ -30,6 +30,7 @@ public sealed class CodexAppServerEvidenceProvider : ICodexServerEvidenceProvide
         {
             if (!process.Start()) throw new IOException("App-server did not start.");
             stderr = DrainAsync(process.StandardError, total.Token);
+            var output = new CodexEvidenceTransport(process.StandardOutput, process.StandardInput);
             var id = 0;
             async Task<string> Request(string method, object? parameters = null)
             {
@@ -42,9 +43,10 @@ public sealed class CodexAppServerEvidenceProvider : ICodexServerEvidenceProvide
                 await process.StandardInput.FlushAsync(timeout.Token);
                 for (var lines = 0; lines < 1000; lines++)
                 {
-                    var line = await ReadBoundedLineAsync(process.StandardOutput, timeout.Token);
+                    var line = await output.ReadLineAsync(timeout.Token);
                     using var doc = JsonDocument.Parse(line);
-                    if (doc.RootElement.TryGetProperty("id", out var responseId) && responseId.TryGetInt32(out var n) && n == requestId)
+                    if (await output.RejectServerRequestAsync(doc.RootElement, timeout.Token)) continue;
+                    if (doc.RootElement.TryGetProperty("id", out var responseId) && responseId.ValueKind == JsonValueKind.Number && responseId.TryGetInt32(out var n) && n == requestId)
                         return line;
                 }
                 throw new IOException("App-server notification bound exceeded.");
@@ -110,8 +112,8 @@ public sealed class CodexAppServerEvidenceProvider : ICodexServerEvidenceProvide
 
     public static CodexServerObservation Correlate(CodexServerObservation observation, string? before, string? after) =>
         before is not null && after is not null && before != after
-            ? observation with { AccountEvidence = AccountEvidenceClass.Conflicting, State = ServerEvidenceState.Conflict,
-                Detail = "Account changed across the request batch; payload retained without account attribution." }
+            ? observation with { AccountEvidence = AccountEvidenceClass.Conflicting, CorrelatedAccountKey = null,
+                Detail = observation.Detail + " Account changed across the request batch; payload retained without account attribution." }
             : before is not null && before == after
                 ? observation with { AccountEvidence = AccountEvidenceClass.ServerCorrelated, CorrelatedAccountKey = before }
                 : observation with { AccountEvidence = AccountEvidenceClass.Unattributed, CorrelatedAccountKey = null };
@@ -125,18 +127,5 @@ public sealed class CodexAppServerEvidenceProvider : ICodexServerEvidenceProvide
     {
         var buffer = new char[4096];
         while (await reader.ReadAsync(buffer.AsMemory(), token) != 0) { }
-    }
-    private static async Task<string> ReadBoundedLineAsync(StreamReader reader, CancellationToken token)
-    {
-        // ReadLineAsync allocates without a bound. Limit each JSON-RPC message to 2 MiB.
-        var line = new System.Text.StringBuilder();
-        var buffer = new char[1];
-        while (line.Length < 2 * 1024 * 1024)
-        {
-            if (await reader.ReadAsync(buffer.AsMemory(), token) == 0) throw new IOException("App-server closed output.");
-            if (buffer[0] == '\n') return line.ToString();
-            line.Append(buffer[0]);
-        }
-        throw new IOException("App-server response exceeds evidence bound.");
     }
 }

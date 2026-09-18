@@ -9,6 +9,10 @@ internal static class ServerEvidenceCli
 {
     public static async Task RunAsync(string[] args)
     {
+        if (args.Length is < 2 or > 3 || args[0] is not ("--server-evidence" or "--probe-server-evidence" or "--collect-server-evidence" or "--declare-current-rollouts"))
+            throw new ArgumentException("Unknown server-evidence mode or invalid argument count; no data was read or written.");
+        if (args[0] == "--declare-current-rollouts" && args.Length != 3)
+            throw new ArgumentException("Explicit declaration requires the existing settings path.");
         if (args.Length < 2 || !File.Exists(args[1])) throw new ArgumentException("Provide an existing TajsTokens database.");
         if (args.Length == 3)
         {
@@ -24,9 +28,19 @@ internal static class ServerEvidenceCli
             () => settings?.RolloutAccountAssociations ?? []);
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
         CodexServerCollection? transient = null;
-        if (args[0] is "--probe-server-evidence" or "--declare-current-rollouts")
-            transient = await new CodexAppServerEvidenceProvider().CollectAsync(await service.SelectThreadsAsync(timeout.Token), timeout.Token);
-        else if (args[0] != "--server-evidence") await service.CollectAsync(true, timeout.Token);
+        switch (args[0])
+        {
+            case "--probe-server-evidence":
+            case "--declare-current-rollouts":
+                transient = await new CodexAppServerEvidenceProvider().CollectAsync(await service.SelectThreadsAsync(timeout.Token), timeout.Token);
+                break;
+            case "--collect-server-evidence":
+                await service.CollectAsync(true, timeout.Token);
+                break;
+            case "--server-evidence":
+                break;
+            default: throw new ArgumentException("Unknown server-evidence mode.");
+        }
         var report = await service.CompareAsync(timeout.Token, transient?.Observations);
         if (args[0] == "--declare-current-rollouts")
         {

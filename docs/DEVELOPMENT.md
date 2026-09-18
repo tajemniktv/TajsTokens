@@ -172,7 +172,7 @@ dotnet run --project tools/TajsTokens.ForecastEvaluation -- --collect-server-evi
 
 The first command reads retained evidence only. The probe makes bounded app-server requests and
 compares them with the database without writing/migrating it. Collection persists the content-free
-reports and may migrate owned schema to 13; use a current application, not an older running binary.
+reports and may migrate owned schema to 14; use a current application, not an older running binary.
 Optional third argument is an existing settings path to include user-declared association counts.
 Normal application collection uses the same service on a 30-minute in-process backoff.
 
@@ -183,5 +183,5 @@ account. Preserve the original settings; restart the application to reload an ou
 Settings → Historical rollout ownership can revoke assertions. No native account fields are rewritten.
 
 See [source contracts and limitations](source-notes/CODEX_SERVER_USAGE.md). Binary rollback never
-downgrades the database; an older binary may reject schema 13. Preserve the complete data directory
+downgrades the database; an older binary may reject schema 14. Preserve the complete data directory
 and use the deployment backup/recovery procedure rather than deleting server evidence tables.

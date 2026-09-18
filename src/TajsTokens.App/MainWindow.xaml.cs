@@ -2,25 +2,69 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
 using TajsTokens.App.Pages;
+using Microsoft.UI.Windowing;
+using System.Text.Json;
 
 namespace TajsTokens.App;
 
 public sealed partial class MainWindow : Window
 {
     private bool _synchronizing;
+    private readonly string _windowStatePath = System.IO.Path.Combine(((App)Application.Current).Services.DataFolder, "window-state.json");
+    private readonly DispatcherTimer _saveWindowTimer = new() { Interval = TimeSpan.FromMilliseconds(500) };
+    private WindowSizeState _windowSize = new(1200, 850, false);
+    private sealed record WindowSizeState(int Width, int Height, bool Maximized);
     public MainWindow()
     {
         InitializeComponent();
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(1200, 850));
+        try
+        {
+            if (System.IO.File.Exists(_windowStatePath))
+                _windowSize = JsonSerializer.Deserialize<WindowSizeState>(System.IO.File.ReadAllText(_windowStatePath)) ?? _windowSize;
+        }
+        catch (Exception e) when (e is System.IO.IOException or UnauthorizedAccessException or JsonException) { }
+        var area = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary).WorkArea;
+        _windowSize = _windowSize with { Width = Math.Clamp(_windowSize.Width, Math.Min(700, area.Width), area.Width),
+            Height = Math.Clamp(_windowSize.Height, Math.Min(650, area.Height), area.Height) };
+        AppWindow.Resize(new Windows.Graphics.SizeInt32(_windowSize.Width, _windowSize.Height));
+        if (_windowSize.Maximized && AppWindow.Presenter is OverlappedPresenter presenter) presenter.Maximize();
+        _saveWindowTimer.Tick += (_, _) => SaveWindowSize();
+        AppWindow.Closing += (_, _) => SaveWindowSize();
+        Closed += (_, _) => SaveWindowSize();
         AppWindow.Changed += (_, args) =>
         {
-            if (!args.DidSizeChange || AppWindow.Presenter is not Microsoft.UI.Windowing.OverlappedPresenter
-                { State: Microsoft.UI.Windowing.OverlappedPresenterState.Restored }) return;
-            var size = AppWindow.Size;
-            if (size.Width > 0 && size.Height > 0 && (size.Width < 700 || size.Height < 650))
-                AppWindow.Resize(new Windows.Graphics.SizeInt32(Math.Max(700, size.Width), Math.Max(650, size.Height)));
+            if ((!args.DidSizeChange && !args.DidPresenterChange) || AppWindow.Presenter is not OverlappedPresenter p ||
+                p.State == OverlappedPresenterState.Minimized) return;
+            if (p.State == OverlappedPresenterState.Restored)
+            {
+                var size = AppWindow.Size;
+                if (size.Width <= 0 || size.Height <= 0) return;
+                if (size.Width < 700 || size.Height < 650)
+                {
+                    AppWindow.Resize(new Windows.Graphics.SizeInt32(Math.Max(700, size.Width), Math.Max(650, size.Height)));
+                    return;
+                }
+                _windowSize = new(size.Width, size.Height, false);
+            }
+            else _windowSize = _windowSize with { Maximized = true };
+            _saveWindowTimer.Stop();
+            _saveWindowTimer.Start();
         };
         Navigate(typeof(OverviewPage));
+    }
+
+    private void SaveWindowSize()
+    {
+        _saveWindowTimer.Stop();
+        try
+        {
+            System.IO.File.WriteAllText(_windowStatePath + ".tmp", JsonSerializer.Serialize(_windowSize));
+            System.IO.File.Move(_windowStatePath + ".tmp", _windowStatePath, overwrite: true);
+        }
+        catch (Exception e) when (e is System.IO.IOException or UnauthorizedAccessException)
+        {
+            System.Diagnostics.Debug.WriteLine("Window size could not be saved: " + e.GetType().Name);
+        }
     }
 
     public void Navigate(Type pageType, object? parameter = null)

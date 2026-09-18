@@ -156,7 +156,7 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
         await Execute("DROP TABLE quota_snapshots_v10;");
         await repository.InitializeAsync(default);
         await repository.InitializeAsync(default);
-        Assert.Equal(13L, await Scalar("PRAGMA user_version;"));
+        Assert.Equal(14L, await Scalar("PRAGMA user_version;"));
         var row = Assert.Single(await repository.GetRecentQuotaSnapshotsAsync(QuotaWindowKind.FiveHour, "codex", "default", 10, default));
         Assert.Equal(12.375, row.UsedPercent);
         Assert.Null(row.CollectedAtUtc); Assert.Null(row.ObservationId); Assert.Null(row.LimitId);
@@ -165,7 +165,7 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
         await repository.UpsertQuotaSnapshotAsync(row, default);
         Assert.Equal(1L, await Scalar("SELECT COUNT(*) FROM quota_snapshots;"));
         // Repair the already-shipped v10 default too, not just new v9 upgrades.
-        await Execute("UPDATE quota_snapshots SET has_source_timestamp=1; ALTER TABLE ingestion_checkpoints DROP COLUMN consumed_prefix_sha256; PRAGMA user_version=10;");
+        await Execute("UPDATE quota_snapshots SET has_source_timestamp=1; ALTER TABLE ingestion_checkpoints DROP COLUMN consumed_prefix_sha256; DROP TABLE codex_server_evidence; PRAGMA user_version=10;");
         await repository.InitializeAsync(default);
         Assert.Equal(0L, await Scalar("SELECT has_source_timestamp FROM quota_snapshots;"));
     }

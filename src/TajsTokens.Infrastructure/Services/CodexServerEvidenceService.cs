@@ -74,20 +74,40 @@ public sealed class CodexServerEvidenceService(string databasePath, SqliteTeleme
         var history = new List<CodexServerObservation>();
         if (tables.Contains("codex_server_evidence"))
         {
-            command.CommandText = "SELECT evidence_json FROM codex_server_evidence ORDER BY collected_at_utc DESC, observation_id DESC LIMIT 2000;";
-            await using var reader = await command.ExecuteReaderAsync(token);
+            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('codex_server_evidence') WHERE name='activity_bucket_set_id';";
+            var normalized = Convert.ToInt64(await command.ExecuteScalarAsync(token)) != 0;
+            command.CommandText = "SELECT evidence_json," + (normalized ? "activity_bucket_set_id" : "NULL") + " FROM codex_server_evidence ORDER BY collected_at_utc DESC, observation_id DESC LIMIT 2000;";
+            var stored = new List<(CodexServerObservation Row, long? SetId)>();
             var retainedCharacters = 0L;
-            while (await reader.ReadAsync(token))
+            await using (var reader = await command.ExecuteReaderAsync(token))
             {
-                var json = reader.GetString(0);
-                retainedCharacters += json.Length;
-                if (retainedCharacters > 16 * 1024 * 1024) break;
-                var row = JsonSerializer.Deserialize<CodexServerObservation>(json);
-                if (row?.ContractVersion == CodexServerEvidenceParser.Contract) history.Add(row);
+                while (await reader.ReadAsync(token))
+                {
+                    var json = reader.GetString(0);
+                    retainedCharacters += json.Length;
+                    if (retainedCharacters > 16 * 1024 * 1024) break;
+                    var row = JsonSerializer.Deserialize<CodexServerObservation>(json);
+                    if (row?.ContractVersion == CodexServerEvidenceParser.Contract)
+                        stored.Add((row, reader.IsDBNull(1) ? null : reader.GetInt64(1)));
+                }
+            }
+            var sets = new Dictionary<long, IReadOnlyList<CodexAccountDay>>();
+            foreach (var (row, setId) in stored)
+            {
+                if (setId is null) { history.Add(row); continue; }
+                if (!sets.TryGetValue(setId.Value, out var days))
+                {
+                    days = await CodexServerEvidenceStorage.ReadDaysAsync(connection, transaction, setId.Value, token);
+                    retainedCharacters += JsonSerializer.Serialize(days).Length;
+                    if (retainedCharacters > 16 * 1024 * 1024) break;
+                    sets.Add(setId.Value, days);
+                }
+                history.Add(row with { Activity = row.Activity! with { DailyUsageBuckets = days } });
             }
         }
         history = history.Concat(transient ?? []).OrderByDescending(x => x.CollectedAtUtc).ToList();
-        var latest = history.GroupBy(x => (x.Surface, x.ThreadId, x.CorrelatedAccountKey)).Select(g => g.First()).ToArray();
+        // Correlation is an outcome of an attempt, not part of the request identity.
+        var latest = history.GroupBy(x => (x.Surface, x.ThreadId)).Select(g => g.First()).ToArray();
         var comparisons = new List<CodexServerComparisonRow>();
         async Task<long?> LocalTotal(string predicate, params (string Name, object Value)[] parameters)
         {

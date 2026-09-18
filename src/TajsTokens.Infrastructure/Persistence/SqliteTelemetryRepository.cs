@@ -9,7 +9,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 
 public sealed partial class SqliteTelemetryRepository(string databasePath) : ITelemetryRepository, ISessionIngestionCheckpointStore
 {
-    private const int CurrentSchemaVersion = 13;
+    private const int CurrentSchemaVersion = 14;
     private const int IntelligenceSchemaVersion = 5;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _intelligenceInitializeGate = new(1, 1);
@@ -460,6 +460,7 @@ public sealed partial class SqliteTelemetryRepository(string databasePath) : ITe
                 PRAGMA user_version = 13;
                 """, cancellationToken);
         }
+        if (version < 14) await CodexServerEvidenceStorage.MigrateAsync(connection, cancellationToken);
     }
 
     /// <summary>

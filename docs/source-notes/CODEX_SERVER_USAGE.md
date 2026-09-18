@@ -93,17 +93,33 @@ scope under the user's selected boundary.
 - Allowlist parsers accept at most 4,000 daily buckets and 512 thread groups. Missing,
   empty, unsupported, authentication-required, invalid, conflicting and failed reads
   remain distinct. Negative/malformed counters and duplicate daily dates fail closed.
-- Owned schema 13 adds only `codex_server_evidence`, with immutable observation identity,
+- Owned schema 14 retains `codex_server_evidence`, with immutable observation identity,
   surface/thread scope, fetch start/end, contract/client version, account correlation and
   typed content-free JSON. Raw response bodies, stderr, errors, credentials, prompts,
   titles and email addresses are never persisted. Same-ID exact retries are idempotent;
   changed same-ID content rolls back the whole batch. Existing native tables are unchanged.
+- Account daily values are stored once per `(start_date, tokens)` in `codex_account_day_values`.
+  Content-addressed bucket sets retain ordered membership via `codex_account_bucket_members`;
+  each small fetch references a set. Identical polls add no day values or memberships. A revised
+  day adds a value and a new membership snapshot; removals, ordering, null and empty remain
+  distinguishable. Sharing is physical only: account association and fetch provenance remain on
+  each observation, never inferred from a shared value/set. Schema 13 fetches are converted in
+  one rollback-safe transaction without deleting historical observations or changing timestamps.
+  Storage still grows with fetches and distinct revisions; this is not age-based retention or a
+  fixed database-size cap. Unavailable thread polling retains the existing rotation/cadence.
 - Reports are point-in-time snapshots, not additive events. Prior snapshots survive nulls,
   failures and revisions. No retention/delete/export policy was introduced.
 - Comparisons read one SQLite snapshot, bounded to 2,000 retained fetch results / 16 MiB
   of JSON characters, 60 threads and 30 daily labels per account. Daily comparisons use
   UTC local-event dates as an explicitly unverified alignment. Lifetime and fetch-to-fetch
   differences have different coverage and accounting-lag limitations.
+- Latest attempt is keyed by surface/thread, not account correlation. Losing correlation or
+  switching accounts cannot leave an older successful thread estimate current. Account-specific
+  historical comparisons remain dated history. Provider outcome and account conflict are separate:
+  a bracket conflict preserves Available/Unavailable/Error and appends attribution diagnostics.
+- The transport scans reusable 4 Ki-character chunks, retaining subsequent lines. Unknown
+  server-to-client requests receive bounded `-32601` replies; notifications and reply IDs remain
+  separate. Existing time/message bounds still apply; no server capability is enabled.
 - Thread joins use exact IDs, then model/effort. Speed has no aligned local field; repeated
   model/effort comparisons across speed groups cannot be summed. Nullable counters remain
   nullable, and each side's categories remain separately named.
@@ -114,6 +130,14 @@ scope under the user's selected boundary.
   forecast selection.
 
 ## Observed local results
+
+Review follow-up on 2026-09-18: schema 14 migration preserved all 18 existing observations,
+verified by hashes of rehydrated content. After the next nine-result live collection, the store
+contained 27 fetches but only 159 day values, one bucket set and 159 membership references.
+Account-fetch JSON averaged 1,052 characters versus 8,157 previously (about 87% smaller);
+this is a per-fetch JSON measurement, not a claim that total database file size shrank.
+The read-only CLI rehydrated all 159 buckets; an unknown CLI option was rejected rather than
+collecting. All 382 Core tests and the Windows build passed; the daily app was restarted.
 
 Read-only probes on 2026-09-18 returned account activity with **159 daily buckets**, lifetime
 **10,935,115,385** tokens, peak day **811,292,125**, longest turn **9,468 seconds**, and

@@ -33,6 +33,7 @@ outlooks and usage predictions—with freshness and uncertainty kept visible.
   live learning still requires independently collected validation evidence.
 - **Advanced → Data explorer:** inspect Codex SQLite data read-only and compare selected sources.
 - **Advanced → CLI harness:** explicitly run a configured local CLI and inspect its output.
+- **Window preferences:** restored window size and maximized state survive restarts.
 
 Predictions are estimates, not guarantees. Token predictions describe recorded local usage
 (including cached input), not subscription-quota percentages. Quota outlooks and scenarios
