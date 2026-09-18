@@ -9,6 +9,34 @@ public sealed class QuotaResetDetectorTests
     private readonly QuotaResetDetector _detector = new();
 
     [Fact]
+    public void AlternatingResetJitterProducesNoSignalsButLargerDriftDoes()
+    {
+        var reset = new DateTimeOffset(2026, 9, 1, 10, 0, 0, TimeSpan.Zero);
+        var rows = Enumerable.Range(0, 30).Select(i => Snapshot(reset.AddHours(-3).AddMinutes(i),
+            20, reset.AddSeconds(i % 2))).ToArray();
+        Assert.Empty(_detector.Detect(rows));
+        var drift = rows.Take(3).Select((x, i) => x with { ResetsAtUtc = reset.AddSeconds(i) }).ToArray();
+        Assert.Equal(QuotaResetClassification.ReanchoredWindow, Assert.Single(_detector.Detect(drift)).Classification);
+        Assert.Equal(QuotaResetClassification.FullReset, Assert.Single(_detector.Detect([
+            rows[0] with { UsedPercent = 90 }, rows[1] with { UsedPercent = 5 }])).Classification);
+    }
+
+    [Fact]
+    public void EventIdentityIncludesEveryCohortDimension()
+    {
+        var reset = new DateTimeOffset(2026, 9, 1, 10, 0, 0, TimeSpan.Zero);
+        var first = Snapshot(reset.AddHours(-3), 90, reset) with { Source = "codex-rollout", SessionId = "one" };
+        var cohorts = new[] { first, first with { Provider = "other" }, first with { Profile = "other" },
+            first with { Kind = QuotaWindowKind.Weekly }, first with { Source = "other-rollout" },
+            first with { AccountKey = "account" }, first with { LimitId = "bucket" },
+            first with { PlanType = "plan" }, first with { SessionId = "two" }, first with { WindowMinutes = 301 } };
+        var events = _detector.Detect(cohorts.SelectMany(x => new[] { x, x with { CapturedAtUtc = x.CapturedAtUtc.AddMinutes(1), UsedPercent = 5 } }).ToArray());
+        Assert.Equal(cohorts.Length, events.Count);
+        Assert.Equal(cohorts.Length, events.Select(x => x.EventId).Distinct().Count());
+        Assert.All(events, x => Assert.StartsWith("quota-reset-v2-", x.EventId));
+    }
+
+    [Fact]
     public void Detect_MeterDropNearAuthoritativeBoundary_IsExpectedReset()
     {
         var boundary = new DateTimeOffset(2026, 9, 1, 6, 0, 0, TimeSpan.Zero);

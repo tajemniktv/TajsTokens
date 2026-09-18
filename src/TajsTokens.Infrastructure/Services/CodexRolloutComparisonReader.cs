@@ -124,6 +124,8 @@ internal sealed class CodexRolloutComparisonReader(Action? afterRead = null)
                     if (root.EnumerateObject().Count(property => property.NameEquals("payload")) > 1)
                         return new(null, hasPrefix, result, "ambiguous session metadata");
                     var payload = root.TryGetProperty("payload", out var nested) && nested.ValueKind == JsonValueKind.Object ? nested : root;
+                    if (payload.TryGetProperty("id", out _) && payload.TryGetProperty("session_id", out _))
+                        return new(null, hasPrefix, result, "ambiguous session owner aliases");
                     var ownerField = payload.TryGetProperty("id", out var primary) && primary.ValueKind == JsonValueKind.String ? "id" : "session_id";
                     if (!payload.TryGetProperty(ownerField, out var id) || id.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(id.GetString()))
                         return new(null, hasPrefix, result, "missing session owner");

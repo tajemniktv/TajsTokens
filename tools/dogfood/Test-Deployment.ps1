@@ -12,6 +12,16 @@ $script:startFailures = 0
 $script:publishFails = $false
 $script:incomplete = $false
 $script:fakeProcesses = @()
+$script:cleanupFails = $false
+
+function Remove-Item {
+    [CmdletBinding()]
+    param([string]$LiteralPath, [switch]$Recurse, [switch]$Force)
+    if ($script:cleanupFails -and $LiteralPath.Replace('\', '/') -like '*dogfood/staging/*') {
+        throw 'Simulated staging deletion failure'
+    }
+    Microsoft.PowerShell.Management\Remove-Item -LiteralPath $LiteralPath -Recurse:$Recurse -Force:$Force
+}
 
 function Get-AppProcesses { @($script:fakeProcesses) }
 function Stop-App {
@@ -26,9 +36,9 @@ function Start-App([string]$Directory) {
 function Set-Launcher { }
 function dotnet {
     $script:publishes++
-    if ($script:publishFails) { $global:LASTEXITCODE = 1; return }
     $stagePath = $args[[Array]::IndexOf($args, '-o') + 1]
     New-Fixture $stagePath 'new'
+    if ($script:publishFails) { $global:LASTEXITCODE = 1; return }
     if ($script:incomplete) { Remove-Item -LiteralPath (Join-Path $stagePath 'coreclr.dll') }
     $global:LASTEXITCODE = 0
 }
@@ -54,7 +64,7 @@ $controls = @('CI', 'GITHUB_ACTIONS', 'TF_BUILD', 'BUILD_BUILDID', 'JENKINS_URL'
 $ambient = @{}
 foreach ($name in $controls) { $ambient[$name] = [Environment]::GetEnvironmentVariable($name); [Environment]::SetEnvironmentVariable($name, $null) }
 try {
-    foreach ($case in @('success', 'publish-failure', 'incomplete', 'shutdown-refusal', 'startup-failure', 'rollback', 'rollback-failure', 'lock', 'interrupted', 'move-boundary', 'move-existing', 'shutdown-preflight', 'ci', 'opt-out')) {
+    foreach ($case in @('success', 'cleanup-success', 'cleanup-failure', 'publish-failure', 'incomplete', 'shutdown-refusal', 'startup-failure', 'rollback', 'rollback-failure', 'lock', 'interrupted', 'move-boundary', 'move-existing', 'shutdown-preflight', 'ci', 'opt-out')) {
         $repo = Join-Path $testBase "$case/repo"
         $root = [IO.Path]::GetFullPath((Join-Path $testBase "$case/install"))
         $current = Join-Path $root 'current'
@@ -71,7 +81,21 @@ try {
         $script:publishes = 0
         $script:stopFails = $false; $script:startFailures = 0
         $script:publishFails = $false; $script:incomplete = $false
+        $script:cleanupFails = $false
         switch ($case) {
+            'cleanup-success' {
+                $script:cleanupFails = $true
+                $warnings = @(Invoke-DogfoodDeployment 3>&1)
+                Assert ((Identity $current) -eq 'new') 'Cleanup changed deployment result'
+                Assert (-not (Test-Path -LiteralPath $journal)) 'Cleanup restored a committed journal'
+                Assert ($script:starts -eq 1) 'Cleanup prevented restart'
+                Assert ($warnings.Count -gt 0) 'Cleanup failure was not reported'
+            }
+            'cleanup-failure' {
+                $script:cleanupFails = $true; $script:publishFails = $true
+                Expect-Failure { Invoke-DogfoodDeployment } 'Publish failed'
+                Assert ((Identity $current) -eq 'old') 'Failed publish changed live installation'
+            }
             'success' {
                 Invoke-DogfoodDeployment
                 Assert ((Identity $current) -eq 'new') 'New build not installed'

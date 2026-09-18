@@ -71,6 +71,27 @@ work are in [Current work](#current-work); dated audits below describe captured 
 
 ## Current work
 
+### Reset identity and review hardening (2026-09-18)
+
+`QuotaResetGenerationPolicy` owns the one-second bounded reset-time semantics shared by
+forecast segmentation, reset detection and calibration (including scenarios). A sequence of
+adjacent one-second shifts cannot chain into an arbitrarily wide generation. Scenario history
+also retains the full quota cohort and does not borrow another bucket/plan/duration's samples.
+Raw timestamps and exact current-anchor matching remain unchanged.
+
+Reset event identity v2 hashes the full `QuotaHistoryPolicy.Cohort` plus the adjacent observation
+times using unambiguous structured encoding. Intelligence component schema 4 atomically rebuilds
+the derived reset cache from all retained eligible quota history, removing old jitter signals
+and incomplete identities without changing source observations. If rebuilding fails, both the
+old cache and version remain retryable. The rebuild reads retained quota history once at upgrade;
+it is not restricted to the ordinary recent-refresh limit. Old derived events whose inputs are
+no longer retained cannot be reconstructed; deployment backups retain the previous database.
+
+Disposable staging deletion failures warn rather than overriding a successful deployment or
+its original failure; cleanup still refuses unsafe paths/reparse points. First-run process
+inspection tolerates processes exiting during enumeration. Read-only rollout comparison rejects
+records carrying both owner aliases rather than selecting one and hiding ambiguity.
+
 ### Historical analytics first (2026-09-17)
 
 Quota burn's normal timeline shows account-meter transitions with explicit local start/end
@@ -586,8 +607,8 @@ TajsTokens should help answer not only **what Codex has done**, but also **what 
 
 In the primary product language, **forecast/outlook means quota outlook**. Use **Usage prediction**
 or **Workload prediction** for expected token activity and **Plan a workload** for user-supplied
-scenarios. The current UI still uses a Forecasts page and token-workload labels; aligning those
-labels is planned work, not a feature shipped by this documentation change.
+scenarios. The delivered Forecasts tabs use these labels; the historical terminology audit
+is no longer pending UI work.
 
 Separate three questions internally, without creating separate source-specific products:
 
@@ -786,8 +807,8 @@ are omitted when independent streams cannot be represented honestly in one serie
 Local rollout/token activity remains installation-scoped. Showing it beside quota movement
 means co-observation, not account membership or causation. Production scenarios require a
 known current quota scope and recent matching evidence; no legacy/other-account history is
-borrowed to fill sparse training data. The planned reconciliation work must preserve the live
-anchor and account protections while removing blanket rejection of supported rollout history.
+borrowed to fill sparse training data. The delivered historical eligibility policy preserves
+these live-anchor/account protections while allowing separately scoped supported rollout history.
 
 There is no assumed universal conversion from tokens to subscription quota. Any relationship between quota movement and workload must be learned from the user's own observed history and remain conditional on available coverage.
 
@@ -842,8 +863,8 @@ completion may retrospectively mark a historical turn inactive. Backfilled event
 be labelled reconstructed history, distinct from a strict replay using collection-time availability.
 Current mutable SQLite metadata does not establish historical availability or historical effort.
 The initial audit restricted quota targets to app-server observations. The 2026-09-09 quota source
-contract above supersedes that blanket historical exclusion; current code still needs the planned
-reconciliation/eligibility changes.
+contract above superseded that blanket historical exclusion. The canonical historical quota
+evidence slice delivered the reconciliation/eligibility changes described under Current work.
 
 The follow-up live scan also observed numeric `started_at` on 1,244 task starts; 1,158 completions
 with `completed_at`/`duration_ms`; and 956 completions with `time_to_first_token_ms`. The inspected

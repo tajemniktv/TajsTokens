@@ -261,8 +261,12 @@ try {
     if ($stage -and (Test-Path -LiteralPath $stage)) {
         $stagingRoot = [IO.Path]::GetFullPath((Join-Path $repo '.codex/temp/dogfood/staging')) + [IO.Path]::DirectorySeparatorChar
         if (-not [IO.Path]::GetFullPath($stage).StartsWith($stagingRoot, [StringComparison]::OrdinalIgnoreCase)) { throw 'Unsafe publish staging cleanup path' }
-        Assert-PlainTree $stage
-        Remove-Item -LiteralPath $stage -Recurse -Force
+        try {
+            Assert-PlainTree $stage
+            Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction Stop
+        } catch {
+            Write-Warning "Disposable staging retained at ${stage}: $_" -WarningAction Continue
+        }
     }
 }
 }

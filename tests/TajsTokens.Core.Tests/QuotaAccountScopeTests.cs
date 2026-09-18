@@ -34,9 +34,38 @@ public sealed class QuotaAccountScopeTests : IDisposable
         var repository = new SqliteTelemetryRepository(Database);
         await repository.InitializeAsync(default);
         foreach (var item in events) await repository.UpsertQuotaResetEventAsync(item, default);
-        await ExecuteAsync("UPDATE quota_reset_events SET event_id=substr(event_id,1,instr(event_id,':unknown:source:')-1) WHERE source <> 'other-source'; UPDATE intelligence_schema SET version=2 WHERE component='phase4-intelligence';");
+        await ExecuteAsync("UPDATE quota_reset_events SET event_id='legacy-' || source; UPDATE intelligence_schema SET version=2 WHERE component='phase4-intelligence';");
         repository = new SqliteTelemetryRepository(Database);
         foreach (var item in events) await repository.UpsertQuotaResetEventAsync(item, default);
+        Assert.Equal(2L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events"));
+    }
+
+    [Fact]
+    public async Task ResetIdentityMigrationRebuildsAllHistoryAtomicallyAndRetries()
+    {
+        var repository = new SqliteTelemetryRepository(Database);
+        await repository.InitializeIntelligenceAsync(default);
+        var first = Point(Now.AddDays(-10), 90, null) with { ResetsAtUtc = Now.AddDays(-9) };
+        var second = first with { CapturedAtUtc = first.CapturedAtUtc.AddMinutes(1), UsedPercent = 5 };
+        foreach (var plan in new[] { "a", "b" })
+            foreach (var row in new[] { first, second })
+                await repository.UpsertQuotaSnapshotAsync(row with { PlanType = plan }, default);
+        for (var i = 0; i < 520; i++)
+            await repository.UpsertQuotaSnapshotAsync(Point(Now.AddMinutes(-520 + i), 20, "recent") with
+                { ResetsAtUtc = Now.AddHours(5).AddSeconds(i % 2) }, default);
+        var legacy = Assert.Single(new QuotaResetDetector().Detect([first, second])) with { EventId = "legacy-event" };
+        await repository.UpsertQuotaResetEventAsync(legacy, default);
+        await ExecuteAsync("UPDATE intelligence_schema SET version=3; CREATE TRIGGER fail_reset_rebuild BEFORE INSERT ON quota_reset_events BEGIN SELECT RAISE(ABORT, 'fixture failure'); END;");
+        await Assert.ThrowsAsync<SqliteException>(() => new SqliteTelemetryRepository(Database).InitializeIntelligenceAsync(default));
+        Assert.Equal(3L, await ScalarAsync("SELECT version FROM intelligence_schema"));
+        Assert.Equal(1L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events WHERE event_id='legacy-event'"));
+        await ExecuteAsync("DROP TRIGGER fail_reset_rebuild;");
+        await new SqliteTelemetryRepository(Database).InitializeIntelligenceAsync(default);
+        Assert.Equal(4L, await ScalarAsync("SELECT version FROM intelligence_schema"));
+        Assert.Equal(2L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events"));
+        Assert.Equal(0L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events WHERE event_id NOT LIKE 'quota-reset-v2-%'"));
+        Assert.Equal(524L, await ScalarAsync("SELECT COUNT(*) FROM quota_snapshots"));
+        await new SqliteTelemetryRepository(Database).InitializeIntelligenceAsync(default);
         Assert.Equal(2L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events"));
     }
 

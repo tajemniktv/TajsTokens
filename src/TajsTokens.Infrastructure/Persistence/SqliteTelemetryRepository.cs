@@ -3,13 +3,14 @@ using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
+using TajsTokens.Core.Services;
 
 namespace TajsTokens.Infrastructure.Persistence;
 
 public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryRepository, ISessionIngestionCheckpointStore
 {
     private const int CurrentSchemaVersion = 12;
-    private const int IntelligenceSchemaVersion = 3;
+    private const int IntelligenceSchemaVersion = 4;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _intelligenceInitializeGate = new(1, 1);
     private volatile bool _intelligenceInitialized;
@@ -524,6 +525,9 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                     """, cancellationToken);
             }
 
+            if (version < 4)
+                await RebuildResetEventsAsync(connection, cancellationToken);
+
             _intelligenceInitialized = true;
         }
         finally
@@ -538,6 +542,15 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
         using var transaction = connection.BeginTransaction();
+
+        var inserted = await WriteQuotaResetEventAsync(connection, transaction, resetEvent, cancellationToken);
+        transaction.Commit();
+        return inserted;
+    }
+
+    private static async Task<int> WriteQuotaResetEventAsync(SqliteConnection connection, SqliteTransaction transaction,
+        QuotaResetEvent resetEvent, CancellationToken cancellationToken)
+    {
 
         var existsCommand = connection.CreateCommand();
         existsCommand.Transaction = transaction;
@@ -587,8 +600,41 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
         command.Parameters.AddWithValue("$explanation", resetEvent.Explanation);
         command.Parameters.AddWithValue("$account", resetEvent.AccountKey ?? "");
         await command.ExecuteNonQueryAsync(cancellationToken);
-        transaction.Commit();
         return existed ? 0 : 1;
+    }
+
+    private static async Task RebuildResetEventsAsync(SqliteConnection connection, CancellationToken cancellationToken)
+    {
+        // Recompute all retained evidence, not just the bounded recent refresh. Replacement and
+        // version advancement are atomic, so interruption leaves the old cache retryable.
+        using var transaction = connection.BeginTransaction();
+        var read = connection.CreateCommand();
+        read.Transaction = transaction;
+        read.CommandText = """
+            SELECT kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, provider, profile, source, account_key,
+                   observation_id,source_identity,session_id,limit_id,plan_type,lane,collected_at_utc,has_source_timestamp
+            FROM quota_snapshots ORDER BY captured_at_utc;
+            """;
+        var rows = new List<QuotaSnapshot>();
+        await using (var reader = await read.ExecuteReaderAsync(cancellationToken))
+            while (await reader.ReadAsync(cancellationToken))
+                rows.Add(ReadQuotaSnapshot(reader));
+        var clear = connection.CreateCommand();
+        clear.Transaction = transaction;
+        clear.CommandText = "DELETE FROM quota_reset_events;";
+        await clear.ExecuteNonQueryAsync(cancellationToken);
+        var eligible = QuotaHistoryPolicy.ReplayRows(QuotaHistoryPolicy.Streams(
+            QuotaHistoryPolicy.Describe(rows, DateTimeOffset.UtcNow)).SelectMany(x => x));
+        foreach (var reset in new QuotaResetDetector().Detect(eligible))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await WriteQuotaResetEventAsync(connection, transaction, reset, cancellationToken);
+        }
+        var version = connection.CreateCommand();
+        version.Transaction = transaction;
+        version.CommandText = "UPDATE intelligence_schema SET version = 4 WHERE component = 'phase4-intelligence';";
+        await version.ExecuteNonQueryAsync(cancellationToken);
+        transaction.Commit();
     }
 
     public Task UpsertQuotaSnapshotAsync(QuotaSnapshot snapshot, CancellationToken cancellationToken) =>
@@ -874,7 +920,14 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
         await using var reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            results.Add(SqliteQuotaEvidence.Read(new QuotaSnapshot(
+            results.Add(ReadQuotaSnapshot(reader));
+        }
+
+        return results;
+    }
+
+    private static QuotaSnapshot ReadQuotaSnapshot(SqliteDataReader reader) =>
+        SqliteQuotaEvidence.Read(new QuotaSnapshot(
                 Enum.Parse<QuotaWindowKind>(reader.GetString(0)),
                 ParseUtc(reader.GetString(1)),
                 reader.IsDBNull(2) ? null : reader.GetDouble(2),
@@ -883,11 +936,7 @@ public sealed class SqliteTelemetryRepository(string databasePath) : ITelemetryR
                 reader.GetString(5),
                 reader.GetString(6),
                 reader.GetString(7),
-                reader.GetString(8) is { Length: > 0 } account ? account : null), reader, 9));
-        }
-
-        return results;
-    }
+                reader.GetString(8) is { Length: > 0 } account ? account : null), reader, 9);
 
     public async Task<IReadOnlyList<ForecastSnapshot>> GetRecentForecastSnapshotsAsync(
         QuotaWindowKind kind,

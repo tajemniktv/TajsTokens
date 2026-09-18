@@ -31,7 +31,7 @@ public static class QuotaForecastBacktester
     public const double NominalCoverage = 0.8;
     // Observed app-server reset timestamps alternate by one second. This is a derived
     // segmentation tolerance, never a normalization of provider facts or anchor identity.
-    private static readonly TimeSpan ResetJitterTolerance = TimeSpan.FromSeconds(1);
+    private static readonly TimeSpan ResetJitterTolerance = QuotaResetGenerationPolicy.Tolerance;
 
     // Keep the incumbent until comparable, matured account-local target outcomes support a switch.
     public static string DefaultModel(QuotaSnapshot anchor) => "legacy-ewma";
@@ -103,7 +103,7 @@ public static class QuotaForecastBacktester
             }
             var reset = row.ResetsAtUtc!.Value;
             if (current is null || previous is null ||
-                reset - minimumReset > ResetJitterTolerance || maximumReset - reset > ResetJitterTolerance ||
+                !QuotaResetGenerationPolicy.FitsRange(reset, minimumReset, maximumReset) ||
                 row.CapturedAtUtc > minimumReset ||
                 QuotaHistoryPolicy.Cohort(row) != QuotaHistoryPolicy.Cohort(previous) ||
                 row.UsedPercent < previous.UsedPercent)
@@ -189,25 +189,12 @@ public static class QuotaForecastBacktester
     }
 
     public static IReadOnlyList<IReadOnlyList<QuotaForecastTrial>> ResetGenerations(IEnumerable<QuotaForecastTrial> trials)
-    {
-        var groups = new List<IReadOnlyList<QuotaForecastTrial>>();
-        List<QuotaForecastTrial>? current = null;
-        foreach (var trial in trials.OrderBy(x => x.ResetUtc))
-        {
-            if (current is null || trial.ResetUtc - current[0].ResetUtc > ResetJitterTolerance)
-            {
-                current = [];
-                groups.Add(current);
-            }
-            current.Add(trial);
-        }
-        return groups;
-    }
+        => QuotaResetGenerationPolicy.Group(trials, x => x.ResetUtc);
 
     public static IReadOnlyList<double> CalibrationErrors(IEnumerable<QuotaForecastTrial> trials,
         DateTimeOffset origin, DateTimeOffset reset, double leadHours) => ResetGenerations(trials
         .Where(x => x.OutcomeUtc < origin && x.ResetUtc < origin - ResetJitterTolerance &&
-                    (x.ResetUtc - reset).Duration() > ResetJitterTolerance &&
+                    !QuotaResetGenerationPolicy.SameTimestamp(x.ResetUtc, reset) &&
                     x.LeadHours >= leadHours / 2 && x.LeadHours <= leadHours * 2))
         // One score per jitter-bounded reset generation, not correlated polling samples.
         .Select(g => g.OrderBy(x => Math.Abs(x.LeadHours - leadHours)).ThenByDescending(x => x.OriginUtc).First())

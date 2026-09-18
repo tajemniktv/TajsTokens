@@ -34,7 +34,7 @@ public sealed class ScenarioPlannerService
             if (samples.Length > 0 && now - samples.Max(x => x.EndUtc) > TimeSpan.FromDays(30))
                 return Unknown("History is stale; a usable interval within 30 days is required.", samples.Length);
             var latest = samples.MaxBy(x => x.EndUtc);
-            samples = samples.Where(x => x.Source == latest?.Source && x.AccountKey == latest?.AccountKey).ToArray();
+            samples = samples.Where(x => x.Source == latest?.Source && x.AccountKey == latest?.AccountKey && x.Cohort == latest?.Cohort).ToArray();
             samples = samples.Where(x => x.EndUtc >= now.AddDays(-30) &&
                 (string.IsNullOrWhiteSpace(request.Model) || string.Equals(x.DominantModel, request.Model, StringComparison.Ordinal)) &&
                 (string.IsNullOrWhiteSpace(request.ReasoningEffort) || string.Equals(x.DominantReasoningEffort, request.ReasoningEffort, StringComparison.Ordinal))).ToArray();
@@ -67,9 +67,11 @@ public sealed class ScenarioPlannerService
                 ? Math.Clamp(model.Predict([request.DurationHours, request.RootAgents, request.Subagents]), 0, 100)
                 : Baseline(samples, request.DurationHours);
             // One comparable held-out error per reset generation, not thousands of correlated polls.
-            var errors = trials.Where(x => x.Sample.ResetUtc is not null && x.Sample.ResetUtc < now &&
-                    Hours(x.Sample) >= request.DurationHours / 2 && Hours(x.Sample) <= request.DurationHours * 2)
-                .GroupBy(x => x.Sample.ResetUtc).Select(g => g.Last().SelectedError).ToArray();
+            var errors = QuotaResetGenerationPolicy.Group(trials.Where(x => x.Sample.ResetUtc is not null &&
+                    x.Sample.ResetUtc < now - QuotaResetGenerationPolicy.Tolerance &&
+                    Hours(x.Sample) >= request.DurationHours / 2 && Hours(x.Sample) <= request.DurationHours * 2),
+                    x => x.Sample.ResetUtc!.Value)
+                .Select(g => g.MaxBy(x => x.Sample.EndUtc).SelectedError).ToArray();
             var radius = QuotaForecastBacktester.ErrorRadius(errors);
             return new ScenarioWindowEstimate(kind, true, samples.Length, prediction,
                 radius is double r ? Math.Max(0, prediction - r) : null,

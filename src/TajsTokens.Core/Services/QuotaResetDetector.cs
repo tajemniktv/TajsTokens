@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 
@@ -23,18 +24,28 @@ public sealed class QuotaResetDetector
                      .GroupBy(QuotaHistoryPolicy.Cohort))
         {
             var ordered = group.OrderBy(snapshot => snapshot.CapturedAtUtc).ToArray();
+            DateTimeOffset? minimumReset = ordered[0].ResetsAtUtc, maximumReset = minimumReset;
             for (var index = 1; index < ordered.Length; index++)
             {
                 var previous = ordered[index - 1];
                 var current = ordered[index];
                 if (previous.UsedPercent is null || current.UsedPercent is null)
                 {
+                    minimumReset = maximumReset = current.ResetsAtUtc;
                     continue;
                 }
 
                 var drop = previous.UsedPercent.Value - current.UsedPercent.Value;
-                var resetIdentityChanged = previous.WindowMinutes != current.WindowMinutes ||
-                                           previous.ResetsAtUtc != current.ResetsAtUtc;
+                var resetIdentityChanged = !QuotaResetGenerationPolicy.SameGeneration(previous, current) ||
+                    (current.ResetsAtUtc is { } reset && minimumReset is { } minimum && maximumReset is { } maximum &&
+                     !QuotaResetGenerationPolicy.FitsRange(reset, minimum, maximum));
+                if (resetIdentityChanged)
+                    minimumReset = maximumReset = current.ResetsAtUtc;
+                else if (current.ResetsAtUtc is { } observedReset)
+                {
+                    minimumReset = minimumReset is { } min && min < observedReset ? min : observedReset;
+                    maximumReset = maximumReset is { } max && max > observedReset ? max : observedReset;
+                }
                 var previousBoundary = previous.ResetsAtUtc;
                 var nearExpectedBoundary = previousBoundary is DateTimeOffset expected &&
                                            current.CapturedAtUtc >= expected - s_expectedBoundaryTolerance &&
@@ -129,17 +140,14 @@ public sealed class QuotaResetDetector
         // Event identity belongs to the observation pair, not its current interpretation. A provider
         // correction or newly-arrived reset metadata should update this event instead of creating a
         // second historical reset for the same adjacent observations.
-        var material = string.Join('|',
-            current.Provider,
-            current.Profile,
-            current.Kind,
-            previous.CapturedAtUtc.ToUniversalTime().ToString("O"),
-            current.CapturedAtUtc.ToUniversalTime().ToString("O"));
-        if (current.AccountKey is not null) material += "|" + current.Source + "|" + current.AccountKey;
+        // Structured encoding preserves nulls and delimiter-bearing identifiers without collisions.
+        var material = JsonSerializer.Serialize(new
+        {
+            Cohort = QuotaHistoryPolicy.Cohort(current),
+            Previous = previous.CapturedAtUtc.ToUniversalTime().ToString("O"),
+            Current = current.CapturedAtUtc.ToUniversalTime().ToString("O")
+        });
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material))).ToLowerInvariant();
-        // Keep known-account IDs stable. Legacy unknown IDs are source-qualified by the
-        // intelligence migration using the same UTF-8 hexadecimal suffix.
-        return $"quota-reset-{hash[..24]}" + (current.AccountKey is null
-            ? ":unknown:source:" + Convert.ToHexString(Encoding.UTF8.GetBytes(current.Source)) : "");
+        return $"quota-reset-v2-{hash}";
     }
 }

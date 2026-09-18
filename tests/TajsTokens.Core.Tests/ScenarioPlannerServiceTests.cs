@@ -9,6 +9,38 @@ public sealed class ScenarioPlannerServiceTests
     private static readonly DateTimeOffset s_evaluationTime = new(2026, 8, 24, 0, 0, 0, TimeSpan.Zero);
     private readonly ScenarioPlannerService _planner = new();
 
+    [Theory]
+    [InlineData(4, false)]
+    [InlineData(8, true)]
+    public void UncertaintyRequiresGenuineResetGenerationsNotJitterVariants(int generations, bool expectedBand)
+    {
+        var history = Enumerable.Range(0, generations).SelectMany(g => Enumerable.Range(0, 12).Select(i =>
+        {
+            var start = s_evaluationTime.AddDays(-generations + g).AddHours(i);
+            return Sample(QuotaWindowKind.FiveHour, start, 2 + i % 3, 1, 0) with
+            { ResetUtc = s_evaluationTime.AddDays(-generations + g).AddHours(18).AddSeconds(i % 2) };
+        })).ToArray();
+        var request = new ScenarioRequest(1, 1, 0);
+        var estimate = _planner.Estimate(request, history, s_evaluationTime).FiveHour;
+        Assert.True(estimate.HasEnoughHistory);
+        Assert.Equal(expectedBand, estimate.LowerQuotaDeltaPercent.HasValue);
+        var steady = history.Select(x => x with { ResetUtc = x.ResetUtc!.Value.AddSeconds(-x.ResetUtc.Value.Second) }).ToArray();
+        Assert.Equal(_planner.Estimate(request, steady, s_evaluationTime).FiveHour, estimate);
+    }
+
+    [Fact]
+    public void ScenarioDoesNotBorrowSamplesFromAnOlderPlanCohort()
+    {
+        var cohort = new QuotaHistoryCohort("codex", "default", QuotaWindowKind.FiveHour,
+            "app-server", "account", "codex", "old-plan", null, 300);
+        var history = BuildSyntheticHistory().Where(x => x.Kind == QuotaWindowKind.FiveHour)
+            .Select((x, i) => x with { AccountKey = "account", Source = "app-server",
+                Cohort = i < 10 ? cohort : cohort with { PlanType = "new-plan" } }).ToArray();
+        var result = _planner.Estimate(new ScenarioRequest(1, 1, 1, AccountKey: "account"), history, s_evaluationTime).FiveHour;
+        Assert.False(result.HasEnoughHistory);
+        Assert.Equal(8, result.SampleCount);
+    }
+
     [Fact]
     public void Estimate_WithSparseHistory_ReturnsHonestInsufficientState()
     {

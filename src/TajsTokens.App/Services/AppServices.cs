@@ -16,12 +16,7 @@ public sealed class AppServices
     public AppServices()
     {
         var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        if (!Directory.Exists(AppDataLocation.GetDataFolder(appDataPath)) &&
-            System.Diagnostics.Process.GetProcessesByName("TajsTokens.App").Any(process =>
-            {
-                using (process) return process.Id != Environment.ProcessId &&
-                    process.SessionId == System.Diagnostics.Process.GetCurrentProcess().SessionId;
-            }))
+        if (!Directory.Exists(AppDataLocation.GetDataFolder(appDataPath)) && HasOtherInstanceInSession())
             throw new InvalidOperationException("Exit other TajsTokens instances before migrating application data.");
         DataFolder = AppDataLocation.EnsureMigrated(appDataPath);
         DatabasePath = Path.Combine(DataFolder, "telemetry.db");
@@ -98,6 +93,29 @@ public sealed class AppServices
     public Exception? StartupPersistenceError { get; }
 
     public event Action<RuntimeSettings, RuntimeSettings>? SettingsChanged;
+
+    private static bool HasOtherInstanceInSession()
+    {
+        using var current = System.Diagnostics.Process.GetCurrentProcess();
+        var processes = System.Diagnostics.Process.GetProcessesByName("TajsTokens.App");
+        try
+        {
+            foreach (var process in processes)
+            {
+                try
+                {
+                    if (process.Id != Environment.ProcessId && process.SessionId == current.SessionId)
+                        return true;
+                }
+                catch (InvalidOperationException) { } // Exited after enumeration; it is absent.
+            }
+            return false;
+        }
+        finally
+        {
+            foreach (var process in processes) process.Dispose();
+        }
+    }
 
     public void SaveSettings(RuntimeSettings settings)
     {

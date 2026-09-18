@@ -143,7 +143,8 @@ public sealed class SqliteIntelligenceServiceTests
             var repository = new SqliteTelemetryRepository(database);
             var observatory = new SqliteCodexObservatoryStore(database);
             var intelligence = new SqliteIntelligenceService(database, repository);
-            await repository.InitializeAsync(CancellationToken.None);
+            // Exercise incremental detection, not the one-time historical cache rebuild.
+            await repository.InitializeIntelligenceAsync(CancellationToken.None);
             await observatory.InitializeAsync(CancellationToken.None);
 
             await observatory.UpsertSessionAsync(

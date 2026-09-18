@@ -133,6 +133,9 @@ public sealed class CodexRolloutInspectionTests : IDisposable
     [InlineData("empty")]
     [InlineData("wrong-owner")]
     [InlineData("duplicate-owner")]
+    [InlineData("conflicting-aliases")]
+    [InlineData("matching-aliases")]
+    [InlineData("malformed-alias")]
     public async Task InvalidOrAmbiguousInputs_RemainUnresolved(string variant)
     {
         var alternate = variant switch
@@ -143,6 +146,9 @@ public sealed class CodexRolloutInspectionTests : IDisposable
             "truncated" => Meta(ThreadId) + "{\"type\":\"event_msg\"}",
             "empty" => "",
             "duplicate-owner" => $$$"""{"type":"session_meta","payload":{"id":"{{{ParentId}}}","id":"{{{ThreadId}}}"}}""" + "\n",
+            "conflicting-aliases" => $$$"""{"type":"session_meta","payload":{"id":"{{{ThreadId}}}","session_id":"{{{ParentId}}}"}}""" + "\n",
+            "matching-aliases" => $$$"""{"type":"session_meta","id":"{{{ThreadId}}}","session_id":"{{{ThreadId}}}"}""" + "\n",
+            "malformed-alias" => $$$"""{"type":"session_meta","payload":{"id":null,"session_id":"{{{ThreadId}}}"}}""" + "\n",
             _ => Meta(ParentId)
         };
         await WritePairAsync(alternate, Meta(ThreadId));

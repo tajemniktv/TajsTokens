@@ -30,7 +30,8 @@ public static class CodexScenarioHistoryBuilder
                 result.Add(new ScenarioHistorySample(before.Kind, before.CapturedAtUtc, after.CapturedAtUtc,
                     after.UsedPercent!.Value - before.UsedPercent!.Value,
                     features.TokenActiveRootSessions, features.TokenActiveSubagentSessions,
-                    Exclusive(features.ModelTokenShares), Exclusive(features.EffortTokenShares), before.ResetsAtUtc, before.Source, before.AccountKey));
+                    Exclusive(features.ModelTokenShares), Exclusive(features.EffortTokenShares), before.ResetsAtUtc, before.Source, before.AccountKey,
+                    QuotaHistoryPolicy.Cohort(before)));
             }
         }
         return result;
