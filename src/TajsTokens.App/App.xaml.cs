@@ -34,6 +34,7 @@ public partial class App : Application
     }
 
     public AppServices Services { get; }
+    public void Navigate(Type pageType, object? parameter = null) => (_window as MainWindow)?.Navigate(pageType, parameter);
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {

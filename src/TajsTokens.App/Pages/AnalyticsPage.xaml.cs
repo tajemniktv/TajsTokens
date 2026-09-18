@@ -1,5 +1,8 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Shapes;
+using Microsoft.UI.Xaml.Automation;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 
@@ -19,8 +22,20 @@ public sealed partial class AnalyticsPage : Page
     public AnalyticsPage()
     {
         InitializeComponent();
+        NavigationCacheMode = Microsoft.UI.Xaml.Navigation.NavigationCacheMode.Enabled;
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
+        SizeChanged += (_, e) =>
+        {
+            var wide = e.NewSize.Width >= (double)Application.Current.Resources["WideContentBreakpoint"];
+            BurnTabs.Height = wide ? 600 : 760;
+            BurnDetailColumn.Width = wide ? new GridLength(1.6, GridUnitType.Star) : new GridLength(0);
+            BurnDetailRow.Height = wide ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+            Grid.SetColumn(BurnDetails, wide ? 1 : 0); Grid.SetRow(BurnDetails, wide ? 0 : 1);
+            SummaryThirdColumn.Width = SummaryFourthColumn.Width = wide ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+            Grid.SetColumn(SourceSummary, wide ? 2 : 0); Grid.SetRow(SourceSummary, wide ? 0 : 1);
+            Grid.SetColumn(ActivitySummary, wide ? 3 : 1); Grid.SetRow(ActivitySummary, wide ? 0 : 1);
+        };
     }
 
     private App App => (App)Application.Current;
@@ -116,6 +131,14 @@ public sealed partial class AnalyticsPage : Page
         {
             _intervalsById[interval.IntervalId] = interval;
         }
+        var previousSeries = (TimelineSeries.SelectedItem as TimelineGroup)?.Key;
+        var series = dashboard.QuotaBurnIntervals.GroupBy(x => (x.Kind, x.AccountKey, x.BeforeSource, x.AfterSource, x.ResetsAtUtc))
+            .OrderByDescending(g => g.Max(x => x.EndUtc)).Select((g, i) => new TimelineGroup(g.Key,
+                $"{FormatKind(g.Key.Kind)} · {SourceLabel(g.Key.AfterSource)} · reset {g.Key.ResetsAtUtc?.ToLocalTime():d MMM HH:mm} · series {i + 1}",
+                g.OrderBy(x => x.StartUtc).ToArray())).ToArray();
+        TimelineSeries.ItemsSource = series;
+        TimelineSeries.SelectedItem = series.FirstOrDefault(x => Equals(x.Key, previousSeries)) ?? series.FirstOrDefault();
+        RenderTimeline();
 
         BurnIntervalCountText.Text = dashboard.QuotaBurnIntervals.Count.ToString("N0");
         LargestDropText.Text = dashboard.QuotaBurnIntervals.Count == 0
@@ -187,6 +210,66 @@ public sealed partial class AnalyticsPage : Page
         BurnSummary.Visibility = BurnTabs.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
         if (BurnTabs.SelectedIndex == 0) StatusText.Text = _loadError ?? _burnStatus;
         else RenderResets();
+    }
+
+    private sealed record TimelineGroup(object Key, string Title, IReadOnlyList<QuotaBurnInterval> Rows);
+    private void OnTimelineSeriesChanged(object sender, SelectionChangedEventArgs e) => RenderTimeline();
+    private void OnTimelineSizeChanged(object sender, SizeChangedEventArgs e) => RenderTimeline();
+    private void OnActivityOverlayChanged(object sender, RoutedEventArgs e) => RenderTimeline();
+
+    private void RenderTimeline()
+    {
+        if (QuotaTimeline is null) return;
+        QuotaTimeline.Children.Clear();
+        if (TimelineSeries.SelectedItem is not TimelineGroup series || series.Rows.Count == 0)
+        {
+            TimelineCaption.Text = "No quota increases in this view. Missing observations do not imply zero consumption.";
+            return;
+        }
+        var width = QuotaTimeline.ActualWidth - 50;
+        if (width <= 0) return;
+        var from = series.Rows.Min(x => x.StartUtc);
+        var to = series.Rows.Max(x => x.EndUtc);
+        var seconds = Math.Max(1, (to - from).TotalSeconds);
+        double X(DateTimeOffset t) => 40 + Math.Clamp((t - from).TotalSeconds / seconds, 0, 1) * (width - 12);
+        static double Y(double percent) => 115 - Math.Clamp(percent, 0, 100);
+        var accent = (Brush)Application.Current.Resources["AccentFillColorDefaultBrush"];
+        var secondary = (Brush)Application.Current.Resources["TextFillColorSecondaryBrush"];
+        foreach (var percent in new[] { 0, 50, 100 })
+        {
+            var label = new TextBlock { Text = percent + "%", FontSize = 12, Foreground = secondary };
+            Canvas.SetTop(label, Y(percent) - 8); QuotaTimeline.Children.Add(label);
+        }
+        var maxTokens = Math.Max(1, series.Rows.Max(x => x.NativeTokens));
+        foreach (var row in series.Rows)
+        {
+            // Do not join separate observations, reset generations or source/account cohorts.
+            var line = new Line { X1 = X(row.StartUtc), X2 = X(row.EndUtc), Y1 = Y(row.BeforeUsedPercent),
+                Y2 = Y(row.AfterUsedPercent), Stroke = accent, StrokeThickness = 2, StrokeDashArray = new DoubleCollection { 3, 2 } };
+            QuotaTimeline.Children.Add(line);
+            var description = $"{row.StartUtc.ToLocalTime():g} → {row.EndUtc.ToLocalTime():g}: {row.BeforeUsedPercent:0.#}% → {row.AfterUsedPercent:0.#}% used; {row.NativeTokens:N0} local tokens (not attribution)";
+            var point = new Button { Content = "", Width = 14, Height = 14, MinWidth = 0, MinHeight = 0,
+                Padding = new Thickness(0), CornerRadius = new CornerRadius(7), Background = accent };
+            ToolTipService.SetToolTip(point, description); AutomationProperties.SetName(point, description);
+            point.Click += (_, _) =>
+            {
+                BurnTabs.SelectedIndex = 0;
+                BurnIntervalList.SelectedItem = BurnIntervalList.Items.OfType<BurnIntervalRow>().FirstOrDefault(x => x.IntervalId == row.IntervalId);
+                if (BurnIntervalList.SelectedItem is { } selected) BurnIntervalList.ScrollIntoView(selected);
+            };
+            Canvas.SetLeft(point, X(row.EndUtc) - 7); Canvas.SetTop(point, Y(row.AfterUsedPercent) - 7);
+            QuotaTimeline.Children.Add(point);
+            if (ShowActivity.IsChecked == true)
+            {
+                var bar = new Border { Width = Math.Max(2, X(row.EndUtc) - X(row.StartUtc)), Height = 28d * row.NativeTokens / maxTokens,
+                    Background = secondary, Opacity = 0.6 };
+                Canvas.SetLeft(bar, X(row.StartUtc)); Canvas.SetTop(bar, 155 - bar.Height);
+                ToolTipService.SetToolTip(bar, description); QuotaTimeline.Children.Add(bar);
+            }
+        }
+        TimelineCaption.Text = $"{from.ToLocalTime():d MMM HH:mm} → {to.ToLocalTime():d MMM HH:mm} · local time. Select a point for details. " +
+            "Dashed segments link observed endpoints, not exact change times; gaps are not interpolated." +
+            (ShowActivity.IsChecked == true ? " Bars show local tokens relative to this series, not quota shares." : "");
     }
 
     private void OnResetFilterChanged(object sender, SelectionChangedEventArgs e) => RenderResets();

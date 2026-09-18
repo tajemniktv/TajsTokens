@@ -95,7 +95,7 @@ public sealed partial class DiagnosticsPage : Page
     }
 
     private void OnCancelClicked(object sender, RoutedEventArgs e) => _refreshCancellation?.Cancel();
-    private void OnCoverageClicked(object sender, RoutedEventArgs e) => Frame.Navigate(typeof(CodexRolloutCoveragePage));
-    private void OnSourcesClicked(object sender, RoutedEventArgs e) => Frame.Navigate(typeof(CodexSourcesPage));
-    private void OnSettingsClicked(object sender, RoutedEventArgs e) => Frame.Navigate(typeof(SettingsPage));
+    private void OnCoverageClicked(object sender, RoutedEventArgs e) => ((App)Application.Current).Navigate(typeof(CodexRolloutCoveragePage));
+    private void OnSourcesClicked(object sender, RoutedEventArgs e) => ((App)Application.Current).Navigate(typeof(CodexSourcesPage));
+    private void OnSettingsClicked(object sender, RoutedEventArgs e) => ((App)Application.Current).Navigate(typeof(SettingsPage));
 }

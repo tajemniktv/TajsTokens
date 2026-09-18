@@ -22,7 +22,7 @@ public sealed partial class OverviewViewModel : ObservableObject
     public partial QuotaCardViewModel WeeklyQuota { get; set; } = UnavailableQuota("Weekly quota", "Waiting for first background refresh.");
 
     [ObservableProperty]
-    public partial string StatusText { get; set; } = "Waiting for background telemetry.";
+    public partial string StatusText { get; set; } = "Getting your Codex history ready…";
 
     [ObservableProperty]
     public partial string LastUpdatedText { get; set; } = "Not refreshed yet";
@@ -41,6 +41,10 @@ public sealed partial class OverviewViewModel : ObservableObject
 
     [ObservableProperty]
     public partial bool IsRefreshing { get; set; }
+    [ObservableProperty]
+    public partial string SetupMessage { get; set; } = "Connecting to Codex and reading local history. You can keep using Codex while this finishes.";
+    [ObservableProperty]
+    public partial bool ShowSetup { get; set; } = true;
     public ObservableCollection<TokenSummaryCard> TokenSummaryCards { get; } = [];
     public ObservableCollection<ForecastPoint> HistoryPoints { get; } = [];
     public ObservableCollection<DataSourceStatusCard> DataSources { get; } = [];
@@ -157,12 +161,16 @@ public sealed partial class OverviewViewModel : ObservableObject
 
             StatusText = (snapshot.TokenDataFresh, snapshot.QuotaDataFresh, snapshot.PersistenceAvailable, snapshot.HasAnyData) switch
             {
-                (true, true, true, _) => "Live background telemetry",
+                (true, true, true, _) => "Up to date",
                 (true, true, false, _) => "Live telemetry · history unavailable",
                 (true, false, _, _) or (false, true, _, _) => "Partial telemetry",
                 (false, false, _, true) => "Stale telemetry · using last known good data",
                 _ => "Telemetry unavailable"
             };
+            ShowSetup = !snapshot.HasAnyData;
+            SetupMessage = snapshot.CapturedAtUtc == DateTimeOffset.MinValue
+                ? "Connecting to Codex and reading local history. You can keep using Codex while this finishes."
+                : "No usable data yet. Check that Codex is installed and signed in, then refresh. Source details below explain what could not be read.";
         }
         finally
         {
@@ -204,7 +212,7 @@ public sealed partial class OverviewViewModel : ObservableObject
             SetQuotaCard(kind, new QuotaCardViewModel(title, "Not reported", "—", "—", "No forecast for this window",
                 "Codex responded successfully",
                 "Codex currently omits this window. This does not mean unlimited usage.",
-                InfoBarSeverity.Informational));
+                InfoBarSeverity.Informational) { IsReported = false, Status = "Not reported" });
             return;
         }
         if (current is null)
@@ -284,6 +292,24 @@ public sealed partial class OverviewViewModel : ObservableObject
     {
         HistoryPoints.Clear();
         var source = generation?.Source ?? TokenSourceLabel(buckets.Select(item => item.Provider));
+        var latest = DateTimeOffset.UtcNow;
+        var endHour = new DateTimeOffset(latest.Year, latest.Month, latest.Day, latest.Hour, 0, 0, TimeSpan.Zero);
+        var timed = buckets.Where(x => x.StartUtc is not null).GroupBy(x => x.StartUtc!.Value.ToUniversalTime())
+            .ToDictionary(x => x.Key, x => x.Sum(v => v.Breakdown.Total));
+        if (timed.Count > 0)
+        {
+            var hours = Enumerable.Range(0, 24).Select(i => endHour.AddHours(i - 23)).ToArray();
+            var maxTokens = Math.Max(1, hours.Max(h => timed.GetValueOrDefault(h)));
+            foreach (var hour in hours)
+            {
+                var total = timed.GetValueOrDefault(hour);
+                HistoryPoints.Add(new ForecastPoint(hour.ToLocalTime().ToString("HH"), 120d * total / maxTokens,
+                    $"{hour.ToLocalTime():ddd dd MMM HH:mm zzz} · {(timed.ContainsKey(hour) ? FormatTokenCount(total) + " recorded tokens" : "No recorded activity; collection may be incomplete")}",
+                    total == 0 ? "" : FormatTokenCount(total)));
+            }
+            HistoryCaption = $"Last 24 clock hours · local time · {(isFresh ? "up to date" : "stale")}. Empty slots mean no recorded activity, not proven idle time.";
+            return;
+        }
         var visible = buckets.TakeLast(12).ToArray();
         if (visible.Length == 0)
         {
@@ -304,10 +330,10 @@ public sealed partial class OverviewViewModel : ObservableObject
 
         var freshness = isFresh ? "live" : "stale";
         var quality = generation?.IsFallback == true ? " · fallback" : string.Empty;
-        HistoryCaption = $"{source} · {freshness}{quality} · last {visible.Length} recorded hours (gaps omitted). Bar height shows tokens relative to the busiest hour.";
+        HistoryCaption = $"Recent active hours · {source} · {freshness}{quality}. Source timestamps unavailable: bars are separate records, NOT a continuous timeline.";
     }
 
-    private static QuotaCardViewModel BuildQuotaCard(
+    internal static QuotaCardViewModel BuildQuotaCard(
         string title,
         QuotaSnapshot snapshot,
         Forecast? forecast,
@@ -328,7 +354,8 @@ public sealed partial class OverviewViewModel : ObservableObject
                 "Forecast paused",
                 $"Last known good · {snapshot.Source} · {QuotaAccountScope.Describe(snapshot.AccountKey)}",
                 "Last-known-good quota is shown; forecasting is paused until the provider is fresh again.",
-                InfoBarSeverity.Warning);
+                InfoBarSeverity.Warning) { Status = "Stale", NeedsAttention = true, RemainingValue = remaining ?? 0,
+                    ResetTimestamp = snapshot.ResetsAtUtc?.ToLocalTime().ToString("ddd d MMM HH:mm") ?? "Unknown reset" };
         }
 
         var paceText = forecast?.State switch
@@ -399,11 +426,24 @@ public sealed partial class OverviewViewModel : ObservableObject
             windowForecast,
             $"{freshness}{confidence}{trend}{methodology}",
             survivalMessage,
-            severity);
+            severity)
+        {
+            RemainingValue = remaining ?? 0,
+            ResetTimestamp = snapshot.ResetsAtUtc?.ToLocalTime().ToString("ddd d MMM HH:mm") ?? "Unknown reset",
+            NeedsAttention = severity == InfoBarSeverity.Warning || snapshot.AccountKey is null,
+            Status = snapshot.AccountKey is null ? "Account unknown" : forecast?.State switch
+            {
+                ForecastState.SafeUntilReset => "On track",
+                ForecastState.NearSustainablePace => "Near limit",
+                ForecastState.ExhaustionLikelyBeforeReset => "At risk",
+                _ => "Learning"
+            }
+        };
     }
 
     private static QuotaCardViewModel UnavailableQuota(string title, string detail) =>
-        new(title, "Unavailable", "Unknown", "Unavailable", "Unavailable", "No quota data", detail, InfoBarSeverity.Warning);
+        new(title, "Unavailable", "Unknown", "Unavailable", "Waiting for a quota reading", "No quota data", detail, InfoBarSeverity.Warning)
+        { NeedsAttention = true, Status = "Unavailable" };
 
     private void AddEvent(string type, string description) =>
         RecentEvents.Insert(0, new EventItem("Now", type, description));

@@ -27,6 +27,8 @@ public sealed partial class CodexPage : Page
     private bool _showExecutionDetails;
     private bool _isNarrow;
     private UsagePage? _usagePage;
+    private string? _selectedThreadId;
+    private string? _selectedGroupKey;
 
     private void OnWorkViewClicked(object sender, RoutedEventArgs e) => ShowUsage(false);
     private void OnUsageViewClicked(object sender, RoutedEventArgs e) => ShowUsage(true);
@@ -58,6 +60,7 @@ public sealed partial class CodexPage : Page
     public CodexPage()
     {
         InitializeComponent();
+        NavigationCacheMode = Microsoft.UI.Xaml.Navigation.NavigationCacheMode.Enabled;
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
         SizeChanged += OnSizeChanged;
@@ -112,13 +115,17 @@ public sealed partial class CodexPage : Page
 
     private void OnSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        var narrow = e.NewSize.Width < 900;
+        var narrow = e.NewSize.Width < (double)Application.Current.Resources["WideContentBreakpoint"];
         if (narrow == _isNarrow && BrowserSplitView.DisplayMode == (narrow ? SplitViewDisplayMode.Overlay : SplitViewDisplayMode.Inline))
         {
             return;
         }
 
         _isNarrow = narrow;
+        Grid.SetRow(BrowserControls, narrow ? 1 : 0);
+        Grid.SetColumn(BrowserControls, narrow ? 0 : 1);
+        Grid.SetColumnSpan(BrowserControls, narrow ? 2 : 1);
+        Grid.SetColumnSpan(BrowserHeading, narrow ? 2 : 1);
         BrowserSplitView.DisplayMode = narrow ? SplitViewDisplayMode.Overlay : SplitViewDisplayMode.Inline;
         OpenNavigationButton.Visibility = narrow ? Visibility.Visible : Visibility.Collapsed;
         BrowserSplitView.IsPaneOpen = !narrow;
@@ -197,7 +204,23 @@ public sealed partial class CodexPage : Page
                     StringComparer.OrdinalIgnoreCase);
                 _dashboard = intelligenceTask.Result;
                 BuildNavigationTree(_navigation);
-                RenderOverview(_dashboard, _navigation);
+                if (_selectedThreadId is { } selectedId && _threadNodes.TryGetValue(selectedId, out var selectedNode))
+                {
+                    _suppressTreeSelection = true;
+                    NavigationTree.SelectedNode = selectedNode;
+                    for (var parent = _treeParents.GetValueOrDefault(selectedNode); parent is not null; parent = _treeParents.GetValueOrDefault(parent))
+                        parent.IsExpanded = true;
+                    _suppressTreeSelection = false;
+                    await LoadThreadAsync(selectedId);
+                }
+                else if (_navigation.Groups.FirstOrDefault(x => x.Key == _selectedGroupKey) is { } selectedGroup)
+                {
+                    _suppressTreeSelection = true;
+                    NavigationTree.SelectedNode = _treeParents.Keys.FirstOrDefault(x => x.Content is NavigationTreeItem item && item.Group?.Key == selectedGroup.Key);
+                    _suppressTreeSelection = false;
+                    RenderWorkspace(selectedGroup);
+                }
+                else RenderOverview(_dashboard, _navigation);
                 var warningCount = _navigation.Warnings.Count + _navigation.CoverageWarnings.Count;
                 StatusText.Text =
                     $"{_navigation.TotalThreadCount:N0} visible thread(s) · {_navigation.Groups.Count:N0} workspace/project group(s) · " +
@@ -293,10 +316,13 @@ public sealed partial class CodexPage : Page
         switch (item.Kind)
         {
             case NavigationTreeKind.All:
+                _selectedThreadId = _selectedGroupKey = null;
                 RenderOverview(_dashboard, _navigation);
                 if (_isNarrow) BrowserSplitView.IsPaneOpen = false;
                 return;
             case NavigationTreeKind.Group when item.Group is not null:
+                _selectedThreadId = null;
+                _selectedGroupKey = item.Group.Key;
                 RenderWorkspace(item.Group);
                 if (_isNarrow) BrowserSplitView.IsPaneOpen = false;
                 return;
@@ -309,6 +335,8 @@ public sealed partial class CodexPage : Page
 
     private async Task LoadThreadAsync(string threadId)
     {
+        _selectedThreadId = threadId;
+        _selectedGroupKey = null;
         var cancellation = _cancellation;
         if (!_loaded || cancellation is null || cancellation.IsCancellationRequested) return;
         var generation = Interlocked.Increment(ref _selectionGeneration);
@@ -357,17 +385,20 @@ public sealed partial class CodexPage : Page
         AddMetric(cards, 2, "5h meter movement · all Codex", FormatQuotaDelta(fiveHourDelta));
         AddMetric(cards, 3, "Weekly movement · all Codex", FormatQuotaDelta(weeklyDelta));
         DetailPanel.Children.Add(cards);
-        AddNotice(DetailPanel,
+        var coverage = new StackPanel { Spacing = 10 };
+        AddNotice(coverage,
             $"Usage range: {dashboard.Query.FromUtc.ToLocalTime():g} → {dashboard.Query.ToUtc.ToLocalTime():g} · " +
             $"timeline bucket: {dashboard.Query.BucketSize.ToString().ToLowerInvariant()}. " +
             "These totals are intentionally database-wide; the range changes lookback and the bucket changes timeline resolution. " +
             (dashboard.UsageHistory.Sum(bucket => bucket.IntegrityDelta) == 0
                 ? "Reported/disjoint token integrity is exact for this range."
                 : "Reported/disjoint token totals include an observed integrity difference."));
-        AddFields(DetailPanel,
+        AddFields(coverage,
             ("Thread catalog capability", navigation.CatalogCapabilityAvailable ? "present" : "absent or unavailable"),
             ("Spawn topology capability", navigation.SpawnEdgesCapabilityAvailable ? "present" : "absent or unavailable"),
             ("Visible thread coverage", $"{navigation.TotalThreadCount:N0} thread(s) in the bounded navigation result"));
+        DetailPanel.Children.Add(new Expander { Header = "Technical coverage and accounting", Content = coverage,
+            HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch });
 
         AddListSection(DetailPanel, "Usage timeline", dashboard.UsageHistory.Count == 0
             ? ["No native Codex token events are available for this range yet."]
@@ -427,7 +458,7 @@ public sealed partial class CodexPage : Page
         _showExecutionDetails = false;
         var thread = result.Thread;
         var session = thread is not null && _sessions.TryGetValue(thread.ThreadId, out var selectedSession) ? selectedSession : null;
-        AddHeading(DetailPanel, thread?.DisplayName ?? "Codex thread", "Conversation-first local inspection; execution details are collapsed by default.");
+        AddHeading(DetailPanel, thread?.DisplayName ?? "Codex thread", $"{thread?.Model ?? session?.Model ?? "Model unavailable"} · {FormatDate(thread?.RecencyAtUtc ?? thread?.UpdatedAtUtc ?? session?.LastActivityAtUtc)}");
         var facts = new List<(string Label, string Value)>
         {
             ("Thread ID", thread?.ThreadId ?? "unavailable"),
@@ -442,7 +473,10 @@ public sealed partial class CodexPage : Page
             ("History source", result.HistorySourceDescription ?? result.HistorySourcePath ?? "unavailable"),
             ("Source freshness", FormatDate(thread?.SourceLastWriteTimeUtc ?? result.CapturedAtUtc))
         };
-        AddFields(DetailPanel, facts.ToArray());
+        var technicalFacts = new StackPanel { Spacing = 8 };
+        AddFields(technicalFacts, facts.ToArray());
+        DetailPanel.Children.Add(new Expander { Header = "Thread details", Content = technicalFacts,
+            HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch });
 
         var toolbar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         var messagesOnly = new CheckBox { Content = "Show execution details", IsChecked = false, VerticalAlignment = VerticalAlignment.Center };
@@ -550,12 +584,12 @@ public sealed partial class CodexPage : Page
     {
         if (sender is Button { Tag: string threadId } && !string.IsNullOrWhiteSpace(threadId))
         {
-            Frame?.Navigate(typeof(CodexDataExplorerPage), new CodexDataExplorerRequest(threadId));
+            App.Navigate(typeof(CodexDataExplorerPage), new CodexDataExplorerRequest(threadId));
         }
     }
 
     private void OnRolloutCoverageClicked(object sender, RoutedEventArgs e) =>
-        Frame?.Navigate(typeof(CodexRolloutCoveragePage));
+        App.Navigate(typeof(CodexRolloutCoveragePage));
 
     private bool IsSubagent(string? threadId) =>
         threadId is not null && _navigation?.PreferredSpawnEdges.Any(edge =>

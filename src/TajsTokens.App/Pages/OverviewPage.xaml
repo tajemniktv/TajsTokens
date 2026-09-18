@@ -22,12 +22,13 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
                 <StackPanel Spacing="3">
-                    <TextBlock FontSize="30" FontWeight="SemiBold" Text="Overview" />
+                    <TextBlock Style="{StaticResource PageTitleStyle}" Text="Overview" />
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                        <TextBlock Text="{Binding StatusText}" Opacity="0.9" />
-                        <TextBlock Text="·" Opacity="0.5" />
-                        <TextBlock Text="{Binding LastUpdatedText}" Opacity="0.7" />
+                        <TextBlock Text="{Binding StatusText}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock Text="·" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock Text="{Binding LastUpdatedText}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     </StackPanel>
+                    <InfoBar x:Name="SetupBanner" IsOpen="{Binding ShowSetup}" IsClosable="False" Title="Getting your Codex history ready" Message="{Binding SetupMessage}" />
                 </StackPanel>
                 <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10" VerticalAlignment="Center">
                     <ProgressRing Width="20" Height="20" IsActive="{Binding IsRefreshing}" />
@@ -36,45 +37,56 @@
             </Grid>
 
             <Grid x:Name="QuotaLayout" Grid.Row="1" ColumnSpacing="16" RowSpacing="16">
-                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
+                <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /></Grid.RowDefinitions>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition x:Name="QuotaSecondColumn" Width="0" />
                 </Grid.ColumnDefinitions>
 
-                <Border Grid.Column="0" VerticalAlignment="Top" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="14" Padding="22">
+                <Border x:Name="FiveHourCard" Grid.Column="0" VerticalAlignment="Top" Style="{StaticResource CardStyle}">
                     <StackPanel Spacing="7">
                         <TextBlock Text="{Binding FiveHourQuota.Title}" FontWeight="SemiBold" FontSize="18" />
-                        <TextBlock Text="{Binding FiveHourQuota.RemainingPercent}" FontSize="40" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <Border Style="{StaticResource StatusBadgeStyle}"><TextBlock Text="{Binding FiveHourQuota.Status}" FontWeight="SemiBold" /></Border>
+                        <TextBlock Text="{Binding FiveHourQuota.RemainingPercent}" Style="{StaticResource HeroMetricStyle}" />
                         <TextBlock Text="remaining quota" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Reset in:" /><TextBlock Text="{Binding FiveHourQuota.ResetCountdown}" /></StackPanel>
-                        <Expander Header="Conditional outlook and evidence" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                        <ProgressBar Value="{Binding FiveHourQuota.RemainingValue}" Maximum="100" AutomationProperties.Name="5-hour quota remaining percent" />
+                        <TextBlock Text="{Binding FiveHourQuota.ResetTimestamp}" Style="{StaticResource SubtitleStyle}" />
+                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Resets in" /><TextBlock Text="{Binding FiveHourQuota.ResetCountdown}" /></StackPanel>
+                        <TextBlock Text="{Binding FiveHourQuota.PredictedExhaustion}" Style="{StaticResource SectionTitleStyle}" Margin="0,8,0,4" />
+                        <Expander Header="Why this outlook?" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                             <StackPanel Spacing="12">
                                 <TextBlock Text="{Binding FiveHourQuota.PredictedExhaustion}" FontSize="18" TextWrapping="Wrap" />
                                 <TextBlock Text="{Binding FiveHourQuota.BurnRate}" TextWrapping="Wrap" />
                                 <TextBlock Text="{Binding FiveHourQuota.GaugeText}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
                             </StackPanel>
                         </Expander>
-                        <InfoBar IsOpen="True" IsClosable="False" Severity="{Binding FiveHourQuota.Severity}" Message="{Binding FiveHourQuota.SurvivalMessage}" />
+                        <InfoBar IsOpen="{Binding FiveHourQuota.NeedsAttention}" IsClosable="False" Severity="{Binding FiveHourQuota.Severity}" Message="{Binding FiveHourQuota.SurvivalMessage}" />
                     </StackPanel>
                 </Border>
 
-                <Border x:Name="WeeklyCard" Grid.Row="1" VerticalAlignment="Top" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="14" Padding="22">
+                <Border x:Name="WeeklyCard" Grid.Row="1" VerticalAlignment="Top" Style="{StaticResource CardStyle}">
                     <StackPanel Spacing="7">
                         <TextBlock Text="{Binding WeeklyQuota.Title}" FontWeight="SemiBold" FontSize="18" />
-                        <TextBlock Text="{Binding WeeklyQuota.RemainingPercent}" FontSize="40" FontWeight="SemiBold" TextWrapping="Wrap" />
+                        <Border Style="{StaticResource StatusBadgeStyle}"><TextBlock Text="{Binding WeeklyQuota.Status}" FontWeight="SemiBold" /></Border>
+                        <TextBlock Text="{Binding WeeklyQuota.RemainingPercent}" Style="{StaticResource HeroMetricStyle}" />
                         <TextBlock Text="remaining quota" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Reset in:" /><TextBlock Text="{Binding WeeklyQuota.ResetCountdown}" /></StackPanel>
-                        <Expander Header="Conditional outlook and evidence" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                        <ProgressBar Value="{Binding WeeklyQuota.RemainingValue}" Maximum="100" AutomationProperties.Name="Weekly quota remaining percent" />
+                        <TextBlock Text="{Binding WeeklyQuota.ResetTimestamp}" Style="{StaticResource SubtitleStyle}" />
+                        <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Resets in" /><TextBlock Text="{Binding WeeklyQuota.ResetCountdown}" /></StackPanel>
+                        <TextBlock Text="{Binding WeeklyQuota.PredictedExhaustion}" Style="{StaticResource SectionTitleStyle}" Margin="0,8,0,4" />
+                        <Expander Header="Why this outlook?" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                             <StackPanel Spacing="12">
                                 <TextBlock Text="{Binding WeeklyQuota.PredictedExhaustion}" FontSize="18" TextWrapping="Wrap" />
                                 <TextBlock Text="{Binding WeeklyQuota.BurnRate}" TextWrapping="Wrap" />
                                 <TextBlock Text="{Binding WeeklyQuota.GaugeText}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
                             </StackPanel>
                         </Expander>
-                        <InfoBar IsOpen="True" IsClosable="False" Severity="{Binding WeeklyQuota.Severity}" Message="{Binding WeeklyQuota.SurvivalMessage}" />
+                        <InfoBar IsOpen="{Binding WeeklyQuota.NeedsAttention}" IsClosable="False" Severity="{Binding WeeklyQuota.Severity}" Message="{Binding WeeklyQuota.SurvivalMessage}" />
                     </StackPanel>
                 </Border>
+                <Expander x:Name="UnreportedStrip" Grid.Row="2" Grid.ColumnSpan="2" Header="Unreported quota windows" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Visibility="Collapsed">
+                    <TextBlock x:Name="UnreportedText" Style="{StaticResource SubtitleStyle}" />
+                </Expander>
             </Grid>
 
             <Grid x:Name="UsageLayout" Grid.Row="2" ColumnSpacing="16" RowSpacing="16">
@@ -85,11 +97,11 @@
                 </Grid.ColumnDefinitions>
                 <Border Grid.Column="0" VerticalAlignment="Top" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="14" Padding="22">
                     <StackPanel Spacing="10">
-                        <TextBlock Text="Hourly token usage" FontWeight="SemiBold" FontSize="18" />
+                        <TextBlock Text="Recent token activity" Style="{StaticResource SectionTitleStyle}" />
                         <ScrollViewer HorizontalContentAlignment="Stretch" HorizontalScrollMode="Enabled" HorizontalScrollBarVisibility="Auto" VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
                             <Grid x:Name="HourlyChart" MinWidth="480" Height="180" ColumnSpacing="6" />
                         </ScrollViewer>
-                        <TextBlock Text="{Binding HistoryCaption}" Opacity="0.75" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding HistoryCaption}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                     </StackPanel>
                 </Border>
                 <Border x:Name="TokenCard" Grid.Row="1" VerticalAlignment="Top" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1" CornerRadius="14" Padding="22">
@@ -113,7 +125,7 @@
                         <TextBlock Text="{Binding TokenForecastText}" FontSize="18" TextWrapping="Wrap" />
                         <TextBlock Text="Includes cached input. This is not a quota estimate." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                         <Expander Header="Prediction evidence" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                            <TextBlock Text="{Binding TokenForecastEvidence}" Opacity="0.75" TextWrapping="Wrap" />
+                            <TextBlock Text="{Binding TokenForecastEvidence}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                         </Expander>
                     </StackPanel>
                 </Border>
@@ -133,7 +145,7 @@
                                 <DataTemplate x:DataType="models:DataSourceStatusCard">
                                     <Grid Margin="0,2,0,8">
                                         <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
-                                        <StackPanel><TextBlock Text="{x:Bind Name}" FontWeight="SemiBold" /><TextBlock Text="{x:Bind Detail}" TextWrapping="Wrap" Opacity="0.75" FontSize="12" /></StackPanel>
+                                        <StackPanel><TextBlock Text="{x:Bind Name}" FontWeight="SemiBold" /><TextBlock Text="{x:Bind Detail}" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="13" /></StackPanel>
                                         <TextBlock Grid.Column="1" Text="{x:Bind State}" FontWeight="SemiBold" Margin="12,0,0,0" />
                                     </Grid>
                                 </DataTemplate>
@@ -147,7 +159,7 @@
                         <ItemsControl ItemsSource="{Binding RecentEvents}">
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="models:EventItem">
-                                    <StackPanel Margin="0,2,0,8"><StackPanel Orientation="Horizontal" Spacing="6"><TextBlock Text="{x:Bind Time}" FontWeight="SemiBold" /><TextBlock Text="{x:Bind Type}" FontWeight="SemiBold" /></StackPanel><TextBlock Text="{x:Bind Description}" TextWrapping="Wrap" Opacity="0.8" FontSize="12" /></StackPanel>
+                                    <StackPanel Margin="0,2,0,8"><StackPanel Orientation="Horizontal" Spacing="6"><TextBlock Text="{x:Bind Time}" FontWeight="SemiBold" /><TextBlock Text="{x:Bind Type}" FontWeight="SemiBold" /></StackPanel><TextBlock Text="{x:Bind Description}" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" FontSize="13" /></StackPanel>
                                 </DataTemplate>
                             </ItemsControl.ItemTemplate>
                         </ItemsControl>

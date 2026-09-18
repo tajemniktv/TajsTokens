@@ -16,7 +16,7 @@
                            FontSize="28"
                            FontWeight="SemiBold" />
                 <TextBlock Text="Runtime behavior, collection cadence, notifications, and local data settings. Changes are persisted under LocalAppData."
-                           Opacity="0.75"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                            TextWrapping="Wrap" />
                 <TextBlock x:Name="BuildVersionText" TextWrapping="Wrap" IsTextSelectionEnabled="True" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </StackPanel>
@@ -60,8 +60,8 @@
                                Maximum="3600"
                                SmallChange="15"
                                SpinButtonPlacementMode="Compact" />
-                    <TextBlock Text="The process-lifetime collector restarts with the new cadence immediately after saving. Native Codex state/rollout collection is incremental, so warm idle refreshes should perform effectively no historical rollout work."
-                               Opacity="0.75"
+                    <TextBlock Text="Changes take effect when saved. Collection reads new local activity without modifying Codex's files."
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
@@ -83,7 +83,7 @@
                              Header="Low-quota thresholds (%)"
                              PlaceholderText="30, 20, 10, 5" />
                     <TextBlock Text="Comma, semicolon, or space separated. Values must be between 1 and 99; duplicates are removed."
-                               Opacity="0.75"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
@@ -100,12 +100,13 @@
                     <TextBlock Text="Codex app-server"
                                FontWeight="SemiBold" />
                     <TextBlock Text="Provider-authoritative quota source."
-                               Opacity="0.75" />
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     <TextBlock Text="Native Codex state + rollouts"
                                FontWeight="SemiBold" />
                     <TextBlock Text="Default token/session source. TajsTokens incrementally normalizes local Codex state and rollouts; remote/cloud-only sessions are explicitly outside this coverage until that source exists."
-                               Opacity="0.75"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                TextWrapping="Wrap" />
+                    <Expander Header="Advanced integrations" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"><StackPanel Spacing="12">
                     <ToggleSwitch x:Name="TokscaleReconciliationToggle"
                                   Header="Reconcile native accounting with Tokscale"
                                   OffContent="Disabled · no Tokscale process"
@@ -115,8 +116,9 @@
                                   OffContent="Native failure stays visible as unavailable/stale"
                                   OnContent="Use Tokscale only if native accounting fails" />
                     <TextBlock Text="Both Tokscale options are disabled by default. Enabling either can launch the Tokscale CLI (or its npx fallback); normal collection no longer requires Node.js, npm, or Tokscale."
-                               Opacity="0.75"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                TextWrapping="Wrap" />
+                    </StackPanel></Expander>
                 </StackPanel>
             </Border>
 
@@ -126,9 +128,7 @@
                     CornerRadius="14"
                     Padding="20">
                 <StackPanel Spacing="10">
-                    <TextBlock Text="Codex CLI harness"
-                               FontSize="20"
-                               FontWeight="SemiBold" />
+                    <Expander Header="Advanced · CLI harness defaults" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"><StackPanel Spacing="10">
                     <TextBox x:Name="CodexCliCommandBox"
                              Header="Executable or PATH command"
                              PlaceholderText="codex or C:\Tools\custom-codex.exe" />
@@ -155,8 +155,9 @@
                                SmallChange="15"
                                SpinButtonPlacementMode="Compact" />
                     <TextBlock Text="The harness runs only when you press Run. Prompt text, stdout, and stderr remain in the current app session and are not written to the telemetry database. Keep credentials out of persisted arguments; use the CLI's normal secure authentication flow."
-                               Opacity="0.75"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                TextWrapping="Wrap" />
+                    </StackPanel></Expander>
                 </StackPanel>
             </Border>
 
@@ -181,10 +182,10 @@
                                FontFamily="Consolas"
                                TextWrapping="Wrap" />
                     <TextBlock x:Name="SettingsSchemaText"
-                               Opacity="0.7"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                Margin="0,6,0,0" />
                     <TextBlock Text="TajsTokens retains selected content-free observations and local source paths, not prompt, reasoning, or tool bodies. There is no automatic age-based cleanup. Replaced rollout generations can rebuild accounting projections; preserve backups for recovery. Native source data remains read-only."
-                               Opacity="0.75"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                TextWrapping="Wrap" />
                 </StackPanel>
             </Border>

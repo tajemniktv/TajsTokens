@@ -71,6 +71,37 @@ work are in [Current work](#current-work); dated audits below describe captured 
 
 ## Current work
 
+**Product presentation pass (2026-09-18):** Overview puts remaining-quota gauges, status,
+local reset timestamps and conditional outlooks above evidence. Healthy cards no longer carry
+permanent InfoBars; omitted windows become a secondary strip. Startup explicitly says it is
+reading local history, and does not fabricate detection/progress milestones. Recent token
+activity uses a 24-clock-hour axis when offset-aware timestamps exist; absent records remain
+gaps rather than proof of inactivity.
+
+The shell owns navigation, selection synchronization and global Back. Diagnostics, Model lab,
+rollout coverage, native sources, Data explorer and CLI harness live under Advanced. Forecasts
+opens with current outlooks, followed by planning, token prediction and history; model research
+has its own Advanced destination. Planning retains the honest default of one active chat and
+no subagents; it does not claim to infer a recent work pattern that the planner cannot yet supply.
+
+Quota history adds an endpoint timeline per account/source/window/reset series, with optional
+local-token bars and point selection into existing details. It does not interpolate gaps or
+sum overlapping rollout readings into account consumption. Usage adds a proportional-time
+summary, removable scope filters and a compact default table with opt-in detailed columns.
+Human-facing times are local; UTC aggregate boundaries are retained and disclosed rather than
+relabelling UTC daily buckets as local calendar days. Conversation provenance is collapsed.
+Shared typography, card/status resources and a content-width breakpoint replace repeated
+presentation decisions on these surfaces. Main-window default is 1200×850, minimum 700×650.
+Session-local bounded page caching retains filters, tab and thread selection; queries refresh
+on return. This is not disk-persisted UI history or a new telemetry contract.
+
+Validation: 360 Core tests passed; the Windows Debug solution build finished with no warnings
+or errors and dogfooded build `20260918T104600975Z-d4b62a9f`. Runtime inspection covered the
+1200-wide shell and 700-wide Codex/Usage/Forecasts/Quota history layouts, quota-point selection,
+Usage drill-down and filter removal, Back restoring Usage scope with fresh data, and Model lab
+sidebar synchronization. First-launch/no-data behavior was inspected in code, not by clearing
+real data. This is a focused runtime pass, not exhaustive DPI, accessibility or user visual acceptance.
+
 ### Quota-cost calibration experiment (2026-09-18)
 
 Implemented the evaluation-first scope agreed in `.codex/ROADMAP.md`; this section remains

@@ -10,7 +10,6 @@ public sealed partial class UsagePage : Page
     public event EventHandler<string>? ThreadRequested;
     public void SelectThread(string threadId)
     {
-        _hasResult = false;
         _model = _repository = null;
         _session = null;
         _thread = threadId;
@@ -21,7 +20,6 @@ public sealed partial class UsagePage : Page
         SearchBox.Text = "";
     }
     private bool _loaded;
-    private bool _hasResult;
     private bool _settingRange;
     private CancellationTokenSource? _request;
     private IReadOnlyList<UsageRow> _rows = [];
@@ -29,23 +27,29 @@ public sealed partial class UsagePage : Page
     private DateTimeOffset? _from, _to;
     private string _group = "Model";
     private IntelligenceQuery? _displayedQuery;
+    private IReadOnlyList<UsageHistoryBucket> _timeline = [];
+    private DataTemplate? _detailedTemplate;
 
     public UsagePage()
     {
         InitializeComponent();
-        Loaded += async (_, _) => { _loaded = true; if (!_hasResult) await LoadAsync(); };
+        _detailedTemplate = RowsList.ItemTemplate;
+        OnColumnsChanged(this, new RoutedEventArgs());
+        Loaded += async (_, _) => { _loaded = true; await LoadAsync(); };
         Unloaded += (_, _) => { _loaded = false; _request?.Cancel(); };
     }
 
     private async Task LoadAsync()
     {
         if (!_loaded) return;
-        _hasResult = false;
         _request?.Cancel();
         var request = new CancellationTokenSource();
         _request = request;
         RowsList.ItemsSource = null;
         _rows = [];
+        _timeline = [];
+        UsageTimeline.Children.Clear();
+        TimelineCaption.Text = "Reading recorded activity…";
         SummaryText.Text = DetailText.Text = "";
         DrillButton.IsEnabled = false;
         OpenThreadButton.IsEnabled = false;
@@ -56,25 +60,27 @@ public sealed partial class UsagePage : Page
             var range = ((ComboBoxItem)RangeCombo.SelectedItem).Tag.ToString();
             var now = DateTimeOffset.UtcNow;
             var from = _from ?? (range == "all" ? DateTimeOffset.UnixEpoch : now.AddDays(-int.Parse(range!)));
-            var size = Enum.TryParse<AnalyticsBucketSize>(_group, out var bucket) ? bucket : AnalyticsBucketSize.Month;
+            var size = Enum.TryParse<AnalyticsBucketSize>(_group, out var bucket) ? bucket :
+                (now - from).TotalDays <= 2 ? AnalyticsBucketSize.Hour : AnalyticsBucketSize.Day;
             var query = new IntelligenceQuery(from, _to ?? now, size, 2000)
             { UsageOnly = true, Model = _model, Repository = _repository, SessionId = _session, ThreadId = _thread };
             var service = ((App)Application.Current).Services.Intelligence;
             var data = await Task.Run(() => service.QueryAsync(query, request.Token), request.Token);
             if (!_loaded || _request != request || request.IsCancellationRequested) return;
             _displayedQuery = data.Query;
+            _timeline = data.UsageHistory;
             var time = _group is "Hour" or "Day" or "Month";
             _rows = time
-                ? data.UsageHistory.Select(x => new UsageRow(x.StartUtc.ToString(data.Query.BucketSize == AnalyticsBucketSize.Month ? "yyyy-MM" : data.Query.BucketSize == AnalyticsBucketSize.Day ? "yyyy-MM-dd" : "yyyy-MM-dd HH:mm"), x.NativeTokens, x.UncachedInputTokens, x.NonReasoningOutputTokens, x.CacheReadTokens, x.CacheWriteTokens, x.ReasoningOutputTokens, x.ActiveSessions, x.StartUtc, x.EndUtc)).ToArray()
+                ? data.UsageHistory.Select(x => new UsageRow($"{x.StartUtc.ToLocalTime():dd MMM HH:mm} → {x.EndUtc.ToLocalTime():dd MMM HH:mm}", x.NativeTokens, x.UncachedInputTokens, x.NonReasoningOutputTokens, x.CacheReadTokens, x.CacheWriteTokens, x.ReasoningOutputTokens, x.ActiveSessions, x.StartUtc, x.EndUtc)).ToArray()
                 : data.Dimensions.Where(x => x.Dimension == _group).Select(x => new UsageRow(x.Value, x.NativeTokens, x.UncachedInputTokens, x.NonReasoningOutputTokens, x.CacheReadTokens, x.CacheWriteTokens, x.ReasoningOutputTokens, x.Sessions, ThreadId: x.ThreadId)).ToArray();
-            SummaryText.Text = $"{Count(data.UsageHistory.Sum(x => x.NativeTokens))} recorded tokens · {data.Dimensions.Count(x => x.Dimension == "Session"):N0} sessions";
-            var filters = string.Join(" · ", new[] { _model, _repository, _session, _thread is null ? null : $"Thread {_thread}" }.Where(x => x is not null));
-            StatusText.Text = $"{data.Query.FromUtc:yyyy-MM-dd HH:mm} → {data.Query.ToUtc:yyyy-MM-dd HH:mm} UTC · {_rows.Count:N0} rows" +
+            SummaryText.Text = $"{Count(data.UsageHistory.Sum(x => x.NativeTokens))} tokens";
+            PeriodText.Text = $"{data.Query.FromUtc.ToLocalTime():d MMM yyyy} – {data.Query.ToUtc.ToLocalTime():d MMM yyyy} · this computer";
+            StatusText.Text = $"{data.Query.FromUtc.ToLocalTime():g} → {data.Query.ToUtc.ToLocalTime():g} · {TimeZoneInfo.Local.DisplayName} · {_rows.Count:N0} rows" +
                 (time ? $" · {data.Query.BucketSize} buckets (coarsened when necessary)" : "") +
-                (filters.Length > 0 ? $" · {filters}" : " · All local Codex activity") +
                 (_rows.Count == 0 ? " · No recorded activity in this scope." : "");
+            RenderChips();
+            RenderTimeline();
             RenderRows();
-            _hasResult = true;
         }
         catch (OperationCanceledException) when (request.IsCancellationRequested) { }
         catch (Exception e)
@@ -96,10 +102,64 @@ public sealed partial class UsagePage : Page
         DrillButton.IsEnabled = false;
         DetailText.Text = "";
     }
+    private void OnColumnsChanged(object sender, RoutedEventArgs e)
+    {
+        if (RowsList is null || _detailedTemplate is null) return;
+        var detailed = DetailedColumns.IsChecked == true;
+        RowsList.ItemTemplate = detailed ? _detailedTemplate : (DataTemplate)Resources["CompactUsageRow"];
+        DetailedHeader.Visibility = detailed ? Visibility.Visible : Visibility.Collapsed;
+        CompactHeader.Visibility = detailed ? Visibility.Collapsed : Visibility.Visible;
+        UsageTable.MinWidth = detailed ? 1040 : 0;
+    }
+
+    private void RenderChips()
+    {
+        FilterChips.Children.Clear();
+        FilterChips.Children.Add(new TextBlock { Text = "All usage", VerticalAlignment = VerticalAlignment.Center });
+        void Add(string label, Action clear)
+        {
+            var button = new Button { Content = label + " ×", MaxWidth = 300 };
+            ToolTipService.SetToolTip(button, "Remove filter: " + label);
+            button.Click += async (_, _) => { clear(); await LoadAsync(); };
+            FilterChips.Children.Add(button);
+        }
+        if (_model is not null) Add("Model: " + _model, () => _model = null);
+        if (_repository is not null) Add("Project: " + _repository, () => _repository = null);
+        if (_session is not null) Add("Session: " + _session, () => _session = null);
+        if (_thread is not null) Add("Thread: " + _thread, () => _thread = null);
+        if (_from is not null) Add("Selected period", () =>
+        {
+            _from = _to = null; _settingRange = true; RangeCombo.SelectedIndex = 2; _settingRange = false;
+        });
+    }
+
+    private void OnTimelineSizeChanged(object sender, SizeChangedEventArgs e) => RenderTimeline();
+
+    private void RenderTimeline()
+    {
+        UsageTimeline.Children.Clear();
+        if (_timeline.Count == 0 || UsageTimeline.ActualWidth <= 0 || _displayedQuery is null) return;
+        var from = _displayedQuery.FromUtc == DateTimeOffset.UnixEpoch ? _timeline.Min(x => x.StartUtc) : _displayedQuery.FromUtc;
+        var to = _displayedQuery.ToUtc;
+        var span = Math.Max(1, (to - from).TotalSeconds);
+        // Coarsen only the visual bars, never the totals or drill-down query.
+        var bins = _timeline.GroupBy(x => Math.Clamp((int)((x.StartUtc - from).TotalSeconds / span * 60), 0, 59))
+            .Select(g => new { Index = g.Key, Tokens = g.Sum(x => x.NativeTokens), From = g.Min(x => x.StartUtc), To = g.Max(x => x.EndUtc) }).ToArray();
+        var max = Math.Max(1, bins.Max(x => x.Tokens));
+        foreach (var bin in bins)
+        {
+            var bar = new Border { Width = Math.Max(1, UsageTimeline.ActualWidth / 60 - 2), Height = 80d * bin.Tokens / max,
+                Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["AccentFillColorDefaultBrush"], CornerRadius = new CornerRadius(3, 3, 0, 0) };
+            Canvas.SetLeft(bar, bin.Index * UsageTimeline.ActualWidth / 60);
+            Canvas.SetTop(bar, 90 - bar.Height);
+            ToolTipService.SetToolTip(bar, $"{bin.From.ToLocalTime():g} → {bin.To.ToLocalTime():g}: {bin.Tokens:N0} recorded tokens");
+            UsageTimeline.Children.Add(bar);
+        }
+        TimelineCaption.Text = $"{from.ToLocalTime():d MMM HH:mm} → {to.ToLocalTime():d MMM HH:mm} · recorded activity; gaps preserved · local time";
+    }
     private async void OnQueryChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_settingRange) return;
-        _hasResult = false;
         if (ReferenceEquals(sender, RangeCombo)) _from = _to = null;
         await LoadAsync();
     }

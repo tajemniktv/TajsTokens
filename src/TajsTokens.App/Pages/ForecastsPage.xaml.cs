@@ -14,15 +14,39 @@ public sealed partial class ForecastsPage : Page
     private long _estimateGeneration;
     private long _evaluationGeneration;
     private IReadOnlyList<EvaluationRow> _evaluationRows = [];
+    private object? _normalTab;
+    private bool _modelLab;
 
     public ForecastsPage()
     {
         InitializeComponent();
+        NavigationCacheMode = Microsoft.UI.Xaml.Navigation.NavigationCacheMode.Enabled;
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
+        SizeChanged += (_, e) =>
+        {
+            var wide = e.NewSize.Width >= (double)Application.Current.Resources["WideContentBreakpoint"];
+            HistoryDetailColumn.Width = wide ? new GridLength(1.5, GridUnitType.Star) : new GridLength(0);
+            HistoryDetailRow.Height = wide ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+            Grid.SetColumn(HistoryDetails, wide ? 1 : 0); Grid.SetRow(HistoryDetails, wide ? 0 : 1);
+        };
     }
 
     private App App => (App)Application.Current;
+
+    protected override void OnNavigatedTo(Microsoft.UI.Xaml.Navigation.NavigationEventArgs e)
+    {
+        base.OnNavigatedTo(e);
+        var normalTab = _normalTab;
+        _modelLab = Equals(e.Parameter, "model-lab");
+        ForecastTabs.Items.Clear();
+        foreach (var tab in _modelLab ? new[] { EvaluationTab } : new[] { OutlookTab, PlanTab, UsageTab, HistoryTab })
+            ForecastTabs.Items.Add(tab);
+        ForecastTabs.SelectedItem = _modelLab ? EvaluationTab : normalTab ?? OutlookTab;
+        PageTitle.Text = _modelLab ? "Model lab" : "Forecasts";
+    }
+
+    private void OnModelLabClicked(object sender, RoutedEventArgs e) => App.Navigate(typeof(ForecastsPage), "model-lab");
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
@@ -100,6 +124,21 @@ public sealed partial class ForecastsPage : Page
     {
         QuotaHistoryText.Text = dashboard.QuotaHistorySummary ?? "Historical quota evidence is unavailable.";
         var snapshot = App.Services.Telemetry.Latest;
+        var current = snapshot.QuotaSnapshots.Where(x => x.Kind is QuotaWindowKind.FiveHour or QuotaWindowKind.Weekly)
+            .GroupBy(x => x.Kind).Select(g => g.OrderByDescending(x => x.CapturedAtUtc).First())
+            .Where(x => !snapshot.QuotaLanes.Any(l => l.Kind == x.Kind && l.NotReportedByProvider)).ToArray();
+        CurrentOutlooks.ItemsSource = current.Select(x =>
+        {
+            var forecast = snapshot.FindCurrentForecast(x);
+            return ViewModels.OverviewViewModel.BuildQuotaCard(x.Kind == QuotaWindowKind.Weekly ? "Weekly quota" : "5-hour quota", x,
+                forecast is { IsFresh: true } ? forecast.Forecast : null, snapshot.IsQuotaSnapshotFresh(x));
+        }).ToArray();
+        var trusted = current.Select(snapshot.FindCurrentForecast).Where(x => x is { IsFresh: true }).ToArray();
+        var advanced = trusted.Any(x => x?.Forecast?.Evidence?.HorizonPredictions?.Any(h => h.Model.StartsWith("composed-quota/", StringComparison.Ordinal)) == true);
+        ModelHealthText.Text = current.Length == 0 ? "No current quota reading. Refresh Codex quota before relying on an outlook." :
+            trusted.Length == 0 ? "No fresh outlook is available. Refresh quota and check Diagnostics before relying on a forecast." :
+            advanced ? "A workload-based short-term prediction has earned live selection. The outlook above remains conditional on your future activity." :
+            "Still learning your next workload. The current outlook keeps its established history-based model until a workload-based prediction proves more reliable on live-collected outcomes. See Model lab for the comparisons.";
         var tokens = snapshot.TokenForecast;
         TokenPredictionText.Text = tokens?.Predictions is { Count: > 0 } predictions
             ? string.Join("\n", predictions.Select(x => $"Next {Horizon(x.HorizonHours)}  ·  ~{CompactTokens(x.ExpectedTokens)} tokens"))
@@ -152,7 +191,11 @@ public sealed partial class ForecastsPage : Page
     private void OnTabChanged(object sender, SelectionChangedEventArgs e)
     {
         if (HistorySummary is not null && ForecastTabs is not null)
-            HistorySummary.Visibility = ForecastTabs.SelectedIndex == 0 ? Visibility.Visible : Visibility.Collapsed;
+        {
+            HistorySummary.Visibility = ReferenceEquals(ForecastTabs.SelectedItem, HistoryTab) ? Visibility.Visible : Visibility.Collapsed;
+            if (!_modelLab && ForecastTabs.SelectedItem is not null && !ReferenceEquals(ForecastTabs.SelectedItem, EvaluationTab))
+                _normalTab = ForecastTabs.SelectedItem;
+        }
     }
 
     private void OnHistoryFilterChanged(object sender, SelectionChangedEventArgs e)

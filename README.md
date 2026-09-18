@@ -13,22 +13,23 @@ outlooks and usage predictions—with freshness and uncertainty kept visible.
   context and supported native source details. Jump from a thread to its token usage.
 - **Codex → Usage breakdown:** compare models, projects, sessions, hours, days and months in consistent token
   tables. Search/sort rows, inspect exact counts and filter a selected row across breakdowns.
-  Scope is retained local Codex activity; time buckets use UTC, not inferred billing or quota cost.
-- **Forecasts:** browse saved quota outlooks, see token workload predictions, estimate
-  supported workload scenarios, and compare models within a selected history cohort and target. Historical evidence
+  A timeline and removable filter chips sit above the breakdown; detailed token columns are optional.
+  Times display locally; daily/monthly groups retain UTC boundaries. Totals are not inferred billing or quota cost.
+- **Forecasts:** start with current quota outlooks, see token workload predictions, estimate
+  supported workload scenarios, and browse saved outlooks. Advanced → Model lab compares models within a selected history cohort and target. Historical evidence
   explains which rollout/app-server readings are usable, repeated, conflicting or incomplete.
   Cost-calibration diagnostics compare actual recorded work with quota movement; they are
   separate from end-to-end forecast and cross-regime transfer diagnostics. Workload composition
   is visible; a learned quota outlook replaces the incumbent only after independent validation gates pass.
-- **Quota burn:** explore recorded quota movement alongside local token activity and filter
+- **Quota history:** select points on a quota-used timeline alongside optional local token activity and filter
   quota drops separately from reset-time shifts. Account readings are the default; rollout
   observations remain separate diagnostics, with explicit observation times and detailed deadlines.
-- **Diagnostics:** check source health, collection coverage and why a forecast is unavailable.
+- **Advanced → Diagnostics / Model lab:** check source health, collection coverage and prediction evidence.
 - **Historical rollout ownership:** explicitly associate retained histories with a recorded account
   in Settings, or revoke the association. User assertions remain separate from native account IDs;
   live learning still requires independently collected validation evidence.
-- **Data Explorer:** inspect Codex SQLite data read-only and compare selected sources.
-- **Codex CLI Harness:** explicitly run a configured local CLI and inspect its output.
+- **Advanced → Data explorer:** inspect Codex SQLite data read-only and compare selected sources.
+- **Advanced → CLI harness:** explicitly run a configured local CLI and inspect its output.
 
 Predictions are estimates, not guarantees. Token predictions describe recorded local usage
 (including cached input), not subscription-quota percentages. Quota outlooks and scenarios

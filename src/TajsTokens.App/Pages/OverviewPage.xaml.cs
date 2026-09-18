@@ -83,11 +83,17 @@ public sealed partial class OverviewPage : Page
         // Constrain the scroll content to its actual viewport, not its children's desired width.
         // Use the available page width (after navigation), as the Codex browser does.
         OverviewContent.Width = width;
-        var wide = width >= 960;
-        QuotaSecondColumn.Width = wide ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
-        UsageSecondColumn.Width = QuotaSecondColumn.Width;
-        Grid.SetRow(WeeklyCard, wide ? 0 : 1);
-        Grid.SetColumn(WeeklyCard, wide ? 1 : 0);
+        var wide = width >= (double)Application.Current.Resources["WideContentBreakpoint"];
+        var both = ViewModel.FiveHourQuota.IsReported && ViewModel.WeeklyQuota.IsReported;
+        FiveHourCard.Visibility = ViewModel.FiveHourQuota.IsReported && !ViewModel.ShowSetup ? Visibility.Visible : Visibility.Collapsed;
+        WeeklyCard.Visibility = ViewModel.WeeklyQuota.IsReported && !ViewModel.ShowSetup ? Visibility.Visible : Visibility.Collapsed;
+        UnreportedStrip.Visibility = both ? Visibility.Collapsed : Visibility.Visible;
+        UnreportedText.Text = string.Join("\n", new[] { ViewModel.FiveHourQuota, ViewModel.WeeklyQuota }.Where(x => !x.IsReported)
+            .Select(x => $"{x.Title}: not currently reported by Codex. This does not mean unlimited usage."));
+        QuotaSecondColumn.Width = wide && both ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        UsageSecondColumn.Width = wide ? new GridLength(1, GridUnitType.Star) : new GridLength(0);
+        Grid.SetRow(WeeklyCard, both && !wide ? 1 : 0);
+        Grid.SetColumn(WeeklyCard, both && wide ? 1 : 0);
         Grid.SetRow(TokenCard, wide ? 0 : 1);
         Grid.SetColumn(TokenCard, wide ? 1 : 0);
         QuotaLayout.ColumnSpacing = UsageLayout.ColumnSpacing = wide ? 16 : 0;
@@ -96,6 +102,7 @@ public sealed partial class OverviewPage : Page
 
     private void RenderChart()
     {
+        ApplyLayout(OverviewViewport.ActualWidth);
         HourlyChart.Children.Clear();
         HourlyChart.ColumnDefinitions.Clear();
         foreach (var point in ViewModel.HistoryPoints)
