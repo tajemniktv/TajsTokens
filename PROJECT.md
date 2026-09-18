@@ -71,6 +71,17 @@ work are in [Current work](#current-work); dated audits below describe captured 
 
 ## Current work
 
+**Desktop analytics acquisition trace (2026-09-18):** installed Windows package
+26.915.3509.0 implements analytics via renderer queries → private Desktop HTTP host service
+→ authenticated backend requests. App-server supplies Desktop authentication, but the reports
+do not flow through the public `account/usage/read` contract. Desktop additionally uses
+`thread_usage/query_v2`, with grouped descendants and allowance/credit metrics distinct from
+CLI credit estimates. No supported external report/export seam was established. Existing
+`NoSupportedSeam` states and the Codex-owned authentication boundary remain correct for
+TajsTokens. This was static installed-code inspection plus user screenshots, not a live backend
+probe; unavailable UI text does not establish an HTTP status. Details and version anchors:
+[Desktop analytics acquisition](docs/source-notes/CODEX_DESKTOP_ANALYTICS.md).
+
 **Server-evidence review hardening (2026-09-18):** latest attempts now use surface/thread
 identity regardless of account-correlation outcome; historical successes cannot survive a newer
 failed/null attempt as current thread estimates. Account attribution conflict no longer replaces

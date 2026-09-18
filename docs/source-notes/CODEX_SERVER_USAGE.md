@@ -58,6 +58,11 @@ without an account binding. An undetected switch away and back is not ruled out.
 
 ## Real backend contracts not available through this seam
 
+Desktop also contains these analytics, through its own authenticated HTTP host service rather
+than these public app-server methods. Exact installed-package tracing and the distinct v2
+top-chat contract are recorded in [Desktop analytics acquisition](CODEX_DESKTOP_ANALYTICS.md).
+"TUI-only" describes where the initial public-source client was found, not exclusive product availability.
+
 `backend-client/src/client/plan_history.rs` exposes
 `usage/plan_limit_history?days=7` through Codex's backend client. Its report includes
 `data_as_of`, `coverage_start`, `coverage_complete`, `approximate` (defaults true),
