@@ -37,6 +37,12 @@ The same cost comparisons appear under Forecasts → Model evaluation, separatel
 from quota and token forecasts. Missing precision/coverage and sparse generations are not
 calibration successes. See PROJECT.md for model gates and interpretation.
 
+Use `--composed` with the same database argument to compare origin-only workload → cost → quota
+forecasts with oracle actual-work cost and the incumbent policy on paired outcomes. `--transfer`
+tests earlier-regime weights with destination scaling against destination-local training; it
+explicitly reports when account-linked compatible regimes are absent. Neither command sends
+messages or changes source data. These calculations are also available in Model evaluation.
+
 ### Application build
 
 ```powershell

@@ -6,6 +6,33 @@ using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
+if (args.Length == 2 && args[0] == "--transfer")
+{
+    var data = await new SqliteForecastDatasetReader(args[1]).ReadAsync("codex", "default",
+        DateTimeOffset.UnixEpoch.AddDays(1), DateTimeOffset.UtcNow, CancellationToken.None);
+    var report = QuotaTransferEvaluator.Evaluate(data);
+    Console.WriteLine(report.Version + ": " + report.Methodology);
+    Console.WriteLine("comparison,horizon,model,source_train,destination_train,heldout,generations,scale,unscaled_loss,scaled_loss,local_loss,status");
+    var index = 0;
+    foreach (var score in report.Scores)
+        Console.WriteLine(FormattableString.Invariant($"{++index},{score.HorizonHours},{score.Model},{score.SourceTraining},{score.DestinationTraining},{score.HeldOut},{score.HeldOutGenerations},{score.Scale:F4},{score.UnscaledLoss:F4},{score.ScaledLoss:F4},{score.LocalOnlyLoss:F4},{score.Status}"));
+    if (report.Scores.Count == 0) Console.WriteLine("No compatible recorded-account regimes available; transfer and TT are unsupported.");
+    return;
+}
+
+if (args.Length == 2 && args[0] == "--composed")
+{
+    var data = await new SqliteForecastDatasetReader(args[1]).ReadAsync("codex", "default",
+        DateTimeOffset.UnixEpoch.AddDays(1), DateTimeOffset.UtcNow, CancellationToken.None);
+    var report = ComposedQuotaEvaluator.Evaluate(data);
+    Console.WriteLine(report.Version + ": " + report.Methodology);
+    Console.WriteLine("cohort,horizon,model,train,heldout,generations,missing_composition,forecast_loss,cost_only_loss,pace_loss,incumbent_loss,displayed_MAE");
+    var cohorts = report.Scores.Select(x => x.Cohort).Distinct().ToList();
+    foreach (var score in report.Scores)
+        Console.WriteLine(FormattableString.Invariant($"cohort-{cohorts.IndexOf(score.Cohort) + 1},{score.HorizonHours},{score.CostModel},{score.TrainingIntervals},{score.HeldOutIntervals},{score.ResetGenerations},{score.MissingComposition},{score.IntervalLoss:F4},{score.CostOnlyIntervalLoss:F4},{score.PaceIntervalLoss:F4},{score.IncumbentIntervalLoss:F4},{score.DisplayedDeltaMae:F4}"));
+    return;
+}
+
 if (args.Length == 2 && args[0] is "--cost" or "--cost-owned-rollouts")
 {
     var data = await new SqliteForecastDatasetReader(args[1]).ReadAsync("codex", "default",

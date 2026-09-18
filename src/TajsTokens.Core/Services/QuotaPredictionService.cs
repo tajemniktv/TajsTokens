@@ -36,7 +36,7 @@ public static class QuotaPredictionService
             var evaluated = Evaluate(local, horizon, ForecastReplayAvailability.CollectedByOrigin, anchor, cancellationToken);
             if (evaluated.Current is { } current) result.Add(current);
         }
-        return result;
+        return ComposedQuotaPolicy.Apply(local, anchor, result, cancellationToken);
     }
 
     public static IReadOnlyList<QuotaPredictionTrial> Replay(CodexForecastDataset data, double horizon,

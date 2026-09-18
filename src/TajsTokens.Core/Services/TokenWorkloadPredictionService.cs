@@ -17,6 +17,29 @@ public static class TokenWorkloadPredictionService
         "Backfilled evidence is usable for retrospective learning, not proof that an earlier app had collected it.";
     private static readonly string[] Candidates = ["recent-30m", "recent-2h", "recent-median", "workload-ridge", "workload-linear"];
 
+    public static TokenHorizonPrediction? PredictHorizon(CodexForecastDataset data, DateTimeOffset origin,
+        double horizon, ForecastReplayAvailability availability = ForecastReplayAvailability.ReconstructedEventTime,
+        CancellationToken cancellationToken = default)
+    {
+        var prefix = data with
+        {
+            Tokens = data.Tokens.Where(x => x.ObservedAtUtc <= origin).ToArray(),
+            Workload = data.Workload.Where(x => x.ObservedAtUtc <= origin).ToArray(),
+            Context = data.Context.Where(x => x.ObservedAtUtc <= origin).ToArray()
+        };
+        if (availability == ForecastReplayAvailability.CollectedByOrigin)
+            prefix = prefix with
+            {
+                Tokens = prefix.Tokens.Where(x => x.CapturedAtUtc <= origin).ToArray(),
+                Workload = prefix.Workload.Where(x => x.CapturedAtUtc <= origin).ToArray(),
+                Context = prefix.Context.Where(x => x.CapturedAtUtc <= origin).ToArray()
+            };
+        if (!prefix.Tokens.Any(x => x.ObservedAtUtc > origin.AddHours(-2))) return null;
+        var prediction = Evaluate(prefix, horizon, origin, cancellationToken).Current;
+        return prediction is null ? null : prediction with
+        { Composition = WorkloadCompositionPrediction.Project(prefix, origin, prediction, availability) };
+    }
+
     public static TokenWorkloadForecast Predict(CodexForecastDataset data, DateTimeOffset now,
         CancellationToken cancellationToken = default)
     {
@@ -28,14 +51,17 @@ public static class TokenWorkloadPredictionService
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var result = Evaluate(available, horizon, now, cancellationToken);
-                if (result.Current is not null) predictions.Add(result.Current);
+                if (result.Current is not null) predictions.Add(result.Current with
+                { Composition = WorkloadCompositionPrediction.Project(available, now, result.Current) });
             }
         return new(now, last, available.Tokens.Count, available.Tokens.Select(x => x.SessionId).Distinct().Count(),
             predictions, Methodology + (predictions.Count == 0 ? " No recent token activity with enough history to anchor a current forecast." : ""));
     }
 
     public static IReadOnlyList<TokenForecastTrial> Replay(CodexForecastDataset data, double horizon,
-        CancellationToken cancellationToken = default) => Evaluate(data, horizon, null, cancellationToken).Trials;
+        CancellationToken cancellationToken = default) => Evaluate(data, horizon, null, cancellationToken).Trials
+        .Select(x => x with { Prediction = x.Prediction with
+        { Composition = WorkloadCompositionPrediction.Project(data, x.OriginUtc, x.Prediction) } }).ToArray();
 
     public static IReadOnlyList<TokenForecastScore> EvaluateScores(CodexForecastDataset data,
         CancellationToken cancellationToken = default)

@@ -18,7 +18,8 @@ outlooks and usage predictions—with freshness and uncertainty kept visible.
   supported workload scenarios, and compare models within a selected history cohort and target. Historical evidence
   explains which rollout/app-server readings are usable, repeated, conflicting or incomplete.
   Cost-calibration diagnostics compare actual recorded work with quota movement; they are
-  separate from future-work predictions and do not change live forecasts automatically.
+  separate from end-to-end forecast and cross-regime transfer diagnostics. Workload composition
+  is visible; a learned quota outlook replaces the incumbent only after independent validation gates pass.
 - **Quota burn:** explore recorded quota movement alongside local token activity and filter
   quota drops separately from reset-time shifts. Account readings are the default; rollout
   observations remain separate diagnostics, with explicit observation times and detailed deadlines.

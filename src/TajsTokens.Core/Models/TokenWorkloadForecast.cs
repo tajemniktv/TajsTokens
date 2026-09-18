@@ -9,7 +9,10 @@ public sealed record TokenWorkloadForecast(DateTimeOffset GeneratedAtUtc, DateTi
 
 public sealed record TokenHorizonPrediction(double HorizonHours, double ExpectedTokens, string Model,
     int TrainingSamples, int ValidationSamples, double? ValidationMeanAbsoluteError,
-    double? LowerTokens, double? UpperTokens, string Explanation);
+    double? LowerTokens, double? UpperTokens, string Explanation)
+{
+    public PredictedWorkload? Composition { get; init; }
+}
 
 public sealed record TokenForecastTrial(DateTimeOffset OriginUtc, DateTimeOffset OutcomeUtc,
     double ObservedTokens, TokenHorizonPrediction Prediction);

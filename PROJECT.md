@@ -131,9 +131,45 @@ growth reflects ongoing normal collection. Windows Debug build passed with zero 
 and dogfooded/restarted build `20260918T091810528Z-85fd9411`. App startup was acknowledged;
 the new evaluation view has build proof, not a completed native visual acceptance pass.
 
-**Conditional next work:** once independent active-regime history passes the cost gate, evaluate
-predicted workload composition → cost → quota end to end before changing live outlooks.
-Cross-regime transfer/TT remains evidence-gated research, not a shipped unit. No active prompts,
+**Full-roadmap implementation:** `WorkloadCompositionPrediction` now projects the
+existing scalar token forecast into five disjoint token categories plus model/effort shares from
+the preceding two hours, retaining missing composition rather than inventing zeros. Current token
+forecasts and retrospective token replay carry the vector. The Forecasts evidence view displays it.
+`ComposedQuotaEvaluator` applies frozen cost weights to origin-only predictions and compares the
+result with actual-workload cost, legacy pace and the actual incumbent quota policy on matched
+outcomes. Event-time reconstruction and collection-time availability remain separate.
+
+`QuotaTransferEvaluator` explicitly compares earlier source-regime weights, destination-scaled
+source weights and destination-local weights. Scale fitting uses only the first 20 destination
+intervals; held-out targets cannot change it. Account/source/session compatibility is required;
+absence of native account linkage is not silently converted to transfer evidence. Evaluation
+groups and read-only CLI `--composed` / `--transfer` expose these distinct experiments.
+
+`ComposedQuotaPolicy` now supplies evidence-gated live composition-to-quota selection. It keeps
+the incumbent unless a supported cost candidate wins, paired end-to-end errors materially beat
+both incumbent and pace, at least eight independent reset generations support the comparison,
+and current composition and recent outcomes are available. Unseen model/effort, missing native
+account identity, detected residual shifts and insufficient calibration all preserve fallback.
+Only total/category/model-effort cost models are eligible: future context/activity/runtime
+features from oracle cost ablations never leak into a live forecast. Empirical ranges use
+completed-generation maximum errors, not an exhaustion probability. Saved horizon evidence
+continues through the existing forecast persistence owner.
+
+Retained-data end-to-end replay had 24 paired half-hour targets across two reset generations
+(four targets lacked recent composition). Interval loss was 1.577pp total, 1.477pp categories,
+and 1.647pp model/effort, versus 1.276pp legacy pace and 1.579pp incumbent policy. This does not
+pass promotion: explanatory cost gains are not equivalent to future-work forecasting gains.
+The transfer evaluator found no compatible native-account-linked regimes in this snapshot.
+Its chronological scale/local-only comparisons are implemented and synthetically verified,
+but empirical transfer and TT are unsupported, not invented successes.
+
+Full-roadmap validation: 356 Core tests passed, including origin-only composition, backfill
+availability, paired cost/forecast leakage, transfer chronology/account isolation and live
+selection fallback gates. Windows Debug build passed with zero warnings/errors and installed
+and restarted `20260918T093836657Z-92e92959`. The completion audit is in
+`.codex/docs/full-roadmap-completion-audit.md`; native visual acceptance remains separate.
+
+TT remains evidence-gated research, not a shipped unit. No active prompts,
 automatic messages, external uploads, crowdsourcing, pricing or hidden-runtime probes were added.
 
 ### Reset identity and review hardening (2026-09-18)

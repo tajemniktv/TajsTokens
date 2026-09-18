@@ -112,7 +112,10 @@ public sealed partial class ForecastsPage : Page
         TokenPredictionEvidence.Text = tokens is not null
             ? $"{tokens.Sessions:N0} sessions · {tokens.TokenEvents:N0} token observations · generated {tokens.GeneratedAtUtc.ToLocalTime():g}\n\n" +
                 string.Join("\n\n", tokens.Predictions.Select(x => $"+{x.HorizonHours:0.#}h: {x.Explanation}" +
-                    (x.LowerTokens is { } low && x.UpperTokens is { } high ? $" Range: {low:N0}–{high:N0} tokens." : ""))) +
+                    (x.LowerTokens is { } low && x.UpperTokens is { } high ? $" Range: {low:N0}–{high:N0} tokens." : "") +
+                    (x.Composition is { } c ? "\nProjected uncached / cache-read / cache-write / output / reasoning: " +
+                        string.Join(" / ", c.TokenCategories.Select(v => CompactTokens(v))) +
+                        $" tokens. Composition from {c.CompositionObservations} recent observations, not measured future usage." : ""))) +
                 "\n\n" + tokens.Methodology : "Local token prediction is independent of quota calibration.";
         _history = dashboard.FiveHourForecasts.Concat(dashboard.WeeklyForecasts)
             .OrderByDescending(x => x.Forecast.GeneratedAtUtc).ToArray();
@@ -247,6 +250,9 @@ public sealed partial class ForecastsPage : Page
             if (report.QuotaCost is { } cost)
                 EvaluationMethodText.Text += $"\n\n{cost.Version}: {cost.Methodology}\n" +
                     string.Join(" · ", cost.QualityCounts.Select(x => $"{x.Key}: {x.Value:N0}"));
+            if (report.ComposedQuota is { } composed) EvaluationMethodText.Text += "\n\n" + composed.Methodology;
+            if (report.QuotaTransfer is { } transfer) EvaluationMethodText.Text += "\n\n" + transfer.Methodology +
+                (transfer.Scores.Count == 0 ? " No compatible recorded-account regimes in this range; transfer and TT remain unsupported." : "");
             _evaluationRows = report.Scores.Select(score => new EvaluationRow(
                 $"{FormatKind(score.Kind)} · {score.Target} · {score.Source} · {QuotaAccountScope.Describe(score.AccountKey)} · {QuotaHistoryPolicy.DescribeCohort(score.HistoryCohort)} · {score.Availability}",
                 score.Model,
@@ -276,6 +282,21 @@ public sealed partial class ForecastsPage : Page
                     $"{score.CandidateShiftResets.Count} candidate residual shifts; no automatic alerts or retraining. " +
                     (score.BandSamples > 0 ? $"Band/target intersection {score.BandIntersectsTargetRate:P0} on {score.BandSamples} intervals; not latent coverage. " : "Insufficient generations for bands. ") +
                     "Frozen coefficients: " + string.Join("; ", score.Coefficients.Select(x => $"{x.Key}={x.Value:0.####}")))))
+                .Concat((report.ComposedQuota?.Scores ?? []).Select(score => new EvaluationRow(
+                    $"End-to-end quota forecast · {FormatKind(score.Cohort.Kind)} · {Horizon(score.HorizonHours)} · {score.Cohort.Source} · {QuotaAccountScope.Describe(score.Cohort.AccountKey)} · {QuotaHistoryPolicy.DescribeCohort(score.Cohort)}",
+                    score.CostModel,
+                    score.HeldOutIntervals == 0 ? "Insufficient chronological history" :
+                        $"Forecast interval loss {score.IntervalLoss:0.###}pp · {score.HeldOutIntervals} held-out intervals / {score.ResetGenerations} resets",
+                    $"Actual-work cost loss {score.CostOnlyIntervalLoss:0.###}pp versus forecast loss {score.IntervalLoss:0.###}pp. " +
+                    $"Pace {score.PaceIntervalLoss:0.###}pp; incumbent policy {score.IncumbentIntervalLoss:0.###}pp; displayed-delta MAE {score.DisplayedDeltaMae:0.###}pp. " +
+                    $"{score.MissingComposition} intervals withheld for missing/stale composition. {report.ComposedQuota!.Methodology}")))
+                .Concat((report.QuotaTransfer?.Scores ?? []).Select(score => new EvaluationRow(
+                    $"Regime transfer research · {Horizon(score.HorizonHours)} · {score.Source.Source} · {QuotaHistoryPolicy.DescribeCohort(score.Source)} → {QuotaHistoryPolicy.DescribeCohort(score.Destination)}",
+                    score.Model,
+                    $"{score.Status} · {score.HeldOut} held-out intervals / {score.HeldOutGenerations} resets",
+                    $"Source training {score.SourceTraining}; destination training {score.DestinationTraining}. " +
+                    $"Unscaled loss {score.UnscaledLoss:0.###}pp; scale-only loss {score.ScaledLoss:0.###}pp; local-only loss {score.LocalOnlyLoss:0.###}pp. " +
+                    $"Fitted destination scale {score.Scale:0.####}. {report.QuotaTransfer!.Methodology}")))
                 .ToArray();
             EvaluationGroup.ItemsSource = _evaluationRows.Select(x => x.Group).Distinct().OrderBy(x => x).ToArray();
             EvaluationGroup.SelectedIndex = _evaluationRows.Count > 0 ? 0 : -1;

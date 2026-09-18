@@ -106,6 +106,16 @@ public static class QuotaCostEvaluation
         return generations.Count(g => g.Average(x => x.First.IntervalLoss) < g.Average(x => x.Second.IntervalLoss)) > generations.Count / 2;
     }
 
+    internal static Func<QuotaCostObservation, double> FitFrozen(IReadOnlyList<QuotaCostObservation> training,
+        string candidate, CancellationToken cancellationToken)
+    {
+        if (training.Count < 20 || candidate is not ("total" or "categories" or "model-effort"))
+            throw new ArgumentException("Composition forecasting requires 20 cost observations and a supported composition model.");
+        var vector = new CostVector(training, candidate);
+        var fit = IntervalRidge.Fit(training.Select(vector.Values).ToArray(), training, cancellationToken);
+        return row => fit.Predict(vector.Values(row));
+    }
+
     private static IReadOnlyList<DateTimeOffset> DetectShifts(IReadOnlyList<IReadOnlyList<QuotaCostTrial>> epochs)
     {
         // Freeze the reference after three held-out generations; require two later generations

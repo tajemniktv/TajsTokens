@@ -69,7 +69,9 @@ public static class QuotaForecastEvaluation
             TokenScores = includeTokenEvaluation ? TokenWorkloadPredictionService.EvaluateScores(data, cancellationToken) : [],
             QuotaHistorySummary = QuotaHistoryPolicy.Summarize(history),
             HistoricalQuotaObservations = history.Count(x => x.Eligible),
-            QuotaCost = QuotaCostEvaluation.Evaluate(data, cancellationToken)
+            QuotaCost = QuotaCostEvaluation.Evaluate(data, cancellationToken),
+            ComposedQuota = ComposedQuotaEvaluator.Evaluate(data, cancellationToken),
+            QuotaTransfer = QuotaTransferEvaluator.Evaluate(data, cancellationToken)
         };
     }
 
