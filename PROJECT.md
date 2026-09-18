@@ -73,6 +73,13 @@ work are in [Current work](#current-work); dated audits below describe captured 
 
 ### Reset identity and review hardening (2026-09-18)
 
+Quota burn's reset history defaults to account-meter quota drops. Reset-time shifts have a
+separate filter and explicitly do not establish replenishment. Headers use detection time
+labelled “Observed”, not inferred effective reset time; expanded deadlines include seconds and
+the signed shift. Rollout diagnostics warn that sessions can observe an earlier change later.
+No unverified cross-account/source grouping or forecasting change is implied. This presentation
+also applies to already saved events; raw classifications remain unchanged.
+
 `QuotaResetGenerationPolicy` owns the one-second bounded reset-time semantics shared by
 forecast segmentation, reset detection and calibration (including scenarios). A sequence of
 adjacent one-second shifts cannot chain into an arbitrarily wide generation. Scenario history

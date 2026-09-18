@@ -156,10 +156,21 @@ public sealed partial class AnalyticsPage : Page
         }
 
         _resetRows = dashboard.ResetEvents.Select(reset => new ResetRow(
-                $"{reset.EffectiveAtUtc.ToLocalTime():g} · {FormatKind(reset.Kind)} · {FormatClassification(reset.Classification)}",
+                $"Observed {reset.DetectedAtUtc.ToLocalTime():G} · {FormatKind(reset.Kind)} · {FormatClassification(reset.Classification)} · " +
+                $"{FormatNullablePercent(reset.BeforeUsedPercent)} → {FormatNullablePercent(reset.AfterUsedPercent)} used",
                 $"{FormatNullablePercent(reset.BeforeUsedPercent)} → {FormatNullablePercent(reset.AfterUsedPercent)} used · " +
-                $"{reset.Explanation}\nPrevious reset: {FormatReset(reset.PreviousResetAtUtc)}\nNew reset: {FormatReset(reset.CurrentResetAtUtc)}\nSignal ID: {reset.EventId}",
-                Scope: $"{reset.Source} · {QuotaAccountScope.Describe(reset.AccountKey)}", Source: reset.Source))
+                (reset.Classification == QuotaResetClassification.ReanchoredWindow
+                    ? "The reported reset deadline moved; this is not evidence of quota replenishment."
+                    : "A drop was observed between readings; the exact reset time and cause are not established.") +
+                (DisplayAuthority(reset.Source) == QuotaObservationAuthority.EmbeddedObservation
+                    ? "\nThis session may have observed an earlier account change later. Separate rollout observations are not additional confirmed resets; unknown account ownership is not inferred."
+                    : "") +
+                $"\nPrevious reset deadline: {FormatReset(reset.PreviousResetAtUtc)}\nNew reset deadline: {FormatReset(reset.CurrentResetAtUtc)}" +
+                (reset.PreviousResetAtUtc is { } before && reset.CurrentResetAtUtc is { } after
+                    ? $"\nDeadline shift: {(after - before).TotalSeconds:+0.###;-0.###;0} seconds" : "") +
+                $"\nSource: {reset.Source}\nSignal ID: {reset.EventId}",
+                Scope: $"{SourceLabel(reset.Source)} · {QuotaAccountScope.Describe(reset.AccountKey)}", Source: reset.Source,
+                IsTimeShift: reset.Classification == QuotaResetClassification.ReanchoredWindow))
                 .ToArray();
         RenderResets();
 
@@ -182,18 +193,19 @@ public sealed partial class AnalyticsPage : Page
 
     private void RenderResets()
     {
-        if (ResetList is null || ResetSourceFilter is null) return;
+        if (ResetList is null || ResetSourceFilter is null || ResetKindFilter is null) return;
         var rows = _resetRows.Where(row => ResetSourceFilter.SelectedIndex == 0 ||
             ResetSourceFilter.SelectedIndex == (DisplayAuthority(row.Source) switch
             {
                 QuotaObservationAuthority.ProviderAuthoritative => 1,
                 QuotaObservationAuthority.EmbeddedObservation => 2,
                 _ => 3
-            })).ToArray();
+            })).Where(row => ResetKindFilter.SelectedIndex == 2 ||
+                row.IsTimeShift == (ResetKindFilter.SelectedIndex == 1)).ToArray();
         ResetList.ItemsSource = rows.Length > 0 ? rows :
-            new[] { new ResetRow("No reset signals in this view", "Try another source or a longer range. Missing evidence is not proof that no reset occurred.") };
+            new[] { new ResetRow("No matching observations in the loaded history", "Try another change type, source or a longer range. Missing evidence is not proof that no reset occurred.") };
         if (BurnTabs?.SelectedIndex == 1)
-            StatusText.Text = _loadError ?? $"{rows.Length:N0} signals in this view · up to 200 loaded across sources. Signals are not a count of confirmed account resets.";
+            StatusText.Text = _loadError ?? $"{rows.Length:N0} observations in this view · up to 200 loaded across sources. Observation times are not confirmed reset times; rollout sessions can repeat the same change.";
     }
 
     private static QuotaObservationAuthority DisplayAuthority(string source) =>
@@ -283,17 +295,17 @@ public sealed partial class AnalyticsPage : Page
 
     private static string FormatClassification(QuotaResetClassification classification) => classification switch
     {
-        QuotaResetClassification.ExpectedReset => "expected reset",
-        QuotaResetClassification.ReanchoredWindow => "re-anchored window",
-        QuotaResetClassification.UnusualReset => "unusual reset evidence",
-        QuotaResetClassification.FullReset => "full-reset evidence",
+        QuotaResetClassification.ExpectedReset => "quota drop near reset deadline",
+        QuotaResetClassification.ReanchoredWindow => "reset-time shift · no replenishment established",
+        QuotaResetClassification.UnusualReset => "quota drop",
+        QuotaResetClassification.FullReset => "large quota drop",
         _ => classification.ToString()
     };
 
     private static string FormatNullablePercent(double? value) => value is double percent ? $"{percent:0.#}%" : "?";
 
     private static string FormatReset(DateTimeOffset? reset) =>
-        reset is DateTimeOffset value ? value.ToLocalTime().ToString("g") : "unknown";
+        reset is DateTimeOffset value ? value.ToLocalTime().ToString("G") : "unknown";
 
     private static string FormatDuration(TimeSpan duration) =>
         duration.TotalHours >= 1 ? $"{duration.TotalHours:0.#}h" : duration.TotalMinutes >= 1
@@ -319,5 +331,5 @@ public sealed partial class AnalyticsPage : Page
 
     private sealed record BurnIntervalRow(string IntervalId, string Header, string Detail, string? Scope = null);
     private sealed record ContributorRow(string Header, string Detail, double Share = 0);
-    private sealed record ResetRow(string Header, string Detail, string? Scope = null, string Source = "");
+    private sealed record ResetRow(string Header, string Detail, string? Scope = null, string Source = "", bool IsTimeShift = false);
 }

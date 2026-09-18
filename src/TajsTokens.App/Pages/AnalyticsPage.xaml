@@ -112,13 +112,18 @@
                     </Grid>
                 </Grid>
             </PivotItem>
-            <PivotItem Header="Reset signals">
+            <PivotItem Header="Quota drops &amp; reset times">
                 <Grid RowSpacing="12" Padding="4,12,4,0">
                     <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                    <TextBlock Text="Stored reset and re-anchor detections across all sources. These are derived signals, not a count of confirmed account resets. Up to 200 recent signals are shown." TextWrapping="Wrap" Opacity="0.7" />
-                    <ComboBox x:Name="ResetSourceFilter" Grid.Row="1" SelectedIndex="0" SelectionChanged="OnResetFilterChanged" AutomationProperties.Name="Reset signal source">
+                    <TextBlock Text="Account-meter drops are shown by default. Times say when a change was observed, not exactly when a reset occurred. Reset-time shifts do not establish quota replenishment. Details are collapsed; up to 200 observations are loaded across sources." TextWrapping="Wrap" Opacity="0.7" />
+                    <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="12">
+                    <ComboBox x:Name="ResetSourceFilter" SelectedIndex="1" SelectionChanged="OnResetFilterChanged" AutomationProperties.Name="Reset signal source">
                         <ComboBoxItem Content="All sources · separate" /><ComboBoxItem Content="Account meter" /><ComboBoxItem Content="Rollout readings" /><ComboBoxItem Content="Unknown / mixed" />
                     </ComboBox>
+                    <ComboBox x:Name="ResetKindFilter" SelectedIndex="0" SelectionChanged="OnResetFilterChanged" AutomationProperties.Name="Quota change type">
+                        <ComboBoxItem Content="Quota drops" /><ComboBoxItem Content="Reset-time shifts" /><ComboBoxItem Content="All observations · diagnostics" />
+                    </ComboBox>
+                    </StackPanel>
                     <ListView x:Name="ResetList" Grid.Row="2" SelectionMode="None" AutomationProperties.Name="Reset and re-anchor signals">
                         <ListView.ItemTemplate><DataTemplate>
                             <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Margin="0,4">

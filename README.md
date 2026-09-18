@@ -18,7 +18,8 @@ outlooks and usage predictions—with freshness and uncertainty kept visible.
   supported workload scenarios, and compare models within a selected history cohort and target. Historical evidence
   explains which rollout/app-server readings are usable, repeated, conflicting or incomplete.
 - **Quota burn:** explore recorded quota movement alongside local token activity and filter
-  reset/re-anchor signals by source without combining overlapping observations.
+  quota drops separately from reset-time shifts. Account readings are the default; rollout
+  observations remain separate diagnostics, with explicit observation times and detailed deadlines.
 - **Diagnostics:** check source health, collection coverage and why a forecast is unavailable.
 - **Data Explorer:** inspect Codex SQLite data read-only and compare selected sources.
 - **Codex CLI Harness:** explicitly run a configured local CLI and inspect its output.
