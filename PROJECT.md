@@ -71,6 +71,41 @@ work are in [Current work](#current-work); dated audits below describe captured 
 
 ## Current work
 
+**Expanded backend survey (2026-09-18):** additional authorized read-only probes returned
+skill/plugin daily history, reset inventory, account renewal metadata and a decimal-string
+zero credit balance. Duplicate entitlement-map entries resolve to one identical native account,
+not two subscriptions. Code-review metrics returned 200 with empty data: route availability is
+now observed, but populated metric semantics remain unverified. Direct thread v1 returned 403,
+task v2 returned 404; workspace credit/token reports remain unavailable for the tested context.
+These results support an experimental daily-allowance dashboard without waiting for per-thread
+costs. Preserve per-report freshness and observed-versus-estimated amounts. Details:
+[expanded survey](docs/source-notes/CODEX_EVIDENCE_REPO_REVIEW.md#10-expanded-endpoint-survey--2026-09-18).
+
+**Direct-backend experiment authorized (2026-09-18):** the user selected
+`how-much-i-get-from-codex` as the closest functional reference and explicitly relaxed the
+previous research acquisition boundary to allow private read-only backend probes. An isolated
+probe using existing Codex authentication in memory obtained daily counts and a daily breakdown
+explicitly labelled `percent` (HTTP 200). This account's daily count credits were all zero
+despite nonzero tokens; model-credit fallback fields did not supply native credit amounts.
+Credit events were empty (200), workspace breakdown returned 400 and plan history returned 404.
+These are actual bounded observations, not inferred capability outcomes. Prior statements that
+no direct requests were made describe the earlier review, not this subsequent experiment.
+Released acquisition remains unchanged; experimental direct HTTP is now permitted research,
+not categorically excluded. Prioritize daily usage/allowance history and useful explicitly
+estimated capacity over proving a universal normalization scale first. Keep observed amounts
+separate from rate-card estimates. See the [experiment addendum](docs/source-notes/CODEX_EVIDENCE_REPO_REVIEW.md#9-authorized-direct-backend-experiment--2026-09-18).
+
+**External Codex evidence review (2026-09-18, proposals only):** seven pinned implementations
+were compared with current acquisition and accounting. Native daily credits/relative usage
+are a promising intermediate scale, not a verified universal allowance conversion; synthetic
+ratio fixtures do not independently validate the author's runtime observations. CodexBar's
+copy/interleave safeguards inform proposed reconciliation tests, not an approved normalization
+change. The installed CLI schema still exposes no structured daily/plan-history/task-v2 report
+seam. Keep Codex-owned authentication and TT's existing research status. Proposed evidence
+fields, compatibility gates, drift signals and tests are in
+[the source review](docs/source-notes/CODEX_EVIDENCE_REPO_REVIEW.md); no new acquisition,
+schema migration or model was implemented by that review.
+
 **Desktop analytics acquisition trace (2026-09-18):** installed Windows package
 26.915.3509.0 implements analytics via renderer queries → private Desktop HTTP host service
 → authenticated backend requests. App-server supplies Desktop authentication, but the reports
