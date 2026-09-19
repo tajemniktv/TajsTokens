@@ -421,6 +421,16 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             "Quota targets stay within this reported backend account; local workload features are co-observed installation signals, not verified account membership. " + estimate.Methodology };
     }
 
+    public async Task<RecentScenarioPattern> GetRecentScenarioPatternAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken)
+    {
+        await EnsureInitializedAsync(cancellationToken);
+        using var observatory = new SqliteCodexObservatoryStore(_databasePath);
+        await observatory.InitializeAsync(cancellationToken);
+        var data = await new SqliteForecastDatasetReader(_databasePath).ReadAsync(
+            "codex", "default", nowUtc.AddHours(-2), nowUtc, cancellationToken, includeQuota: false);
+        return RecentScenarioPatternBuilder.Build(data, nowUtc);
+    }
+
     public async Task<TokenWorkloadForecast> ForecastTokenWorkloadAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken)
     {
         await EnsureInitializedAsync(cancellationToken);

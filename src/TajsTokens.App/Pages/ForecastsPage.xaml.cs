@@ -513,6 +513,47 @@ public sealed partial class ForecastsPage : Page
         _ => $"{value:0}"
     };
 
+    private async void OnRecentPatternClicked(object sender, RoutedEventArgs e)
+    {
+        var cancellation = _pageCancellation;
+        if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested) return;
+        var original = (RootAgentsBox.Value, SubagentsBox.Value, ModelBox.Text, ReasoningBox.Text);
+        RecentPatternButton.IsEnabled = false;
+        RecentPatternText.Text = "Reading recent local activity…";
+        try
+        {
+            var pattern = await App.Services.Intelligence.GetRecentScenarioPatternAsync(DateTimeOffset.UtcNow, cancellation.Token);
+            if (!_isLoaded || cancellation.IsCancellationRequested) return;
+            if (original != (RootAgentsBox.Value, SubagentsBox.Value, ModelBox.Text, ReasoningBox.Text))
+            {
+                RecentPatternText.Text = "Inputs changed while loading; your edits were preserved. Click again to load a recent pattern.";
+                return;
+            }
+            if (pattern.Available && (pattern.RootSessions > RootAgentsBox.Maximum || pattern.SubagentSessions > SubagentsBox.Maximum))
+            {
+                RecentPatternText.Text = "Recent session counts exceed this planner's input range; no values were silently clamped. Enter a hypothetical workload manually.";
+                return;
+            }
+            RecentPatternText.Text = pattern.Explanation;
+            if (!pattern.Available) return;
+            RootAgentsBox.Value = pattern.RootSessions;
+            SubagentsBox.Value = pattern.SubagentSessions;
+            ModelBox.Text = pattern.Model ?? string.Empty;
+            ReasoningBox.Text = pattern.ReasoningEffort ?? string.Empty;
+            Interlocked.Increment(ref _estimateGeneration);
+            ScenarioInfo.Severity = InfoBarSeverity.Informational;
+            ScenarioInfo.Title = "Review the recent pattern";
+            ScenarioInfo.Message = "Inputs updated, not an estimate. Choose a duration and select Estimate quota use.";
+            ScenarioMethodText.Text = string.Empty;
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            if (_isLoaded && !cancellation.IsCancellationRequested) RecentPatternText.Text = "Recent pattern unavailable: " + Summarize(exception.Message);
+        }
+        finally { RecentPatternButton.IsEnabled = true; }
+    }
+
     private async void OnEstimateClicked(object sender, RoutedEventArgs e)
     {
         var cancellation = _pageCancellation;

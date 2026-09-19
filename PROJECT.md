@@ -282,12 +282,27 @@ pruning/background scoring is added. Whole-database backups retain reports. No p
 or native raw payloads are stored. These are aggregate research records, not original per-task TT
 history, subscription balances or live forecast promotion.
 
+**Product decision, 2026-09-19:** keep TT in Model Lab; do not introduce per-task scoring or a public
+quota unit yet. The 30-day `tt-lab/v3` replay produced one supported local prolite half-hour basis:
+20 basis intervals, 20 calibration intervals and 31 matched held-out intervals across two reset groups.
+Reset-balanced envelope losses were TT 0.0846pp, full vector 0.2205pp, raw tokens 0.3745pp and zero
+2.3929pp. Signed TT bias was -0.3133pp; eligible-interval cumulative error was -1.7029pp with summed
+meter bounds [-32.7029, 24.2971]pp, not a confidence interval. No held-out intervals were unsupported
+in that local comparison, but there were zero compatible transfer comparisons. This supports continued
+local-index evaluation, not general transfer, current-plan pricing or forecast promotion. Revisit using
+ordinary new compatible contexts; do not force task-level storage merely to make TT user-facing.
+
 ### Other scoped product gaps
 
 Broader auxiliary pagination/thread-scoped queries and snapshot-consistent multi-page log reads remain
 unfinished. Alternate-file coverage is best-effort and does not prove full account accounting. Address
 these through concrete navigation/inspection workflows, not by restarting the foundation. The workload
-planner currently consumes explicit hypothetical inputs, not an inferred recent work pattern.
+planner accepts explicit hypothetical inputs and an optional editable recent-local-pattern suggestion.
+The suggestion uses the same two-hour token-active root/subagent and exclusive model/effort semantics
+as scenario history, requires positive collected tokens within ten minutes, and refuses unknown roles
+or stale snapshots. Mixed/unknown model or effort clears that filter explicitly. Duration stays user-owned;
+no quota estimate runs until requested, no account attribution or future-continuation probability is implied,
+and the existing scenario support checks still apply. Loading never overwrites intervening user edits.
 Window size/maximized preference is retained separately in `data/window-state.json`.
 
 ### Acceptance and upkeep

@@ -22,7 +22,10 @@ outlooks and usage predictions—with freshness and uncertainty kept visible.
   Times display locally; daily/monthly groups retain UTC boundaries. Totals are not inferred billing or quota cost.
 - **Forecasts:** start with current quota outlooks, see token nowcasts and conditional 30/60-minute
   session outlooks (recorded local work, not a prediction of human presence), estimate
-  supported workload scenarios, and browse saved outlooks. Advanced → Model lab compares models within a selected history cohort and target. Historical evidence
+  supported workload scenarios, and browse saved outlooks. The planner can fill editable session counts
+  and model/effort from recent local activity while leaving your planned duration unchanged; this is a
+  conditional scenario, not a prediction that work continues.
+  Advanced → Model lab compares models within a selected history cohort and target. Historical evidence
   explains which rollout/app-server readings are usable, repeated, conflicting or incomplete.
   Cost-calibration diagnostics compare actual recorded work with quota movement; they are
   separate from end-to-end forecast and cross-regime transfer diagnostics. Workload composition

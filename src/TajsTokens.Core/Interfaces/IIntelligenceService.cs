@@ -31,6 +31,8 @@ public interface IIntelligenceService
         string provider, string profile, DateTimeOffset fromUtc, DateTimeOffset toUtc,
         CancellationToken cancellationToken);
 
+    Task<RecentScenarioPattern> GetRecentScenarioPatternAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken);
+
     Task<IReadOnlyList<TtEvaluationArchiveEntry>> GetTtEvaluationHistoryAsync(string provider, string profile,
         int take, CancellationToken cancellationToken);
 }

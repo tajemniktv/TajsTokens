@@ -136,6 +136,8 @@
                         <TextBlock Text="Explore a workload" FontSize="22" FontWeight="SemiBold" />
                         <TextBlock Text="Estimate quota use from comparable activity in your own history. If there is not enough evidence, no estimate is shown." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                         <NumberBox x:Name="DurationBox" Header="How long will you work? · hours" Value="0.5" Minimum="0.1" Maximum="168" SpinButtonPlacementMode="Compact" />
+                        <Button x:Name="RecentPatternButton" Content="Use recent local work pattern" Click="OnRecentPatternClicked" />
+                        <TextBlock x:Name="RecentPatternText" Text="Optional: fill editable session counts and exclusive model/effort from recent local activity. This does not predict that you will continue working." TextWrapping="Wrap" Style="{StaticResource CaptionStyle}" />
                         <Expander Header="Advanced workload shape" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"><StackPanel Spacing="12">
                             <TextBlock Text="Default: one active chat, no subagents. Adjust only when you expect a different work pattern." Style="{StaticResource SubtitleStyle}" />
                             <NumberBox x:Name="RootAgentsBox" Header="Active chats (root sessions)" Value="1" Minimum="0" Maximum="32" SpinButtonPlacementMode="Compact" />

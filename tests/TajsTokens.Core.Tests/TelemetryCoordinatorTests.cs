@@ -348,6 +348,9 @@ public sealed class TelemetryCoordinatorTests : IDisposable
             CancellationToken cancellationToken) =>
             throw new NotSupportedException();
 
+        public Task<RecentScenarioPattern> GetRecentScenarioPatternAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken) =>
+            throw new NotSupportedException();
+
         public Task<ScenarioEstimate> EstimateScenarioAsync(
             ScenarioRequest request,
             DateTimeOffset historyFromUtc,
