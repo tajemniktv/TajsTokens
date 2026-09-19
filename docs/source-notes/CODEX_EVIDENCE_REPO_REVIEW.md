@@ -307,6 +307,22 @@ cache-write zero and explicit zero, while retaining that distinction on each obs
 cache-write remains different. Further reconciliation promotion needs an actual supported case;
 layered model evaluation can continue independently.
 
+The 2026-09-19 03:54–04:00 UTC read-only live-store audit closed the selected-source upgrade check:
+all 362 distinct rollout paths selected by the installed `state_5.sqlite` catalog had v7 checkpoints
+(358 ordinary and four Desktop-owner variants). At the final file-size check, 361 were at checkpointed
+EOF and one had changed since its checkpoint. The 23 retained older checkpoints all referred to
+existing alternate/non-selected paths; they are not evidence of a stalled selected-file replay and
+were not imported merely to make version counts uniform. The store contained 6,258 response
+observations across 37 physical files at the initial sample; ongoing collection can increase these.
+
+The pre-replay cohort through `2026-09-19T02:33:31.587886+00:00`, including null capture times,
+still contained 71,216 token-event rows with the same identity/capture SHA-256:
+`7e121ed021d44be4d93b96f401ec4f68f7a24bd70a651490c1a6105c1249c795`.
+This hashes Python's default JSON serialization of `(source_event_id,captured_at_utc)` pairs ordered
+by source event ID, selected with `captured_at_utc <= cutoff OR captured_at_utc IS NULL`.
+The 3,121 null captures remained unknown. This proves preservation of this cohort's identities and
+capture values, not all token-vector values, complete account coverage or a native cross-file join.
+
 ## 5. Compatibility and evidence-model contracts
 
 These contracts guide existing typed evidence owners. Daily reports, profile/thread projections
