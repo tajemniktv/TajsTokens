@@ -331,8 +331,16 @@ public sealed partial class ForecastsPage : Page
             EvaluationStatusText.Text = $"Evaluated {from.ToLocalTime():d}–{now.ToLocalTime():d} · {report.Scores.Count:N0} quota comparisons · {report.TokenScores.Count:N0} token comparisons. Select a cohort below; lower error is better within the same target.";
             EvaluationMethodText.Text = $"{report.QuotaHistorySummary} {report.WorkloadObservations:N0} native workload observations · {report.TokensWithEffort:N0}/{report.TokenObservations:N0} token records with effort. {report.Methodology}";
             if (report.QuotaCost is { } cost)
+            {
                 EvaluationMethodText.Text += $"\n\n{cost.Version}: {cost.Methodology}\n" +
                     string.Join(" · ", cost.QualityCounts.Select(x => $"{x.Key}: {x.Value:N0}"));
+                if (cost.EvidenceCoverage is { } coverage)
+                    EvaluationMethodText.Text += $"\n\nEvidence coverage: {coverage.TokenRecords:N0} token records; {coverage.ReportedTokens:N0} reported tokens. " +
+                        $"Model known for {coverage.TokensWithModel:N0} tokens; effort known for {coverage.TokensWithEffort:N0}. " +
+                        $"Category mismatch/invalid records: {coverage.CategoryMismatchRecords:N0}; collection time unknown: {coverage.UnknownCollectionRecords:N0}; collected after event: {coverage.CollectedAfterEventRecords:N0}. " +
+                        "Requested-tier settings: " + string.Join(", ", coverage.RequestedTierSettings.Select(x => $"{x.Key}={x.Value:N0}")) +
+                        $"; missing tier={coverage.MissingTierSettings:N0}; undated settings={coverage.UndatedTierSettings:N0}.\n" + QuotaEvaluationCoverageBuilder.Boundary;
+            }
             if (report.ComposedQuota is { } composed) EvaluationMethodText.Text += "\n\n" + composed.Methodology;
             if (report.ComposedQuotaStrict is { } strict) EvaluationMethodText.Text += "\n\n" + strict.Methodology;
             if (report.Tt is { } tt) EvaluationMethodText.Text += "\n\n" + tt.Methodology +
@@ -361,6 +369,12 @@ public sealed partial class ForecastsPage : Page
                     $"Mean error {CompactTokens(score.MeanAbsoluteError)} tokens · {score.Origins:N0} held-out origins",
                     $"MAE {CompactTokens(score.MeanAbsoluteError)} tokens · RMSE {CompactTokens(score.RootMeanSquaredError)} tokens · reconstructed rollout history · {score.WorkloadOrigins} workload-model predictions" +
                     (score.IntervalOrigins > 0 ? $" · band coverage {score.IntervalCoverage:P0} on {score.IntervalOrigins} origins" : ""))))
+                .Concat((report.QuotaCost?.CohortCoverage ?? []).Select(coverage => new EvaluationRow(
+                    $"Evidence coverage · {FormatKind(coverage.Cohort.Kind)} · {Horizon(coverage.HorizonHours)} · {coverage.Cohort.Source} · {QuotaAccountScope.Describe(coverage.Cohort.AccountKey)} · {QuotaHistoryPolicy.DescribeCohort(coverage.Cohort)}",
+                    "Coverage, not a model",
+                    $"{coverage.Intervals:N0} built intervals; {coverage.NativeAccountIntervals:N0} with native quota account ID; {coverage.AssertedAccountIntervals:N0} with ownership assertion",
+                    "Quota identity does not attribute every local token to that account. Overlapping flags: " +
+                    string.Join("; ", coverage.QualityCounts.Select(x => $"{x.Key}={x.Value:N0}")))))
                 .Concat((report.QuotaCost?.Scores ?? []).Select(score => new EvaluationRow(
                     $"Cost calibration (actual work, not forecast) · {FormatKind(score.Cohort.Kind)} · {Horizon(score.HorizonHours)} · {score.Cohort.Source} · {QuotaAccountScope.Describe(score.Cohort.AccountKey)} · {QuotaHistoryPolicy.DescribeCohort(score.Cohort)}",
                     score.Candidate,

@@ -35,6 +35,12 @@ without persisting settings, rewriting native IDs or pooling session histories. 
 associations use Settings or the separately documented ownership action below.
 No credentials or message content are read/exported.
 
+Cost output also includes dataset-local token-weighted model/effort coverage, category mismatches,
+unknown/after-event collection times, physical requested-tier settings and per-cohort quality flags.
+Flags overlap; neither horizons nor sources may be summed as independent work. These describe
+built observations, not every rejected quota reading. After-event collection is not automatically
+strict-origin ineligibility. Tier settings do not establish billed-tier or token-level coverage.
+
 The same cost comparisons appear under Forecasts → Model evaluation, separately labelled
 from quota and token forecasts. Missing precision/coverage and sparse generations are not
 calibration successes. See PROJECT.md for model gates and interpretation.

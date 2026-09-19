@@ -27,7 +27,7 @@ public static class QuotaCostEvaluation
         return Evaluate(rows, (userConfirmedRolloutOwnership ?
             "User confirms retained rollouts belong to their account. Native account IDs remain absent; sessions/sources are not pooled. " : "") + data.Coverage + " " +
             QuotaHistoryPolicy.Summarize(QuotaHistoryPolicy.Describe(data.Quota, data.CapturedAtUtc)), cancellationToken)
-            with { DatasetCapturedAtUtc = data.CapturedAtUtc };
+            with { DatasetCapturedAtUtc = data.CapturedAtUtc, EvidenceCoverage = QuotaEvaluationCoverageBuilder.Build(data) };
     }
 
     public static QuotaCostReport Evaluate(IReadOnlyList<QuotaCostObservation> rows, string coverage,
@@ -114,7 +114,8 @@ public static class QuotaCostEvaluation
             }
         }
         return new(Version, Methodology, coverage, rows.Count,
-            rows.SelectMany(x => x.QualityFlags).GroupBy(x => x).ToDictionary(x => x.Key, x => x.Count()), scores);
+            rows.SelectMany(x => x.QualityFlags).GroupBy(x => x).ToDictionary(x => x.Key, x => x.Count()), scores)
+            { CohortCoverage = QuotaEvaluationCoverageBuilder.Cohorts(rows) };
     }
 
     private static bool Priceable(QuotaCostObservation row) => row.ApiPriceWeight is { IsComplete: true } price &&

@@ -68,6 +68,8 @@ if (args.Length == 2 && args[0] is "--cost" or "--cost-owned-rollouts")
     var report = QuotaCostEvaluation.Evaluate(data, userConfirmedRolloutOwnership: args[0] == "--cost-owned-rollouts");
     Console.WriteLine(report.Version + $" (snapshot {report.DatasetCapturedAtUtc:O}): " + report.Methodology);
     Console.WriteLine(report.Coverage);
+    Console.WriteLine(QuotaEvaluationCoverageBuilder.Boundary);
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { report.EvidenceCoverage, report.CohortCoverage }));
     Console.WriteLine($"observations={report.Observations}; " + string.Join("; ", report.QualityCounts.Select(x => $"{x.Key}={x.Value}")));
     Console.WriteLine("cohort,source,window,horizon,model,train,train_generations,heldout,heldout_generations,interval_loss,displayed_MAE,generation_loss,residual_p10,residual_median,residual_p90,unexplained_lower,bands,intersection_rate,material_win,shift_candidates,status,rate_card,unpriced_training,unpriced_heldout,unpriced_tokens,paired_pace_loss,paired_total_loss");
     var cohorts = report.Scores.Select(x => x.Cohort).Distinct().ToList();

@@ -78,9 +78,14 @@ The [evidence review](docs/source-notes/CODEX_EVIDENCE_REPO_REVIEW.md) maps sour
 remaining proof boundaries. The [layered design](docs/source-notes/TT_LAYERED_STATISTICAL_DESIGN.md)
 defines model/TT rationale. Neither is a competing delivery plan.
 
-**Next implementable slice:** make evaluation coverage and exclusions assessable together:
-account attribution, token composition, requested-tier coverage, reconciliation ambiguity and
-collection-time eligibility. Use the existing Model Lab/read-model owners, not a new framework.
+**Evidence-visibility progress:** Model Lab and cost CLI now expose dataset-local token-weighted
+model/effort coverage, category mismatch/invalid counts, unknown/after-event collection times,
+physical requested-tier setting counts, and per-cohort/horizon quality flags and quota-account/
+assertion counts. Counts do not attribute local tokens to an account, infer billed tier or establish
+copy/interleave coverage. They are rebuildable diagnostics with no new acquisition or retention.
+**Next implementable slice:** connect rejected interval construction and strict-origin exclusions
+to these coverage summaries; distinguish source/reporting gaps from absent recorded work without
+inventing completeness. Use existing Model Lab/read-model owners, not a new framework.
 New observations block some validation claims, **not all development**.
 
 ### Ordered roadmap and acceptance
