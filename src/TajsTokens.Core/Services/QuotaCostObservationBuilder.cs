@@ -5,11 +5,12 @@ namespace TajsTokens.Core.Services;
 
 public static class QuotaCostObservationBuilder
 {
-    public const string Version = "quota-cost-observations/v2";
+    public const string Version = "quota-cost-observations/v3";
     public const string CoverageBoundary = "Construction counts eligible-epoch interior start candidates, not raw quota readings or independent outcomes. " +
         "Epoch endpoints are not candidates. Each rejected start has the first applicable reason in selection order; " +
         "candidate starts can overlap. No outcome in an epoch can mean a reset or range boundary, not missing collection. " +
-        "Strict replay withholding is a later, separate stage and must not be subtracted from these counts.";
+        "Outcome polling tolerance is the smaller of five minutes and 20% of the requested horizon; actual elapsed time " +
+        "is used for workload projection. Strict replay withholding is a later, separate stage and must not be subtracted from these counts.";
 
     public static IReadOnlyList<QuotaCostObservation> Build(CodexForecastDataset data,
         CancellationToken cancellationToken = default, bool userConfirmedRolloutOwnership = false,
@@ -43,7 +44,7 @@ public static class QuotaCostObservationBuilder
                 var target = start.CapturedAtUtc.AddHours(horizon);
                 var end = epoch.Skip(i + 1).FirstOrDefault(x => x.CapturedAtUtc >= target);
                 if (end is null) { Reject("no-outcome-in-epoch"); continue; }
-                if (end.CapturedAtUtc - target > TimeSpan.FromMinutes(5)) { Reject("outcome-beyond-poll-tolerance"); continue; }
+                if (end.CapturedAtUtc - target > TimeSpan.FromMinutes(Math.Min(5, horizon * 60 * .2))) { Reject("outcome-beyond-poll-tolerance"); continue; }
                 // A -> B -> A metadata must not bridge the intervening regime merely because
                 // GroupBy puts both A portions in one stream. Concurrent incompatible lanes
                 // in the same meter identity are conservatively withheld as ambiguous.

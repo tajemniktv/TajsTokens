@@ -23,8 +23,9 @@ public static class ComposedQuotaPolicy
         var eligible = cost.Scores.Where(x => x.Cohort == QuotaHistoryPolicy.Cohort(anchor) && x.MaterialWin && x.CandidateShiftResets.Count == 0 &&
             x.Candidate is "total" or "categories" or "model-effort").ToArray();
         if (eligible.Length == 0 && prefix.AccountAssociations.Count == 0) return incumbent;
-        var evaluation = ComposedQuotaEvaluator.Evaluate(prefix, cancellationToken);
-        var strict = ComposedQuotaEvaluator.Evaluate(prefix, cancellationToken, ForecastReplayAvailability.CollectedByOrigin);
+        // Extra short-horizon research does not expand the released forecast/promotion surface.
+        var evaluation = ComposedQuotaEvaluator.Evaluate(prefix, cancellationToken, horizons: [.5, 2d]);
+        var strict = ComposedQuotaEvaluator.Evaluate(prefix, cancellationToken, ForecastReplayAvailability.CollectedByOrigin, [.5, 2d]);
         var observations = QuotaCostObservationBuilder.Build(prefix, cancellationToken);
         return incumbent.Select(baseline =>
         {

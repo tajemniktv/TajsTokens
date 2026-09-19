@@ -72,7 +72,7 @@ public static class QuotaForecastEvaluation
             Tt = TtEvaluator.Evaluate(data, cancellationToken),
             QuotaHistorySummary = QuotaHistoryPolicy.Summarize(history),
             HistoricalQuotaObservations = history.Count(x => x.Eligible),
-            QuotaCost = QuotaCostEvaluation.Evaluate(data, cancellationToken),
+            QuotaCost = QuotaCostEvaluation.Evaluate(data, cancellationToken, horizons: ComposedQuotaEvaluator.EvaluationHorizons),
             ComposedQuota = ComposedQuotaEvaluator.Evaluate(data, cancellationToken),
             ComposedQuotaStrict = ComposedQuotaEvaluator.Evaluate(data, cancellationToken, ForecastReplayAvailability.CollectedByOrigin),
             QuotaTransfer = QuotaTransferEvaluator.Evaluate(data, cancellationToken)

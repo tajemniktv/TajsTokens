@@ -146,7 +146,10 @@ public static class QuotaForecastBacktester
                 cancellationToken.ThrowIfCancellationRequested();
                 var anchor = epoch[i];
                 if (anchor.UsedPercent >= 100) continue; // Already exhausted is a fact, not a successful forecast.
-                if (lastOrigin is not null && anchor.CapturedAtUtc - lastOrigin < TimeSpan.FromMinutes(30)) continue;
+                // Short-horizon comparisons need short-horizon origins. Retain the existing
+                // half-hour sampling for longer/reset outlooks; never pool these trial streams.
+                if (lastOrigin is not null && anchor.CapturedAtUtc - lastOrigin <
+                    TimeSpan.FromHours(Math.Min(.5, horizonHours ?? .5))) continue;
                 if (anchor.CapturedAtUtc - epoch[0].CapturedAtUtc < TimeSpan.FromMinutes(15)) continue;
                 var targetTime = horizonHours is double horizon ? anchor.CapturedAtUtc.AddHours(horizon) : anchor.ResetsAtUtc!.Value;
                 if (targetTime > anchor.ResetsAtUtc) continue;

@@ -71,7 +71,8 @@ if (args.Length == 2 && args[0] is "--cost" or "--cost-owned-rollouts")
 {
     var data = await new SqliteForecastDatasetReader(args[1], associations).ReadAsync("codex", "default",
         DateTimeOffset.UnixEpoch.AddDays(1), DateTimeOffset.UtcNow, CancellationToken.None);
-    var report = QuotaCostEvaluation.Evaluate(data, userConfirmedRolloutOwnership: args[0] == "--cost-owned-rollouts");
+    var report = QuotaCostEvaluation.Evaluate(data, userConfirmedRolloutOwnership: args[0] == "--cost-owned-rollouts",
+        horizons: ComposedQuotaEvaluator.EvaluationHorizons);
     Console.WriteLine(report.Version + $" (snapshot {report.DatasetCapturedAtUtc:O}): " + report.Methodology);
     Console.WriteLine(report.Coverage);
     Console.WriteLine(QuotaEvaluationCoverageBuilder.Boundary);

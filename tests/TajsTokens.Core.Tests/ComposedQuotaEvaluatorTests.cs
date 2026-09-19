@@ -6,6 +6,55 @@ namespace TajsTokens.Core.Tests;
 
 public sealed class ComposedQuotaEvaluatorTests
 {
+    [Fact]
+    public void ShortQuotaHorizonsHaveIndependentStrictTargetsAndDoNotChangeLongerTrials()
+    {
+        var original = TimelyData();
+        var start = original.Quota[0].CapturedAtUtc;
+        var data = original with {
+            Quota = Enumerable.Range(0, 200).Select(i => original.Quota[0] with { UsedPercent = i / 3d, CapturedAtUtc = start.AddMinutes(i * 5), CollectedAtUtc = start.AddMinutes(i * 5) }).ToArray(),
+            Tokens = Enumerable.Range(0, 200).Select(i => original.Tokens[0] with { ObservedAtUtc = start.AddMinutes(i * 5), CapturedAtUtc = start.AddMinutes(i * 5) }).ToArray()
+        };
+        var all = ComposedQuotaEvaluator.Evaluate(data, availability: ForecastReplayAvailability.CollectedByOrigin);
+        Assert.Equal(ComposedQuotaEvaluator.EvaluationHorizons, all.Scores.Select(x => x.HorizonHours).Distinct().Order().ToArray());
+        foreach (var horizon in new[] { 5d / 60, .25 })
+        {
+            var score = Assert.Single(all.Scores, x => x.HorizonHours == horizon && x.CostModel == "total");
+            Assert.NotEmpty(score.Trials);
+            Assert.All(score.Trials, trial => {
+                Assert.Equal(TimeSpan.FromHours(horizon), trial.OutcomeUtc - trial.OriginUtc);
+                Assert.NotNull(trial.IncumbentIntervalLoss);
+                Assert.NotNull(trial.ZeroUseIntervalLoss);
+                Assert.Null(trial.LowerRemainingPercent); // One reset is still insufficient.
+            });
+            Assert.True(score.Trials.Zip(score.Trials.Skip(1)).All(pair => pair.First.OutcomeUtc <= pair.Second.OriginUtc));
+        }
+        var legacy = ComposedQuotaEvaluator.Evaluate(data, availability: ForecastReplayAvailability.CollectedByOrigin, horizons: [.5, 2d]);
+        foreach (var score in legacy.Scores)
+            Assert.Equal(System.Text.Json.JsonSerializer.Serialize(score.Trials),
+                System.Text.Json.JsonSerializer.Serialize(all.Scores.Single(x => x.Cohort == score.Cohort && x.HorizonHours == score.HorizonHours && x.CostModel == score.CostModel).Trials));
+    }
+
+    [Fact]
+    public void ShortTargetsRejectCoarsePollingRatherThanRelabelLongerOutcomes()
+    {
+        var data = TimelyData();
+        var start = data.Quota[0].CapturedAtUtc;
+        var coarse = QuotaCostObservationBuilder.BuildDetailed(data, horizons: [5d / 60]);
+        Assert.Empty(coarse.Observations); // A 15-minute polling stream cannot validate five minutes.
+        Assert.Contains(coarse.Coverage, x => x.RejectedStarts.GetValueOrDefault("outcome-beyond-poll-tolerance") > 0);
+        foreach (var lateMinutes in new[] { 1, 2 })
+        {
+            var jittered = data with { Quota = data.Quota.Select((x, i) => x with {
+                CapturedAtUtc = start.AddMinutes(i * 5 + (i == 4 ? lateMinutes : 0)),
+                CollectedAtUtc = start.AddMinutes(i * 5 + (i == 4 ? lateMinutes : 0)) }).ToArray() };
+            var rows = QuotaCostObservationBuilder.Build(jittered, horizons: [5d / 60]);
+            var row = rows.SingleOrDefault(x => x.StartUtc == start.AddMinutes(15));
+            if (lateMinutes == 1) Assert.Equal(TimeSpan.FromMinutes(6), row!.EndUtc - row.StartUtc);
+            else Assert.Null(row);
+        }
+    }
+
     internal static CodexForecastDataset TimelyData()
     {
         var start = DateTimeOffset.Parse("2026-09-01T00:00:00Z");

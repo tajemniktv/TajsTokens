@@ -23,9 +23,9 @@ public static class QuotaCostEvaluation
         "Raw-token baselines retain reported totals. Different held-out target sets cannot earn a comparative promotion.";
 
     public static QuotaCostReport Evaluate(CodexForecastDataset data, CancellationToken cancellationToken = default,
-        bool userConfirmedRolloutOwnership = false)
+        bool userConfirmedRolloutOwnership = false, IReadOnlyList<double>? horizons = null)
     {
-        var built = QuotaCostObservationBuilder.BuildDetailed(data, cancellationToken, userConfirmedRolloutOwnership);
+        var built = QuotaCostObservationBuilder.BuildDetailed(data, cancellationToken, userConfirmedRolloutOwnership, horizons);
         return Evaluate(built.Observations, (userConfirmedRolloutOwnership ?
             "User confirms retained rollouts belong to their account. Native account IDs remain absent; sessions/sources are not pooled. " : "") + data.Coverage + " " +
             QuotaHistoryPolicy.Summarize(QuotaHistoryPolicy.Describe(data.Quota, data.CapturedAtUtc)), cancellationToken)

@@ -5,12 +5,14 @@ namespace TajsTokens.Core.Services;
 /// <summary>Actual-cost and origin-only forecast errors on identical disjoint outcomes.</summary>
 public static class ComposedQuotaEvaluator
 {
-    public const string Version = "composed-quota/v8";
+    public const string Version = "composed-quota/v9";
+    public static IReadOnlyList<double> EvaluationHorizons { get; } = Array.AsReadOnly(new[] { 5d / 60, .25, .5, 2d });
 
     public static ComposedQuotaEvaluation Evaluate(CodexForecastDataset data, CancellationToken cancellationToken = default,
-        ForecastReplayAvailability availability = ForecastReplayAvailability.ReconstructedEventTime)
+        ForecastReplayAvailability availability = ForecastReplayAvailability.ReconstructedEventTime,
+        IReadOnlyList<double>? horizons = null)
     {
-        var rows = QuotaCostObservationBuilder.Build(data, cancellationToken);
+        var rows = QuotaCostObservationBuilder.Build(data, cancellationToken, horizons: horizons ?? EvaluationHorizons);
         var predictions = new Dictionary<(DateTimeOffset, double), PredictedWorkload?>();
         var activities = new Dictionary<DateTimeOffset, string>();
         var scores = new List<ComposedQuotaScore>();
