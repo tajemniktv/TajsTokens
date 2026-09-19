@@ -246,7 +246,7 @@ Plausible explicit assumptions are allowed, but must remain distinguishable from
 - **Completed quiet outcomes:** evaluation ends at the earlier of requested time and dataset capture,
   not the last token. Snapshot age cannot manufacture negative targets; collector gaps remain a
   competing explanation. The session decomposition reuses retained token time/amount fields.
-- **Composed quota:** `composed-quota/v9` preserves separate retrospective and strict collection-time
+- **Composed quota:** `composed-quota/v10` preserves separate retrospective and strict collection-time
   evaluations. Only required cost inputs govern availability; unknown capture time never becomes
   event time. Recovered old work cannot qualify a historical prediction retroactively.
   Descriptive breakdowns expose reset generation, origin activity/model/effort mix and recorded
@@ -260,6 +260,9 @@ Plausible explicit assumptions are allowed, but must remain distinguishable from
   polling tolerance is at most 20% of the requested horizon, capped at five minutes; actual elapsed
   time drives workload projection. Sparse short-horizon evidence is withheld, not pooled with longer
   horizons. Released live quota horizons and their promotion path remain unchanged (30/120 minutes).
+  Incumbent comparisons query exact eligible origins/outcomes even when irregular polling puts them
+  outside the incumbent's ordinary replay sample. Additional comparison queries do not enter its
+  training, selection or calibration history; only already-matured ordinary outcomes contribute.
 - **Promotion:** retain the incumbent unless a supported total/category/model-effort candidate wins
   cost and paired end-to-end comparisons against incumbent and pace, with at least eight independent
   reset generations and current composition/outcomes. Unknown support, identity, shifts or calibration

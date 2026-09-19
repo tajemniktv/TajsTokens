@@ -10,6 +10,40 @@ public sealed class QuotaPredictionServiceTests
     private static readonly DateTimeOffset Start = DateTimeOffset.Parse("2026-08-01T00:00:00Z");
 
     [Fact]
+    public void ExactTargetsRecoverIrregularPollingComparisonsWithoutChangingTrainingOrReadingFutureWork()
+    {
+        var original = ComposedQuotaEvaluatorTests.TimelyData();
+        var start = original.Quota[0].CapturedAtUtc;
+        DateTimeOffset At(int i) => start.AddMinutes(i * 5 + (i % 11 == 0 ? 2 : 0));
+        var data = original with {
+            Quota = Enumerable.Range(0, 200).Select(i => original.Quota[0] with {
+                CapturedAtUtc = At(i), CollectedAtUtc = At(i), UsedPercent = i / 3d }).ToArray(),
+            Tokens = Enumerable.Range(0, 200).Select(i => original.Tokens[0] with {
+                ObservedAtUtc = At(i), CapturedAtUtc = At(i) }).ToArray()
+        };
+        const double horizon = 5d / 60;
+        const ForecastReplayAvailability strict = ForecastReplayAvailability.CollectedByOrigin;
+        var targets = QuotaCostObservationBuilder.Build(data, horizons: [horizon]).Skip(20)
+            .Select(x => (Origin: x.StartUtc, Outcome: x.EndUtc)).ToArray();
+        var ordinary = QuotaPredictionService.Replay(data, horizon, strict);
+        var extra = targets.First(x => ordinary.All(y => y.Observation.OriginUtc != x.Origin));
+        var matched = QuotaPredictionService.ReplayAtTargets(data, horizon, strict, targets);
+        Assert.Equal(targets.Length, matched.Count);
+        Assert.All(targets, target => Assert.Equal(target.Outcome, matched[target.Origin].TargetUtc));
+        var alone = QuotaPredictionService.ReplayAtTargets(data, horizon, strict, [extra]);
+        Assert.Equal(matched[extra.Origin], alone[extra.Origin]); // Other requested targets never become training points.
+        foreach (var sampled in ordinary.Where(x => matched.ContainsKey(x.Observation.OriginUtc)))
+            Assert.Equal(sampled.Prediction with { TargetUtc = sampled.Observation.OutcomeUtc }, matched[sampled.Observation.OriginUtc]);
+        var futureChanged = data with { Tokens = data.Tokens.Select(x => x.ObservedAtUtc > extra.Origin ? x with {
+            Model = "future-model", ReportedTotalTokens = 999999999 } : x).ToArray() };
+        Assert.Equal(alone[extra.Origin], QuotaPredictionService.ReplayAtTargets(futureChanged, horizon, strict, [extra])[extra.Origin]);
+        Assert.Empty(QuotaPredictionService.ReplayAtTargets(data, horizon, strict,
+            [(extra.Origin, extra.Outcome.AddDays(7)), (start.AddSeconds(1), extra.Outcome)]));
+        var composed = ComposedQuotaEvaluator.Evaluate(data, availability: strict, horizons: [horizon]);
+        Assert.All(composed.Scores.Single(x => x.CostModel == "total").Trials, x => Assert.NotNull(x.IncumbentIntervalLoss));
+    }
+
+    [Fact]
     public void TimeWeightedRatePreservesLinearSlopeAndDoesNotDecayPerFlatPoll()
     {
         var sparse = new[] { Point(0, 0), Point(1, 2), Point(2, 4) };

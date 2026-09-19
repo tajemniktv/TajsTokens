@@ -43,9 +43,17 @@ public static class QuotaPredictionService
         ForecastReplayAvailability availability, CancellationToken cancellationToken = default) =>
         Evaluate(data, horizon, availability, null, cancellationToken).Trials;
 
-    private static (IReadOnlyList<QuotaPredictionTrial> Trials, QuotaHorizonPrediction? Current) Evaluate(
+    /// <summary>Scores exact comparison targets without admitting them to the incumbent's training/selection history.</summary>
+    public static IReadOnlyDictionary<DateTimeOffset, QuotaHorizonPrediction> ReplayAtTargets(
         CodexForecastDataset data, double horizon, ForecastReplayAvailability availability,
-        QuotaSnapshot? current, CancellationToken cancellationToken)
+        IReadOnlyList<(DateTimeOffset Origin, DateTimeOffset Outcome)> targets, CancellationToken cancellationToken = default) =>
+        Evaluate(data, horizon, availability, null, cancellationToken, targets).Targets;
+
+    private static (IReadOnlyList<QuotaPredictionTrial> Trials, QuotaHorizonPrediction? Current,
+        IReadOnlyDictionary<DateTimeOffset, QuotaHorizonPrediction> Targets) Evaluate(
+        CodexForecastDataset data, double horizon, ForecastReplayAvailability availability,
+        QuotaSnapshot? current, CancellationToken cancellationToken,
+        IReadOnlyList<(DateTimeOffset Origin, DateTimeOffset Outcome)>? targets = null)
     {
         // The caller supplies one source/account/window stream. SplitEpochs rejects mixed streams.
         var models = QuotaPaceModels.Candidates.ToDictionary(model => model,
@@ -73,7 +81,38 @@ public static class QuotaPredictionService
             live = PredictAt(current, horizon, QuotaPaceModels.Candidates.ToDictionary(model => model,
                 model => QuotaPaceModels.ProjectRemaining(epoch, model, horizon)), null).Prediction;
         }
-        return (points.Select(x => new QuotaPredictionTrial(x.Label!, x.Prediction)).ToArray(), live);
+        var matched = new Dictionary<DateTimeOffset, QuotaHorizonPrediction>();
+        if (targets is { Count: > 0 })
+        {
+            var epochs = QuotaForecastBacktester.SplitEpochs(data.Quota);
+            var epochByOrigin = epochs.SelectMany(epoch => epoch.Select(row => (row.CapturedAtUtc, Epoch: epoch)))
+                .GroupBy(x => x.CapturedAtUtc).ToDictionary(x => x.Key, x => x.Last().Epoch);
+            var sampled = points.ToDictionary(x => x.Label!.OriginUtc);
+            foreach (var target in targets)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!epochByOrigin.TryGetValue(target.Origin, out var epoch) ||
+                    !anchors.TryGetValue(target.Origin, out var anchor) || anchor.UsedPercent >= 100 ||
+                    target.Origin - epoch[0].CapturedAtUtc < TimeSpan.FromMinutes(15)) continue;
+                var nominal = target.Origin.AddHours(horizon);
+                var outcome = epoch.FirstOrDefault(x => x.CapturedAtUtc >= nominal);
+                if (outcome is null || outcome.CapturedAtUtc != target.Outcome ||
+                    target.Outcome - nominal > TimeSpan.FromMinutes(Math.Min(5, horizon * 60 * .2))) continue;
+                if (sampled.TryGetValue(target.Origin, out var existing) && existing.Label!.OutcomeUtc == target.Outcome)
+                {
+                    matched[target.Origin] = existing.Prediction with { TargetUtc = target.Outcome };
+                    continue;
+                }
+                var prefix = epoch.TakeWhile(x => x.CapturedAtUtc <= target.Origin).ToArray();
+                var lead = (target.Outcome - target.Origin).TotalHours;
+                var estimates = QuotaPaceModels.Candidates.ToDictionary(model => model,
+                    model => QuotaPaceModels.ProjectRemaining(prefix, model, lead));
+                // PredictAt selects only matured points/labels. Do not append this extra query
+                // to points: querying another target must never change a later prediction.
+                matched[target.Origin] = PredictAt(anchor, lead, estimates, null).Prediction with { TargetUtc = target.Outcome };
+            }
+        }
+        return (points.Select(x => new QuotaPredictionTrial(x.Label!, x.Prediction)).ToArray(), live, matched);
 
         Point PredictAt(QuotaSnapshot anchor, double lead, IReadOnlyDictionary<string, double> estimates, QuotaForecastTrial? label)
         {

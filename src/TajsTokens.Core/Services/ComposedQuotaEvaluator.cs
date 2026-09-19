@@ -5,7 +5,7 @@ namespace TajsTokens.Core.Services;
 /// <summary>Actual-cost and origin-only forecast errors on identical disjoint outcomes.</summary>
 public static class ComposedQuotaEvaluator
 {
-    public const string Version = "composed-quota/v9";
+    public const string Version = "composed-quota/v10";
     public static IReadOnlyList<double> EvaluationHorizons { get; } = Array.AsReadOnly(new[] { 5d / 60, .25, .5, 2d });
 
     public static ComposedQuotaEvaluation Evaluate(CodexForecastDataset data, CancellationToken cancellationToken = default,
@@ -22,9 +22,9 @@ public static class ComposedQuotaEvaluator
             var nativeTraining = ordered.Take(20).ToArray();
             var quota = QuotaHistoryPolicy.ReplayRows(QuotaHistoryPolicy.Streams(QuotaHistoryPolicy.Describe(
                 QuotaHistoryPolicy.AvailableRows(data.Quota.Where(x => QuotaHistoryPolicy.Cohort(x) == group.Key.Cohort), availability), data.CapturedAtUtc)).SelectMany(x => x));
-            var incumbent = nativeTraining.Length == 20 ? QuotaPredictionService.Replay(data with { Quota = quota },
-                    group.Key.HorizonHours, availability, cancellationToken)
-                .ToDictionary(x => x.Observation.OriginUtc) : [];
+            var incumbent = nativeTraining.Length == 20 ? QuotaPredictionService.ReplayAtTargets(data with { Quota = quota },
+                    group.Key.HorizonHours, availability, ordered.Skip(20).Select(x => (x.StartUtc, x.EndUtc)).ToArray(), cancellationToken)
+                : new Dictionary<DateTimeOffset, QuotaHorizonPrediction>();
             var asserted = QuotaCostTrainingPolicy.Select(rows, group.Key.Cohort, group.Key.HorizonHours, true);
             var candidates = new[] { "total", "categories", "model-effort" };
             foreach (var candidate in asserted.Length > nativeTraining.Length ? candidates.Concat(candidates.Select(x => "asserted-" + x)) : candidates)
@@ -104,8 +104,8 @@ public static class ComposedQuotaEvaluator
                             UpperRemainingPercent = calibration.Radius is { } high ? Math.Min(100 - row.StartUsed, remaining + high) : null,
                             CalibrationGenerations = calibration.Generations,
                             IncumbentIntervalLoss = incumbent.TryGetValue(row.StartUtc, out var baseline) &&
-                                baseline.Observation.OutcomeUtc == row.EndUtc
-                                ? row.IntervalLoss(100 - row.StartUsed - baseline.Prediction.RemainingPercent) : null
+                                baseline.TargetUtc == row.EndUtc
+                                ? row.IntervalLoss(100 - row.StartUsed - baseline.RemainingPercent) : null
                         });
                     }
                 }
