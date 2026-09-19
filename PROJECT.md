@@ -377,9 +377,19 @@ and result area. Exact-thread filtering returned the selected thread's goal row 
 paging to batch 1. Retained Diagnostics displayed the bounded numerical-variation sample, diagnostic
 threshold and requested-tier caveat without making another backend request. Its authentication copy
 now distinguishes app-server reads from the explicitly enabled daily adapter instead of claiming that
-no authentication files are ever read. Other window sizes, detailed model-selection presentation and
-empty/stale/partial/corrupt workflows still need native acceptance checks. No native source contents
-or privacy settings were changed during this pass.
+no authentication files are ever read. No native source contents or privacy settings were changed.
+
+Follow-up on deployed build `20260919T045257758Z-93e2b31e` verified Model Lab's before-run empty
+state, disabled evaluation button during a seven-day run, and completed native-account strict
+15-minute selection details. The expanded result displayed 42 outcomes/42 incumbent pairs, three
+reset groups, unavailable joint ranges, withholding reasons and explicit failed promotion gates.
+Saved v2/v3 TT snapshots remained readable with original timestamps/bases and unavailable metrics;
+loading them did not rerun scoring. Changing back to 30 days cleared the evaluated cohort/results
+and requested a fresh evaluation rather than relabeling the seven-day result. The local evaluation
+saved its normal aggregate TT snapshot; no external requests or raw-data exports were initiated by
+these actions. Other window sizes and injected empty-history/stale-source/corrupt-row UI states
+remain unverified. Corrupt-neighbor preservation is covered by isolated persistence tests, not a
+claim that corrupt data was injected into the live app.
 
 ## Local installation and owned data
 
