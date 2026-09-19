@@ -402,6 +402,8 @@ public sealed partial class ForecastsPage : Page
                     score.CostModel,
                     score.HeldOutIntervals == 0 ? "Insufficient chronological history" :
                         $"Forecast interval loss {score.IntervalLoss:0.###}pp · {score.HeldOutIntervals} held-out intervals / {score.ResetGenerations} resets",
+                    ComposedQuotaPolicy.AssessSelection(score, report.EvaluatedAtUtc,
+                        score.Availability == ForecastReplayAvailability.CollectedByOrigin).Explanation + "\n\n" +
                     $"Actual-work cost loss {score.CostOnlyIntervalLoss:0.###}pp versus forecast loss {score.IntervalLoss:0.###}pp. " +
                     (score.IntervalOrigins > 0 ? $"Joint range: {score.IntervalCoverage:P0} reported-value coverage on {score.IntervalOrigins} origins; mean width {score.MeanIntervalWidth:0.###}pp. "
                         : "Joint range unavailable: insufficient earlier completed reset calibration. ") +

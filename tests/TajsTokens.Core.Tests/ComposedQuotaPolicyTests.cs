@@ -56,6 +56,35 @@ public sealed class ComposedQuotaPolicyTests
             }).ToArray()
         };
         Assert.True(ComposedQuotaPolicy.SupportsStrictSelection(strict, now));
+        var ready = ComposedQuotaPolicy.AssessSelection(strict, now, true);
+        Assert.True(ready.Passed);
+        Assert.Empty(ready.Reasons);
+        Assert.Equal(.1, ready.ResetBalancedLoss!.Value, 8);
+        Assert.Equal(1, ready.ResetBalancedIncumbentLoss);
+        Assert.Contains("not a live promotion decision", ready.Explanation);
+        var unpaired = ComposedQuotaPolicy.AssessSelection(strict with {
+            Trials = strict.Trials.Select((x, i) => i == 0 ? x with { IncumbentIntervalLoss = null } : x).ToArray()
+        }, now, true);
+        Assert.False(unpaired.Passed);
+        Assert.Equal(15, unpaired.IncumbentPairs);
+        Assert.Null(unpaired.ResetBalancedIncumbentLoss);
+        Assert.Contains(unpaired.Reasons, x => x.Contains("matched incumbent"));
+        var noTrials = ComposedQuotaPolicy.AssessSelection(strict with { Trials = [], HeldOutIntervals = 0, ResetGenerations = 0 }, now, true);
+        Assert.False(noTrials.Passed);
+        Assert.Null(noTrials.ResetBalancedLoss);
+        Assert.Contains(noTrials.Reasons, x => x.Contains("No held-out"));
+        Assert.Contains(ComposedQuotaPolicy.AssessSelection(score, now, true).Reasons, x => x.Contains("Collection-time replay"));
+        Assert.Contains(ComposedQuotaPolicy.AssessSelection(strict with { AssertedTrainingIntervals = 1 }, now, true).Reasons,
+            x => x.Contains("32 strict outcomes"));
+        Assert.Contains(ComposedQuotaPolicy.AssessSelection(strict, now.AddDays(1), true).Reasons, x => x.Contains("Recent completed"));
+        Assert.Contains(ComposedQuotaPolicy.AssessSelection(strict with { MissingComposition = 17 }, now, true).Reasons,
+            x => x.Contains("Withheld intervals"));
+        Assert.Contains(ComposedQuotaPolicy.AssessSelection(strict with {
+            Trials = strict.Trials.Select(x => x with { IntervalLoss = .95 }).ToArray()
+        }, now, true).Reasons, x => x.Contains("improvement over incumbent"));
+        Assert.Contains(ComposedQuotaPolicy.AssessSelection(strict with {
+            Trials = strict.Trials.Select(x => x.ResetUtc == now ? x with { IntervalLoss = 1.1 } : x).ToArray()
+        }, now, true).Reasons, x => x.Contains("latest two reset"));
         Assert.False(ComposedQuotaPolicy.SupportsStrictSelection(strict with
         {
             Trials = strict.Trials.Select(x => x.ResetUtc == now ? x with { IntervalLoss = 1.1 } : x).ToArray()

@@ -87,29 +87,51 @@ public static class ComposedQuotaPolicy
     }
 
     public static bool SupportsSelection(ComposedQuotaScore score, DateTimeOffset origin)
+        => AssessSelection(score, origin).Passed;
+
+    /// <summary>Shared selection gate evidence, not a claim that all live promotion gates passed.</summary>
+    public static ComposedSelectionAssessment AssessSelection(ComposedQuotaScore score, DateTimeOffset origin, bool requireStrict = false)
     {
-        if (score.HeldOutIntervals < 16 || score.ResetGenerations < 8 || score.MissingComposition > score.HeldOutIntervals ||
-            score.Trials.Count == 0 || score.Trials.Any(x => x.OutcomeUtc > origin || x.IncumbentIntervalLoss is null) ||
-            score.Trials.Max(x => x.OutcomeUtc) < origin.AddHours(-Math.Max(2, score.HorizonHours * 2))) return false;
+        var reasons = new List<string>();
         var generations = QuotaResetGenerationPolicy.Group(score.Trials, x => x.ResetUtc);
-        if (generations.Count < 8 || score.Trials.Count < 16) return false;
-        var loss = generations.Average(g => g.Average(x => x.IntervalLoss));
-        var incumbentLoss = generations.Average(g => g.Average(x => x.IncumbentIntervalLoss!.Value));
-        var paceLoss = generations.Average(g => g.Average(x => x.PaceIntervalLoss));
-        return loss + 0.1 < incumbentLoss && loss < incumbentLoss * 0.9 &&
-            loss + 0.1 < paceLoss && loss < paceLoss * 0.9 &&
-            generations.Count(g => g.Average(x => x.IntervalLoss) < g.Average(x => x.IncumbentIntervalLoss!.Value)) > generations.Count / 2;
+        var pairs = score.Trials.Count(x => x.IncumbentIntervalLoss is not null);
+        if (score.HeldOutIntervals < 16 || score.Trials.Count < 16) reasons.Add("At least 16 held-out outcomes are required.");
+        if (score.ResetGenerations < 8 || generations.Count < 8) reasons.Add("At least eight independent reset generations are required.");
+        if (score.MissingComposition > score.HeldOutIntervals) reasons.Add("Withheld intervals exceed evaluated outcomes.");
+        if (score.Trials.Any(x => x.OutcomeUtc > origin)) reasons.Add("Some outcomes occur after the assessment time.");
+        if (score.Trials.Count == 0) reasons.Add("No held-out trials are available.");
+        else if (score.Trials.Max(x => x.OutcomeUtc) < origin.AddHours(-Math.Max(2, score.HorizonHours * 2)))
+            reasons.Add("Recent completed outcomes are missing.");
+        if (pairs != score.Trials.Count) reasons.Add("Not every outcome has a matched incumbent prediction.");
+        double? loss = generations.Count == 0 ? null : generations.Average(g => g.Average(x => x.IntervalLoss));
+        double? paceLoss = generations.Count == 0 ? null : generations.Average(g => g.Average(x => x.PaceIntervalLoss));
+        double? incumbentLoss = generations.Count == 0 || pairs != score.Trials.Count ? null :
+            generations.Average(g => g.Average(x => x.IncumbentIntervalLoss!.Value));
+        if (loss is { } l && paceLoss is { } p && !(l + .1 < p && l < p * .9))
+            reasons.Add("The reset-balanced improvement over pace is not both greater than 0.1pp and 10%.");
+        if (loss is { } il && incumbentLoss is { } b)
+        {
+            if (!(il + .1 < b && il < b * .9)) reasons.Add("The reset-balanced improvement over incumbent is not both greater than 0.1pp and 10%.");
+            if (generations.Count(g => g.Average(x => x.IntervalLoss) < g.Average(x => x.IncumbentIntervalLoss!.Value)) <= generations.Count / 2)
+                reasons.Add("The challenger does not beat incumbent in a majority of reset generations.");
+        }
+        if (requireStrict)
+        {
+            if (score.Availability != ForecastReplayAvailability.CollectedByOrigin || score.Trials.Any(x =>
+                x.Availability != ForecastReplayAvailability.CollectedByOrigin || x.Workload.Availability != ForecastReplayAvailability.CollectedByOrigin))
+                reasons.Add("Collection-time replay is required; reconstructed history cannot qualify.");
+            if (incumbentLoss is not null && !generations.OrderByDescending(g => g.Max(x => x.OutcomeUtc)).Take(2)
+                .All(g => g.Average(x => x.IntervalLoss) <= g.Average(x => x.IncumbentIntervalLoss!.Value) &&
+                    g.Average(x => x.IntervalLoss) <= g.Average(x => x.PaceIntervalLoss)))
+                reasons.Add("One of the latest two reset groups loses to pace or incumbent.");
+            if (score.AssertedTrainingIntervals > 0 && (score.HeldOutIntervals < 32 || generations.Count < 12))
+                reasons.Add("User-asserted training requires at least 32 strict outcomes across 12 reset generations.");
+        }
+        return new(reasons.Count == 0, requireStrict, score.Trials.Count, generations.Count, pairs, loss, incumbentLoss, paceLoss, reasons);
     }
 
     public static bool SupportsStrictSelection(ComposedQuotaScore score, DateTimeOffset origin) =>
-        score.Availability == ForecastReplayAvailability.CollectedByOrigin &&
-        score.Trials.All(x => x.Availability == ForecastReplayAvailability.CollectedByOrigin &&
-            x.Workload.Availability == ForecastReplayAvailability.CollectedByOrigin) && SupportsSelection(score, origin) &&
-        QuotaResetGenerationPolicy.Group(score.Trials, x => x.ResetUtc).OrderByDescending(g => g.Max(x => x.OutcomeUtc)).Take(2)
-            .All(g => g.Average(x => x.IntervalLoss) <= g.Average(x => x.IncumbentIntervalLoss!.Value) &&
-                g.Average(x => x.IntervalLoss) <= g.Average(x => x.PaceIntervalLoss)) &&
-        (score.AssertedTrainingIntervals == 0 || score.HeldOutIntervals >= 32 &&
-            QuotaResetGenerationPolicy.Group(score.Trials, x => x.ResetUtc).Count >= 12);
+        AssessSelection(score, origin, requireStrict: true).Passed;
 
     private static bool SupportsAssertedCost(ComposedQuotaScore score, IReadOnlyList<ComposedQuotaScore> all)
     {

@@ -26,6 +26,10 @@ This is the current implementation layout. Product and source semantics are defi
 dotnet run --project tools/TajsTokens.ForecastEvaluation -- --cost "$env:LOCALAPPDATA/Programs/TajemnikTV/TajsTokens/data/telemetry.db"
 ```
 
+The composed evaluation commands also emit `selection_evidence` JSON with shared policy-gate reasons
+and reset-balanced comparison losses. A passing selection-evidence assessment is not a live promotion
+claim: current account/composition, cost support and uncertainty calibration still apply.
+
 This reads the retained database in one transaction and prints aggregate, cohort-separated
 cost diagnostics. It does not migrate/replay sources, change live predictions, or deploy the
 app. For private output, redirect to `.codex/temp/`. The snapshot time and policy version are

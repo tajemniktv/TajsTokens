@@ -60,6 +60,10 @@ if (args.Length == 2 && args[0] is "--composed" or "--composed-strict")
         Console.WriteLine(FormattableString.Invariant($"cohort-{cohorts.IndexOf(score.Cohort) + 1},{score.HorizonHours},{score.CostModel},{score.TrainingIntervals},{score.HeldOutIntervals},{score.ResetGenerations},{score.MissingComposition},{score.IntervalLoss:F4},{score.CostOnlyIntervalLoss:F4},{score.PaceIntervalLoss:F4},{score.IncumbentIntervalLoss:F4},{score.DisplayedDeltaMae:F4},{score.AssertedTrainingIntervals},{string.Join(';', score.WithheldReasons.Select(x => $"{x.Key}={x.Value}"))},{score.IntervalOrigins},{score.IntervalCoverage:F4},{score.MeanIntervalWidth:F4}"));
     Console.WriteLine("breakdowns=" + System.Text.Json.JsonSerializer.Serialize(report.Scores.Where(x => x.Breakdowns.Count > 0)
         .Select(x => new { Cohort = cohorts.IndexOf(x.Cohort) + 1, x.HorizonHours, x.CostModel, x.Availability, x.Breakdowns })));
+    Console.WriteLine("selection_evidence=" + System.Text.Json.JsonSerializer.Serialize(report.Scores.Select(x => new {
+        Cohort = cohorts.IndexOf(x.Cohort) + 1, x.HorizonHours, x.CostModel,
+        Assessment = ComposedQuotaPolicy.AssessSelection(x, data.CapturedAtUtc,
+            x.Availability == ForecastReplayAvailability.CollectedByOrigin) })));
     return;
 }
 

@@ -113,6 +113,10 @@ response-copy case supporting a new canonical rule. Retain the existing accounti
 Layered evaluation now exposes horizon/composition/reset-grouped diagnostics plus outcome category
 coverage and quality-flag combinations. Outcome diagnostics are not origin inputs, and complete
 reported token vectors do not establish account-wide coverage. Matched baseline comparisons remain separate.
+Model Lab and the composed CLI also explain the shared selection-evidence gates: actual outcome/
+reset counts, missing incumbent pairs, recency, collection-time provenance, reset-balanced wins,
+recent-group regressions and stricter asserted-training requirements. Passing these gates is explicitly
+not full live promotion; current composition, cost support and uncertainty calibration remain separate.
 **Next implementable slice:** continue layered evaluation and
 its product explanations while ordinary collection supplies more evidence. Legacy adjacency comparison remains in the
 read-only corpus audit, not a stored native join. Accounting promotion is separate.
