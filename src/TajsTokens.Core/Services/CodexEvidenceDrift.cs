@@ -5,7 +5,7 @@ using TajsTokens.Core.Models;
 
 namespace TajsTokens.Core.Services;
 
-public enum CodexDriftKind { ReportedConfiguration, Missingness, Capability, HistoricalRevision, BlockingState }
+public enum CodexDriftKind { ReportedConfiguration, Missingness, Capability, HistoricalRevision, BlockingState, NumericalVariation }
 
 /// <summary>Rebuildable signal referencing immutable fetches; not proof of a provider policy change.</summary>
 public sealed record CodexDriftSignal(string Id, string Policy, string BeforeObservationId,
@@ -18,7 +18,9 @@ public sealed record CodexDriftSignal(string Id, string Policy, string BeforeObs
 
 public static class CodexEvidenceDrift
 {
-    public const string Policy = "codex-evidence-drift/v2";
+    public const string Policy = "codex-evidence-drift/v3";
+    // Diagnostic convention, not a provider precision contract. Exact values remain in observations/signals.
+    public const decimal RelativeUsageNoiseThreshold = 0.000000000001m;
 
     public static IReadOnlyList<CodexDriftSignal> Analyze(IEnumerable<CodexServerObservation> observations)
     {
@@ -108,7 +110,17 @@ public static class CodexEvidenceDrift
                         var oldFields = Fields(oldDay);
                         var newFields = Fields(day);
                         foreach (var field in oldFields.Keys.Union(newFields.Keys).Order(StringComparer.Ordinal))
-                            Change(day.Date + "/" + field, oldFields.GetValueOrDefault(field), newFields.GetValueOrDefault(field), CodexDriftKind.HistoricalRevision);
+                        {
+                            var oldValue = oldFields.GetValueOrDefault(field);
+                            var newValue = newFields.GetValueOrDefault(field);
+                            var numerical = current.Surface == CodexServerSurface.DailyRelativeUsage && oldReport.Units == "percent" &&
+                                field.StartsWith("surface:", StringComparison.Ordinal) &&
+                                decimal.TryParse(oldValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var a) && a >= 0 &&
+                                decimal.TryParse(newValue, NumberStyles.Float, CultureInfo.InvariantCulture, out var b) && b >= 0 &&
+                                Math.Abs(a - b) <= RelativeUsageNoiseThreshold;
+                            Change(day.Date + "/" + field, oldValue, newValue,
+                                numerical ? CodexDriftKind.NumericalVariation : CodexDriftKind.HistoricalRevision);
+                        }
                     }
                 }
             }

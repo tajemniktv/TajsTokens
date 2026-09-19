@@ -153,6 +153,12 @@ not zero cost or proven accounting changes. Only strict interior dates of both r
 boundary dates remain unverified. Unknown units, changed grouping/contracts, duplicate dates, failures
 and incompatible identities retain the existing comparison barriers. This does not establish endpoint
 inclusive/exclusive semantics or the cause/effective time of a historical revision.
+The 2026-09-19 03:29 UTC repeat collection found unchanged counts on 26 overlapping completed days.
+Relative values changed on 22 days (24 surface values), but by at most 1.4e-14pp. Drift v3 labels
+percent-surface differences up to 1e-12pp as numerical variation, a diagnostic convention rather than
+provider precision, preserving exact observations and before/after values. Diagnostics prioritize other
+signals and show a bounded noise sample. Credits stayed zero. End-date inclusion was observed on the
+relative route in both requests, but omission of dates on counts still cannot prove boundary semantics.
 
 **Optional research, not mandatory scope:** logistic/Gamma or hierarchical challengers, adaptive
 fits, continuous/endpoint presence models, per-task TT history before a product decision, additional

@@ -131,7 +131,10 @@ public sealed class CodexServerEvidenceService(string databasePath, SqliteTeleme
         command.Parameters.Clear();
         var signals = CodexEvidenceDrift.Analyze(driftHistory);
         lines.Add($"Evidence changes ({CodexEvidenceDrift.Policy}): {signals.Count} signals from a bounded {driftHistory.Count}-fetch history; observations persist, signals are rebuilt. Not confirmed quota-policy changes.");
-        foreach (var signal in signals.TakeLast(24))
+        var numerical = signals.Where(x => x.Kind == CodexDriftKind.NumericalVariation).ToArray();
+        if (numerical.Length > 0)
+            lines.Add($"  {numerical.Length} tiny relative-usage variations (≤1e-12pp diagnostic threshold, not provider precision); exact values are retained. Showing up to three after substantive signals.");
+        foreach (var signal in signals.Where(x => x.Kind != CodexDriftKind.NumericalVariation).TakeLast(24).Concat(numerical.TakeLast(3)))
             lines.Add($"  {signal.FirstObservedAtUtc:g} · {QuotaAccountScope.Describe(signal.AccountKey)} · {signal.Surface} · {signal.Kind} · {signal.Field}: {signal.Before ?? "unknown/not reported"} → {signal.After ?? "unknown/not reported"}; effective date unknown.");
         if (signals.Count == 0) lines.Add("  No comparable changes in the selected history; this does not prove policy stability.");
         command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('codex_workload_observations') WHERE name='service_tier';";

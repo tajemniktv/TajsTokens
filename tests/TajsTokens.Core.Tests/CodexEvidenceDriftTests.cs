@@ -72,6 +72,24 @@ public sealed class CodexEvidenceDriftTests
     }
 
     [Fact]
+    public void TinyPercentVariationDoesNotMasqueradeAsSubstantiveHistoricalRevision()
+    {
+        CodexDailyReport Report(decimal value, string units = "percent") => new("daily/v1", "relative", "2026-09-16", "2026-09-19", units, null,
+            null, "pro", null, null, [new("2026-09-17", null, null, null, null, null, null, new Dictionary<string, decimal> { ["desktop_app"] = value })]);
+        var before = Quota(0) with { Surface = CodexServerSurface.DailyRelativeUsage, QuotaMetadata = null, DailyReport = Report(9.658874161270091m) };
+        var after = Quota(1) with { Surface = CodexServerSurface.DailyRelativeUsage, QuotaMetadata = null, DailyReport = Report(9.65887416127009m) };
+        var signal = Assert.Single(CodexEvidenceDrift.Analyze([before, after]));
+        Assert.Equal(CodexDriftKind.NumericalVariation, signal.Kind);
+        Assert.NotEqual(signal.Before, signal.After); // Never round away the observed evidence.
+        Assert.Equal(CodexDriftKind.HistoricalRevision, Assert.Single(CodexEvidenceDrift.Analyze([before,
+            after with { DailyReport = Report(9.659m) }])).Kind);
+        Assert.Equal(CodexDriftKind.HistoricalRevision, Assert.Single(CodexEvidenceDrift.Analyze([
+            before with { DailyReport = Report(9.658874161270091m, "fraction") },
+            after with { DailyReport = Report(9.65887416127009m, "fraction") }])).Kind);
+        Assert.Empty(CodexEvidenceDrift.Analyze([before, after with { DailyReport = before.DailyReport }]));
+    }
+
+    [Fact]
     public void CompletedInteriorDayOmissionsAreMissingnessNotZeroCostOrPolicyChanges()
     {
         CodexDailyReportRow Day(string date) => new(date, 0, 0, 10, 0, 0, 10, null);
