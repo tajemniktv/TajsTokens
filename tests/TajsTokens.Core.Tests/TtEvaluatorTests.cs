@@ -6,6 +6,59 @@ namespace TajsTokens.Core.Tests;
 public sealed class TtEvaluatorTests
 {
     [Fact]
+    public void ScalarCannotHideChangedRelativeCategoryCostsBehindARefittedScale()
+    {
+        var seed = QuotaCostObservationBuilder.Build(ComposedQuotaEvaluatorTests.TimelyData()).First(x => x.HorizonHours == .5);
+        var start = seed.StartUtc;
+        var rows = Enumerable.Range(0, 60).Select(i =>
+        {
+            var output = i % 2 == 1;
+            var cost = i >= 20 && output ? 8d : 2d;
+            var origin = start.AddDays(i / 20 * 7).AddHours(i % 20);
+            return seed with
+            {
+                StartUtc = origin, EndUtc = origin.AddMinutes(30), ResetUtc = start.AddDays((i / 20 + 1) * 7),
+                StartUsed = 0, EndUsed = cost, LowerDelta = cost - .1, UpperDelta = cost + .1,
+                TokenCategories = output ? [0, 0, 0, 10000, 0] : [10000, 0, 0, 0, 0],
+                Features = seed.Features with { Tokens = 10000 }
+            };
+        }).ToArray();
+        var score = TtEvaluator.Evaluate(rows).Scores.Single();
+        Assert.NotNull(score.Basis);
+        // Equal costs during basis fitting produce equal TT; later quota pricing differs 4:1.
+        Assert.Equal(score.Basis.Score(rows[0]), score.Basis.Score(rows[1]));
+        Assert.Equal(20, score.HeldOutIntervals);
+        Assert.Equal(0, score.UnsupportedIntervals);
+        Assert.True(score.ScalarMae > 2);
+        Assert.True(score.FullVectorMae < score.ScalarMae);
+        Assert.True(score.FullVectorLoss < score.ScalarLoss);
+        Assert.Equal("research-only-not-promoted", score.Status);
+    }
+
+    [Fact]
+    public void MissingCalibrationCoverageCannotBecomeAZeroCostConversion()
+    {
+        var seed = QuotaCostObservationBuilder.Build(ComposedQuotaEvaluatorTests.TimelyData()).First(x => x.HorizonHours == .5);
+        var rows = Enumerable.Range(0, 60).Select(i => seed with
+        {
+            StartUtc = seed.StartUtc.AddHours(i), EndUtc = seed.StartUtc.AddHours(i).AddMinutes(30),
+            StartUsed = 0, EndUsed = 2, LowerDelta = 1.9, UpperDelta = 2.1,
+            Features = i == 30 ? seed.Features with { EffortTokenShares = new Dictionary<string, double>() } : seed.Features
+        }).ToArray();
+        var score = TtEvaluator.Evaluate(rows).Scores.Single();
+        Assert.NotNull(score.Basis);
+        Assert.Equal("insufficient-or-unsupported-calibration", score.Status);
+        Assert.Null(score.QuotaPointsPerTt);
+        Assert.Null(score.ScalarLoss);
+        Assert.NotNull(score.HeldOutTt); // Observed workload scoring does not require a quota conversion.
+        var unavailableBasis = TtEvaluator.Evaluate(rows.Select((x, i) => i == 0
+            ? x with { Features = x.Features with { ModelTokenShares = new Dictionary<string, double>() } } : x).ToArray()).Scores.Single();
+        Assert.Null(unavailableBasis.Basis);
+        Assert.Null(unavailableBasis.HeldOutTt);
+        Assert.Equal(20, unavailableBasis.UnsupportedIntervals);
+    }
+
+    [Fact]
     public void BasisIsImmutableAdditiveAnchoredAndContentAddressed()
     {
         double[] weights = [1, 2, 0, 3, 4];

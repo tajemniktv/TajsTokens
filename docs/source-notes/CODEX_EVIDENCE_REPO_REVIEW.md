@@ -1157,3 +1157,45 @@ Validation: 471 Core tests passed. The initial app build caught a missing format
 after correcting it, Windows Debug build passed with zero warnings/errors and deployed/restarted
 `20260919T003901513Z-647d344f`. CLI replay used owned retained evidence only. UI visual acceptance
 and cross-regime/as-original TT-history validation remain unclaimed.
+
+## 27. Requirement audit and TT negative controls (2026-09-19)
+
+This audit distinguishes delivered implementation from unavailable evidence and remaining
+product work. It does not mark the overall implementation goal complete or make every original
+hypothetical test a demonstrated capability. PROJECT.md remains the current-work authority.
+
+| Original investigation requirement | Evidence / implementation now present | Proof boundary |
+|---|---|---|
+| Provider credits versus daily allowance | Sections 1, 9–10, 16, 20; `CodexDailyPairing`; stored personal count/relative reports | Zero credit quantities on the observed account cannot validate a ratio. Constructed ratio fixtures test arithmetic only. |
+| Exact report contracts | Section 2 source-pinned table, SDK review in section 8, live probe outcomes in sections 9–10 | Availability, units and meaning are separate. Unsupported plan/task/workspace reports are not implemented successful acquisition. |
+| Native scale versus TT | Pairing negatives, token/category/API-price evaluation, section 26 TT prototype | No universal native scale or TT conversion established. TT is a local, basis-labelled experiment. |
+| Semantic drift | `CodexEvidenceDrift`, immutable server ledger and negative/revision tests | Derived versioned change records preserve input references; they do not prove provider-policy causality. |
+| Source/account/cycle compatibility | Server bracket/account-switch, account-scope, daily-pairing and quota-history tests | Correlation remains correlation; no historical ownership is invented. Unknown seats are not presumed compatible. |
+| Copy/interleave evidence | Competing reducers, ordered-sequence tests, real-corpus audit and Desktop ownership fix | Physical observations remain distinct. Neither containment nor lineage inference earned canonical promotion. |
+| Acquisition boundary and SDK | Installed RPC/source findings, SDK comparison, explicit opt-in backend adapter | Direct HTTP is never an automatic app-server fallback. No credential refresh writer, account switching or synthetic agent traffic added. |
+
+The proposed P0 checks are covered by the named parser/pairing/provider/drift/reconciliation/
+persistence suites for the implemented sources. They are **not** blanket proof of future endpoint
+contracts: populated plan/task reports, signed credit-event adjustments, shared-pool coverage and
+historical denominator rebasing remain source-dependent work before those sources can be used.
+In particular, section 10 corroborated an empty HTTP 200 response for `daily-code-review-metrics`;
+that confirms the observed route response, not populated-row semantics or a useful retained metric.
+
+The TT negative-control fixture now models a relative category-price change: two categories have
+equal cost during basis fitting, then one costs four times the other during calibration and
+validation. The frozen basis correctly assigns equal TT to equal-score work, while a scalar
+conversion loses to the full-vector challenger. This verifies that the evaluator can reject the
+information bottleneck rather than only succeeding on proportional synthetic examples.
+
+A second fixture establishes that unsupported calibration effort does not become a zero-cost
+conversion. Supported workload can still have a TT score without a quota conversion. Missing
+model support during basis fitting prevents creation of a usable basis altogether.
+
+Remaining product boundaries are explicit: no durable as-original TT scoring history, no
+validated cross-regime scalar conversion, no live session quota uncertainty with adequate
+independent cycles, and no endpoint/continuous-activity model. The latter is a different target
+from any recorded work, not a defect to hide by renaming the existing probability. New source
+retention and unavailable backend capabilities require their own evidence and contracts.
+
+Validation: 473 Core tests passed; isolated Windows Debug build passed with zero warnings/errors
+(`DogfoodEnabled=false`). This test/documentation-only slice did not deploy or restart the app.
