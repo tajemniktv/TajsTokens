@@ -105,8 +105,13 @@ crossed lifecycle boundaries and are not established usage conflicts.
 The [selected response-evidence contract](#selected-response-evidence-contract) now has parser,
 batch/fallback storage and bounded thread Storage diagnostics. Metadata-only v6→v7 replay preserves
 verified source generations and token capture times; rewritten content still changes generation.
-**Next implementable slice:** evaluate cross-file response identity and extend bounded thread
-diagnostics where the retained evidence supports it. Legacy adjacency comparison remains in the
+Thread Storage now shows up to ten selected response/turn/thread snapshots with capture time,
+source offsets and field diagnostics, clearly separated rather than summed. Defaulted cache-write
+zero versus explicit zero is provenance variation, not a numeric candidate conflict. A stable
+367-file scan found 6,090 response keys with no repeats within/across files, so there is no observed
+response-copy case supporting a new canonical rule. Retain the existing accounting.
+**Next implementable slice:** return to horizon/composition/reset-grouped layered evaluation and
+its product explanations while ordinary collection supplies more evidence. Legacy adjacency comparison remains in the
 read-only corpus audit, not a stored native join. Accounting promotion is separate.
 Installed rollouts contain this source; some legacy counter falls have nearby records and others
 do not. Preserve missing coverage and conflicting vectors rather than assuming adjacency proves

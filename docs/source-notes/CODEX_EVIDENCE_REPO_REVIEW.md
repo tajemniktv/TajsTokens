@@ -296,6 +296,17 @@ contract tests parser uncertainty/privacy, migration, batch/fallback failure/ret
 replay, copies, replaced-generation retention, bounded/corrupt reads and identity conflicts. Legacy
 pairing remains a read-only audit comparison, not a durable request-to-token join.
 
+A later stable 367-file scan on the same date found 6,090 records and 6,090 distinct
+`(thread_id,response_id)` keys: no within-file or cross-file repeats/conflicts in this sample.
+This supplies no empirical copy fixture and does not establish global request-key uniqueness.
+Do not promote a copy rule merely because native identity now exists. Thread Storage exposes
+up to ten selected snapshots from its bounded read, including nullable event time, actual capture,
+offsets and field diagnostics. Response, turn-cumulative and thread-cumulative quantities stay
+separate. Candidate comparisons ignore the provenance-only distinction between native-defaulted
+cache-write zero and explicit zero, while retaining that distinction on each observation; unknown
+cache-write remains different. Further reconciliation promotion needs an actual supported case;
+layered model evaluation can continue independently.
+
 ## 5. Compatibility and evidence-model contracts
 
 These contracts guide existing typed evidence owners. Daily reports, profile/thread projections

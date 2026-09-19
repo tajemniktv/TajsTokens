@@ -24,7 +24,10 @@ public sealed record CodexResponseEvidencePage(IReadOnlyList<CodexResponseEviden
                      x.Observation.ReportedThreadId == x.Observation.OwnerThreadId)
                      .Select(x => x.Observation).GroupBy(x => (x.SourceIdentity, x.ReportedThreadId, x.ResponseId)))
         {
-            var variants = group.Select(x => (x.TurnId, x.RootTurnId, x.RuntimeSessionId, x.Usage, x.TurnUsage, x.ThreadUsage)).Distinct().Count();
+            // An absent cache-write counter has an explicit native zero default. Preserve that
+            // provenance on the occurrence, but do not label it a numeric/lineage conflict.
+            var variants = group.Select(x => (x.TurnId, x.RootTurnId, x.RuntimeSessionId,
+                x.Usage?.Counters, x.TurnUsage?.Counters, x.ThreadUsage?.Counters)).Distinct().Count();
             if (variants > 1) conflicts++;
             else if (group.Count() > 1) repeated++;
         }

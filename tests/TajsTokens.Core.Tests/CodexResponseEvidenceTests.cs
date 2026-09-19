@@ -131,6 +131,10 @@ public sealed class CodexResponseEvidenceTests
             new(row with { ResponseId = "incomplete", RuntimeSessionId = null }, true)], false, 0);
         Assert.Equal((0, 1), page.CompareActiveCandidates());
         Assert.Equal(1, page.Retired);
+        var explicitZero = row with { Usage = row.Usage! with { CacheWriteDefaulted = false } };
+        Assert.Equal((1, 0), new CodexResponseEvidencePage([new(row, true), new(explicitZero, true)], false, 0).CompareActiveCandidates());
+        var unknown = row with { Usage = row.Usage! with { Counters = row.Usage.Counters with { CacheWriteInputTokens = null } } };
+        Assert.Equal((0, 1), new CodexResponseEvidencePage([new(row, true), new(unknown, true)], false, 0).CompareActiveCandidates());
     }
 
     private static async Task Sql(string db, string sql)

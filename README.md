@@ -14,7 +14,7 @@ outlooks and usage predictions—with freshness and uncertainty kept visible.
   Collection details stay available on demand.
 - **Codex → Work & threads:** navigate workspaces, threads and subagents; inspect turns, tools,
   context and supported native source details. Jump from a thread to its token usage.
-  Thread Storage also shows bounded supplemental response-evidence coverage and identity conflicts;
+  Thread Storage also shows bounded supplemental response-evidence coverage, selected counter snapshots and identity conflicts;
   these records stay separate from token totals and forecasts.
 - **Codex → Usage breakdown:** compare models, projects, sessions, hours, days and months in consistent token
   tables. Search/sort rows, inspect exact counts and filter a selected row across breakdowns.

@@ -463,8 +463,9 @@ public sealed partial class ObservatoryPage : Page
                               $"{responses.WithDiagnostics:N0} with missing/invalid/conflicting fields · {responses.CorruptRows:N0} unreadable rows. " +
                               $"Within-source candidate groups: {candidates.Repeated:N0} repeated / {candidates.Conflicting:N0} conflicting. " +
                               (responses.Truncated ? "Bounded to 500 rows; incomplete coverage. " : "") +
-                              "Separate evidence only; not additional tokens or proven cross-file identity.");
-                    StorageList.ItemsSource = rows.Prepend(evidence).ToArray();
+                              "Separate evidence only; not additional tokens or proven cross-file identity. " +
+                              $"Showing {Math.Min(10, responses.Rows.Count)} most recently collected details from this bounded read, active first.");
+                    StorageList.ItemsSource = rows.Prepend(evidence).Concat(responses.Rows.Take(10).Select(ToResponseEvidenceRow)).ToArray();
                     break;
                 }
                 case 6:
@@ -572,6 +573,28 @@ public sealed partial class ObservatoryPage : Page
             session.DisplayName,
             $"{role} · {session.Status} · {model} · {Path.GetFileName(session.Repository.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar))}",
             $"native {FormatCount(session.NativeTokens.ReportedTotal)} · {session.CompactionCount} compact · {FormatBytes(session.RolloutBytes)}{context}");
+    }
+
+    private static StorageRow ToResponseEvidenceRow(CodexResponseEvidenceRow row)
+    {
+        var item = row.Observation;
+        string Count(long? value) => value?.ToString("N0") ?? "unknown";
+        string Snapshot(string name, CodexResponseSnapshot? snapshot)
+        {
+            if (snapshot is null) return $"{name}: unavailable";
+            var c = snapshot.Counters;
+            return $"{name}: reported total {Count(c.TotalTokens)} · input {Count(c.InputTokens)} " +
+                   $"(cached {Count(c.CachedInputTokens)}, cache-write {Count(c.CacheWriteInputTokens)}) · " +
+                   $"output {Count(c.OutputTokens)} (reasoning subset {Count(c.ReasoningOutputTokens)})" +
+                   (snapshot.CacheWriteDefaulted ? " · cache-write absent, native zero default" : "");
+        }
+        return new($"Response evidence · {(row.IsActive ? "active" : "retired")} · " +
+                   (item.ObservedAtUtc is { } at ? at.ToLocalTime().ToString("g") : "event time unknown"),
+            $"Collected {item.CapturedAtUtc.ToLocalTime():g} · {item.SourceFile} · bytes {item.StartByteOffset}–{item.EndByteOffset}\n" +
+            Snapshot("Response", item.Usage) + "\n" + Snapshot("Turn cumulative", item.TurnUsage) + "\n" +
+            Snapshot("Thread cumulative", item.ThreadUsage) + "\n" +
+            (item.Diagnostics.Length == 0 ? "No parser field diagnostics; not proof of complete request coverage." : "Field diagnostics: " + item.Diagnostics) +
+            " Three distinct snapshots; do not add them together.");
     }
 
     private static ContextRow ToContextRow(CodexContextObservation item)
