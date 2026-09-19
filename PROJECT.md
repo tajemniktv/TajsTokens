@@ -350,9 +350,13 @@ expanded research history could push the cohort selector/results outside the vie
 now keeps its controls in the results list's scrolling header, retaining list virtualization and wrapping
 model labels rather than consuming all available height with fixed controls. The deployed fix was checked
 at approximately 686×643 pixels with loaded saved history expanded: scrolling reached the cohort selector
-and result area. Exact-thread filtering, other window
-sizes, detailed selection/drift presentation and empty/stale/partial/corrupt workflows still need
-native acceptance checks. No native source contents or privacy settings were changed during this pass.
+and result area. Exact-thread filtering returned the selected thread's goal row and reset auxiliary
+paging to batch 1. Retained Diagnostics displayed the bounded numerical-variation sample, diagnostic
+threshold and requested-tier caveat without making another backend request. Its authentication copy
+now distinguishes app-server reads from the explicitly enabled daily adapter instead of claiming that
+no authentication files are ever read. Other window sizes, detailed model-selection presentation and
+empty/stale/partial/corrupt workflows still need native acceptance checks. No native source contents
+or privacy settings were changed during this pass.
 
 ## Local installation and owned data
 
