@@ -132,7 +132,7 @@ public sealed partial class OverviewViewModel : ObservableObject
             {
                 TokenForecastText = tokenForecast.Predictions.Count > 0
                     ? string.Join("\n", tokenForecast.Predictions.Select(x => $"Next {(x.HorizonHours < 1 ? $"{x.HorizonHours * 60:0} min" : $"{x.HorizonHours:0.#}h")}: ~{FormatTokenCount((long)x.ExpectedTokens)} recorded tokens"))
-                    : "No recent token activity to anchor a forecast.";
+                    : tokenForecast.Activity?.Explanation ?? "No recent token activity to anchor a forecast.";
                 if (tokenForecast.IsStale) TokenForecastText = "Stale prediction — refresh failed\n" + TokenForecastText;
                 TokenForecastEvidence = $"Generated {tokenForecast.GeneratedAtUtc.ToLocalTime():g} · {tokenForecast.Sessions:N0} sessions · {tokenForecast.TokenEvents:N0} token observations. " +
                     string.Join("\n", tokenForecast.Predictions.Select(x => $"{x.Model}: {x.Explanation}" +
@@ -340,6 +340,12 @@ public sealed partial class OverviewViewModel : ObservableObject
         bool isFresh)
     {
         var remaining = snapshot.RemainingPercent;
+        var evenBurn = QuotaEvenBurn.FromSnapshot(snapshot);
+        var evenBurnText = evenBurn is null
+            ? "Even burn unavailable · requires a valid reset and duration"
+            : $"Even burn at reading: {evenBurn.UsedPercent:0.#}% used · {evenBurn.ElapsedPercent:0.#}% elapsed\n" +
+              $"{Math.Abs(evenBurn.ExcessPercentagePoints):0.#} pp {(evenBurn.ExcessPercentagePoints >= 0 ? "above" : "below")} even burn · not a forecast\n" +
+              "Window start inferred from reported reset minus duration";
         var resetCountdown = snapshot.ResetsAtUtc is DateTimeOffset reset
             ? FormatTimeSpan(reset - DateTimeOffset.UtcNow)
             : "Unknown";
@@ -355,6 +361,7 @@ public sealed partial class OverviewViewModel : ObservableObject
                 $"Last known good · {snapshot.Source} · {QuotaAccountScope.Describe(snapshot.AccountKey)}",
                 "Last-known-good quota is shown; forecasting is paused until the provider is fresh again.",
                 InfoBarSeverity.Warning) { Status = "Stale", NeedsAttention = true, RemainingValue = remaining ?? 0,
+                    EvenBurn = "Last-known reading · " + evenBurnText,
                     ResetTimestamp = snapshot.ResetsAtUtc?.ToLocalTime().ToString("ddd d MMM HH:mm") ?? "Unknown reset" };
         }
 
@@ -429,6 +436,7 @@ public sealed partial class OverviewViewModel : ObservableObject
             severity)
         {
             RemainingValue = remaining ?? 0,
+            EvenBurn = evenBurnText,
             ResetTimestamp = snapshot.ResetsAtUtc?.ToLocalTime().ToString("ddd d MMM HH:mm") ?? "Unknown reset",
             NeedsAttention = severity == InfoBarSeverity.Warning || snapshot.AccountKey is null,
             Status = snapshot.AccountKey is null ? "Account unknown" : forecast?.State switch

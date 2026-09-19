@@ -22,4 +22,5 @@ public sealed record CodexWorkloadObservation(
     long? CompletedAtUnixSeconds = null,
     long? DurationMilliseconds = null,
     long? TimeToFirstTokenMilliseconds = null,
-    string? SessionSourceKind = null);
+    string? SessionSourceKind = null,
+    string? ServiceTier = null);

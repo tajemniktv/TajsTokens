@@ -110,10 +110,10 @@
                     </Grid>
                 </Grid>
             </PivotItem>
-            <PivotItem x:Name="UsageTab" Header="Usage prediction">
+            <PivotItem x:Name="UsageTab" Header="Nowcast">
                 <ScrollViewer>
                     <StackPanel Spacing="20" MaxWidth="960" HorizontalAlignment="Left" Margin="0,12,0,24">
-                        <TextBlock Text="What your next work may use" FontSize="24" FontWeight="SemiBold" />
+                        <TextBlock Text="Next 5 / 15 minutes" FontSize="24" FontWeight="SemiBold" />
                         <TextBlock Text="Recorded tokens in local rollouts, including cached input. Not an account-wide total or a subscription-quota estimate." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         <Border Padding="24" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                             <StackPanel Spacing="16">
@@ -124,6 +124,9 @@
                         <Expander Header="Prediction evidence and limitations" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                             <TextBlock x:Name="TokenPredictionEvidence" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
                         </Expander>
+                        <TextBlock Text="Session outlook · conditional scenario" FontSize="22" FontWeight="SemiBold" />
+                        <TextBlock Text="If any positive local token usage is recorded in the next interval. This does not mean continuous activity or predict whether you personally keep working. No quota conversion is implied." TextWrapping="Wrap" />
+                        <TextBlock x:Name="SessionOutlookText" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
                     </StackPanel>
                 </ScrollViewer>
             </PivotItem>

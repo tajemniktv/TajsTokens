@@ -6,7 +6,18 @@ using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
-if (args.Length >= 2 && args[0] is "--server-evidence" or "--probe-server-evidence" or "--collect-server-evidence" or "--declare-current-rollouts")
+if (args.Length == 2 && args[0] == "--reconciliation")
+{
+    var home = Path.GetFullPath(args[1]);
+    if (!Directory.Exists(home)) throw new ArgumentException("Codex home must exist.");
+    var files = new[] { "sessions", "archived_sessions", "archive" }.Select(x => Path.Combine(home, x))
+        .Where(Directory.Exists).SelectMany(x => Directory.EnumerateFiles(x, "*.jsonl", SearchOption.AllDirectories));
+    var report = await TajsTokens.Infrastructure.Ingestion.CodexReconciliationAudit.RunAsync(files);
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(report, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+    return;
+}
+
+if (args.Length >= 2 && args[0] is "--server-evidence" or "--probe-server-evidence" or "--collect-server-evidence" or "--declare-current-rollouts" or "--daily-pairing" or "--collect-daily-evidence")
 {
     await ServerEvidenceCli.RunAsync(args);
     return;
@@ -43,10 +54,10 @@ if (args.Length == 2 && args[0] is "--composed" or "--composed-strict")
     var report = ComposedQuotaEvaluator.Evaluate(data, availability: args[0] == "--composed-strict"
         ? ForecastReplayAvailability.CollectedByOrigin : ForecastReplayAvailability.ReconstructedEventTime);
     Console.WriteLine(report.Version + ": " + report.Methodology);
-    Console.WriteLine("cohort,horizon,model,train,heldout,generations,missing_composition,forecast_loss,cost_only_loss,pace_loss,incumbent_loss,displayed_MAE,asserted_train");
+    Console.WriteLine("cohort,horizon,model,train,heldout,generations,missing_composition,forecast_loss,cost_only_loss,pace_loss,incumbent_loss,displayed_MAE,asserted_train,withheld_reasons,band_origins,reported_band_coverage,mean_band_width");
     var cohorts = report.Scores.Select(x => x.Cohort).Distinct().ToList();
     foreach (var score in report.Scores)
-        Console.WriteLine(FormattableString.Invariant($"cohort-{cohorts.IndexOf(score.Cohort) + 1},{score.HorizonHours},{score.CostModel},{score.TrainingIntervals},{score.HeldOutIntervals},{score.ResetGenerations},{score.MissingComposition},{score.IntervalLoss:F4},{score.CostOnlyIntervalLoss:F4},{score.PaceIntervalLoss:F4},{score.IncumbentIntervalLoss:F4},{score.DisplayedDeltaMae:F4},{score.AssertedTrainingIntervals}"));
+        Console.WriteLine(FormattableString.Invariant($"cohort-{cohorts.IndexOf(score.Cohort) + 1},{score.HorizonHours},{score.CostModel},{score.TrainingIntervals},{score.HeldOutIntervals},{score.ResetGenerations},{score.MissingComposition},{score.IntervalLoss:F4},{score.CostOnlyIntervalLoss:F4},{score.PaceIntervalLoss:F4},{score.IncumbentIntervalLoss:F4},{score.DisplayedDeltaMae:F4},{score.AssertedTrainingIntervals},{string.Join(';', score.WithheldReasons.Select(x => $"{x.Key}={x.Value}"))},{score.IntervalOrigins},{score.IntervalCoverage:F4},{score.MeanIntervalWidth:F4}"));
     return;
 }
 
@@ -58,10 +69,10 @@ if (args.Length == 2 && args[0] is "--cost" or "--cost-owned-rollouts")
     Console.WriteLine(report.Version + $" (snapshot {report.DatasetCapturedAtUtc:O}): " + report.Methodology);
     Console.WriteLine(report.Coverage);
     Console.WriteLine($"observations={report.Observations}; " + string.Join("; ", report.QualityCounts.Select(x => $"{x.Key}={x.Value}")));
-    Console.WriteLine("cohort,source,window,horizon,model,train,train_generations,heldout,heldout_generations,interval_loss,displayed_MAE,generation_loss,residual_p10,residual_median,residual_p90,unexplained_lower,bands,intersection_rate,material_win,shift_candidates,status");
+    Console.WriteLine("cohort,source,window,horizon,model,train,train_generations,heldout,heldout_generations,interval_loss,displayed_MAE,generation_loss,residual_p10,residual_median,residual_p90,unexplained_lower,bands,intersection_rate,material_win,shift_candidates,status,rate_card,unpriced_training,unpriced_heldout,unpriced_tokens,paired_pace_loss,paired_total_loss");
     var cohorts = report.Scores.Select(x => x.Cohort).Distinct().ToList();
     foreach (var score in report.Scores)
-        Console.WriteLine(FormattableString.Invariant($"cohort-{cohorts.IndexOf(score.Cohort) + 1},{score.Cohort.Source},{score.Cohort.Kind},{score.HorizonHours},{score.Candidate},{score.TrainingSamples},{score.TrainingGenerations},{score.HeldOutSamples},{score.HeldOutGenerations},{score.IntervalLoss:F4},{score.DisplayedDeltaMae:F4},{score.GenerationMeanIntervalLoss:F4},{score.ResidualP10:F4},{score.ResidualMedian:F4},{score.ResidualP90:F4},{score.UnexplainedPositiveMovement:F4},{score.BandSamples},{score.BandIntersectsTargetRate:F4},{score.MaterialWin},{score.CandidateShiftResets.Count},{score.Status}"));
+        Console.WriteLine(FormattableString.Invariant($"cohort-{cohorts.IndexOf(score.Cohort) + 1},{score.Cohort.Source},{score.Cohort.Kind},{score.HorizonHours},{score.Candidate},{score.TrainingSamples},{score.TrainingGenerations},{score.HeldOutSamples},{score.HeldOutGenerations},{score.IntervalLoss:F4},{score.DisplayedDeltaMae:F4},{score.GenerationMeanIntervalLoss:F4},{score.ResidualP10:F4},{score.ResidualMedian:F4},{score.ResidualP90:F4},{score.UnexplainedPositiveMovement:F4},{score.BandSamples},{score.BandIntersectsTargetRate:F4},{score.MaterialWin},{score.CandidateShiftResets.Count},{score.Status},{score.RateCardVersion},{score.UnpricedTrainingIntervals},{score.UnpricedHeldOutIntervals},{score.UnpricedReportedTokens},{score.PairedPaceIntervalLoss:F4},{score.PairedTotalIntervalLoss:F4}"));
     return;
 }
 
@@ -105,8 +116,49 @@ if (args.Length == 2 && args[0] == "--tokens")
     timer.Restart();
     var forecast = TokenWorkloadPredictionService.Predict(data, data.CapturedAtUtc);
     Console.WriteLine($"sessions={forecast.Sessions}; observations={forecast.TokenEvents}; live_ms={timer.ElapsedMilliseconds}");
+    Console.WriteLine($"activity={forecast.Activity?.State}; {forecast.Activity?.Explanation}");
     foreach (var prediction in forecast.Predictions)
         Console.WriteLine(FormattableString.Invariant($"Token +{prediction.HorizonHours}h: {prediction.ExpectedTokens:F0}; model={prediction.Model}; train={prediction.TrainingSamples}; validation={prediction.ValidationSamples}"));
+    return;
+}
+if (args.Length == 2 && args[0] == "--tt")
+{
+    var now = DateTimeOffset.UtcNow;
+    var data = await new SqliteForecastDatasetReader(args[1]).ReadAsync("codex", "default", now.AddDays(-30), now, CancellationToken.None);
+    var report = TtEvaluator.Evaluate(data);
+    Console.WriteLine(report.Version + ": " + report.Methodology);
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(report.Scores.Select(x => new
+    {
+        x.Cohort.Kind, x.Cohort.Source, x.HorizonHours, x.Basis, x.Status, x.BasisIntervals, x.CalibrationIntervals,
+        x.HeldOutIntervals, x.UnsupportedIntervals, x.UnsupportedTokens, x.ResetGenerations, x.QuotaPointsPerTt,
+        x.HeldOutTt, x.ScalarLoss, x.FullVectorLoss, x.RawTokenLoss, x.ScalarMae, x.FullVectorMae, x.RawTokenMae, x.ZeroLoss
+    })));
+    return;
+}
+if (args.Length == 2 && args[0] == "--session-quota")
+{
+    var now = DateTimeOffset.UtcNow;
+    var data = await new SqliteForecastDatasetReader(args[1]).ReadAsync("codex", "default",
+        now.AddDays(-30), now, CancellationToken.None);
+    var report = SessionQuotaEvaluator.Evaluate(data);
+    Console.WriteLine(report.Version + ": " + report.Methodology);
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(report.Scores.Select(x => new
+    {
+        x.Cohort.Kind, x.Cohort.Source, x.HorizonHours, x.TrainingIntervals, x.WithheldIntervals,
+        Outcomes = x.Trials.Count, x.ResetGenerations, x.ActiveOutcomes, x.ConditionalMae, x.ConditionalPaceMae,
+        x.ExpectedMae, x.PaceMae, x.IntervalLoss, x.PaceIntervalLoss, x.BandOrigins, x.ReportedBandCoverage, x.MeanBandWidth,
+        x.IncumbentPairedOrigins, x.PairedExpectedMae, x.IncumbentMae, x.PairedExpectedIntervalLoss, x.IncumbentIntervalLoss
+    })));
+    return;
+}
+if (args.Length == 2 && args[0] == "--session-outlook")
+{
+    var now = DateTimeOffset.UtcNow;
+    var data = await new SqliteForecastDatasetReader(args[1]).ReadAsync("codex", "default",
+        now.AddDays(-30), now, CancellationToken.None, includeQuota: false);
+    var report = SessionWorkloadPredictionService.Evaluate(data, data.CapturedAtUtc);
+    Console.WriteLine(report.Policy + " (live-path 30-day lookback): " + report.Methodology);
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { report.Scores, report.Current }));
     return;
 }
 if (args.Length == 2 && args[0] is "--evaluate" or "--quota")

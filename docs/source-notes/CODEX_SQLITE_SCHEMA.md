@@ -514,6 +514,28 @@ Migration 0002 renamed the earlier `message` payload into `feedback_log_body` wh
 
 **TajsTokens handling note:** `feedback_log_body`, paths, module/file metadata, thread IDs, and process IDs can expose content or operational context. Treat them as local diagnostic evidence first.
 
+## Installed logs corroboration — 2026-09-19
+
+A read-only, query-only inspection of the live database corroborated the columns and indexes
+above. This updates the logs evidence only, not the older source pin for the other databases.
+The sampled database held approximately 28,149 rows spanning September 9–18 UTC across 24
+process UUIDs; these are a rolling snapshot, not lifetime coverage. Its roughly 524 MiB file
+contained about 491 MiB of free/reusable pages and approximately 16 million body characters.
+File size therefore does not describe retained diagnostic content. No vacuum or other native
+database mutation was performed.
+
+Corroborating source at `7498521d288b9b3b96ffba4eedf089d8d6e06a84` (not an exact installed-build
+match) specifies ten-day retention in `codex-rs/state/src/runtime/logs.rs`, a 10 MiB partition
+budget in `state/src/runtime.rs`, and a bounded, dropping writer queue in `state/src/log_db.rs`.
+Partitions distinguish thread logs from threadless process logs. Filtering, queue loss, pruning
+and logger configuration prevent treating this database as a complete accounting ledger.
+
+Actual useful payloads and their semantic traps are recorded in the
+[repository review, section 13](CODEX_EVIDENCE_REPO_REVIEW.md#13-native-log-evidence--2026-09-19).
+In particular, post-sampling `total_usage_tokens` is active context occupancy, not additive
+workload. Existing TajsTokens bounded native-log inspection remains the owner; this investigation
+does not introduce raw-body retention or a second ingestion pipeline.
+
 ---
 
 # `memories_1.sqlite`

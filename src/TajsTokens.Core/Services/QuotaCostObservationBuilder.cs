@@ -5,16 +5,17 @@ namespace TajsTokens.Core.Services;
 
 public static class QuotaCostObservationBuilder
 {
-    public const string Version = "quota-cost-observations/v1";
+    public const string Version = "quota-cost-observations/v2";
 
     public static IReadOnlyList<QuotaCostObservation> Build(CodexForecastDataset data,
-        CancellationToken cancellationToken = default, bool userConfirmedRolloutOwnership = false)
+        CancellationToken cancellationToken = default, bool userConfirmedRolloutOwnership = false,
+        IReadOnlyList<double>? horizons = null)
     {
         var result = new List<QuotaCostObservation>();
         var history = QuotaHistoryPolicy.Describe(data.Quota, data.CapturedAtUtc);
         foreach (var stream in QuotaHistoryPolicy.Streams(history))
         foreach (var epoch in QuotaForecastBacktester.SplitEpochs(QuotaHistoryPolicy.ReplayRows(stream)))
-        foreach (var horizon in new[] { 0.5, 2d })
+        foreach (var horizon in horizons ?? [0.5, 2d])
         {
             DateTimeOffset? previousEnd = null;
             for (var i = 1; i < epoch.Count - 1; i++)
@@ -69,11 +70,12 @@ public static class QuotaCostObservationBuilder
                 if (association is not null) flags.Add("user-asserted-account-association");
                 // Availability includes every retained source family used by the cost features,
                 // including old session metadata. Missing capture times are unknown, not event time.
-                DateTimeOffset?[] collected = epoch.Take(i + 1).Append(end).Select(x => x.CollectedAtUtc)
-                    .Concat(tokens.Select(x => x.CapturedAtUtc))
+                DateTimeOffset?[] tokenCollected = epoch.Take(i + 1).Append(end).Select(x => x.CollectedAtUtc)
+                    .Concat(tokens.Select(x => x.CapturedAtUtc)).ToArray();
+                if (association is not null) tokenCollected = tokenCollected.Append((DateTimeOffset?)association.AssertedAtUtc).ToArray();
+                DateTimeOffset?[] collected = tokenCollected
                     .Concat(data.Workload.Where(x => x.ObservedAtUtc <= end.CapturedAtUtc).Select(x => (DateTimeOffset?)x.CapturedAtUtc))
                     .Concat(data.Context.Where(x => x.ObservedAtUtc > start.CapturedAtUtc && x.ObservedAtUtc <= end.CapturedAtUtc).Select(x => x.CapturedAtUtc)).ToArray();
-                if (association is not null) collected = collected.Append((DateTimeOffset?)association.AssertedAtUtc).ToArray();
                 result.Add(new(stream.Key, epoch[0].CapturedAtUtc, epoch[0].ResetsAtUtc!.Value,
                     start.CapturedAtUtc, end.CapturedAtUtc, horizon, start.UsedPercent.Value, end.UsedPercent.Value,
                     lower, upper, rounded ? "app-server-rounding-envelope" : "unknown-precision-1pp-endpoint-sensitivity",
@@ -82,6 +84,8 @@ public static class QuotaCostObservationBuilder
                     runtime.Length, flags)
                 {
                     EvidenceAvailableAtUtc = collected.All(x => x is not null) ? collected.Max() : null,
+                    TokenCostEvidenceAvailableAtUtc = tokenCollected.All(x => x is not null) ? tokenCollected.Max() : null,
+                    ApiPriceWeight = ApiPriceWorkload.Calculate(tokens),
                     OriginCollectedAtUtc = start.CollectedAtUtc,
                     OriginEvidenceAvailableAtUtc = prefix.All(x => x.CollectedAtUtc is not null)
                         ? prefix.Max(x => x.CollectedAtUtc) : null,

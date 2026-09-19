@@ -128,6 +128,7 @@ public sealed class TelemetryCoordinator
             var quotaSnapshots = previous.QuotaSnapshots;
             var quotaLanes = BuildInitialQuotaLanes(previous);
             IReadOnlyList<QuotaSnapshot> freshQuotaSnapshots = [];
+            CodexServerObservation? quotaMetadata = null;
             var quotaFresh = false;
             var quotaResponseHasSupportedWindow = false;
             try
@@ -136,6 +137,7 @@ public sealed class TelemetryCoordinator
                 freshQuotaSnapshots = response.Snapshots;
                 if (freshQuotaSnapshots.Any(item => item.AccountKey != response.AccountKey))
                     throw new InvalidOperationException("Quota response contains inconsistent backend-account scope.");
+                quotaMetadata = response.MetadataObservation;
                 var compatiblePrevious = previous with
                 {
                     QuotaSnapshots = previous.QuotaSnapshots.Where(item => item.AccountKey == response.AccountKey).ToArray(),
@@ -197,10 +199,12 @@ public sealed class TelemetryCoordinator
                 events.Add(new TelemetryRefreshEvent(startedAt, "Quota unavailable", detail));
             }
 
-            if (persistenceAvailable && quotaResponseHasSupportedWindow)
+            if (persistenceAvailable && (quotaResponseHasSupportedWindow || quotaMetadata is not null))
             {
                 try
                 {
+                    if (quotaMetadata is not null)
+                        await _repository.SaveServerEvidenceAsync(new([quotaMetadata]), refreshToken);
                     foreach (var snapshot in freshQuotaSnapshots.Where(snapshot =>
                                  snapshot.Kind is QuotaWindowKind.FiveHour or QuotaWindowKind.Weekly))
                     {

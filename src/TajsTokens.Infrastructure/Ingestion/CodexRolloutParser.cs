@@ -40,7 +40,8 @@ internal sealed partial class CodexRolloutParser
             CompletedAtUnixSeconds: ReadLong(payload, "completed_at"),
             DurationMilliseconds: ReadLong(payload, "duration_ms"),
             TimeToFirstTokenMilliseconds: ReadLong(payload, "time_to_first_token_ms"),
-            SessionSourceKind: type == "session_meta" ? ReadSessionSourceKind(payload) : null);
+            SessionSourceKind: type == "session_meta" ? ReadSessionSourceKind(payload) : null,
+            ServiceTier: type == "thread_settings_applied" ? ReadServiceTier(payload) : null);
 
         if (string.Equals(topType, "session_meta", StringComparison.OrdinalIgnoreCase))
         {
@@ -66,6 +67,14 @@ internal sealed partial class CodexRolloutParser
         if (!state.OwnershipEstablished)
         {
             return ParsedRolloutRecord.StorageOnly(sourceRecordId, eventClass, recordBytes, timestamp, null);
+        }
+
+        if (topType == "event_msg" && nestedType == "thread_settings_applied")
+        {
+            // A source setting, not an executed/billed tier. No carry-forward to token events:
+            // first-turn absence and interleaved streams cannot establish that attribution.
+            return ParsedRolloutRecord.StorageOnly(sourceRecordId, eventClass, recordBytes, timestamp, state.OwnSessionId)
+                with { WorkloadObservation = Workload("thread_settings_applied") };
         }
 
         if (string.Equals(topType, "turn_context", StringComparison.OrdinalIgnoreCase) ||
@@ -178,6 +187,15 @@ internal sealed partial class CodexRolloutParser
         }
 
         return ParsedRolloutRecord.StorageOnly(sourceRecordId, eventClass, recordBytes, timestamp, state.OwnSessionId);
+    }
+
+    private static string? ReadServiceTier(JsonElement payload)
+    {
+        if (!payload.TryGetProperty("thread_settings", out var settings) || settings.ValueKind != JsonValueKind.Object ||
+            settings.EnumerateObject().Count(p => p.NameEquals("service_tier")) != 1) return null;
+        var value = settings.GetProperty("service_tier");
+        var tier = value.ValueKind == JsonValueKind.String ? value.GetString() : null;
+        return tier is { Length: > 0 and <= 128 } && !string.IsNullOrWhiteSpace(tier) && !tier.Any(char.IsControl) ? tier : null;
     }
 
     private static string? ReadEffort(JsonElement payload) => payload.TryGetProperty("effort", out _)
@@ -317,9 +335,16 @@ internal sealed partial class CodexRolloutParser
     internal static string? ExtractSessionIdFromFileName(string filePath)
     {
         var name = Path.GetFileNameWithoutExtension(filePath);
+        // Observed Desktop form: the trailing UUID is a file suffix, not the thread owner.
+        // Anchor the entire known shape; do not choose the first arbitrary UUID in renamed copies.
+        var desktop = DesktopRolloutNameRegex().Match(name);
+        if (desktop.Success) return desktop.Groups["owner"].Value;
         var matches = SessionIdRegex().Matches(name);
         return matches.Count == 0 ? null : matches[^1].Value;
     }
+
+    internal static bool HasDesktopFilenameSuffix(string filePath) =>
+        DesktopRolloutNameRegex().IsMatch(Path.GetFileNameWithoutExtension(filePath));
 
     private static string? ReadNestedString(JsonElement element, string objectName, string propertyName)
     {
@@ -409,6 +434,9 @@ internal sealed partial class CodexRolloutParser
 
     [GeneratedRegex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")]
     private static partial Regex SessionIdRegex();
+
+    [GeneratedRegex(@"^rollout-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-(?<owner>[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})_[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")]
+    private static partial Regex DesktopRolloutNameRegex();
 }
 
 internal sealed class RolloutParseState

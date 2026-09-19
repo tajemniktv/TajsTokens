@@ -21,6 +21,77 @@ public sealed class CodexServerEvidenceTests : IDisposable
         Directory.CreateDirectory(_directory);
     }
 
+    [Theory]
+    [InlineData(3, 4)]
+    [InlineData(4, 5)]
+    public async Task ParserUpgradeInvalidatesOnlySelectionCacheAtomicallyAndCanRetry(int prior, int next)
+    {
+        var repository = new SqliteTelemetryRepository(Database);
+        await repository.InitializeAsync(default);
+        await repository.SaveServerEvidenceAsync(new([Parse("""{"result":{"summary":{"lifetimeTokens":123}}}""")]), default);
+        await new SqliteCodexStateIndexStore(Database).InitializeAsync(default);
+        await Execute($$"""
+            UPDATE codex_state_index_schema SET version={{prior}};
+            INSERT INTO codex_state_thread_fingerprints VALUES('thread',42,1,NULL,NULL,0,'hash','2026-09-18');
+            UPDATE codex_state_sync SET watermark_updated_at_ms=42;
+            CREATE TRIGGER fail_index_upgrade BEFORE UPDATE OF version ON codex_state_index_schema
+            WHEN NEW.version={{next}} BEGIN SELECT RAISE(ABORT,'test migration failure'); END;
+            """);
+        await Assert.ThrowsAsync<SqliteException>(() => new SqliteCodexStateIndexStore(Database).InitializeAsync(default));
+        Assert.Equal(1L, await Scalar("SELECT COUNT(*) FROM codex_state_thread_fingerprints"));
+        Assert.Equal(42L, await Scalar("SELECT watermark_updated_at_ms FROM codex_state_sync"));
+        await Execute("DROP TRIGGER fail_index_upgrade;");
+        var index = new SqliteCodexStateIndexStore(Database);
+        await index.InitializeAsync(default);
+        Assert.Empty(await index.GetFingerprintsAsync(default));
+        Assert.Equal(0, await index.GetWatermarkAsync(default));
+        Assert.Equal(1L, await Scalar("SELECT COUNT(*) FROM codex_server_evidence"));
+    }
+
+    [Fact]
+    public async Task QuotaMetadataRetainsRevisionsWithoutWindowsAndShowsLatestMissingState()
+    {
+        var repository = new SqliteTelemetryRepository(Database);
+        await repository.InitializeAsync(default);
+        var observation = CodexAppServerQuotaProvider.ParseQuotaResponse("""{"result":{"accountId":"account","rateLimits":{"spendControlReached":true}}}""", Now).MetadataObservation!;
+        await repository.SaveServerEvidenceAsync(new([observation]), default);
+        await repository.SaveServerEvidenceAsync(new([observation]), default);
+        var changed = CodexAppServerQuotaProvider.ParseQuotaResponse("""{"result":{"accountId":"account","rateLimits":{}}}""", Now.AddMinutes(1)).MetadataObservation!;
+        await repository.SaveServerEvidenceAsync(new([changed]), default);
+        Assert.Equal(2L, await Scalar("SELECT COUNT(*) FROM codex_server_evidence WHERE surface='QuotaMetadata'"));
+        var service = new CodexServerEvidenceService(Database, repository, new CodexBackendDailyEvidenceProvider(() => false));
+        var text = await service.ReadNativeMetadataSummaryAsync(default);
+        Assert.Contains("spend-control reached unknown", text);
+        Assert.DoesNotContain("spend-control reached True", text);
+        Assert.Contains("Missingness", text);
+        Assert.Contains("legacy/spend-control-reached", text);
+        Assert.Equal(2L, await Scalar("SELECT COUNT(*) FROM codex_server_evidence WHERE surface='QuotaMetadata'"));
+    }
+
+    [Fact]
+    public async Task DailySnapshotsAreImmutableAndLatestFailureDoesNotResurrectEarlierSuccess()
+    {
+        var repository = new SqliteTelemetryRepository(Database);
+        await repository.InitializeAsync(default);
+        var report = CodexDailyReportParser.Parse("""{"balance_unit":"credit","data":[{"date":"2026-09-17","totals":{"credits":0,"text_total_tokens":500}}]}""",
+            false, "wham/analytics/daily-workspace-usage-counts", "2026-09-01", "2026-09-18");
+        var row = new CodexServerObservation("daily-test", CodexServerSurface.DailyCounts, null, Now, Now,
+            CodexServerEvidenceParser.Contract, CodexDailyReportParser.Contract, ServerEvidenceState.Available, "test")
+            { DailyReport = report, CorrelatedAccountKey = "test-account", AccountEvidence = AccountEvidenceClass.ServerCorrelated };
+        await repository.SaveServerEvidenceAsync(new([row]), default);
+        await repository.SaveServerEvidenceAsync(new([row]), default);
+        var service = new CodexServerEvidenceService(Database, repository, new CodexBackendDailyEvidenceProvider(() => false));
+        var saved = Assert.Single(await service.ReadDailyReportsAsync(default));
+        Assert.Equal(500, Assert.Single(saved.DailyReport!.Days).TotalTokens);
+        Assert.Equal(0m, saved.DailyReport.Days[0].Credits);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SaveServerEvidenceAsync(new([row with { Detail = "overwrite" }]), default));
+        await repository.SaveServerEvidenceAsync(new([row with { Id = "daily-failed", CollectedAtUtc = Now.AddMinutes(30),
+            State = ServerEvidenceState.AuthenticationRequired, DailyReport = null }]), default);
+        var latest = Assert.Single(await service.ReadDailyReportsAsync(default));
+        Assert.Equal(ServerEvidenceState.AuthenticationRequired, latest.State);
+        Assert.Null(latest.DailyReport);
+    }
+
     [Fact]
     public void AccountAllowlistKeepsUnknownSeparateFromZeroAndDoesNotRetainContent()
     {

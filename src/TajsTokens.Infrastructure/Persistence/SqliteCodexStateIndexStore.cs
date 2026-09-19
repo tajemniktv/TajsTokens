@@ -34,7 +34,7 @@ internal sealed record CodexStateThreadFingerprint(
 /// </summary>
 internal sealed class SqliteCodexStateIndexStore
 {
-    private const int SchemaVersion = 3;
+    private const int SchemaVersion = 5;
     private const string Component = "codex-state-index";
     private readonly string _connectionString;
     private readonly SemaphoreSlim _initializeGate = new(1, 1);
@@ -153,6 +153,41 @@ internal sealed class SqliteCodexStateIndexStore
                 await migration.ExecuteNonQueryAsync(cancellationToken);
                 transaction.Commit();
                 version = 3;
+            }
+
+            if (version == 3)
+            {
+                // typed-v6 adds tier-setting evidence. Byte checkpoints and retained facts survive;
+                // only disposable selection hints must be invalidated to revisit unchanged files.
+                using var transaction = connection.BeginTransaction();
+                using var migration = connection.CreateCommand();
+                migration.Transaction = transaction;
+                migration.CommandText = """
+                    DELETE FROM codex_state_thread_fingerprints;
+                    UPDATE codex_state_sync SET watermark_updated_at_ms = 0 WHERE component = 'codex-state-index';
+                    UPDATE codex_state_index_schema SET version = 4 WHERE component = 'codex-state-index';
+                    """;
+                await migration.ExecuteNonQueryAsync(cancellationToken);
+                transaction.Commit();
+                version = 4;
+            }
+
+            if (version == 4)
+            {
+                // Re-select indexed Desktop suffixed paths after ownership parsing was corrected.
+                // Unaffected files keep their parser version and byte checkpoints; alternates
+                // remain outside catalog-selected acquisition.
+                using var transaction = connection.BeginTransaction();
+                using var migration = connection.CreateCommand();
+                migration.Transaction = transaction;
+                migration.CommandText = """
+                    DELETE FROM codex_state_thread_fingerprints;
+                    UPDATE codex_state_sync SET watermark_updated_at_ms = 0 WHERE component = 'codex-state-index';
+                    UPDATE codex_state_index_schema SET version = 5 WHERE component = 'codex-state-index';
+                    """;
+                await migration.ExecuteNonQueryAsync(cancellationToken);
+                transaction.Commit();
+                version = 5;
             }
 
             if (version != SchemaVersion)

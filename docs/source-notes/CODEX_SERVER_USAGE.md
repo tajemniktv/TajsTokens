@@ -2,6 +2,15 @@
 
 ## Versions and observation boundary
 
+**Scope update, 2026-09-19:** the acquisition boundary and observed results below describe the
+original app-server collector and its investigation. The user subsequently authorized a separate,
+opt-in direct-backend experiment and daily-report adapter; see the
+[consolidated review](CODEX_EVIDENCE_REPO_REVIEW.md#11-consolidated-findings-and-implementation-status--2026-09-18).
+Statements below excluding direct HTTP are not a current prohibition on that separate adapter.
+Live logs additionally corroborate runtime `getAuthStatus` requests and quota/token notification
+names, but do not establish successful token export or expose quantitative usage in those
+name-only notification rows; see [section 13](CODEX_EVIDENCE_REPO_REVIEW.md#13-native-log-evidence--2026-09-19).
+
 The clean reference checkout at `E:\dev\codex` was fast-forwarded from
 `a51608398d53b6d23ed98b8287de415b35f1eea5` to current `origin/main`
 `7498521d288b9b3b96ffba4eedf089d8d6e06a84` (2026-09-18).

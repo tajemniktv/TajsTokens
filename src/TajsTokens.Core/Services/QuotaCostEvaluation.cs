@@ -5,7 +5,7 @@ namespace TajsTokens.Core.Services;
 /// <summary>Frozen-prefix cost calibration, deliberately separate from future-workload forecasting.</summary>
 public static class QuotaCostEvaluation
 {
-    public const string Version = "quota-cost-evaluation/v1";
+    public const string Version = "quota-cost-evaluation/v2";
     public static readonly string[] Candidates = ["persistence", "pace", "total", "categories", "model-effort",
         "context-ablation", "activity-ablation", "runtime-ablation", "time-ablation"];
     public const string Methodology = "Evaluation only: actual interval workload is an oracle cost input, NOT an end-to-end forecast. " +
@@ -16,7 +16,9 @@ public static class QuotaCostEvaluation
         "Residuals are associations, not causal attribution or proof of provider changes. Bands use earlier completed held-out generation maximum errors " +
         "after eight generations and target 80% envelope intersection, not calibrated latent coverage or exhaustion probability. " +
         "A diagnostic win needs 16 held-out intervals in three generations and >=10% and 0.1pp generation-average loss improvement over both pace and total; " +
-        "richer candidates must also beat their simpler parent and win on most generations. No automatic production promotion.";
+        "richer candidates must also beat their simpler parent and win on most generations. No automatic production promotion. " +
+        "API-price weighting is a fixed retrospective standard/short-context baseline, never credits or actual cost; incomplete pricing is withheld. " +
+        "Its comparisons use matched outcomes and it cannot earn a promotion label.";
 
     public static QuotaCostReport Evaluate(CodexForecastDataset data, CancellationToken cancellationToken = default,
         bool userConfirmedRolloutOwnership = false)
@@ -39,16 +41,19 @@ public static class QuotaCostEvaluation
             var trainingGenerations = QuotaResetGenerationPolicy.Group(training, x => x.ResetUtc).Count;
             var heldout = ordered.Skip(training.Length).Where(x => x.StartUtc >= training[^1].EndUtc).ToArray();
             var local = new List<QuotaCostScore>();
-            foreach (var candidate in Candidates)
+            foreach (var candidate in ordered.Any(x => x.ApiPriceWeight is not null) ? Candidates.Append("api-price") : Candidates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var trials = new List<QuotaCostTrial>();
                 var vector = new CostVector(training, candidate);
-                var fitted = training.Length >= 20;
+                var unpricedTraining = candidate == "api-price" ? training.Count(x => !Priceable(x)) : 0;
+                var unpricedHeldout = candidate == "api-price" ? heldout.Count(x => !Priceable(x)) : 0;
+                var fitted = training.Length >= 20 && unpricedTraining == 0;
                 var fit = fitted && candidate is not "pace" and not "persistence"
                     ? IntervalRidge.Fit(training.Select(vector.Values).ToArray(), training, cancellationToken) : null;
                 foreach (var row in fitted ? heldout : [])
                 {
+                    if (candidate == "api-price" && !Priceable(row)) continue;
                     var prediction = candidate switch
                     {
                         "pace" => row.PaceDelta,
@@ -73,12 +78,27 @@ public static class QuotaCostEvaluation
                     Quantile(residuals, 0.1), Quantile(residuals, 0.5), Quantile(residuals, 0.9),
                     Mean(trials.Select(x => Math.Max(0, x.LowerDelta - x.Prediction))), bands.Length,
                     Mean(bands.Select(x => x.UpperPrediction >= x.LowerDelta && x.LowerPrediction <= x.UpperDelta ? 1d : 0d)),
-                    false, fitted ? "evaluation-only" : "insufficient-training-intervals",
+                    false, unpricedTraining > 0 ? "unpriced-training-evidence" : fitted ? "evaluation-only" : "insufficient-training-intervals",
                     fit is null ? new Dictionary<string, double>() : vector.Names.Select((name, i) => (name, value: fit.Weights[i] / fit.Scales[i]))
-                        .ToDictionary(x => x.name, x => x.value), trials, DetectShifts(epochs)));
+                        .ToDictionary(x => x.name, x => x.value), trials, DetectShifts(epochs))
+                {
+                    RateCardVersion = candidate == "api-price" ? ApiPriceWorkload.Version : null,
+                    UnpricedTrainingIntervals = unpricedTraining, UnpricedHeldOutIntervals = unpricedHeldout,
+                    UnpricedReportedTokens = candidate == "api-price" ? ordered.Sum(x => x.ApiPriceWeight?.UnpricedReportedTokens ?? 0) : 0
+                });
             }
             foreach (var score in local)
             {
+                if (score.Candidate == "api-price")
+                {
+                    var origins = score.Trials.Select(x => x.StartUtc).ToHashSet();
+                    scores.Add(score with
+                    {
+                        PairedPaceIntervalLoss = Mean(local.Single(x => x.Candidate == "pace").Trials.Where(x => origins.Contains(x.StartUtc)).Select(x => x.IntervalLoss)),
+                        PairedTotalIntervalLoss = Mean(local.Single(x => x.Candidate == "total").Trials.Where(x => origins.Contains(x.StartUtc)).Select(x => x.IntervalLoss))
+                    });
+                    continue;
+                }
                 var parents = new[] { "pace", "total", score.Candidate switch
                 {
                     "model-effort" => "categories",
@@ -97,6 +117,9 @@ public static class QuotaCostEvaluation
             rows.SelectMany(x => x.QualityFlags).GroupBy(x => x).ToDictionary(x => x.Key, x => x.Count()), scores);
     }
 
+    private static bool Priceable(QuotaCostObservation row) => row.ApiPriceWeight is { IsComplete: true } price &&
+        price.RateCardVersion == ApiPriceWorkload.Version;
+
     private static bool Beats(QuotaCostScore score, QuotaCostScore parent)
     {
         if (score.GenerationMeanIntervalLoss is not { } loss || parent.GenerationMeanIntervalLoss is not { } baseline ||
@@ -114,6 +137,13 @@ public static class QuotaCostEvaluation
         var vector = new CostVector(training, candidate);
         var fit = IntervalRidge.Fit(training.Select(vector.Values).ToArray(), training, cancellationToken);
         return row => fit.Predict(vector.Values(row));
+    }
+
+    internal static double[] FitCategoryWeights(IReadOnlyList<QuotaCostObservation> training, CancellationToken cancellationToken)
+    {
+        var vector = new CostVector(training, "categories");
+        var fit = IntervalRidge.Fit(training.Select(vector.Values).ToArray(), training, cancellationToken);
+        return fit.Weights.Select((weight, i) => weight / fit.Scales[i] / 1e6).ToArray();
     }
 
     private static IReadOnlyList<DateTimeOffset> DetectShifts(IReadOnlyList<IReadOnlyList<QuotaCostTrial>> epochs)
@@ -157,6 +187,10 @@ public static class QuotaCostEvaluation
         public CostVector(IReadOnlyList<QuotaCostObservation> training, string candidate)
         {
             this.candidate = candidate;
+            if (candidate == "api-price")
+            {
+                models = []; efforts = []; Names = ["standard-short-context-api-weight"]; return;
+            }
             models = training.SelectMany(x => x.Features.ModelTokenShares.Keys).Distinct().Order().Take(16).ToArray();
             efforts = training.SelectMany(x => x.Features.EffortTokenShares.Keys).Distinct().Order().Take(16).ToArray();
             var names = new List<string>(candidate == "total" ? ["reported-total/M"] :
@@ -177,6 +211,7 @@ public static class QuotaCostEvaluation
 
         public double[] Values(QuotaCostObservation row)
         {
+            if (candidate == "api-price") return [(double)row.ApiPriceWeight!.WeightedAmount];
             var f = row.Features;
             var total = f.Tokens / 1e6;
             var values = new List<double>(candidate == "total" ? [total] : row.TokenCategories.Select(x => x / 1e6));

@@ -143,7 +143,7 @@ public sealed class SqliteCodexObservatoryReadModelTests
 
             var versionCommand = verify.CreateCommand();
             versionCommand.CommandText = "SELECT version FROM observatory_schema WHERE component = 'codex-observatory';";
-            Assert.Equal(6L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
+            Assert.Equal(7L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
 
             var indexCommand = verify.CreateCommand();
             indexCommand.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_native_tokens_observed_time';";
@@ -157,7 +157,7 @@ public sealed class SqliteCodexObservatoryReadModelTests
     }
 
     [Fact]
-    public async Task Initialize_FreshDatabaseReopensWithSchemaVersion6()
+    public async Task Initialize_FreshDatabaseReopensWithSchemaVersion7()
     {
         var directory = Directory.CreateTempSubdirectory("tajstokens-observatory-reopen-");
         var databasePath = Path.Combine(directory.FullName, "telemetry.db");
@@ -179,7 +179,7 @@ public sealed class SqliteCodexObservatoryReadModelTests
             await connection.OpenAsync(CancellationToken.None);
             var version = connection.CreateCommand();
             version.CommandText = "SELECT version FROM observatory_schema WHERE component = 'codex-observatory';";
-            Assert.Equal(6L, (long)(await version.ExecuteScalarAsync(CancellationToken.None))!);
+            Assert.Equal(7L, (long)(await version.ExecuteScalarAsync(CancellationToken.None))!);
         }
         finally
         {

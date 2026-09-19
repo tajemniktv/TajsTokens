@@ -162,6 +162,27 @@ dotnet run --project src/TajsTokens.App/TajsTokens.App.csproj -p:DogfoodEnabled=
 ```
 ## Provider-native evidence diagnostics
 
+`dotnet run --project tools/TajsTokens.ForecastEvaluation -- --tt <telemetry.db>`
+reconstructs the experimental TT basis and scalar-cost comparison from 30 days of owned evidence.
+It prints exact basis semantics, weights, reference basket, supported model/effort dimensions,
+coverage and matched cost errors. It does not persist original scores, poll Codex, alter past
+forecasts or establish cross-user comparability. Retain the full basis ID with any reported TT;
+newly reconstructed history may yield a different basis, not a revision to the old unit.
+
+`dotnet run --project tools/TajsTokens.ForecastEvaluation -- --session-quota <telemetry.db>`
+evaluates the reconstructed session-workload to quota-cost chain over the same 30-day owned-data
+lookback. Output separates conditional-positive and unconditional errors against matched pace,
+reset counts and joint-band coverage. The incumbent-policy comparison has its own matched count
+and candidate errors; do not compare a subset baseline against the full candidate sample.
+It neither polls Codex nor promotes a model; missing bands
+are not zero uncertainty. Model Lab exposes the same comparison with source/account cohort labels.
+
+`dotnet run --project tools/TajsTokens.ForecastEvaluation -- --session-outlook <telemetry.db>`
+evaluates recorded-activity probability and conditional positive-token workload separately over
+retained local history. It performs no native collection. Output includes sample counts, Brier and
+calibration errors, conditional/expected-token errors against pace, and historical-range coverage.
+It is reconstructed event-time evidence, not historical deployment proof or an account-wide model.
+
 The evaluation CLI also exposes separate server evidence (no credentials or browser access):
 
 ```powershell
@@ -175,6 +196,20 @@ compares them with the database without writing/migrating it. Collection persist
 reports and may migrate owned schema to 14; use a current application, not an older running binary.
 Optional third argument is an existing settings path to include user-declared association counts.
 Normal application collection uses the same service on a 30-minute in-process backoff.
+
+Private-backend daily reports are a separate, explicit opt-in:
+
+```powershell
+dotnet run --project tools/TajsTokens.ForecastEvaluation -- --daily-pairing <telemetry.db>
+dotnet run --project tools/TajsTokens.ForecastEvaluation -- --collect-daily-evidence <telemetry.db>
+```
+
+Pairing reads retained reports (initializing current owned schema if needed). Collection performs
+one bounded private-backend fetch with the existing selected Codex login and saves allowlisted
+typed observations. It does **not** enable background polling, alter settings, refresh tokens or
+write native credentials. Use only with explicit authorization for experimental backend access.
+Account brackets and a final selected-account check reject account switches. Neither command
+turns daily relative percentages into current five-hour/weekly quota or zero credits into a scale.
 
 `--declare-current-rollouts <telemetry.db> <settings.json>` is an explicit ownership action, not a
 read-only diagnostic: after a fresh account bracket, it saves bounded assertions through the existing

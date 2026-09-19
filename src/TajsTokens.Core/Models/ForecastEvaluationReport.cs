@@ -20,10 +20,13 @@ public sealed record ForecastEvaluationReport(
     IReadOnlyList<ForecastEvaluationScore> Scores, string Methodology)
 {
     public IReadOnlyList<TokenForecastScore> TokenScores { get; init; } = [];
+    public IReadOnlyList<SessionWorkloadScore> SessionScores { get; init; } = [];
     public string? QuotaHistorySummary { get; init; }
     public int HistoricalQuotaObservations { get; init; }
     public QuotaCostReport? QuotaCost { get; init; }
     public ComposedQuotaEvaluation? ComposedQuota { get; init; }
     public ComposedQuotaEvaluation? ComposedQuotaStrict { get; init; }
     public QuotaTransferEvaluation? QuotaTransfer { get; init; }
+    public SessionQuotaEvaluation? SessionQuota { get; init; }
+    public TtEvaluation? Tt { get; init; }
 }

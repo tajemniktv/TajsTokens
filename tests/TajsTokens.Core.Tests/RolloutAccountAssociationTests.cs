@@ -44,6 +44,7 @@ public sealed class RolloutAccountAssociationTests
             Assert.Equal("account", x.EffectiveAccountKey);
             Assert.Equal(association.Id, x.AccountAssociationId);
             Assert.Equal(data.CapturedAtUtc, x.EvidenceAvailableAtUtc);
+            Assert.Equal(data.CapturedAtUtc, x.TokenCostEvidenceAvailableAtUtc);
         });
         Assert.DoesNotContain(QuotaCostObservationBuilder.Build(data), x => x.Attribution == QuotaAccountAttribution.UserAsserted);
     }

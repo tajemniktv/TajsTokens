@@ -43,11 +43,83 @@ public sealed partial class AnalyticsPage : Page
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         _isLoaded = true;
+        BackendEnabled.IsOn = App.Services.Settings.ExperimentalCodexBackendEnabled;
         var previous = Interlocked.Exchange(ref _pageCancellation, new CancellationTokenSource());
         previous?.Cancel();
         previous?.Dispose();
         var generation = Interlocked.Increment(ref _loadGeneration);
-        await LoadAsync(_pageCancellation.Token, generation);
+        var token = _pageCancellation.Token;
+        await LoadAsync(token, generation);
+        await LoadBackendAsync(token);
+    }
+
+    private async void OnBackendEnabledToggled(object sender, RoutedEventArgs e)
+    {
+        if (!_isLoaded || BackendEnabled.IsOn == App.Services.Settings.ExperimentalCodexBackendEnabled) return;
+        var baseline = App.Services.Settings;
+        BackendEnabled.IsEnabled = false;
+        BackendCollect.IsEnabled = false;
+        try
+        {
+            var result = await App.TryApplySettingsAsync(baseline, baseline with { ExperimentalCodexBackendEnabled = BackendEnabled.IsOn });
+            if (!result.Success)
+            {
+                BackendEnabled.IsOn = App.Services.Settings.ExperimentalCodexBackendEnabled;
+                BackendStatus.Text = "Could not save the collection preference. Reload and try again.";
+            }
+        }
+        finally
+        {
+            BackendEnabled.IsEnabled = true;
+            BackendCollect.IsEnabled = BackendEnabled.IsOn;
+        }
+    }
+
+    private async void OnBackendCollectClicked(object sender, RoutedEventArgs e)
+    {
+        var token = _pageCancellation?.Token ?? CancellationToken.None;
+        BackendCollect.IsEnabled = false;
+        BackendStatus.Text = "Collecting bounded account reports…";
+        try
+        {
+            await App.Services.ServerEvidence.CollectAsync(true, token);
+            await LoadBackendAsync(token);
+        }
+        catch (OperationCanceledException) { }
+        finally { if (_isLoaded) BackendCollect.IsEnabled = BackendEnabled.IsOn; }
+    }
+
+    private async Task LoadBackendAsync(CancellationToken token)
+    {
+        try
+        {
+            var reports = await App.Services.ServerEvidence.ReadDailyReportsAsync(token);
+            if (!_isLoaded || token.IsCancellationRequested) return;
+            BackendCollect.IsEnabled = BackendEnabled.IsOn;
+            BackendStatus.Text = reports.Count == 0 ? "No retained daily reports. Enable collection to begin." :
+                string.Join("\n", reports.Select(r => $"{r.Surface}: {r.State} · fetched {r.CollectedAtUtc.ToLocalTime():g} · {r.Detail}"));
+            var lines = new List<string>();
+            var summary = new List<string>();
+            foreach (var observation in reports)
+            {
+                if (observation.DailyReport is not { } report) continue;
+                if (report.Days.OrderByDescending(d => d.Date).FirstOrDefault() is { } latest)
+                    summary.Add(latest.SurfaceUsage is { Count: > 0 } values
+                        ? $"Latest relative report ({latest.Date} UTC): {values.Values.Sum():N2} {report.Units ?? "unknown units"} across reported surfaces."
+                        : $"Latest count report ({latest.Date} UTC): {latest.TotalTokens?.ToString("N0") ?? "unknown"} tokens, {latest.Credits?.ToString("N3") ?? "unknown"} reported credits.");
+                lines.Add($"{observation.Surface} · account {observation.CorrelatedAccountKey?[..Math.Min(observation.CorrelatedAccountKey.Length, 34)]}… · plan {report.Plan ?? "unknown"} · units {report.Units ?? "unknown"} · freshness {report.DataFreshness ?? "not supplied"}");
+                if (report.PolicyBefore != report.PolicyAfter) lines.Add("Quota policy/cycle changed during collection. Do not calibrate these reports together.");
+                foreach (var day in report.Days.OrderByDescending(d => d.Date))
+                    lines.Add(day.SurfaceUsage is { } surfaces
+                        ? $"{day.Date}  {string.Join(" · ", surfaces.Select(s => $"{s.Key}: {s.Value:N2} {report.Units ?? "unknown units"}"))}"
+                        : $"{day.Date}  tokens {day.TotalTokens?.ToString("N0") ?? "unknown"} · uncached {day.UncachedInputTokens?.ToString("N0") ?? "unknown"} · cached {day.CachedInputTokens?.ToString("N0") ?? "unknown"} · output {day.OutputTokens?.ToString("N0") ?? "unknown"} · credits {day.Credits?.ToString("N3") ?? "unknown"} · on-demand {day.OnDemandCredits?.ToString("N3") ?? "unknown"}");
+            }
+            BackendRows.ItemsSource = lines;
+            summary.Add(TajsTokens.Core.Services.CodexDailyPairing.Evaluate(reports).ToDisplayText());
+            BackendSummary.Text = string.Join("\n", summary);
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception) { if (_isLoaded) BackendStatus.Text = "Could not read daily reports; retained evidence is unchanged."; }
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
@@ -69,6 +141,7 @@ public sealed partial class AnalyticsPage : Page
         }
         var generation = Interlocked.Increment(ref _loadGeneration);
         await LoadAsync(cancellation.Token, generation);
+        await LoadBackendAsync(cancellation.Token);
     }
 
     private async Task LoadAsync(CancellationToken cancellationToken, long generation)

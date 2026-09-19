@@ -13,7 +13,7 @@ namespace TajsTokens.Infrastructure.Ingestion;
 public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
 {
     private const string BoundaryParserVersion = "boundary-v2";
-    private const string TypedParserVersion = "typed-v5-quota-provenance";
+    private const string TypedParserVersion = "typed-v6-service-tier-evidence";
     private const int DurableBatchSize = 128;
     private readonly ICodexSessionEventProvider _sessionEventProvider;
     private readonly ISessionIngestionCheckpointStore _checkpointStore;
@@ -62,6 +62,8 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         }
 
         var parserVersion = _observatoryStore is null ? BoundaryParserVersion : TypedParserVersion;
+        if (_observatoryStore is not null && CodexRolloutParser.HasDesktopFilenameSuffix(filePath))
+            parserVersion += "/desktop-owner-v1";
         var existing = await _checkpointStore.GetCheckpointAsync(filePath, cancellationToken);
         var sourceIdentity = GetSourceIdentity(filePath);
         var initialInfo = new FileInfo(filePath);

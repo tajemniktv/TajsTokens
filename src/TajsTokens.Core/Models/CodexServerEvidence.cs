@@ -3,7 +3,7 @@ namespace TajsTokens.Core.Models;
 // These are provider-native quantities, NOT token_usage events or quota_snapshots.
 public enum ServerEvidenceState { Available, Empty, Unavailable, Unsupported, AuthenticationRequired, Incomplete, Conflict, Invalid, Error, NoSupportedSeam }
 public enum AccountEvidenceClass { ProviderVerified, ServerCorrelated, UserDeclaredSingleAccount, Unattributed, Conflicting }
-public enum CodexServerSurface { AccountActivity, ThreadUsage, PlanHistory, GroupedAnalytics }
+public enum CodexServerSurface { AccountActivity, ThreadUsage, PlanHistory, GroupedAnalytics, DailyCounts, DailyRelativeUsage, QuotaMetadata }
 
 public sealed record CodexAccountActivity(long? LifetimeTokens, long? PeakDailyTokens,
     long? LongestRunningTurnSec, long? CurrentStreakDays, long? LongestStreakDays,
@@ -29,6 +29,16 @@ public sealed record CodexServerObservation(string Id, CodexServerSurface Surfac
     public CodexServerAccountBracket? AccountBracket { get; init; }
     public CodexAccountActivity? Activity { get; init; }
     public CodexThreadUsage? ThreadUsage { get; init; }
+    public CodexDailyReport? DailyReport { get; init; }
+    public CodexQuotaMetadataReport? QuotaMetadata { get; init; }
 }
+
+// Daily reports are snapshots, not increments. Dates and units remain provider-native.
+public sealed record CodexDailyReport(string SourceContract, string Endpoint, string StartDate,
+    string EndDate, string? Units, string? GroupBy, string? DataFreshness,
+    string? Plan, string? PolicyBefore, string? PolicyAfter, IReadOnlyList<CodexDailyReportRow> Days);
+public sealed record CodexDailyReportRow(string Date, decimal? Credits, decimal? OnDemandCredits,
+    long? UncachedInputTokens, long? CachedInputTokens, long? OutputTokens, long? TotalTokens,
+    IReadOnlyDictionary<string, decimal>? SurfaceUsage);
 
 public sealed record CodexServerCollection(IReadOnlyList<CodexServerObservation> Observations);

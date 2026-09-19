@@ -28,6 +28,8 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
         var hasAccountKey = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 1;
         command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('quota_snapshots') WHERE name = 'observation_id';";
         var hasProvenance = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 1;
+        command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('codex_workload_observations') WHERE name = 'service_tier';";
+        var hasServiceTier = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 1;
         command.Parameters.AddWithValue("$from", Utc(fromUtc));
         command.Parameters.AddWithValue("$lookback", Utc(fromUtc.AddHours(-2)));
         command.Parameters.AddWithValue("$to", Utc(toUtc));
@@ -65,7 +67,9 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
             SELECT w.source_record_id,w.source_identity,w.source_file,w.start_byte_offset,w.end_byte_offset,
                    w.session_id,w.event_type,w.observed_at_utc,w.captured_at_utc,w.turn_id,w.root_turn_id,
                    w.parent_thread_id,w.model,w.reasoning_effort,w.context_window_tokens,w.contract_version,
-                   w.started_at_unix_seconds,w.completed_at_unix_seconds,w.duration_ms,w.time_to_first_token_ms,w.session_source_kind
+                   w.started_at_unix_seconds,w.completed_at_unix_seconds,w.duration_ms,w.time_to_first_token_ms,w.session_source_kind,
+            """ + (hasServiceTier ? "w.service_tier" : "NULL") + """
+
             FROM codex_workload_observations w
             WHERE w.observed_at_utc <= $to
               AND w.session_id IN (
@@ -79,7 +83,7 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
             while (await reader.ReadAsync(cancellationToken))
                 workload.Add(new CodexWorkloadObservation(reader.GetString(0), reader.GetString(1), reader.GetString(2), reader.GetInt64(3), reader.GetInt64(4),
                     reader.GetString(5), reader.GetString(6), OptionalTime(reader, 7), Time(reader.GetString(8)), Text(reader, 9), Text(reader, 10), Text(reader, 11),
-                    Text(reader, 12), Text(reader, 13), Number(reader, 14), reader.GetString(15), Number(reader, 16), Number(reader, 17), Number(reader, 18), Number(reader, 19), Text(reader, 20)));
+                    Text(reader, 12), Text(reader, 13), Number(reader, 14), reader.GetString(15), Number(reader, 16), Number(reader, 17), Number(reader, 18), Number(reader, 19), Text(reader, 20), Text(reader, 21)));
         if (workload.Count > 100000) throw new InvalidOperationException("Workload metadata exceeds the supported replay bound; a paged evidence read is required.");
         command.CommandText = """
             SELECT session_id,observed_at_utc,captured_at_utc,model,reasoning_effort,uncached_input_tokens,

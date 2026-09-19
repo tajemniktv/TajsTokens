@@ -49,10 +49,8 @@ public static class ComposedQuotaPolicy
                 workload.EffortShares.Keys.Except(training.SelectMany(x => x.Features.EffortTokenShares.Keys)).Any()) return baseline;
             var fit = QuotaCostEvaluation.FitFrozen(training, selected.CostModel.Replace("asserted-", "", StringComparison.Ordinal), cancellationToken);
             var predicted = fit(ComposedQuotaEvaluator.Project(training[0], workload));
-            var errors = QuotaResetGenerationPolicy.Group(liveEvidence.Trials.Where(x => x.ResetUtc < anchor.CapturedAtUtc - QuotaResetGenerationPolicy.Tolerance), x => x.ResetUtc)
-                .Select(g => g.Max(x => Math.Abs(x.PredictedDelta - x.ObservedDelta))).Order().ToArray();
-            if (errors.Length < 8) return baseline;
-            var radius = Math.Max(1, errors[Math.Min(errors.Length - 1, (int)Math.Ceiling((errors.Length + 1) * 0.8) - 1)]);
+            var calibration = CalibrateUncertainty(liveEvidence.Trials, anchor.CapturedAtUtc);
+            if (calibration.Radius is not { } radius) return baseline;
             var remaining = Math.Clamp(anchor.RemainingPercent!.Value - predicted, 0, anchor.RemainingPercent.Value);
             return baseline with
             {
@@ -62,13 +60,26 @@ public static class ComposedQuotaPolicy
                 ValidationMeanAbsoluteError = selected.DisplayedDeltaMae,
                 LowerRemainingPercent = Math.Max(0, remaining - radius),
                 UpperRemainingPercent = Math.Min(anchor.RemainingPercent.Value, remaining + radius),
-                IntervalSamples = errors.Length,
+                IntervalSamples = calibration.Generations,
                 Explanation = "Origin-only predicted workload composition through frozen account/cohort-local cost weights earned selection over pace and incumbent. " +
                     $"{selected.HeldOutIntervals} retrospective outcomes; {liveEvidence.HeldOutIntervals} collection-time outcomes across {liveEvidence.ResetGenerations} reset generations; {selected.AssertedTrainingIntervals} user-asserted training intervals. " +
                     "Empirical 80%-target range from completed-generation maximum errors; not an exhaustion probability or guarantee. " +
                     "Unobserved account activity remains unexplained; unsupported/stale composition falls back to the incumbent."
             };
         }).ToArray();
+    }
+
+    // Caller supplies a single source/account/cohort/horizon/model. Calibrate combined workload
+    // and cost error directly; never multiply separate uncertainty endpoints.
+    public static (double? Radius, int Generations) CalibrateUncertainty(
+        IEnumerable<ComposedQuotaTrial> trials, DateTimeOffset origin)
+    {
+        var errors = QuotaResetGenerationPolicy.Group(trials.Where(x =>
+                x.OutcomeUtc <= origin && x.CalibrationAvailableAtUtc <= origin &&
+                x.ResetUtc < origin - QuotaResetGenerationPolicy.Tolerance), x => x.ResetUtc)
+            .Select(g => g.Max(x => Math.Abs(x.PredictedDelta - x.ObservedDelta))).Order().ToArray();
+        return (errors.Length < 8 ? null : Math.Max(1,
+            errors[Math.Min(errors.Length - 1, (int)Math.Ceiling((errors.Length + 1) * .8) - 1)]), errors.Length);
     }
 
     public static bool SupportsSelection(ComposedQuotaScore score, DateTimeOffset origin)

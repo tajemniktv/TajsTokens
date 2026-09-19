@@ -12,10 +12,10 @@ public sealed class TokenWorkloadPredictionServiceTests
     public void RolloutTokensTrainWithoutAnyQuotaObservationsOrAccount()
     {
         var data = History(140);
-        var forecast = TokenWorkloadPredictionService.Predict(data, data.Tokens[^1].ObservedAtUtc.AddMinutes(20));
+        var forecast = TokenWorkloadPredictionService.Predict(data, data.Tokens[^1].ObservedAtUtc.AddMinutes(2));
         var withQuota = data with { Quota = [new(TajsTokens.Core.Enums.QuotaWindowKind.Weekly, Start, 90, 10080, Start.AddDays(7), "codex", "default", "codex-app-server:codex")] };
         Assert.Equal(JsonSerializer.Serialize(forecast), JsonSerializer.Serialize(
-            TokenWorkloadPredictionService.Predict(withQuota, data.Tokens[^1].ObservedAtUtc.AddMinutes(20))));
+            TokenWorkloadPredictionService.Predict(withQuota, data.Tokens[^1].ObservedAtUtc.AddMinutes(2))));
         Assert.Equal(140, forecast.TokenEvents);
         Assert.Equal(14, forecast.Sessions);
         Assert.Equal(2, forecast.Predictions.Count);
@@ -56,7 +56,7 @@ public sealed class TokenWorkloadPredictionServiceTests
     public void BackfilledRolloutsAreUsableForRetrospectiveTrainingButNotBeforeCollection()
     {
         var data = History(100);
-        var now = data.Tokens[^1].ObservedAtUtc.AddMinutes(20);
+        var now = data.Tokens[^1].ObservedAtUtc.AddMinutes(2);
         var backfilled = data with { Tokens = data.Tokens.Select(x => x with { CapturedAtUtc = now }).ToArray() };
         var prediction = TokenWorkloadPredictionService.Predict(backfilled, now);
         Assert.True(prediction.Predictions[0].TrainingSamples >= 20);
@@ -76,6 +76,64 @@ public sealed class TokenWorkloadPredictionServiceTests
     [Fact]
     public void SubTickHorizonIsRejectedBeforeGridArithmetic() =>
         Assert.Throws<ArgumentOutOfRangeException>(() => TokenWorkloadPredictionService.Replay(History(8), double.Epsilon));
+
+    [Fact]
+    public void NowcastUsesShortHorizonsAndPausesAtTenMinutesWithoutClaimingNoSession()
+    {
+        var data = History(40);
+        var latest = data.Tokens[^1].ObservedAtUtc;
+        var active = TokenWorkloadPredictionService.Predict(data, latest.AddMinutes(9));
+        Assert.Equal(new[] { 5d / 60, .25 }, active.Predictions.Select(x => x.HorizonHours));
+        var quiet = TokenWorkloadPredictionService.Predict(data, latest.AddMinutes(10));
+        Assert.Empty(quiet.Predictions);
+        Assert.Equal(NowcastActivityState.NoRecentActivity, quiet.Activity!.State);
+        Assert.Contains("not proof", quiet.Activity.Explanation);
+    }
+
+    [Fact]
+    public void QuietOpenTurnsAndLateOrFutureEvidenceAreNotLivenessProof()
+    {
+        var data = History(40);
+        var now = data.Tokens[^1].ObservedAtUtc.AddMinutes(20);
+        CodexWorkloadObservation Event(string type, DateTimeOffset at, DateTimeOffset captured) =>
+            new(type, "source", "file", 0, 1, "session", type, at, captured,
+                "turn", null, null, null, null, null);
+        data = data with { Workload = [Event("task_started", now.AddMinutes(-30), now.AddMinutes(-30))] };
+        var quiet = CodexNowcastActivity.Evaluate(data, now);
+        Assert.Equal(NowcastActivityState.QuietOpenTurn, quiet.State);
+        Assert.False(quiet.SupportsNowcast);
+        var later = data with { Workload = [.. data.Workload,
+            Event("task_complete", now.AddMinutes(1), now.AddMinutes(1)),
+            Event("function_call", now.AddMinutes(-1), now.AddMinutes(1))] };
+        Assert.Equal(quiet, CodexNowcastActivity.Evaluate(later, now, ForecastReplayAvailability.CollectedByOrigin));
+        Assert.True(CodexNowcastActivity.Evaluate(later, now).SupportsNowcast);
+        var staleTokens = data with
+        {
+            Tokens = data.Tokens.Select(x => x with { ObservedAtUtc = x.ObservedAtUtc.AddHours(-3) }).ToArray(),
+            Workload = [Event("function_call", now.AddMinutes(-1), now)]
+        };
+        var unanchored = TokenWorkloadPredictionService.Predict(staleTokens, now);
+        Assert.True(unanchored.Activity!.SupportsNowcast);
+        Assert.Empty(unanchored.Predictions);
+        Assert.Contains("Insufficient recent token history", unanchored.Activity.Explanation);
+        Assert.Equal(NowcastActivityState.Unknown, CodexNowcastActivity.Evaluate(
+            data with { Workload = [], Tokens = data.Tokens.Select(x => x with { CapturedAtUtc = null }).ToArray() },
+            now, ForecastReplayAvailability.CollectedByOrigin).State);
+    }
+
+    [Fact]
+    public void ShortReplayUsesTheSameActivityGateAndFutureDataCannotChangeItsPrefix()
+    {
+        var data = History(40);
+        var before = TokenWorkloadPredictionService.Replay(data, .25);
+        var after = TokenWorkloadPredictionService.Replay(History(50), .25);
+        Assert.NotEmpty(before);
+        foreach (var trial in before)
+        {
+            Assert.True(CodexNowcastActivity.Evaluate(data, trial.OriginUtc).SupportsNowcast);
+            Assert.Equal(JsonSerializer.Serialize(trial), JsonSerializer.Serialize(after.Single(x => x.OriginUtc == trial.OriginUtc)));
+        }
+    }
 
     private static CodexForecastDataset History(int count)
     {

@@ -14,7 +14,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 /// </summary>
 public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObservatoryStore, IDisposable
 {
-    private const int ObservatorySchemaVersion = 6;
+    private const int ObservatorySchemaVersion = 7;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _initializeGate = new(1, 1);
     private volatile bool _initialized;
@@ -320,6 +320,15 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                     UPDATE observatory_schema SET version = 6 WHERE component = 'codex-observatory';
                     """, cancellationToken);
                 version = 6;
+            }
+
+            if (version == 6)
+            {
+                await ExecuteMigrationAsync(connection, """
+                    ALTER TABLE codex_workload_observations ADD COLUMN service_tier TEXT;
+                    UPDATE observatory_schema SET version = 7 WHERE component = 'codex-observatory';
+                    """, cancellationToken);
+                version = 7;
             }
 
             // Scrub rows written by pre-hardening Phase 3 builds. typed-v3 forces one safe replay so

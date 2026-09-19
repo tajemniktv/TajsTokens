@@ -162,7 +162,10 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
         return new(snapshots
             .GroupBy(snapshot => snapshot.Kind)
             .Select(group => group.First() with { AccountKey = accountKey })
-            .ToArray(), accountKey);
+            .ToArray(), accountKey)
+        {
+            MetadataObservation = CodexQuotaMetadataParser.Parse(result, accountKey, capturedAtUtc)
+        };
     }
 
     internal static string ResolveCodexCommand()

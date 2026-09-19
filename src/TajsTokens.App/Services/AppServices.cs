@@ -49,7 +49,8 @@ public sealed class AppServices
             () => Settings.TokscaleFallbackEnabled);
         CodexQuotaProvider = new CodexAppServerQuotaProvider();
         ServerEvidence = new CodexServerEvidenceService(DatabasePath, Repository, new CodexAppServerEvidenceProvider(),
-            () => Settings.RolloutAccountAssociations);
+            () => Settings.RolloutAccountAssociations,
+            new CodexBackendDailyEvidenceProvider(() => Settings.ExperimentalCodexBackendEnabled));
 
         var observatory = CodexObservatoryRuntimeFactory.Create(DatabasePath, Repository);
         ObservatoryStore = observatory.Store;

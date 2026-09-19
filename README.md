@@ -8,14 +8,18 @@ outlooks and usage predictions—with freshness and uncertainty kept visible.
 ## What you can do
 
 - **Overview:** check prominent remaining-quota values, resets, labelled hourly token usage,
-  quota outlooks and short-term usage predictions. Collection details stay available on demand.
+  quota outlooks and 5/15-minute local-token nowcasts, paused after ten minutes without observed
+  activity (quiet open turns are not treated as confirmed idle sessions). A separate even-burn comparison shows usage
+  against elapsed time at the reading, with an explicitly inferred window start—not a forecast.
+  Collection details stay available on demand.
 - **Codex → Work & threads:** navigate workspaces, threads and subagents; inspect turns, tools,
   context and supported native source details. Jump from a thread to its token usage.
 - **Codex → Usage breakdown:** compare models, projects, sessions, hours, days and months in consistent token
   tables. Search/sort rows, inspect exact counts and filter a selected row across breakdowns.
   A timeline and removable filter chips sit above the breakdown; detailed token columns are optional.
   Times display locally; daily/monthly groups retain UTC boundaries. Totals are not inferred billing or quota cost.
-- **Forecasts:** start with current quota outlooks, see token workload predictions, estimate
+- **Forecasts:** start with current quota outlooks, see token nowcasts and conditional 30/60-minute
+  session outlooks (recorded local work, not a prediction of human presence), estimate
   supported workload scenarios, and browse saved outlooks. Advanced → Model lab compares models within a selected history cohort and target. Historical evidence
   explains which rollout/app-server readings are usable, repeated, conflicting or incomplete.
   Cost-calibration diagnostics compare actual recorded work with quota movement; they are
@@ -25,9 +29,17 @@ outlooks and usage predictions—with freshness and uncertainty kept visible.
   quota drops separately from reset-time shifts. Account readings are the default; rollout
   observations remain separate diagnostics, with explicit observation times and detailed deadlines.
 - **Advanced → Diagnostics / Model lab:** check source health, collection coverage and prediction evidence.
+- **Experimental daily backend reports:** opt in on Quota history to collect daily Codex token
+  counts and reported per-surface percentages using your existing Codex sign-in. Private endpoints
+  may change; failures remain visible. Reports stay local, credentials are not saved, and daily
+  percentages are not treated as the current weekly quota or a monetary cost.
 - **Provider-native account evidence:** Diagnostics compares backend account activity with retained local
   tokens and reads optional thread credit estimates. Missing estimates remain unavailable; credits are
   not quota percentages. Experimental plan history is not yet exposed through Codex's supported app-server seam.
+  Retained evidence also shows named quota/spend-control metadata and local service-tier setting
+  counts. Settings are observations, not proof of the tier billed; unknown values stay unknown.
+  Evidence-change diagnostics distinguish reported configuration changes, missing fields,
+  failures and revised historical reports without treating ordinary resets as policy changes.
 - **Historical rollout ownership:** explicitly associate retained histories with a recorded account
   in Settings, or revoke the association. User assertions remain separate from native account IDs;
   live learning still requires independently collected validation evidence.

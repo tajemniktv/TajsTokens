@@ -71,6 +71,234 @@ work are in [Current work](#current-work); dated audits below describe captured 
 
 ## Current work
 
+**Layered statistical direction and TT proposal (2026-09-19):** preserve separate cost,
+workload/activity, composition and horizon-specific quota models. The user's proposed TT is a
+frozen, interpretable, versioned normalized workload score with a documented reference basket
+and content-addressed basis identity—not credits, quota, money or an independently forecast unit.
+Prototype it in Model Lab, with explicit unsupported coverage and scalar-versus-full-vector
+comparisons. Account/window/regime quota conversion must remain separate and revisable; changing
+provider policy must not silently change historical TT or original forecasts. Local bases do not
+imply cross-user comparability. This is a research direction, not a released TT metric, fitted
+universal weights or a claim that challengers beat the incumbent. Existing source/retention and
+promotion gates remain in force. The rationale, formulas, caveats and proposed candidates are
+preserved in [Layered statistical design](docs/source-notes/TT_LAYERED_STATISTICAL_DESIGN.md).
+
+**TT Model Lab prototype:** `tt-lab/v1` freezes category weights on the first 20 compatible
+known-account intervals, normalizes to one million tokens in the first positive interval's
+category mix, then fits a separate quota/TT scale on the next 20 intervals. The immutable
+content-addressed basis includes exact weights/reference, category support, observed pooled
+model/effort support and input semantics. Missing/mismatched categories or unsupported mix
+are withheld, never silently scored as zero. Later outcomes compare scalar TT against locally
+fitted raw-token and full-vector cost models on the same supported rows with reset-balanced
+envelope loss, displayed-delta MAE and a zero-use reference. Basis and calibration remain separate.
+The current 30-day weekly/half-hour sample supports only Astra/low: 27 held-out intervals in one
+reset, MAE 0.487pp scalar versus 0.507pp full-vector and 0.791pp raw tokens. This is completed-work
+cost research, not future-work forecasting or cross-regime validation. Model Lab/`--tt` expose the
+basis, coverage and calibration; no live promotion or original TT-history persistence exists.
+Each run is an explicitly reconstructed/restated scoring result. Persisted as-original scoring
+and cross-regime conversion require separate implementation; existing forecasts are untouched.
+
+**Forecast horizon separation (2026-09-19; partially implemented):**
+separate quota cost conditional on workload from whether future activity occurs. Nowcast targets
+5/15 minutes (30 minutes only with supporting validation); session outlook describes 30/60 minutes
+conditional on continued work; quota outlook uses explicitly conditional pace/history scenarios
+through reset; workload planner consumes user-supplied hypothetical work. Existing 30-minute and
+two-hour token forecasts are not automatically relabelled as these new products. Short horizons
+are hypotheses to evaluate, not inherently predictable. Live recorded-token output now uses
+5/15-minute `rollout-token/v2` nowcasts, with the same ten-minute activity eligibility gate in
+chronological short-horizon replay. Positive token increments, starts and tool activity qualify;
+settings alone do not. Quiet open turns, no recent activity and unknown evidence pause output
+with distinct explanations; none proves no session exists. Existing stale-refresh handling remains
+separate. Historical 30-minute/two-hour comparisons remain research baselines, not live nowcasts.
+Activity likelihood and active-period
+workload require separate chronological evaluation before composing expected burn. Do not multiply
+interval endpoints and call the result a calibrated uncertainty interval. Until activity probability
+is calibrated, show observed activity/idle/unknown rather than a numerical probability. Ten minutes
+without activity is an initial configurable-policy hypothesis for pausing workload extrapolation,
+not proof that no Codex session exists; lifecycle/turn/subagent evidence and collector freshness
+must distinguish quiet work from missing collection. Quota pace remains independently available.
+The first recorded-activity/conditional-workload decomposition is now implemented as
+`recorded-session-outlook/v2` for 30/60-minute local-token scenarios. The target is **any positive
+recorded token usage in the interval**, not human presence, continuous activity or remaining active
+at its endpoint. It estimates earlier activity frequency by token-recency group and conditional
+mean/10–90% historical positive-work range, with explicit global fallback when groups are sparse.
+Live activity probability and unconditional mean are withheld until 64 earlier same-group held-out
+outcomes pass an empirical calibration/Brier baseline gate. This is evidence of past reliability,
+not a guarantee of future calibration. Conditional ranges are descriptive, not calibrated bands;
+live joint quota-burn uncertainty and endpoint/continuous-activity models remain unimplemented.
+Model Lab now evaluates the session-to-quota chain retrospectively (`session-quota-evaluation/v2`):
+origin-only conditional tokens and activity frequency through the existing frozen, account-cohort
+total-token cost model. Thirty-/sixty-minute meter targets use their actual elapsed horizons,
+including the existing five-minute polling tolerance; no proportional duration shortcut is used.
+Conditional and unconditional errors are separate, with matched pace baselines and joint-error
+bands only after eight earlier completed resets. The current 30-day replay has 32/9 outcomes
+across 2/1 resets: expected MAE 1.85/4.32pp versus pace 2.58/4.09pp. Against the existing
+quota policy on identical origin/outcome pairs, 30 minutes has 32 pairs (1.85 versus 2.06pp MAE);
+60 minutes has only four pairs (3.11 versus 3.09pp). Unmatched outcomes do not enter that comparison.
+No bands qualify.
+This is a research comparison, not a promoted quota forecast: longer-horizon performance is mixed,
+local work does not establish complete account attribution, and strict deployment evidence remains
+required. It adds no native fields, retention or durable schema.
+Completed quiet targets are included through the earlier of evaluation time and dataset capture,
+not censored at the final token event. Snapshot age alone cannot supply additional negative labels;
+collection gaps can still resemble inactivity. Nowcasts predict interval tokens after recent
+activity, not continuous-session workload.
+
+This slice reuses only the already-retained token `ObservedAtUtc`, `CapturedAtUtc` and
+`ReportedTotalTokens` fields. It introduces no native metadata collection, new retention, source
+schema or raw-content copying. Outputs are rebuildable in-memory forecast/evaluation projections.
+Any later use of additional tool-call/completion or client/generation fields needs an explicit
+per-field source/content/privacy/retention decision here before implementing collection.
+
+**Native daily pairing (2026-09-19):** Analytics and `--daily-pairing <telemetry.db>` now evaluate
+latest stored daily snapshots, never add polls or replace the latest failure with an old success.
+Same account/bracket, source versions, plan/current policy context, requested range, units, grain
+and freshness are required. Missing/zero credits, balance spill, tiny relative amounts, incomplete
+days and ambiguous end dates cannot establish a scale. Ratios remain explicitly provisional:
+historical denominator era and seat/product scope are not independently established. The owned
+database initially had no readable latest daily pair because experimental collection was disabled.
+An explicit one-shot collection now retains 27 count-report dates and 31 relative-report dates;
+all 27 native credit values are zero and on-demand credits are absent. No ratio can be learned.
+The CLI `--collect-daily-evidence <telemetry.db>` explicitly opts into one bounded collection,
+without enabling background polling or modifying auth/settings. Credential-selected account is
+rechecked after the backend bracket; a mid-fetch local account switch discards both reports.
+Native credits are therefore not a demonstrated intermediate scale on this account; a TT candidate
+still needs evidence of value over existing token/category/price baselines rather than a new name.
+
+**Review implementation continuation (2026-09-19):** `composed-quota/v4` separates frozen
+token-cost availability from unrelated activity/context/tier metadata. Strict replay still requires
+timely quota labels, token amounts/model/effort and ownership assertions; unknown collection time
+never becomes event time. Model evaluation and its CLI now show overlapping withholding reasons.
+The previous zero-outcome strict result was caused by the broad training dependency: corrected
+replay has 17 outcomes in one reset, 25 late-training exclusions and two missing compositions.
+The incumbent remains better (0.2189pp envelope-distance loss versus 0.4559pp total-token,
+0.5239pp categories and 0.5368pp model/effort). These are a pre-Desktop-recovery snapshot,
+not current qualification: after historical token recovery, strict replay has zero held-out
+outcomes in the native cohort, with 46 late-training exclusions and one missing composition.
+Recovered historical evidence cannot retroactively become available at an earlier origin.
+No model was promoted or gate weakened.
+
+Live composed quota and chronological evaluation now share uncertainty calibration: at least
+eight earlier completed reset generations with available outcome labels, generation-maximum
+absolute errors, an empirical 80% target and a one-percentage-point radius floor. Model Lab
+reports range sample counts, reported-value coverage and mean width; insufficient calibration
+stays absent. These combined workload/cost error bands are not an activity-conditioned session
+quota distribution, latent-usage coverage or an exhaustion probability.
+
+Cost evaluation also includes the versioned `openai-api-standard-short-2026-09-19/v1` baseline.
+It uses fixed public rates as retrospective workload weights, not historical bills, actual execution
+tier, native credits or TT. Unknown model/rate coverage remains explicit; incomplete training blocks
+fitting and incomplete held-out intervals are withheld, with matched pace/total comparisons.
+It is diagnostic-only and cannot earn a production promotion label. On 44 compatible half-hour
+targets its 0.3644pp loss trails total tokens (0.3191pp), although it beats pace (1.3741pp).
+
+Diagnostics now derives versioned evidence-change signals from the existing immutable quota and
+daily-report ledger. Signals retain before/after observation IDs, policy, account, first-observed
+time and unknown effective time; configuration, missingness, capability, blocking state and
+historical revision remain separate. Consumption, balance depletion and reset timestamps do not
+produce policy-change signals. Account switches, failed attempts, overlapping fetches and contract/
+client changes break semantic comparisons. Each surface has an independent 512-fetch/5 MiB read
+budget; no signals found in this bounded history is not proof of stability. Raw source observations
+remain the durable owner; derived signals rebuild without a second ledger or new acquisition.
+
+Remaining forecast work includes joint conditional quota-burn uncertainty and distinguishing
+endpoint/continuous activity from the implemented any-recorded-work target. Any future native-scale
+or reconciliation promotion requires new supporting evidence;
+the observed zero-credit reports and corpus comparisons do not justify either promotion.
+Unsupported plan/task/enterprise routes
+remain capability findings, not fabricated data or scheduled retries. A public TT unit remains
+optional pending demonstrated value over the now-measured native/token/price baselines.
+
+**Real-corpus reconciliation evaluation (2026-09-19):** the original scalar competitors now
+share a restart-tested research implementation with a read-only `--reconciliation <codex-home>`
+CLI. It reuses the existing file reader and ownership-aware rollout parser, excludes changed or
+failed files, and emits only aggregate counts. Cross-file fingerprints require matching session,
+timestamp, model/effort and both counter snapshots; they are repeat candidates, not canonical
+request IDs. No persisted observations or production accounting are changed. In the initial
+367-file sample, 66,263 token observations produced disagreements in 28 files: incumbent
+9,161,300,274, high-watermark 8,855,223,082, bounded lineage 9,162,150,860. No strict cross-file
+fingerprints repeated; this does not rule out inherited prefixes or cross-session copies.
+These are physical-file experiment totals, not account billing or independent ground truth.
+The v2 audit additionally compares ordered owned-token fingerprints with owner omitted, separating
+equal sequences, strict prefixes, divergent prefixes and non-prefix overlap. It keeps occurrence
+order/multiplicity and full category counters; it never merges files. The same 367-file sample had
+zero candidate pairs even without owner matching, but the final scan excluded 3,996 pre-ownership records.
+That initial exclusion was investigated below rather than treated as proof of inherited copies. Equal scalar totals with
+changed category vectors are separately counted, including across research-state restarts.
+
+**Desktop rollout ownership correction (2026-09-19):** the v3 audit separated pre-ownership token
+records from other records and completely unowned files from inherited prefixes. All 553 excluded
+token records in that snapshot belonged to five completely unowned files, not prefix segments.
+Installed Desktop files use `rollout-<timestamp>-<thread UUID>_<suffix UUID>.jsonl`; metadata matched
+the first UUID in all five, while the parser incorrectly selected the last UUID. The exact anchored
+Desktop form now uses the first UUID, still requiring matching session metadata. Other filename
+forms keep their prior behavior. Three of these paths matched the native catalog, two were
+alternate paths for known threads. Catalog-selected acquisition remains authoritative; alternates
+are not silently imported. Only suffixed paths get a changed typed-parser version and replay;
+state-index schema v5 invalidates disposable selection hints so unchanged indexed files are
+revisited. No observatory payload/schema change or general accounting-rule change is made.
+See the [review continuation](docs/source-notes/CODEX_EVIDENCE_REPO_REVIEW.md#14-real-corpus-reconciliation-and-model-continuation--2026-09-19).
+
+**Descriptive even-burn comparison (2026-09-19):** Overview quota cards compare reported
+consumption with elapsed window percentage at the same reading's capture time, separately from
+Forecast. Start is explicitly inferred as that reading's reset minus its reported duration; no
+other lane, account or historical duration is borrowed. Invalid/missing percentages, durations,
+resets and captures outside the inferred window produce unavailable rather than clamped pace.
+Stale cards label the comparison as last-known; the passage of wall-clock time alone never
+improves the displayed comparison. This is an explanatory baseline, not a forecast, quota-policy
+claim or TT conversion. Model Lab price weighting and the initial real-corpus audit are now
+implemented above; broader reconciliation classification remains pending.
+
+**Quota/tier evidence and reconciliation experiments (2026-09-18):** app-server quota responses
+now retain bounded typed metadata for named and legacy buckets independently of supported quota
+windows. The existing server-evidence ledger preserves account pseudonym, collection time,
+limit names/IDs, plan, reached reason, nullable spend-control state, normal model alias, credit
+balance/flags, individual spend-control values and native window/reset fields. Missing is not
+false/zero, alternative buckets are not summed, and malformed optional metadata does not hide
+usable current quota. High-frequency metadata is excluded from the activity comparison's
+bounded history budget. No private route or credential handling was added for this evidence.
+
+Local `thread_settings_applied.thread_settings.service_tier` is retained as nullable, spelling-
+preserving setting evidence with existing source identity, offsets, timestamps and any explicit
+turn ID. It is not silently attributed to subsequent token events or presented as confirmed
+billing tier. Observatory schema 7 adds the nullable column; parser `typed-v6-service-tier-evidence`
+replays existing sources once through the existing generation/recovery path. State-index schema 4
+atomically invalidates only disposable selection fingerprints/watermark, so unchanged catalog files
+are revisited too; native evidence and ingestion checkpoints are preserved. Diagnostics' retained
+server-evidence read also displays latest quota metadata and physical tier-setting record counts.
+
+Original test-only high-watermark and bounded `total-last` lineage experiments now compare
+against the incumbent on ambiguous totals, interleaving, repeated snapshots, resets, partial
+history, physical copies, every restart boundary and lineage eviction. They are simplified
+competing assumptions, not copies of third-party implementations or canonical accounting rules.
+The incumbent remains unchanged. Real-corpus reconciliation and chronological workload/TT model
+evaluation remain next work; a synthetic winner is not a production promotion.
+
+Plausible explicit assumptions are acceptable for useful experimental projections; retain their
+basis and distinguish them from observed source fields. Lack of perfect evidence alone is not a
+reason to block an experiment. User visual acceptance remains separate from builds/runtime checks.
+
+**Experimental daily backend analytics implemented (2026-09-18):** Quota history now offers an
+explicit opt-in for bounded read-only daily count and relative-usage reports, plus manual collection.
+The existing server-evidence service runs these at its 30-minute cadence. The adapter reads the
+selected Codex home's existing access token/account in memory, uses a fixed HTTPS origin with
+redirects/cookies disabled, never refreshes authentication, and verifies backend account identity
+before/after collection. No raw responses, credentials, account IDs or content are retained.
+Typed immutable snapshots retain requested UTC dates, report units/freshness, parser contract,
+account pseudonym, plan and before/after primary/secondary window duration/reset signatures.
+Daily snapshots are not increments or live quota: repeated collection is never summed. Missing
+amounts remain unknown, zero credits remain zero, and a latest failure is not replaced by an old
+successful report. This intentionally revises the earlier app-server-only acquisition boundary
+for this opt-in feature; normal quota acquisition remains app-server-owned.
+
+The first production-adapter live check returned 27 count rows (`credit`) and 31 relative rows
+(`percent`) with a matching account bracket. This slice exposes reported daily surface percentages
+and token categories without inventing a credit denominator, TT conversion or rate-card pricing.
+Entitlements/renewal, skill/plugin metrics, native-credit calibration and automated historical
+policy-change interpretation remain follow-up work; available private routes are not all enabled
+collectors. Retention uses the existing server-evidence store and policy; additive optional JSON
+fields preserve v1 history and do not require a physical schema migration.
+
 **Expanded backend survey (2026-09-18):** additional authorized read-only probes returned
 skill/plugin daily history, reset inventory, account renewal metadata and a decimal-string
 zero credit balance. Duplicate entitlement-map entries resolve to one identical native account,

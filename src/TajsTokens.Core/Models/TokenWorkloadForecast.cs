@@ -5,6 +5,8 @@ public sealed record TokenWorkloadForecast(DateTimeOffset GeneratedAtUtc, DateTi
     int TokenEvents, int Sessions, IReadOnlyList<TokenHorizonPrediction> Predictions, string Methodology)
 {
     public bool IsStale { get; init; }
+    public Services.NowcastActivity? Activity { get; init; }
+    public IReadOnlyList<SessionWorkloadPrediction> SessionOutlooks { get; init; } = [];
 }
 
 public sealed record TokenHorizonPrediction(double HorizonHours, double ExpectedTokens, string Model,

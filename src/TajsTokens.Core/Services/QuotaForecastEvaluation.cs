@@ -67,6 +67,9 @@ public static class QuotaForecastEvaluation
             "Historical quota targets use separate source/account/bucket/plan cohorts; unknown-account rollout sessions are never assigned to the current account. Potentially cached rollout repeats are withheld, not zero-burn targets. App-server integer rounding and rollout numeric representation are retained, not forced into equality. Event-time replay reconstructs history; collection-time replay cannot use backfilled quota until actually collected. Origins are at least 30 minutes apart after 15 minutes of history; outcomes must be within 5 minutes of the requested horizon. Near-reset targets are proxies and missing survival labels stay unknown. Bands target 80% from earlier compatible errors, not calibrated exhaustion probabilities. Workload is local co-observation, not account attribution. " + data.Coverage)
         {
             TokenScores = includeTokenEvaluation ? TokenWorkloadPredictionService.EvaluateScores(data, cancellationToken) : [],
+            SessionScores = includeTokenEvaluation ? SessionWorkloadPredictionService.Evaluate(data, data.CapturedAtUtc, cancellationToken).Scores : [],
+            SessionQuota = includeTokenEvaluation ? SessionQuotaEvaluator.Evaluate(data, cancellationToken) : null,
+            Tt = TtEvaluator.Evaluate(data, cancellationToken),
             QuotaHistorySummary = QuotaHistoryPolicy.Summarize(history),
             HistoricalQuotaObservations = history.Count(x => x.Eligible),
             QuotaCost = QuotaCostEvaluation.Evaluate(data, cancellationToken),

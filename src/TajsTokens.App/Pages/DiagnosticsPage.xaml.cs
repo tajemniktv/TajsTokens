@@ -108,9 +108,11 @@ public sealed partial class DiagnosticsPage : Page
             var report = await Task.Run(async () =>
             {
                 if (collect) await App.Services.ServerEvidence.CollectAsync(true, timeout.Token);
-                return await App.Services.ServerEvidence.CompareAsync(timeout.Token);
+                var comparison = await App.Services.ServerEvidence.CompareAsync(timeout.Token);
+                var metadata = await App.Services.ServerEvidence.ReadNativeMetadataSummaryAsync(timeout.Token);
+                return comparison.ToDisplayText() + "\n\n" + metadata;
             });
-            if (_loaded) ServerEvidenceText.Text = App.Services.ServerEvidence.Status + "\n\n" + report.ToDisplayText();
+            if (_loaded) ServerEvidenceText.Text = App.Services.ServerEvidence.Status + "\n\n" + report;
         }
         catch (Exception)
         {

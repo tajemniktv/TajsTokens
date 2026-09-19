@@ -8,7 +8,7 @@ namespace TajsTokens.Core.Services;
 /// </summary>
 public static class TokenWorkloadPredictionService
 {
-    public const string PolicyVersion = "rollout-token/v1";
+    public const string PolicyVersion = "rollout-token/v2";
     public const string Methodology = "Reconstructed rollout history: predict the sum of recorded token increments " +
         "(including cached input) in the next interval, conditional on recent local activity. " +
         "Chronological held-out outcomes; future tokens, completions and model changes are excluded from inputs. " +
@@ -35,6 +35,7 @@ public static class TokenWorkloadPredictionService
                 Context = prefix.Context.Where(x => x.CapturedAtUtc <= origin).ToArray()
             };
         if (!prefix.Tokens.Any(x => x.ObservedAtUtc > origin.AddHours(-2))) return null;
+        if (horizon <= .25 && !CodexNowcastActivity.Evaluate(prefix, origin, availability).SupportsNowcast) return null;
         var prediction = Evaluate(prefix, horizon, origin, cancellationToken).Current;
         return prediction is null ? null : prediction with
         { Composition = WorkloadCompositionPrediction.Project(prefix, origin, prediction, availability) };
@@ -46,16 +47,21 @@ public static class TokenWorkloadPredictionService
         var available = Available(data, now);
         var last = available.Tokens.Count > 0 ? available.Tokens.Max(x => x.ObservedAtUtc) : (DateTimeOffset?)null;
         var predictions = new List<TokenHorizonPrediction>();
-        if (last is not null && now - last <= TimeSpan.FromHours(2))
-            foreach (var horizon in new[] { 0.5, 2d })
+        var activity = CodexNowcastActivity.Evaluate(available, now);
+        if (activity.SupportsNowcast && last is not null && now - last <= TimeSpan.FromHours(2))
+            foreach (var horizon in new[] { 5d / 60, .25 })
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var result = Evaluate(available, horizon, now, cancellationToken);
                 if (result.Current is not null) predictions.Add(result.Current with
                 { Composition = WorkloadCompositionPrediction.Project(available, now, result.Current) });
             }
+        if (activity.SupportsNowcast && predictions.Count == 0)
+            activity = activity with { Explanation = activity.Explanation + " Insufficient recent token history to anchor a nowcast." };
         return new(now, last, available.Tokens.Count, available.Tokens.Select(x => x.SessionId).Distinct().Count(),
-            predictions, Methodology + (predictions.Count == 0 ? " No recent token activity with enough history to anchor a current forecast." : ""));
+            predictions, Methodology + " Live nowcasts use a ten-minute observed-activity gate, not a liveness guarantee. " + activity.Explanation)
+        { Activity = activity, SessionOutlooks = activity.SupportsNowcast
+            ? SessionWorkloadPredictionService.Evaluate(available, now, cancellationToken).Current : [] };
     }
 
     public static IReadOnlyList<TokenForecastTrial> Replay(CodexForecastDataset data, double horizon,
@@ -67,10 +73,10 @@ public static class TokenWorkloadPredictionService
         CancellationToken cancellationToken = default)
     {
         var scores = new List<TokenForecastScore>();
-        foreach (var horizon in new[] { 0.5, 2d })
+        foreach (var horizon in new[] { 5d / 60, .25, 0.5, 2d })
         {
             var evaluated = Evaluate(data, horizon, null, cancellationToken);
-            foreach (var candidate in Candidates.Append(PolicyVersion))
+            foreach (var candidate in Candidates.Append("zero-workload").Append(PolicyVersion))
             {
                 // Candidate predictions are exposed by the same evaluation pass, not refitted on outcomes.
                 var errors = evaluated.Points.Select(x => (candidate == PolicyVersion ? x.Prediction.ExpectedTokens
@@ -99,6 +105,8 @@ public static class TokenWorkloadPredictionService
         for (var i = 0; i < tokens.Length; i++) sums[i + 1] = sums[i] + tokens[i].ReportedTotalTokens;
         var workload = data.Workload.Where(x => x.ObservedAtUtc is not null).OrderBy(x => x.ObservedAtUtc).ToArray();
         var workloadTimes = workload.Select(x => x.ObservedAtUtc!.Value).ToArray();
+        var activityTimes = tokens.Where(x => x.ReportedTotalTokens > 0).Select(x => x.ObservedAtUtc)
+            .Concat(workload.Where(x => CodexNowcastActivity.IsActivityEvent(x.EventType)).Select(x => x.ObservedAtUtc!.Value)).Order().ToArray();
         var bySession = workload.GroupBy(x => x.SessionId).ToDictionary(x => x.Key, x => x.ToArray());
         var contexts = data.Context.OrderBy(x => x.ObservedAtUtc).ToArray();
         var contextTimes = contexts.Select(x => x.ObservedAtUtc).ToArray();
@@ -142,6 +150,11 @@ public static class TokenWorkloadPredictionService
             cancellationToken.ThrowIfCancellationRequested();
             // Do not rebuild turn metadata for months of idle grid points between sessions.
             if (Through(origin) == Through(origin.AddHours(-2))) continue;
+            if (horizon <= .25)
+            {
+                var throughActivity = UpperBound(activityTimes, origin);
+                if (throughActivity == 0 || origin - activityTimes[throughActivity - 1] >= CodexNowcastActivity.IdleAfter) continue;
+            }
             var features = Features(origin);
             if (features.ObservedTokenEvents == 0) continue;
             var end = origin.AddHours(horizon);
@@ -169,6 +182,7 @@ public static class TokenWorkloadPredictionService
             var training = rows.Where(x => x.End <= row.Origin && x.Origin < row.Origin).TakeLast(120).ToArray();
             var estimates = new Dictionary<string, double>
             {
+                ["zero-workload"] = 0, // Evaluation-only inactivity baseline, not a fitted activity classifier.
                 ["recent-30m"] = row.Recent,
                 ["recent-2h"] = row.Features.Tokens * horizon / 2,
                 ["recent-median"] = training.Length > 0 ? Median(training.TakeLast(8).Select(x => x.Target)) : row.Recent

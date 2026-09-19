@@ -43,9 +43,9 @@ internal static class SqliteCodexWorkloadEvidence
             INSERT INTO codex_workload_observations(source_record_id,source_identity,source_file,
                 start_byte_offset,end_byte_offset,session_id,event_type,observed_at_utc,captured_at_utc,
                 turn_id,root_turn_id,parent_thread_id,model,reasoning_effort,context_window_tokens,contract_version,
-                started_at_unix_seconds,completed_at_unix_seconds,duration_ms,time_to_first_token_ms,session_source_kind)
+                started_at_unix_seconds,completed_at_unix_seconds,duration_ms,time_to_first_token_ms,session_source_kind,service_tier)
             VALUES($id,$identity,$file,$start,$end,$session,$type,$observed,$captured,$turn,$root,$parent,$model,$effort,$window,$contract,
-                $nativeStart,$nativeEnd,$duration,$firstToken,$sourceKind)
+                $nativeStart,$nativeEnd,$duration,$firstToken,$sourceKind,$tier)
             ON CONFLICT(source_record_id) DO NOTHING;
             """;
         object Value(object? value) => value ?? DBNull.Value;
@@ -71,6 +71,7 @@ internal static class SqliteCodexWorkloadEvidence
         command.Parameters.AddWithValue("$duration", Value(item.DurationMilliseconds));
         command.Parameters.AddWithValue("$firstToken", Value(item.TimeToFirstTokenMilliseconds));
         command.Parameters.AddWithValue("$sourceKind", Value(item.SessionSourceKind));
+        command.Parameters.AddWithValue("$tier", Value(item.ServiceTier));
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 }

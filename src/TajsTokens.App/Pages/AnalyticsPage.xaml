@@ -21,6 +21,19 @@
         </Grid>
         <StackPanel Grid.Row="1" Spacing="10">
         <Border Style="{StaticResource CardStyle}"><StackPanel Spacing="8">
+            <TextBlock Text="Daily Codex usage · experimental" Style="{StaticResource SectionTitleStyle}" />
+            <TextBlock Text="Last 31 UTC report dates from the private Codex backend. Uses your existing Codex sign-in read-only. No credentials or raw responses are saved. Daily report percentages are not the live weekly quota." TextWrapping="Wrap" />
+            <ToggleSwitch x:Name="BackendEnabled" Header="Collect experimental backend reports every 30 minutes" Toggled="OnBackendEnabledToggled" />
+            <Button x:Name="BackendCollect" Content="Collect daily reports now" Click="OnBackendCollectClicked" />
+            <TextBlock x:Name="BackendStatus" Text="Not collected." TextWrapping="Wrap" />
+            <TextBlock x:Name="BackendSummary" TextWrapping="Wrap" />
+            <Expander Header="Daily values and source details" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+            <ItemsControl x:Name="BackendRows"><ItemsControl.ItemTemplate><DataTemplate>
+                <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,3" IsTextSelectionEnabled="True" />
+            </DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
+            </Expander>
+        </StackPanel></Border>
+        <Border Style="{StaticResource CardStyle}"><StackPanel Spacing="8">
             <TextBlock Text="Observed quota used" Style="{StaticResource SectionTitleStyle}" />
             <Grid ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
                 <ComboBox x:Name="TimelineSeries" HorizontalAlignment="Stretch" DisplayMemberPath="Title" SelectionChanged="OnTimelineSeriesChanged" AutomationProperties.Name="Quota timeline cohort"/>

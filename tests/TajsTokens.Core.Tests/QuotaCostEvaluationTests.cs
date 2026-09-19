@@ -133,7 +133,7 @@ public sealed class QuotaCostEvaluationTests
         Assert.False(score.MaterialWin);
     }
 
-    private static QuotaCostObservation[] Observations(int count)
+    internal static QuotaCostObservation[] Observations(int count)
     {
         var cohort = QuotaHistoryPolicy.Cohort(Quota(0, 10));
         return Enumerable.Range(0, count).Select(i =>

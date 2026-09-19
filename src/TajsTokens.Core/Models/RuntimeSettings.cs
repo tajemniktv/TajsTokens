@@ -29,6 +29,8 @@ public sealed record RuntimeSettings
     /// </summary>
     public bool TokscaleFallbackEnabled { get; init; }
 
+    public bool ExperimentalCodexBackendEnabled { get; init; }
+
     /// <summary>
     /// User-configured executable or PATH command used only when the Codex CLI harness is run.
     /// </summary>

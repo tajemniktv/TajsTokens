@@ -52,6 +52,7 @@
                         <ProgressBar Value="{Binding FiveHourQuota.RemainingValue}" Maximum="100" AutomationProperties.Name="5-hour quota remaining percent" />
                         <TextBlock Text="{Binding FiveHourQuota.ResetTimestamp}" Style="{StaticResource SubtitleStyle}" />
                         <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Resets in" /><TextBlock Text="{Binding FiveHourQuota.ResetCountdown}" /></StackPanel>
+                        <TextBlock Text="{Binding FiveHourQuota.EvenBurn}" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         <TextBlock Text="{Binding FiveHourQuota.PredictedExhaustion}" Style="{StaticResource SectionTitleStyle}" Margin="0,8,0,4" />
                         <Expander Header="Why this outlook?" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                             <StackPanel Spacing="12">
@@ -73,6 +74,7 @@
                         <ProgressBar Value="{Binding WeeklyQuota.RemainingValue}" Maximum="100" AutomationProperties.Name="Weekly quota remaining percent" />
                         <TextBlock Text="{Binding WeeklyQuota.ResetTimestamp}" Style="{StaticResource SubtitleStyle}" />
                         <StackPanel Orientation="Horizontal" Spacing="4"><TextBlock Text="Resets in" /><TextBlock Text="{Binding WeeklyQuota.ResetCountdown}" /></StackPanel>
+                        <TextBlock Text="{Binding WeeklyQuota.EvenBurn}" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         <TextBlock Text="{Binding WeeklyQuota.PredictedExhaustion}" Style="{StaticResource SectionTitleStyle}" Margin="0,8,0,4" />
                         <Expander Header="Why this outlook?" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                             <StackPanel Spacing="12">

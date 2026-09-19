@@ -17,6 +17,7 @@ public sealed record QuotaCardViewModel(
     public string Status { get; init; } = "Connecting";
     public bool NeedsAttention { get; init; }
     public bool IsReported { get; init; } = true;
+    public string EvenBurn { get; init; } = "Even burn unavailable";
 }
 
 public sealed record TokenSummaryCard(string Label, string Value, string Detail);

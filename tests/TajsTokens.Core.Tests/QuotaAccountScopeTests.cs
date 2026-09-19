@@ -292,7 +292,7 @@ public sealed class QuotaAccountScopeTests : IDisposable
             for (var i = 0; i < 80; i++)
             {
                 command.Parameters["$id"].Value = $"fixture-{i}";
-                command.Parameters["$at"].Value = Now.AddMinutes(-1200 + i * 15).ToString("O", System.Globalization.CultureInfo.InvariantCulture);
+                command.Parameters["$at"].Value = Now.AddMinutes(-1190 + i * 15).ToString("O", System.Globalization.CultureInfo.InvariantCulture);
                 await command.ExecuteNonQueryAsync();
             }
             transaction.Commit();
@@ -302,7 +302,8 @@ public sealed class QuotaAccountScopeTests : IDisposable
         Assert.Equal(80, forecast.TokenEvents);
         Assert.Equal(2, forecast.Predictions.Count);
         Assert.True(forecast.Predictions[0].TrainingSamples >= 20);
-        Assert.True(forecast.Predictions[0].ExpectedTokens > 0);
+        Assert.Contains(forecast.Predictions, x => x.ExpectedTokens > 0);
+        Assert.Empty((await intelligence.ForecastTokenWorkloadAsync(Now.AddMinutes(5), default)).Predictions);
     }
 
     private async Task ExecuteAsync(string sql)

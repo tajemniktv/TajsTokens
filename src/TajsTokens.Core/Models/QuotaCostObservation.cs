@@ -11,6 +11,10 @@ public sealed record QuotaCostObservation(
     IReadOnlyList<string> QualityFlags)
 {
     public DateTimeOffset? EvidenceAvailableAtUtc { get; init; }
+    // Availability of quota labels, token amounts/model/effort and any ownership assertion.
+    // Unlike the full-feature timestamp, this excludes unused context/activity/tier metadata.
+    public DateTimeOffset? TokenCostEvidenceAvailableAtUtc { get; init; }
+    public ApiPriceWeight? ApiPriceWeight { get; init; }
     public DateTimeOffset? OriginCollectedAtUtc { get; init; }
     public DateTimeOffset? OriginEvidenceAvailableAtUtc { get; init; }
     public DateTimeOffset? OutcomeCollectedAtUtc { get; init; }

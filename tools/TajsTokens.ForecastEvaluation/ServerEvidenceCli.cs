@@ -9,7 +9,7 @@ internal static class ServerEvidenceCli
 {
     public static async Task RunAsync(string[] args)
     {
-        if (args.Length is < 2 or > 3 || args[0] is not ("--server-evidence" or "--probe-server-evidence" or "--collect-server-evidence" or "--declare-current-rollouts"))
+        if (args.Length is < 2 or > 3 || args[0] is not ("--server-evidence" or "--probe-server-evidence" or "--collect-server-evidence" or "--declare-current-rollouts" or "--daily-pairing" or "--collect-daily-evidence"))
             throw new ArgumentException("Unknown server-evidence mode or invalid argument count; no data was read or written.");
         if (args[0] == "--declare-current-rollouts" && args.Length != 3)
             throw new ArgumentException("Explicit declaration requires the existing settings path.");
@@ -27,6 +27,22 @@ internal static class ServerEvidenceCli
         var service = new CodexServerEvidenceService(args[1], repository, new CodexAppServerEvidenceProvider(),
             () => settings?.RolloutAccountAssociations ?? []);
         using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(3));
+        if (args[0] == "--collect-daily-evidence")
+        {
+            // Explicit one-shot opt-in. Does not change saved settings or enable future polling.
+            await repository.InitializeAsync(timeout.Token);
+            var collected = await new CodexBackendDailyEvidenceProvider(() => true).CollectAsync([], timeout.Token);
+            await repository.SaveServerEvidenceAsync(collected, timeout.Token);
+            foreach (var row in collected.Observations)
+                Console.WriteLine($"{row.Surface}: {row.State}; {row.DailyReport?.Days.Count ?? 0} report dates. {row.Detail}");
+            Console.WriteLine(CodexDailyPairing.Evaluate(collected.Observations).ToDisplayText());
+            return;
+        }
+        if (args[0] == "--daily-pairing")
+        {
+            Console.WriteLine(CodexDailyPairing.Evaluate(await service.ReadDailyReportsAsync(timeout.Token)).ToDisplayText());
+            return;
+        }
         CodexServerCollection? transient = null;
         switch (args[0])
         {

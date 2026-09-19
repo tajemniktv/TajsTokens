@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
+using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Providers;
 
@@ -10,7 +11,8 @@ namespace TajsTokens.Infrastructure.Services;
 
 /// <summary>One bounded cadence, separate evidence store/read model. Never feeds live quota policy.</summary>
 public sealed class CodexServerEvidenceService(string databasePath, SqliteTelemetryRepository repository,
-    ICodexServerEvidenceProvider provider, Func<IReadOnlyList<RolloutAccountAssociation>>? associations = null)
+    ICodexServerEvidenceProvider provider, Func<IReadOnlyList<RolloutAccountAssociation>>? associations = null,
+    ICodexServerEvidenceProvider? backendProvider = null)
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private DateTimeOffset _nextAttempt;
@@ -29,6 +31,8 @@ public sealed class CodexServerEvidenceService(string databasePath, SqliteTeleme
             var threads = await SelectThreadsAsync(token);
             var collection = await provider.CollectAsync(threads, token);
             await repository.SaveServerEvidenceAsync(collection, token);
+            if (backendProvider is not null)
+                await repository.SaveServerEvidenceAsync(await backendProvider.CollectAsync([], token), token);
             Status = $"Last server-evidence fetch {DateTimeOffset.Now:g}; {collection.Observations.Count} surface/thread results retained.";
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
@@ -37,6 +41,28 @@ public sealed class CodexServerEvidenceService(string databasePath, SqliteTeleme
             Status = "Server-evidence collection/storage failed; prior observations remain historical, not fresh. See capability results and retry.";
         }
         finally { _gate.Release(); }
+    }
+
+    public async Task<IReadOnlyList<CodexServerObservation>> ReadDailyReportsAsync(CancellationToken token)
+    {
+        await repository.InitializeAsync(token);
+        await using var connection = await OpenReadOnlyAsync(token);
+        using var command = connection.CreateCommand();
+        // Latest attempt per surface, never quietly substitute an old successful account/report.
+        command.CommandText = """
+            SELECT evidence_json FROM codex_server_evidence e
+            WHERE surface IN ('DailyCounts','DailyRelativeUsage') AND observation_id=(
+                SELECT observation_id FROM codex_server_evidence latest WHERE latest.surface=e.surface
+                ORDER BY collected_at_utc DESC,observation_id DESC LIMIT 1);
+            """;
+        var rows = new List<CodexServerObservation>();
+        await using var reader = await command.ExecuteReaderAsync(token);
+        while (await reader.ReadAsync(token))
+        {
+            var row = JsonSerializer.Deserialize<CodexServerObservation>(reader.GetString(0));
+            if (row?.ContractVersion == CodexServerEvidenceParser.Contract) rows.Add(row);
+        }
+        return rows;
     }
 
     public async Task<IReadOnlyList<string>> SelectThreadsAsync(CancellationToken token)
@@ -62,6 +88,73 @@ public sealed class CodexServerEvidenceService(string databasePath, SqliteTeleme
         return threads;
     }
 
+    public async Task<string> ReadNativeMetadataSummaryAsync(CancellationToken token)
+    {
+        await repository.InitializeAsync(token);
+        await using var connection = await OpenReadOnlyAsync(token);
+        using var transaction = connection.BeginTransaction(deferred: true);
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = "SELECT evidence_json FROM codex_server_evidence WHERE surface='QuotaMetadata' ORDER BY collected_at_utc DESC,observation_id DESC LIMIT 1;";
+        var lines = new List<string> { "Native quota metadata (not a workload-credit scale)" };
+        if (await command.ExecuteScalarAsync(token) is string json && JsonSerializer.Deserialize<CodexServerObservation>(json) is { } row)
+        {
+            lines.Add($"Latest attempt: {row.State}, {row.CollectedAtUtc:g}; {row.AccountEvidence}; account {row.CorrelatedAccountKey ?? "unknown"}.");
+            foreach (var limit in row.QuotaMetadata?.Limits ?? [])
+            {
+                lines.Add($"{limit.ResponseKey}: {limit.LimitName ?? limit.LimitId ?? "unnamed"}; plan {limit.PlanType ?? "unknown"}; normal model {limit.NormalModelSlug ?? "unknown"}; reached type {limit.RateLimitReachedType ?? "unknown"}; spend-control reached {limit.SpendControlReached?.ToString() ?? "unknown"}.");
+                if (limit.Credits is { } credits)
+                    lines.Add($"  Credits: has={credits.HasCredits?.ToString() ?? "unknown"}, unlimited={credits.Unlimited?.ToString() ?? "unknown"}, balance={credits.Balance ?? "unknown"}.");
+                if (limit.IndividualLimit is { } individual)
+                    lines.Add($"  Individual spend control: used={individual.Used ?? "unknown"}, limit={individual.Limit ?? "unknown"}, remaining={individual.RemainingPercent?.ToString() ?? "unknown"}%, reset Unix seconds={individual.ResetsAt?.ToString() ?? "unknown"}.");
+            }
+            lines.Add("Named and legacy buckets are alternative response views, never summed.");
+        }
+        else lines.Add("No retained response metadata yet; refresh telemetry to collect it.");
+        var driftHistory = new List<CodexServerObservation>();
+        // Independent budgets prevent frequent quota polls from evicting daily report comparisons.
+        foreach (var surface in new[] { "QuotaMetadata", "DailyCounts", "DailyRelativeUsage" })
+        {
+            long driftBytes = 0;
+            command.CommandText = "SELECT evidence_json FROM codex_server_evidence WHERE surface=$surface ORDER BY collected_at_utc DESC,observation_id DESC LIMIT 512;";
+            command.Parameters.Clear();
+            command.Parameters.AddWithValue("$surface", surface);
+            await using var historyReader = await command.ExecuteReaderAsync(token);
+            while (await historyReader.ReadAsync(token))
+            {
+                var payload = historyReader.GetString(0);
+                driftBytes += payload.Length * 2L;
+                if (driftBytes > 5 * 1024 * 1024) break;
+                if (JsonSerializer.Deserialize<CodexServerObservation>(payload) is { } observation) driftHistory.Add(observation);
+            }
+        }
+        command.Parameters.Clear();
+        var signals = CodexEvidenceDrift.Analyze(driftHistory);
+        lines.Add($"Evidence changes ({CodexEvidenceDrift.Policy}): {signals.Count} signals from a bounded {driftHistory.Count}-fetch history; observations persist, signals are rebuilt. Not confirmed quota-policy changes.");
+        foreach (var signal in signals.TakeLast(24))
+            lines.Add($"  {signal.FirstObservedAtUtc:g} · {QuotaAccountScope.Describe(signal.AccountKey)} · {signal.Surface} · {signal.Kind} · {signal.Field}: {signal.Before ?? "unknown/not reported"} → {signal.After ?? "unknown/not reported"}; effective date unknown.");
+        if (signals.Count == 0) lines.Add("  No comparable changes in the selected history; this does not prove policy stability.");
+        command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('codex_workload_observations') WHERE name='service_tier';";
+        if (Convert.ToInt64(await command.ExecuteScalarAsync(token)) == 1)
+        {
+            lines.Add("Local service-tier setting records (physical occurrences, not request counts or confirmed billing tier):");
+            command.CommandText = """
+                SELECT service_tier,COUNT(*),COUNT(DISTINCT source_identity)
+                FROM codex_workload_observations WHERE event_type='thread_settings_applied'
+                GROUP BY service_tier ORDER BY COUNT(*) DESC LIMIT 32;
+                """;
+            await using var reader = await command.ExecuteReaderAsync(token);
+            var any = false;
+            while (await reader.ReadAsync(token))
+            {
+                any = true;
+                lines.Add($"  {(reader.IsDBNull(0) ? "unknown" : reader.GetString(0))}: {reader.GetInt64(1):N0} records across {reader.GetInt64(2):N0} sources.");
+            }
+            if (!any) lines.Add("  No setting records retained. Absence does not imply Standard.");
+        }
+        return string.Join(Environment.NewLine, lines);
+    }
+
     public async Task<CodexServerComparisonReport> CompareAsync(CancellationToken token, IReadOnlyList<CodexServerObservation>? transient = null)
     {
         await using var connection = await OpenReadOnlyAsync(token);
@@ -76,7 +169,7 @@ public sealed class CodexServerEvidenceService(string databasePath, SqliteTeleme
         {
             command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('codex_server_evidence') WHERE name='activity_bucket_set_id';";
             var normalized = Convert.ToInt64(await command.ExecuteScalarAsync(token)) != 0;
-            command.CommandText = "SELECT evidence_json," + (normalized ? "activity_bucket_set_id" : "NULL") + " FROM codex_server_evidence ORDER BY collected_at_utc DESC, observation_id DESC LIMIT 2000;";
+            command.CommandText = "SELECT evidence_json," + (normalized ? "activity_bucket_set_id" : "NULL") + " FROM codex_server_evidence WHERE surface<>'QuotaMetadata' ORDER BY collected_at_utc DESC, observation_id DESC LIMIT 2000;";
             var stored = new List<(CodexServerObservation Row, long? SetId)>();
             var retainedCharacters = 0L;
             await using (var reader = await command.ExecuteReaderAsync(token))

@@ -4,6 +4,8 @@ using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 using TajsTokens.Core.Services;
 
+using System.Globalization;
+
 namespace TajsTokens.App.Pages;
 
 public sealed partial class ForecastsPage : Page
@@ -140,9 +142,19 @@ public sealed partial class ForecastsPage : Page
             advanced ? "A workload-based short-term prediction has earned live selection. The outlook above remains conditional on your future activity." :
             "Still learning your next workload. The current outlook keeps its established history-based model until a workload-based prediction proves more reliable on live-collected outcomes. See Model lab for the comparisons.";
         var tokens = snapshot.TokenForecast;
+        SessionOutlookText.Text = tokens?.SessionOutlooks is { Count: > 0 } sessions
+            ? string.Join("\n\n", sessions.Select(x => $"Next {Horizon(x.HorizonHours)} · " +
+                (x.ConditionalMeanTokens is { } mean
+                    ? $"if recorded work occurs: mean {CompactTokens(mean)} tokens; historical positive-work 10–90% range {CompactTokens(x.ConditionalLowTokens)}–{CompactTokens(x.ConditionalHighTokens)} (not a calibrated interval)."
+                    : "insufficient positive-work history for a conditional estimate.") +
+                (x.ActivityEstimateSupported
+                    ? $"\nEstimated chance of recorded work: {x.RecordedActivityProbability:P0}; unconditional mean {CompactTokens(x.ExpectedTokens)} tokens."
+                    : "\nActivity probability and unconditional mean withheld.") + "\n" + x.Explanation))
+            : "Session outlook needs recent activity and enough earlier recorded history. " + tokens?.Activity?.Explanation;
+        if (tokens?.IsStale == true) SessionOutlookText.Text = "Stale outlook — refresh failed\n" + SessionOutlookText.Text;
         TokenPredictionText.Text = tokens?.Predictions is { Count: > 0 } predictions
             ? string.Join("\n", predictions.Select(x => $"Next {Horizon(x.HorizonHours)}  ·  ~{CompactTokens(x.ExpectedTokens)} tokens"))
-            : "No current token workload prediction. Refresh telemetry; this does not require quota-account history.";
+            : tokens?.Activity?.Explanation ?? "No current token workload prediction. Refresh telemetry; this does not require quota-account history.";
         if (tokens?.IsStale == true) TokenPredictionText.Text = "Stale prediction — refresh failed\n" + TokenPredictionText.Text;
         TokenPredictionRange.Text = tokens is not null
             ? string.Join("\n", tokens.Predictions.Select(x => x.LowerTokens is { } low && x.UpperTokens is { } high
@@ -155,7 +167,8 @@ public sealed partial class ForecastsPage : Page
                     (x.Composition is { } c ? "\nProjected uncached / cache-read / cache-write / output / reasoning: " +
                         string.Join(" / ", c.TokenCategories.Select(v => CompactTokens(v))) +
                         $" tokens. Composition from {c.CompositionObservations} recent observations, not measured future usage." : ""))) +
-                "\n\n" + tokens.Methodology : "Local token prediction is independent of quota calibration.";
+                "\n\n" + tokens.Methodology + "\n\n" + TajsTokens.Core.Services.SessionWorkloadPredictionService.Methodology
+                : "Local token prediction is independent of quota calibration.";
         _history = dashboard.FiveHourForecasts.Concat(dashboard.WeeklyForecasts)
             .OrderByDescending(x => x.Forecast.GeneratedAtUtc).ToArray();
         RenderLatest(QuotaWindowKind.FiveHour, FiveHourSafeText, FiveHourSamplesText);
@@ -297,6 +310,10 @@ public sealed partial class ForecastsPage : Page
             if (report.ComposedQuotaStrict is { } strict) EvaluationMethodText.Text += "\n\n" + strict.Methodology;
             if (report.QuotaTransfer is { } transfer) EvaluationMethodText.Text += "\n\n" + transfer.Methodology +
                 (transfer.Scores.Count == 0 ? " No compatible recorded-account regimes in this range; transfer and TT remain unsupported." : "");
+            if (report.SessionScores.Count > 0) EvaluationMethodText.Text += "\n\n" + TajsTokens.Core.Services.SessionWorkloadPredictionService.Methodology + "\n" +
+                string.Join("\n", report.SessionScores.Select(x => $"Session {Horizon(x.HorizonHours)}: {x.Origins} activity outcomes ({x.ActiveOrigins} positive); Brier {x.BrierScore:0.000} vs global frequency {x.BaselineBrierScore:0.000}; calibration error {x.CalibrationError:0.000}. " +
+                    $"Conditional MAE {CompactTokens(x.ConditionalMeanAbsoluteError)} vs pace {CompactTokens(x.ConditionalPaceMeanAbsoluteError)} on {x.ConditionalOrigins} positive outcomes; historical-range coverage {x.ConditionalRangeCoverage:P0}. " +
+                    $"Unconditional MAE {CompactTokens(x.ExpectedMeanAbsoluteError)} vs pace {CompactTokens(x.PaceMeanAbsoluteError)} tokens on {x.ExpectedOrigins} matched outcomes."));
             _evaluationRows = report.Scores.Select(score => new EvaluationRow(
                 $"{FormatKind(score.Kind)} · {score.Target} · {score.Source} · {QuotaAccountScope.Describe(score.AccountKey)} · {QuotaHistoryPolicy.DescribeCohort(score.HistoryCohort)} · {score.Availability}",
                 score.Model,
@@ -325,6 +342,9 @@ public sealed partial class ForecastsPage : Page
                     $"Mean unexplained movement above envelope lower bound: {score.UnexplainedPositiveMovement:0.###}pp. Not causal attribution. " +
                     $"{score.CandidateShiftResets.Count} candidate residual shifts; no automatic alerts or retraining. " +
                     (score.BandSamples > 0 ? $"Band/target intersection {score.BandIntersectsTargetRate:P0} on {score.BandSamples} intervals; not latent coverage. " : "Insufficient generations for bands. ") +
+                    (score.RateCardVersion is null ? "" :
+                        $"API-price baseline {score.RateCardVersion}: {score.UnpricedTrainingIntervals} unpriced training / {score.UnpricedHeldOutIntervals} unpriced held-out intervals; {score.UnpricedReportedTokens:N0} unpriced reported tokens. " +
+                        $"Matched-outcome pace/total losses {score.PairedPaceIntervalLoss:0.###}/{score.PairedTotalIntervalLoss:0.###}pp. Fixed standard/short-context weights, not actual spend or credits; no tier, historical-price or long-context claim. ") +
                     "Frozen coefficients: " + string.Join("; ", score.Coefficients.Select(x => $"{x.Key}={x.Value:0.####}")))))
                 .Concat((report.ComposedQuota?.Scores ?? []).Concat(report.ComposedQuotaStrict?.Scores ?? []).Select(score => new EvaluationRow(
                     $"End-to-end quota forecast · {score.Availability} · {FormatKind(score.Cohort.Kind)} · {Horizon(score.HorizonHours)} · {score.Cohort.Source} · {QuotaAccountScope.Describe(score.Cohort.AccountKey)} · {QuotaHistoryPolicy.DescribeCohort(score.Cohort)}",
@@ -332,10 +352,36 @@ public sealed partial class ForecastsPage : Page
                     score.HeldOutIntervals == 0 ? "Insufficient chronological history" :
                         $"Forecast interval loss {score.IntervalLoss:0.###}pp · {score.HeldOutIntervals} held-out intervals / {score.ResetGenerations} resets",
                     $"Actual-work cost loss {score.CostOnlyIntervalLoss:0.###}pp versus forecast loss {score.IntervalLoss:0.###}pp. " +
+                    (score.IntervalOrigins > 0 ? $"Joint range: {score.IntervalCoverage:P0} reported-value coverage on {score.IntervalOrigins} origins; mean width {score.MeanIntervalWidth:0.###}pp. "
+                        : "Joint range unavailable: insufficient earlier completed reset calibration. ") +
                     $"Pace {score.PaceIntervalLoss:0.###}pp; incumbent policy {score.IncumbentIntervalLoss:0.###}pp; displayed-delta MAE {score.DisplayedDeltaMae:0.###}pp. " +
                     $"Training: {score.AssertedTrainingIntervals} user-asserted intervals; remaining training and all validation are native cohort evidence. " +
                     $"{score.MissingComposition} intervals withheld for missing/stale composition or unavailable training/meters. " +
+                    (score.WithheldReasons.Count == 0 ? "" : "Reasons (may overlap): " + string.Join("; ", score.WithheldReasons.Select(x => $"{x.Key}: {x.Value}")) + ". ") +
                     (score.Availability == ForecastReplayAvailability.CollectedByOrigin ? report.ComposedQuotaStrict!.Methodology : report.ComposedQuota!.Methodology))))
+                .Concat((report.SessionQuota?.Scores ?? []).Select(score => new EvaluationRow(
+                    $"Session quota research · {FormatKind(score.Cohort.Kind)} · {Horizon(score.HorizonHours)} · {score.Cohort.Source} · {QuotaAccountScope.Describe(score.Cohort.AccountKey)} · {QuotaHistoryPolicy.DescribeCohort(score.Cohort)}",
+                    "activity × conditional workload × frozen total-token cost",
+                    $"{score.Trials.Count} outcomes / {score.ResetGenerations} resets; expected MAE {score.ExpectedMae:0.###}pp vs pace {score.PaceMae:0.###}pp",
+                    $"Conditional MAE {score.ConditionalMae:0.###}pp vs matched pace {score.ConditionalPaceMae:0.###}pp on {score.ActiveOutcomes} positive-work outcomes. " +
+                    $"Expected interval loss {score.IntervalLoss:0.###}pp vs pace {score.PaceIntervalLoss:0.###}pp. {score.TrainingIntervals} training intervals; {score.WithheldIntervals} withheld. " +
+                    (score.IncumbentPairedOrigins > 0
+                        ? $"Matched incumbent comparison ({score.IncumbentPairedOrigins} outcomes): expected/incumbent MAE {score.PairedExpectedMae:0.###}/{score.IncumbentMae:0.###}pp; interval loss {score.PairedExpectedIntervalLoss:0.###}/{score.IncumbentIntervalLoss:0.###}pp. "
+                        : "No identical incumbent origin/outcome pairs; no comparison claimed. ") +
+                    (score.BandOrigins > 0 ? $"Joint band coverage {score.ReportedBandCoverage:P0} on {score.BandOrigins} outcomes; mean width {score.MeanBandWidth:0.###}pp. " : "Insufficient completed resets for joint bands. ") +
+                    report.SessionQuota!.Methodology)))
+                .Concat((report.Tt?.Scores ?? []).Select(score => new EvaluationRow(
+                    $"TT research · {FormatKind(score.Cohort.Kind)} · {Horizon(score.HorizonHours)} · {score.Cohort.Source} · {QuotaAccountScope.Describe(score.Cohort.AccountKey)} · {QuotaHistoryPolicy.DescribeCohort(score.Cohort)}",
+                    score.Basis?.BasisId ?? "No scoring basis",
+                    $"{score.Status} · {score.HeldOutIntervals} supported outcomes / {score.ResetGenerations} resets",
+                    $"Basis/calibration intervals {score.BasisIntervals}/{score.CalibrationIntervals}. Unsupported held-out work: {score.UnsupportedIntervals} intervals / {CompactTokens(score.UnsupportedTokens)} tokens. " +
+                    $"Supported held-out workload {score.HeldOutTt:0.###} TT; separate calibration {score.QuotaPointsPerTt:0.######}pp/TT. " +
+                    $"Matched reset-balanced loss: TT scalar {score.ScalarLoss:0.###}, full vector {score.FullVectorLoss:0.###}, raw tokens {score.RawTokenLoss:0.###}pp. " +
+                    $"Zero-use loss {score.ZeroLoss:0.###}pp; displayed-delta MAE (TT/full/raw) {score.ScalarMae:0.###}/{score.FullVectorMae:0.###}/{score.RawTokenMae:0.###}pp. " +
+                    (score.Basis is { } basis ? "Category weights/token: " + string.Join(", ", basis.Weights.Select(x => x.ToString("G6", CultureInfo.InvariantCulture))) +
+                        "; 1-TT reference category counts: " + string.Join(", ", basis.Reference.Select(x => x.ToString("G6", CultureInfo.InvariantCulture))) +
+                        "; supported models: " + string.Join(", ", basis.Models) + "; efforts: " + string.Join(", ", basis.Efforts) + ". " : "") +
+                    report.Tt!.Methodology)))
                 .Concat((report.QuotaTransfer?.Scores ?? []).Select(score => new EvaluationRow(
                     $"Regime transfer research · {Horizon(score.HorizonHours)} · {score.Source.Source} · {QuotaHistoryPolicy.DescribeCohort(score.Source)} → {QuotaHistoryPolicy.DescribeCohort(score.Destination)}",
                     score.Model,

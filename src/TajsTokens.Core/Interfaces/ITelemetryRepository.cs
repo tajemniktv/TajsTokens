@@ -6,6 +6,7 @@ namespace TajsTokens.Core.Interfaces;
 public interface ITelemetryRepository
 {
     Task UpsertQuotaSnapshotAsync(QuotaSnapshot snapshot, CancellationToken cancellationToken);
+    Task SaveServerEvidenceAsync(CodexServerCollection collection, CancellationToken cancellationToken);
     Task AddTokenUsageAsync(TokenUsage usage, CancellationToken cancellationToken);
     Task AddSessionAsync(CodexSession session, CancellationToken cancellationToken);
     Task AddOrUpdateAgentAsync(Agent agent, CancellationToken cancellationToken);

@@ -1,0 +1,14 @@
+namespace TajsTokens.Core.Models;
+
+public sealed record TtEvaluationScore(QuotaHistoryCohort Cohort, double HorizonHours, TtWorkloadBasis? Basis,
+    string Status, int BasisIntervals, int CalibrationIntervals, int HeldOutIntervals, int UnsupportedIntervals,
+    double UnsupportedTokens, int ResetGenerations, double? QuotaPointsPerTt, double? HeldOutTt,
+    double? ScalarLoss, double? FullVectorLoss, double? RawTokenLoss)
+{
+    public double? ScalarMae { get; init; }
+    public double? FullVectorMae { get; init; }
+    public double? RawTokenMae { get; init; }
+    public double? ZeroLoss { get; init; }
+}
+
+public sealed record TtEvaluation(string Version, string Methodology, IReadOnlyList<TtEvaluationScore> Scores);

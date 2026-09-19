@@ -17,6 +17,31 @@ public sealed class ComposedQuotaEvaluatorTests
     }
 
     [Fact]
+    public void UnusedLateMetadataDoesNotInvalidateTokenCostTraining()
+    {
+        var data = TimelyData();
+        var late = new CodexWorkloadObservation("late-tier", "source", "file", 0, 1, "s",
+            "thread_settings_applied", data.Quota[0].CapturedAtUtc, data.CapturedAtUtc,
+            null, null, null, null, null, null, ServiceTier: "priority");
+        var amended = data with { Workload = [late] };
+        var costRows = QuotaCostObservationBuilder.Build(amended);
+        Assert.All(costRows, row =>
+        {
+            Assert.Equal(data.CapturedAtUtc, row.EvidenceAvailableAtUtc);
+            Assert.Equal(row.EndUtc, row.TokenCostEvidenceAvailableAtUtc);
+        });
+        var before = ComposedQuotaEvaluator.Evaluate(data, availability: ForecastReplayAvailability.CollectedByOrigin);
+        var after = ComposedQuotaEvaluator.Evaluate(amended, availability: ForecastReplayAvailability.CollectedByOrigin);
+        foreach (var score in before.Scores)
+        {
+            var updated = after.Scores.Single(x => x.Cohort == score.Cohort && x.HorizonHours == score.HorizonHours && x.CostModel == score.CostModel);
+            Assert.Equal(score.Trials.Select(x => (x.OriginUtc, x.PredictedDelta)), updated.Trials.Select(x => (x.OriginUtc, x.PredictedDelta)));
+            Assert.Equal(score.WithheldReasons, updated.WithheldReasons);
+        }
+        Assert.Contains(after.Scores, x => x.HeldOutIntervals > 0);
+    }
+
+    [Fact]
     public void StrictEvaluationRequiresTrainingAvailableAtOriginAndTimelyMeters()
     {
         var data = TimelyData();
@@ -27,15 +52,21 @@ public sealed class ComposedQuotaEvaluatorTests
         {
             Assert.Equal(ForecastReplayAvailability.CollectedByOrigin, x.Availability);
             Assert.Equal(ForecastReplayAvailability.CollectedByOrigin, x.Workload.Availability);
+            Assert.Equal(x.OutcomeUtc, x.CalibrationAvailableAtUtc);
+            Assert.Null(x.LowerRemainingPercent); // One reset cannot establish joint uncertainty.
+            Assert.Null(x.UpperRemainingPercent);
         });
         var delayedTraining = data with { Tokens = data.Tokens.Select((x, i) => i < 40 ? x with { CapturedAtUtc = data.CapturedAtUtc } : x).ToArray() };
         var unknownTraining = data with { Tokens = data.Tokens.Select((x, i) => i == 2 ? x with { CapturedAtUtc = null } : x).ToArray() };
         var delayedMeters = data with { Quota = data.Quota.Select(x => x with { CollectedAtUtc = data.CapturedAtUtc }).ToArray() };
-        foreach (var unavailable in new[] { delayedTraining, unknownTraining, delayedMeters })
+        foreach (var (unavailable, reason) in new[] { (delayedTraining, "training-collected-after-origin"),
+                     (unknownTraining, "training-collection-unknown"), (delayedMeters, "origin-meter-collected-after-origin") })
         {
             Assert.NotEmpty(ComposedQuotaEvaluator.Evaluate(unavailable).Scores.Single(x => x.HorizonHours == 0.5 && x.CostModel == "total").Trials);
-            Assert.Empty(ComposedQuotaEvaluator.Evaluate(unavailable, availability: ForecastReplayAvailability.CollectedByOrigin)
-                .Scores.Single(x => x.HorizonHours == 0.5 && x.CostModel == "total").Trials);
+            var score = ComposedQuotaEvaluator.Evaluate(unavailable, availability: ForecastReplayAvailability.CollectedByOrigin)
+                .Scores.Single(x => x.HorizonHours == 0.5 && x.CostModel == "total");
+            Assert.Empty(score.Trials);
+            Assert.Equal(score.MissingComposition, score.WithheldReasons[reason]);
         }
     }
 

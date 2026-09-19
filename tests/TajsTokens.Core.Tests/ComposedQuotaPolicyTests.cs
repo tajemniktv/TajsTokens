@@ -7,6 +7,31 @@ namespace TajsTokens.Core.Tests;
 public sealed class ComposedQuotaPolicyTests
 {
     [Fact]
+    public void JointUncertaintyNeedsEightCompletedAvailableGenerationsNotPollingVolume()
+    {
+        var now = DateTimeOffset.Parse("2026-09-19T10:00:00Z");
+        var workload = new PredictedWorkload(now, .5, 10, [10, 0, 0, 0, 0],
+            new Dictionary<string, double>(), new Dictionary<string, double>(), 1, now,
+            ForecastReplayAvailability.CollectedByOrigin, "fixture");
+        var trials = Enumerable.Range(1, 8).Select(i => new ComposedQuotaTrial(now.AddDays(-i).AddHours(-2),
+            now.AddDays(-i).AddHours(-1), now.AddDays(-i), 10, 0, 12, 0, 0, 0, 90, workload)
+        { CalibrationAvailableAtUtc = now.AddDays(-i), Availability = ForecastReplayAvailability.CollectedByOrigin }).ToArray();
+        var ready = ComposedQuotaPolicy.CalibrateUncertainty(trials, now);
+        Assert.Equal(8, ready.Generations);
+        Assert.Equal(2, ready.Radius);
+        Assert.Null(ComposedQuotaPolicy.CalibrateUncertainty(trials.Take(7), now).Radius);
+        Assert.Null(ComposedQuotaPolicy.CalibrateUncertainty(Enumerable.Repeat(trials[0], 100), now).Radius);
+        Assert.Null(ComposedQuotaPolicy.CalibrateUncertainty(trials.Select(x => x with { CalibrationAvailableAtUtc = null }), now).Radius);
+        Assert.Null(ComposedQuotaPolicy.CalibrateUncertainty(trials.Select(x => x with { CalibrationAvailableAtUtc = now.AddSeconds(1) }), now).Radius);
+        Assert.Equal(ready, ComposedQuotaPolicy.CalibrateUncertainty(trials.Append(trials[0] with
+        { ObservedDelta = 1000, CalibrationAvailableAtUtc = now.AddSeconds(1) }), now));
+        Assert.Equal(ready, ComposedQuotaPolicy.CalibrateUncertainty(trials.Append(trials[0] with
+        { ObservedDelta = 1000, OutcomeUtc = now.AddSeconds(1) }), now));
+        Assert.Null(ComposedQuotaPolicy.CalibrateUncertainty(trials.Select(x => x with { ResetUtc = now }), now).Radius);
+        Assert.Equal(1, ComposedQuotaPolicy.CalibrateUncertainty(trials.Select(x => x with { ObservedDelta = 10 }), now).Radius);
+    }
+
+    [Fact]
     public void PromotionRequiresIndependentRecentPairedEvidenceNotRepeatedPolling()
     {
         var now = DateTimeOffset.Parse("2026-09-18T10:00:00Z");

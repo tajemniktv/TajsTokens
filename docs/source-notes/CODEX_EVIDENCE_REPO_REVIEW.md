@@ -2,18 +2,29 @@
 
 ## Result and proof boundary
 
+The subsequent user-supplied [layered statistical and TT design proposal](TT_LAYERED_STATISTICAL_DESIGN.md)
+defines a frozen normalized workload basis with separate quota calibration. It is a research
+direction, not evidence of implemented TT or a universal native-credit scale. PROJECT.md owns
+current implementation scope; this review's dated experiments remain evidence, not competing plans.
+
 **Prefer provider-native accounting quantities over inventing TT, but do not treat all
 credits as one stable unit or daily relative usage as historical quota consumption.**
 The reviewed implementations establish useful acquisition and reconciliation techniques,
-not a universal credit-to-allowance contract. Keep released acquisition through Codex-owned
-app-server. The changes and tests below are proposals, not implemented acquisition.
+not a universal credit-to-allowance contract. Prefer Codex-owned app-server acquisition where
+available. **Current status:** sections 1–8 record the original static review; sections 9–10
+record subsequent authorized live probes. Section 11 consolidates the broader repository map
+and the now-implemented, opt-in daily backend adapter. Proposals are not all implemented.
 
-This review inspected pinned source, existing TajsTokens implementation and source notes,
-and generated the installed CLI's protocol schema, including experimental fields. It made
+The original static review inspected pinned source, existing TajsTokens implementation and source notes,
+and generated the installed CLI's protocol schema, including experimental fields. That phase made
 no authenticated backend calls, read no credentials, ran no downloaded project code, and
 did not change collection, databases, account associations, forecasts or the running app.
 Third-party tests were inspected, not executed. Published runtime anecdotes are attributed
 to their authors; synthetic fixtures are not independent runtime corroboration.
+
+Review depth is deliberately unequal: seven repositories received the original comparative
+review below. Four additional repositories received focused source/documentation checks during
+this consolidation, not equivalent whole-project audits. No third-party code was copied or run.
 
 ### Source anchors
 
@@ -36,6 +47,15 @@ Installed CLI freshly checked: `0.156.0-alpha.2`; no exact source/build equivale
 Its schema was generated locally with `codex app-server generate-json-schema --experimental`.
 The installed Desktop evidence remains the separately dated static inspection in
 [CODEX_DESKTOP_ANALYTICS.md](CODEX_DESKTOP_ANALYTICS.md), not a new Desktop runtime probe.
+
+Additional focused checks, cloned on 2026-09-18:
+
+| Repository / pin | Inspected anchors |
+| --- | --- |
+| [junhoyeo/tokscale](https://github.com/junhoyeo/tokscale/tree/d8fd670a46857e5290e71b10245dc522a344fc17) | `README.md` account activity section; `crates/tokscale-cli/src/commands/codex_activity.rs` |
+| [merefield/codexometer](https://github.com/merefield/codexometer/tree/13405d21160c29ed6330f621d277debecf96450c) | `README.md` Consumption Pace and Observed quota API equivalent; `internal/ui/benchmark_quota.go` |
+| [xiufengsun/TokenTracker](https://github.com/xiufengsun/TokenTracker/tree/5ccd325fb31fd3ca92c577adc85966b8fb8da8ab) | `src/lib/codex-service-tier.js`, `codex-token-usage.js`, `codex-token-refresh.js`; interleave fixtures in `test/rollout-parser.test.js` |
+| [douglasmonsky/codex-usage-tracker](https://github.com/douglasmonsky/codex-usage-tracker/tree/43278d1408416c3262086028bdfa7a522cfc35f8) | `src/codex_usage_tracker/agent_kernel/evidence/service.py`, `kernel/allowance/service.py`; supported-question, product-direction and schema contracts under `docs/` |
 
 ## 1. Credit / daily allowance relationship
 
@@ -123,14 +143,20 @@ lifetime totals and warns of missing subagent/tool/background activity and repor
 Do not generalize that product's refresh timing into a personal-plan endpoint SLA.
 [OpenAI Desktop analytics guidance](https://help.openai.com/en/articles/20001478-reviewing-work-and-codex-usage-and-using-personal-analytics-in-chatgpt-desktop).
 
-**`daily-code-review-metrics` remains unverified.** No corroborating implementation was found
+**At the static-review stage, `daily-code-review-metrics` was unverified.** No corroborating implementation was found
 in the seven reviewed snapshots or searched Codex backend-client/model sources. This is not
 proof of nonexistence. A code-review quota bucket is not corroboration of that analytics route.
+Section 10 subsequently corroborated a 200/empty response; populated metric semantics remain unverified.
 
 ## 3. Comparison with TajsTokens
 
 | Project | Useful technique | Difference / do not import |
 | --- | --- | --- |
+| openai/codex | Primary upstream schema/implementation reference for app-server activity/current quota and backend analytics, plan history, thread v1 and task v2. Prefer a Codex-owned report seam. | Backend-client methods are not automatically app-server RPCs or available to every account. Installed/runtime evidence takes precedence over an unmatched upstream snapshot. |
+| Tokscale | App-server `account/usage/read` with explicitly supplemental account activity; this technique is already represented in TajsTokens' account evidence/reconciliation. | Account totals never replace local token truth. The current focused check confirms the technique, not an independently reconstructed chronology of who discovered it first. |
+| Codexometer | Transparent elapsed-window versus consumed-quota pace; linear exhaustion projection; observed API-price-weighted workload/quota learning. Useful evaluation and explanatory baselines. | API-equivalent USD is an estimate, not native provider credits. Published price weighting, tier assumptions and its learner require separate evaluation before adoption; pace is not calibrated forecasting. |
+| TokenTracker | Local `thread_settings_applied.thread_settings.service_tier`; bounded multi-baseline cumulative reconciliation and restart/interleave fixtures. | Tier parser normalizes strings, and pricing treats unknown as Standard: retain raw nullable evidence instead. Stream inference uses `total - last` and a 32-baseline cache, not native stream IDs; it cannot prove a lineage from totals-only `100 → 20 → 110`. Direct auth refresh is outside our adapter's responsibilities. |
+| codex-usage-tracker | Explicit physical occurrences versus canonical entities, bounded evidence selection, deterministic allowance intervals with local tokens/calls/turns per percentage point. | Strong conceptual reference, not a proven winner on our corpus. Its supported contracts reject allowance-exhaustion forecasting as a kernel fact; deterministic diagnostics are not predictions. Do not transplant its separate kernel/ledger. |
 | Codex-Usage | Explicit read-only endpoint inventory; per-endpoint failures; redacted diagnostics; profile plus quota plus credit-event inspection. | Directly reads `auth.json` and sends bearer/account header. Local summary uses final cumulative total per physical file, assigns it to file date/final model, then sums files: not stronger copy/interleave accounting than TajsTokens. Redacting arbitrary responses is weaker than our typed content-free retention. |
 | how-much-i-get-from-codex | Joins native daily credits and relative usage; identifies incompatible quota windows, changing denominator, ambiguous subscriptions and stale analytics. | Browser-session token acquisition and direct private HTTP. Price fallbacks, allocation, zero coercion, thresholds and depletion precedence are application heuristics. Not a stable provider-normalized unit or independent calibration dataset. |
 | codex-reset-watcher | Endpoint allowlist, redirect rejection, ephemeral transport; before/after auth-context change checks; per-account non-secret snapshots; separates last check from successful usage capture and unknown reset inventory. | Credential/JWT parsing; snapshots are not a full historical analytics ledger. Reset credits are entitlements to reset, not workload credits. Auth-context identity preference still does not prove a response's effective seat in every route. |
@@ -143,9 +169,10 @@ TajsTokens already has the better evidence boundary for this task: source/accoun
 immutable fetch observations, actual collection times, null/capability states, account-bracket
 correlation, revocable user associations, current-anchor equality, and schema-14 daily-value
 sharing without losing revisions. Reuse those owners; do not add a competing ledger.
-Current server evidence does **not** retain the daily credit/relative-usage reports, full-profile
+At the original review baseline, server evidence did **not** retain daily credit/relative-usage reports, full-profile
 metadata, historical-period allowance labels or v2 task percentages. See
 [existing acquisition contract](CODEX_SERVER_USAGE.md).
+The opt-in daily report implementation in section 11 supersedes only the daily-report part of that gap.
 
 ## 4. Duplicate, copied and interleaved rollout evidence
 
@@ -268,12 +295,14 @@ a separate mutation, not a research probe.
 daily relative/workspace breakdowns, credit-event history, full-profile extras, plan history,
 and task v2. `--experimental` schema generation did not add them. Their backend-client/TUI
 implementation and Desktop private HTTP host path do not by themselves create a supported
-third-party RPC/export seam. Backend availability remains untested in this review.
+third-party RPC/export seam. Backend availability was untested at this stage; see sections 9–10.
 
 **Experimental auth adapter possibility, not released integration:** upstream legacy v1
 `getAuthStatus` defines `includeToken`/`refreshToken` and an optional `authToken` response.
-This was not present in the installed generated public method catalog; availability is not
-established here and no token request was made. Even where callable, exporting a token then
+This was not present in the installed generated public method catalog; availability was not
+established during the original review and no token request was made. The September 19 log
+inspection subsequently observed runtime requests for this method (section 13), without proving
+successful token export. Even where callable, exporting a token then
 making HTTP requests transfers credentials/request ownership to TajsTokens: it is not a
 Codex-owned analytics RPC. Internal `chatgptAuthTokens` login is explicitly marked unstable,
 internal-only and supplies credentials to Codex, not an analytics read alternative.
@@ -284,7 +313,7 @@ extension using the existing backend client and credential refresh. An experimen
 would require an explicit change to the acquisition boundary, not silent fallback or browser
 injection. No account-management, reset-redemption or unrelated UI redesign is proposed.
 
-Recommended order:
+Original recommended order (superseded by the authorized probes and section 11):
 
 1. Review/adopt the quantity, compatibility and reconciliation test proposals.
 2. Preserve already available semantic quota metadata through existing app-server acquisition.
@@ -444,5 +473,687 @@ the whole feature. Credit-valued allowance estimates still require an explicit p
 this account because the daily native credit numerator is zero. No model or TT change follows yet.
 
 The original probe scripts and sanitized results remain ignored in `.codex/temp/codex-repo-review/`.
-Only this summary and the product-direction note are staged. No production collection/storage changes,
-application builds/restarts or broad backend endpoint enumeration were performed.
+At the survey stage only this summary and the product-direction note changed. Production
+collection/storage and app builds/restarts followed in section 11, not during the survey.
+
+## 11. Consolidated findings and implementation status — 2026-09-18
+
+This section reconciles the supplied broader repository map with pinned source, actual probes
+and the current TajsTokens working tree. It is supporting evidence, not a second roadmap;
+[PROJECT.md Current work](../../PROJECT.md#current-work) owns delivery status and priorities.
+Superlatives such as “best” or “most mature” are omitted: review depths differ and none of these
+algorithms has yet won a controlled comparison against our retained corpus. The previously used
+`Finesssee/Win-CodexBar` name is not independently verified here; the reviewed pin is under `nesszer`.
+
+### What is implemented versus proposed
+
+- **Implemented:** optional daily counts and relative-usage acquisition, typed immutable report
+  snapshots in the existing server-evidence store, account-bracket correlation, report units and
+  freshness, requested date range, plan and before/after window-duration/reset signatures.
+  Quota history exposes the opt-in, manual collection, latest reported values and daily details.
+  The normal server-evidence cadence is 30 minutes; current quota remains app-server-owned.
+- **Auth boundary:** the separate experimental adapter reads the existing selected Codex home's
+  access token/account into memory and sends bounded GETs to a fixed HTTPS origin. Redirects and
+  cookies are disabled. It does not refresh OAuth, write `auth.json`, switch accounts, acquire
+  browser credentials or silently fall back from app-server. Direct HTTP entails responsibility
+  for credential handling and request behavior, but **does not require owning refresh/persistence**.
+- **Proof:** the production adapter fetched 27 daily count rows (`credit`) and 31 daily relative
+  rows (`percent`) with a matching account bracket. The Core suite passed 392 tests; the final
+  Windows build passed with zero warnings/errors and deployed/restarted the daily app. This is
+  not user visual acceptance or proof of longitudinal stability. The research/doc move is committed
+  as `86fd457`; implementation was staged after a separate signing timeout at consolidation time.
+- **Still proposed:** more app-server quota metadata, nullable local service-tier evidence,
+  competing copy/interleave algorithms, even-burn presentation, API-price-weighted Model Lab
+  baselines, native-credit calibration, renewal/entitlement and skill/plugin collectors, and
+  historical semantic drift interpretation. Persisting a policy signature is not detecting or
+  explaining historical policy changes. Do not imply these features shipped with daily reports.
+
+### Corrected availability and uncertainty map
+
+| Question | Current evidence / remaining uncertainty |
+| --- | --- |
+| Have native daily reports been fetched on this account? | Yes, both isolated probes and the implemented C# adapter. “Never fetched” is obsolete. |
+| Are daily native credits nonzero during included usage? | In the sampled history, all reported daily count credits were zero despite nonzero tokens. The observed plan string was `prolite`; do not replace it with an assumed plan label. |
+| Is there a stable credits / relative-usage ratio? | Not established on this account: no positive native numerator/percentage pairs. The author's ~49.897 credits/pp is account/era-specific, not a universal constant. |
+| Does it survive resets, policy changes or model/effort/speed differences? | Unknown. Daily reports do not establish which present 5h/weekly meter a denominator describes. |
+| Are delay, revision and date-boundary semantics established? | No longitudinal revision/latency study or cross-route boundary proof. Preserve independent freshness and snapshots; do not silently align different date ranges. |
+| Is plan history available? | Tested `plan_limit_history?days=7` returned 404. This is an observed request outcome, not just a TUI message or proof of permanent nonexistence. |
+| Are thread/task estimates available? | Direct sampled v1 returned 403 and v2 returned 404. V2 is no longer “not probed”; no actual task percentages were obtained. |
+| Does code-review metrics exist? | A live 200/empty JSON response corroborates the tested route. Populated-row contracts, metric meaning and completeness remain unverified. |
+| Is service-tier coverage sufficient locally? | Not measured on TajsTokens' corpus. TokenTracker's source comments describe its own corpus, not ours. |
+| Are duplicates/interleaves canonically resolved? | No. Candidate fingerprints and competing algorithms are evidence for tests, not proof of independent usage or safe deletion. |
+
+### Follow-up proposals worth carrying forward
+
+The following list records the original proposals, not a current outstanding-work checklist.
+The implementation status below supersedes its present-tense descriptions of missing fields.
+
+| Item | Current implementation evidence | Boundary / remaining work |
+|---|---|---|
+| 1. Quota metadata | `CodexQuotaMetadataParser`, typed server evidence, Diagnostics; section 12 | Presence is not proof of stable semantics. The unspecified "two review fixes" cannot be audited without identifiers. |
+| 2. Service tier | `CodexRolloutParser`, observatory persistence/replay and `CodexServiceTierEvidenceTests`; section 12 | Requested settings are not confirmed execution or billing speed. |
+| 3. Reconciliation | `CodexReconciliationAudit`, `CodexSequenceComparison`, competing reducers and recovery fixtures; sections 14, 18–19 | No competitor earned canonical promotion. Desktop filename ownership was corrected without importing alternate paths. |
+| 4. Baselines | `QuotaEvenBurn`, `ApiPriceWorkload`, cost evaluation and product diagnostics; sections 14–15 | Versioned price weights are counterfactual, not native credits or actual bills; no promotion. |
+| 5. Acquisition | Opt-in `CodexBackendDailyEvidenceProvider`, stored daily reports, account-switch tests and one-shot CLI; section 20 | Available personal reports contain zero credits. Unavailable reports remain capability findings, not fabricated contracts or reasons for repeated denied probes. |
+| 6. Compatibility/drift | `CodexDailyPairing`, `CodexEvidenceDrift`, parser/provider/persistence tests; sections 15–16, 20 | Tests cover the implemented surfaces, not every future plan/task contract proposed in section 6. No policy change is inferred from ordinary consumption. |
+
+This map does not claim that every original proposed test is implemented. Plan/task acquisition,
+native-credit scale validation and hypothetical backend extensions remain unsupported research;
+the current product scope and forecast work are owned by `PROJECT.md`.
+
+1. Preserve additional installed app-server quota fields (`rateLimitReachedType`,
+   `spendControlReached`, `individualLimit`, `normalModelSlug`, credits and named-limit metadata)
+   with explicit null/unknown handling. Their presence is schema evidence, not proof that every
+   field is populated or semantically stable. The current C# quota projection does not retain
+   the first four named fields. The supplied “two review fixes” has no issue/diff identifiers;
+   it is not recorded as a verified outstanding defect or completion claim.
+2. Add local service-tier observations with source order/turn association and unknown coverage.
+   Retain observed spelling and null when absent; separate requested settings from confirmed
+   execution/billing tier. Test first-turn absence, settings changes, restart/checkpoint replay,
+   conflicting sources and copy attribution before equating local tier with backend `speed`.
+3. Compare current accounting, TokenTracker-style lineage inference and CodexBar/Win-CodexBar
+   containment using identical copy, inherited-prefix, interleaved, truncation and restart fixtures.
+   Include totals-only `100 → 20 → 110`, total-plus-last counters, equal counters from distinct
+   requests, bounded-cache eviction, file-order independence and checkpoint/full-replay parity.
+   Keep physical occurrences even if a separately versioned projection identifies canonical usage.
+4. Evaluate simple pace independently of Forecast: consumed 62% minus elapsed 40% gives a
+   **22-percentage-point pace deficit**. Require a known compatible window/start/duration;
+   resets, missing windows and changing duration must not generate a fictitious elapsed fraction.
+   API-price-weighted workload belongs beside token/category/model-effort baselines in Model Lab,
+   not automatically in production quota policy. Version price tables and retain unpriced coverage.
+5. Continue the already-authorized experimental acquisition rather than reinstate “do not poll”.
+   Keep daily counts, relative usage, workspace credit/token reports, credit events, profile activity,
+   plan history, v1 estimates and v2 task percentages as distinct typed contracts when added.
+   Prioritize actually available personal-account reports; do not repeatedly probe denied routes.
+   A Codex-owned analytics/plan/task app-server seam remains preferable long term. Names such as
+   `account/analytics/read` are design suggestions, **not existing methods**; the SDK adds no
+   hidden billing capability (section 8).
+6. Extend the section 6 tests for account/seat/date/cycle compatibility, revisions, negative drift
+   cases, parser-unit changes, missing versus zero, latest-failure visibility and privacy. Track
+   unit/plan/window changes separately from ordinary resets, reporting lag and source-coverage changes.
+   Before native-credit calibration, distinguish included workload credits, balance debits,
+   reset entitlements and percentages; do not fill missing native credits with a price estimate
+   and subsequently call the resulting ratio provider-native.
+
+**TT remains deferred, not disproved.** Prefer observed native quantities or direct
+feature-to-quota models where supported. The current zero-credit history does not supply a stable
+native intermediate scale, but neither does it justify inventing TT. Any learned scalar or new
+weighting still needs chronological evaluation and existing promotion gates. Preserve selected
+typed evidence and provenance—not raw payloads “aggressively”; retention/privacy boundaries apply.
+
+## 12. Evidence slice and reconciliation experiment — 2026-09-18
+
+The existing app-server quota reader now retains a separate typed `QuotaMetadata` observation
+in the existing server-evidence ledger. This includes named/legacy buckets even without a
+supported quota window, nullable policy/spend-control metadata, balance strings and window/reset
+values. It is not a new polling source or a native workload-credit measurement. Current quota
+gauges continue to use their existing selection rules. Optional-metadata validation failure does
+not discard otherwise usable window values. Frequent metadata does not consume the bounded
+account-activity comparison history budget.
+
+Rollout workload evidence now retains raw nullable service-tier settings, preserving source
+identity, byte order and any native turn ID. Schema migration and parser replay recover these
+records from existing sources. There is no new inferred token-to-tier attribution, pricing default
+or accounting change. Diagnostics exposes physical setting-record counts, not canonical requests.
+Live deployment verified schema 7, account-scoped quota metadata, and initial `flex` setting records.
+That check exposed the state-index fast path skipping unchanged files; schema 4 now invalidates
+only the disposable index hints atomically, with rollback/retry coverage. Initial counts are not
+complete-corpus coverage and should not be presented as such.
+
+Original test-only scalar competitors make the assumptions testable without importing code:
+
+| Synthetic sequence | Incumbent | High-watermark-only | Bounded total-minus-last lineage |
+| --- | ---: | ---: | ---: |
+| Totals 100 → 20 → 110, no last counters | 190 | 110 | 110, marked ambiguous |
+| Same totals, last counters 100 → 20 → 10 | 130 | 110 | 130 |
+| Totals 100 → 20 → 100, last 100 → 20 → 100 | 220 | 100 | 120 |
+| Reset 100 → 20 → 30, last 100 → 20 → 10 | 130 | 100 | 130 |
+| Partial history totals 1000 → 1100, last 10 → 20 | 30 | 1100 | 30 |
+
+These numbers are algorithm outputs, not independent workload truth. The high-watermark-only
+baseline deliberately ignores last counters; it is not a full CodexBar reproduction. The lineage
+baseline uses a 32-head cache and a `total-last` predecessor assumption, not native stream IDs
+or a full TokenTracker port. Tests also show equal counters can hide independent requests,
+eviction can make old replay look new, copies remain independently counted, and serialization at
+every restart boundary preserves each candidate's result. Existing inherited-prefix and source-
+rewrite tests remain part of the full suite. Real-corpus comparison is still needed before choosing
+a canonical projection. Plausible assumptions can support experiments without relabelling inferred
+results as provider facts or waiting indefinitely for perfect identifiers.
+
+## 13. Native log evidence — 2026-09-19
+
+Read-only inspection of the live `logs_2.sqlite` used a short SQLite read transaction and
+returned allowlisted aggregates, not raw bodies, identities or credentials. The existing
+[SQLite reference](CODEX_SQLITE_SCHEMA.md#installed-logs-corroboration--2026-09-19) correctly
+describes its schema. Existing [server-usage contracts](CODEX_SERVER_USAGE.md) remain useful;
+logs supplement runtime evidence rather than replace those contracts.
+
+| Observed evidence | Useful interpretation / boundary |
+| --- | --- |
+| About 778 `post sampling token usage` rows, with `total_usage_tokens`, compaction scope/limit and full-context limit fields | Context occupancy and compaction diagnostics. Upstream explicitly assigns `total_usage_tokens = token_status.active_context_tokens`; never sum these as consumed tokens or TT training workload. Observed scope/full-context limits were 244,800/258,400, not universal constants. |
+| About 1,175 `getAuthStatus` request-name rows | Runtime capability discovery beyond the generated public catalog. Invocation is not successful response or credential export. Upstream defaults `includeToken` and `refreshToken` to false and withholds host-owned credentials. No token extraction was attempted. |
+| About 71 `thread/tokenUsage/updated`, 68 `account/rateLimits/updated`, and two `thread/settings/updated` rows | These sampled notifications contain names, not quantitative payloads. Useful for lifecycle/coverage timing, not reconstructing historical allowance percentages. |
+| Transport completion rows for GET `/backend-api/codex/models`, POST `/backend-api/codex/analytics-events/events`, POST `/backend-api/ps/apps/batch`, and GET `/backend-api/accounts/{id}` | All selected route groups had observed HTTP 200 responses. Analytics-events is telemetry ingestion, not a report endpoint. Routes were extracted only from the actual HTTP logger, with queries and identifiers removed. |
+| Three observed `service_tier` values parsed as `flex` in selected turn logs | Additional local tier corroboration, not proof of execution/billing tier or equivalence with backend `speed`. |
+| Output-item identifiers and optional thread/process identities | Potential correlation evidence for replay/interleaving experiments. Repeated item observations are not proof of repeated billing or a validated canonical token identity. |
+
+The selected HTTP logger slice exposed no numeric quota/credit headers and no daily WHAM report
+calls. This is **not** evidence that those routes are unavailable: retention, logger selection and
+different transport owners limit coverage. Endpoint strings inside logged tool commands are not
+transport observations and were excluded. No new provider-credit scale was discovered.
+
+Source corroboration at `7498521d288b9b3b96ffba4eedf089d8d6e06a84` (not exact-build proof):
+
+- `codex-rs/core/src/session/turn.rs:568`: active-context assignment and compaction fields.
+- `codex-rs/app-server/src/message_processor.rs:624`: request-name logging;
+  `app-server/src/outgoing_message.rs:758`: notification-name logging.
+- `codex-rs/app-server/src/request_processors/account_processor.rs:1035`: legacy auth-status
+  options and credential-export exclusions.
+- `codex-rs/http-client/src/client.rs:118`: completed-request method/URL/status/header logging.
+- `codex-rs/core/src/stream_events_utils.rs:326`: tool payload previews demonstrate why raw logs
+  remain content-bearing; line 448 records output-item identity.
+
+**Practical next slice, not implemented:** extend the existing bounded native-log inspector with
+allowlisted context/compaction and transport/capability diagnostics. Before persisting derived
+records, test logger/version-specific extraction, missing fields, content-string false positives,
+query/header redaction, repeated observations, pruning and database recreation. Context limits
+may indicate a model/configuration change, not quota-policy drift; preserve that distinction.
+Any item-ID reconciliation experiment should compare same-thread/process and cross-process
+observations against rollout evidence before changing canonical accounting. No new acquisition,
+raw-log retention, endpoint probes or TT normalization were introduced by this investigation.
+
+## 14. Real-corpus reconciliation and model continuation — 2026-09-19
+
+The scalar experiments from section 12 now share their implementation with a read-only corpus
+audit, rather than maintain a separate CLI approximation. Existing restart, repeat, interleave
+and eviction fixtures exercise that implementation. Additional fixtures check inherited-prefix
+exclusion, physical copies, malformed-file exclusion, last-only counters and aggregate-output
+privacy. The native parser/file reader own record and session semantics; no replacement parser,
+new durable schema, native mutation or production deduplication was introduced.
+
+Run locally from the repository root:
+
+```powershell
+dotnet run --project tools/TajsTokens.ForecastEvaluation -c Debug -- --reconciliation "$env:USERPROFILE\.codex"
+```
+
+Pass the actual selected Codex home if it differs. The command scans `sessions`,
+`archived_sessions` and `archive`; other roots are not implicitly included. Reports exclude
+files whose size/write time changed during reading and files with read/JSON failures. This is
+not an atomic whole-corpus snapshot or protection against an undetectable same-metadata rewrite.
+It keeps hashes only in memory and prints aggregate numbers, never native identities or payloads.
+
+Initial sample: 367 stable files, zero excluded files, 66,263 owned token observations, no
+incomplete cumulative snapshots, one totals-only drop, and 28 files where candidate totals differ.
+
+| Counter projection | Physical-file total | Difference from incumbent |
+| --- | ---: | ---: |
+| Incumbent reducer | 9,161,300,274 | — |
+| High-watermark-only | 8,855,223,082 | −306,077,192 |
+| Bounded total-minus-last lineage | 9,162,150,860 | +850,586 |
+
+No cross-file fingerprint repeated under the strict session/time/model/effort/both-snapshot key.
+This is narrower than all possible copy detection: inherited prefixes are withheld by the parser,
+cross-session similarities do not match, and repeated rows within one file are not this metric.
+Earlier historical repeat-fingerprint results used different predicates/data and are not refuted
+by this result. Scalar containment still discards possible legitimate reset work; lineage still
+assumes predecessor identity and cannot recover evicted repeats. Neither result establishes truth
+or warrants changing the canonical reducer. Candidate counters lacking complete valid cumulative
+evidence are explicitly counted as incomplete, not treated as a zero watermark.
+
+The separately delivered even-burn Overview comparison is descriptive only and does not address
+TT or change these model evaluations. Native credits remain zero in the observed daily report;
+local learned workload weights remain a plausible research path, not newly discovered credits.
+
+### Chronological evaluation refresh
+
+The existing `--cost`, `--composed`, `--composed-strict` and `--transfer` commands were run
+read-only against the owned database. Each command reads its own consistent transaction; this
+was not one frozen snapshot across commands. The cost snapshot at 2026-09-18 22:37:38 UTC had
+341 usable intervals across separate cohorts. The authoritative weekly half-hour cohort had
+20 training and 44 held-out intervals across only two held-out reset generations.
+
+| Actual-workload cost candidate | Held-out mean envelope-distance loss (pp) |
+| --- | ---: |
+| Pace | 1.3741 |
+| Total tokens | 0.3191 |
+| Token categories | 0.3831 |
+| Model/effort | 0.2786 |
+| Context ablation (oracle explanatory input) | 0.1906 |
+
+These are explanatory cost losses, not forecasting performance. No candidate earned the
+material-win gate. Reconstructed end-to-end replay had 39 paired outcomes across two resets
+(five additional targets lacked composition): total-token loss 1.1507pp, categories 1.0774pp,
+model/effort 1.1901pp, pace 1.3592pp, **incumbent 1.0586pp**. Better explanatory weights still
+do not imply a better product forecast. The context ablation is not eligible for live promotion.
+
+Strict collection-time replay withheld all 44 potential outcomes under its combined availability/
+composition gate; the current report does not distinguish those reasons. The older five-outcome
+strict result is not current proof. The next model follow-up should diagnose this loss of strict
+coverage, including the builder's broad workload-availability dependency and newly backfilled
+metadata, before changing any gate or treating the exclusion as ordinary model failure. Unknown
+capture times and genuinely late evidence must remain excluded. Transfer evaluation still found
+no compatible recorded-account regimes, so it cannot establish a transferable TT scale.
+
+Validation: 417 Core tests passed; Windows Debug build succeeded with zero warnings/errors and
+installed/restarted daily build `20260918T223931937Z-d18f5867`. Native corpus audit and the four
+retained-data evaluations completed. No model promotion, accounting rewrite, signing or push.
+
+## 15. Strict replay, drift diagnostics and API-price baseline — 2026-09-19
+
+### Strict coverage diagnosis and correction
+
+The new withholding diagnostics reproduced the previous zero-outcome result: all 44 targets
+failed `training-collected-after-origin`. `QuotaCostObservationBuilder` had included every
+historical workload observation's collection time in the frozen training dependency. That made
+newly backfilled metadata invalidate token-only models which never used those fields.
+
+`quota-cost-observations/v2` preserves the broad full-feature timestamp and separately derives
+token-cost availability from quota labels/prefix, token amounts/model/effort and any ownership
+assertion. `composed-quota/v3` uses the latter for its existing three token-based candidates.
+Activity/context/runtime oracle ablations remain outside composed promotion. Late or unknown
+token collection, late meters and retrospective ownership declarations still fail closed.
+Tests cover that boundary and prove that a late unused tier setting cannot change eligible
+predictions. The UI and CLI show overlapping exclusion reasons rather than one opaque total.
+
+Corrected strict replay: 17 held-out targets, one reset generation; 25 targets still fail late
+training, two lack composition. Interval losses: incumbent 0.2189pp, total 0.4559pp, categories
+0.5239pp, model/effort 0.5368pp, pace 1.3173pp. This fixes dependency provenance, not the model's
+relative performance, and supplies neither sufficient resets nor an earned promotion.
+
+### Rebuildable semantic change records
+
+`codex-evidence-drift/v1` compares adjacent compatible immutable observations. Each derived
+signal carries stable ID, policy, before/after observation IDs, surface/account, field values,
+first-observed collection time and **unknown** policy-effective time. The persisted observation
+ledger remains the durable source; no redundant derived table or raw response retention is added.
+
+- Reported plan, limit identity, model alias, duration, individual limit and unlimited-credit
+  flag changes are configuration evidence, not proof of a changed quota denominator.
+- Bucket/field disappearance is missingness, never automatic revocation. Blocking reason and
+  spend-control state are separate operational signals.
+- Failures, client/contract changes, account switches and overlapping fetches prevent bridging
+  semantic comparisons. A/B/A account history is not silently joined.
+- Historical daily revisions require overlapping completed UTC days and compatible units and
+  grouping. Current-day growth, moving range edges and freshness advancement alone are not drift.
+- Quota consumption, ordinary reset movement, balance depletion, and decimal formatting alone
+  generate no policy signal. Null remains distinct from zero and false.
+
+Diagnostics displays the latest 24 signals from independently bounded per-surface histories
+(512 fetches / 5 MiB each). These limits are disclosed; zero signals does not establish stability.
+Tests cover resets/depletion negatives, account/version/failure barriers, missingness, stable
+provenance, reordered named/legacy views, unit changes and revised versus in-progress days.
+
+### API-price weighting, not native credits
+
+`openai-api-standard-short-2026-09-19/v1` uses the inspected standard short-context rates from
+[official API pricing](https://developers.openai.com/api/docs/pricing) for GPT-6 Astra and the
+three GPT-5.6 models, plus the published model-page rates for
+[GPT-5.5](https://developers.openai.com/api/docs/models/gpt-5.5),
+[GPT-5.4](https://developers.openai.com/api/docs/models/gpt-5.4),
+[GPT-5.3-Codex](https://developers.openai.com/api/docs/models/gpt-5.3-codex) and
+[GPT-5.2-Codex](https://developers.openai.com/api/docs/models/gpt-5.2-codex).
+The source snapshot is a fixed retrospective weighting choice, not historical price evidence.
+The implementation matches exact supported names; it does not guess undocumented aliases.
+
+The weighted categories are disjoint input, cached input, cache writes (only where a rate is
+documented), non-reasoning output and reasoning output. Unknown model/cache-write rates retain
+unpriced event/token coverage, never a zero-cost substitute. Standard/short-context weighting
+does not assert actual service tier or request context length and omits regional/tool modifiers.
+It is neither estimated subscription billing nor a provider-credit fallback.
+
+The existing frozen-prefix interval model fits one scale coefficient on the first 20 targets.
+Unpriced training prevents fitting; unpriced held-out targets are excluded and matched-outcome
+pace/total losses are reported. The candidate cannot earn a material-win/promotion label.
+Chronological native weekly replay priced all 20 training and 44 held-out half-hour targets:
+API-weight loss 0.3644pp, matched total-token 0.3191pp, matched pace 1.3741pp (two held-out resets).
+This sample does not support preferring published-price weighting to raw tokens.
+
+Validation: 425 Core tests passed; Windows Debug build succeeded with zero warnings/errors and
+installed/restarted daily build `20260918T230426495Z-59db2cb3`. Strict replay was reproduced
+before and after the dependency correction; the API-price baseline ran on retained chronological
+data. Drift extraction and persisted-ledger read integration have automated proof; native visual
+acceptance is not claimed. Changes are staged, without signing or push. Remaining review work
+is tracked in PROJECT.md, including daily native pairing diagnostics and broader reconciliation.
+
+## 16. Native pairing and forecast horizons — 2026-09-19
+
+The native daily pairing diagnostic now consumes the existing immutable report snapshots in
+Analytics and the evaluation CLI (`--daily-pairing <telemetry.db>`). It does not acquire evidence,
+change canonical accounting, fit TT or convert a daily ratio into current five-hour/weekly quota.
+Latest failures supersede earlier successes. Same account bracket, versions, range, units, grain,
+plan, collection policy and freshness are checked. Completed UTC days only are compared, excluding
+the requested end date because endpoint inclusion semantics remain uncertain. Zero/missing native
+credits, on-demand spill (including unknown spill), tiny usage and incompatible reports are exposed
+as separate exclusions. Revisions replace a snapshot; they are never summed across polls.
+
+Any resulting credits/percentage-point ratio is a hypothesis. Common product/seat scope and
+historical denominator era remain unverified. Tests can construct 49.897, but that is arithmetic
+verification, not independent corroboration of the repository's observed scale. The current owned
+database inspection returned no readable latest daily pair; earlier transient probes do not provide
+a stored paired series. No authenticated request was made for this diagnostic run.
+
+The accepted forecast direction is now **Nowcast / Session outlook / Quota outlook / Workload
+planner**, with implementation status owned by PROJECT.md. Separate activity probability from
+workload conditional on activity, and separately estimate quota cost given workload. Short-horizon
+predictability must still be measured. Do not publish illustrative probabilities as model output,
+multiply conditional interval endpoints into purported calibrated bounds, or rename the existing
+two-hour extrapolation as a nowcast. Idle handling must distinguish missing collection, quiet
+running work and observed inactivity. Long-horizon output should describe pace/history scenarios,
+not claim knowledge of future human decisions. This direction changes the next forecast slice,
+not native quota semantics or the already-completed cost-model evaluation.
+
+Validation: 438 Core tests passed, including 13 pairing cases. Windows Debug build passed with
+zero warnings/errors and installed/restarted `20260918T231501762Z-3182d9d4`. No visual acceptance
+or new forecast-model validation is claimed. Changes are staged, not signed or pushed.
+
+## 17. Activity-aware local nowcasts — 2026-09-19
+
+Live recorded-token forecasts now target 5/15 minutes, not 30 minutes/two hours. A versioned
+ten-minute observed-activity gate pauses extrapolation after quiet periods. Quiet open turns are
+not considered guaranteed running work; missing terminals cannot extend predictions forever.
+Recent settings/context metadata alone cannot manufacture activity. The UI distinguishes quiet
+open turns, no recent observed activity, unknown evidence and failed/stale refreshes. No probability
+of human activity is reported. Quota outlook remains independent and unchanged.
+
+Short-horizon chronological replay uses the same eligibility gate and retains earlier-only fitting,
+selection and empirical intervals. On the retained corpus, 4,688 five-minute origins yielded
+selected-policy MAE 1,385,011 tokens versus recent-30m pace 1,417,181; 1,545 fifteen-minute origins
+yielded MAE 3,777,833 versus 3,812,848. Empirical 80%-target ranges covered 81.1% and 81.0% of
+4,668 and 1,525 eligible outcomes. These are reconstructed event-time corpus results, not strict
+historical deployment proof or a promise of useful precision. Fifteen-minute recent-median error
+was lower (3,598,647), so the selected policy is not uniformly best. Model Lab retains all competing
+baselines and adds zero workload as an explicit evaluation-only inactivity baseline.
+Zero-workload MAE was 1,902,593 and 5,353,439 tokens respectively, worse than the selected policy.
+
+This is not yet the proposed hurdle model. Predicting active probability, future workload
+conditional on activity, conditional session outlook and calibrated joint burn uncertainty remain
+separate next work. Ten minutes is an explicit initial assumption, not an inferred universal rule.
+
+Validation: 441 Core tests passed. Windows Debug build passed with zero warnings/errors and
+installed/restarted `20260918T232412503Z-08000f0d`. Retained-corpus replay includes pace, median,
+regression and zero-workload comparisons; live query reported quiet open turns and paused output.
+Native UI visual acceptance is not claimed. Work is staged, without signing or push.
+
+## 18. Ordered reconciliation candidates — 2026-09-19
+
+`reconciliation-audit/v2` extends the read-only corpus CLI with ordered token-sequence comparisons.
+It retains the existing same-owner fingerprint count and separately omits owner when looking for
+cross-file candidates. Timestamp, model/effort, full cumulative category vector and last-usage
+vector still participate. Equal sequences, strict prefixes, divergent prefixes and non-prefix
+overlap are mutually exclusive pair classes; shared-prefix occurrence counts are pairwise, not a
+deduplicated workload total. Repeated values inside one sequence retain multiplicity/order. An
+inverted index limits comparison to files sharing at least one fingerprint. Hashes, owners and
+paths never leave the invocation. These are token evidence relationships, not byte-copy proof or
+native request identity. Account compatibility is not established, so no automatic merge follows.
+
+The 367 stable files / 66,263 owned observations produced no candidate pairs, even without owner
+matching. The first scan excluded 3,949 pre-ownership records; the final scan excluded 3,996 as
+the source corpus continued growing, with owned-token totals unchanged and zero equal-total
+category-change observations. Some excluded records may contain
+inherited parent history; the production parser's exclusion is preserved rather than bypassed to
+manufacture accounting evidence. That blind spot remains explicit next research. Counter-category
+reshuffles at unchanged scalar totals now have a separate diagnostic and restart/retry fixture.
+
+Tests cover exact sequences, prefix plus suffix, divergent tails, reordered overlap, repeated
+occurrences, empty/unrelated streams, processing-order invariance, copied files and aggregate-only
+privacy. Canonical accounting and durable evidence remain unchanged; no competitor was promoted.
+
+Validation: 449 Core tests passed; final corpus audit completed. Windows Debug build passed with
+zero warnings/errors and installed/restarted `20260918T233022949Z-5068df91`. Changes staged;
+no signing or push. This diagnostic adds no new native acquisition or retention.
+
+## 19. Pre-ownership investigation found a Desktop filename bug — 2026-09-19
+
+The v3 audit splits excluded token-count records from other records, unowned whole files from
+prefixes, and missing filename identity from missing matching metadata. Before the fix, 4,068
+records / 553 token-count records belonged to five wholly unowned files. No successfully owned
+file contained an excluded prefix. All five filenames had the observed Desktop form
+`rollout-<timestamp>-<thread UUID>_<suffix UUID>.jsonl`. The existing last-UUID rule incorrectly
+selected the suffix. Both metadata identity fields matched the first UUID, and the native catalog
+confirmed all five thread identities: three exact selected paths, two alternate paths.
+
+This is installed-runtime evidence, not a claim about an independently verified public upstream
+contract. These files report CLI versions `0.150.0-alpha.8`, `0.155.0-alpha.2.6`, and
+`0.156.0-alpha.2`, with Desktop originator. No native identity, path or content was exported.
+
+The parser now recognizes only the exact timestamp-plus-two-UUID Desktop filename shape and uses
+its thread UUID. Matching metadata is still mandatory; a copied prefix or metadata matching only
+the suffix cannot establish ownership. Arbitrary renamed multi-UUID files retain the old rule.
+The fix is shared by ingestion, coverage and read-only alternate comparisons. Only affected paths
+change typed-parser version; state-index v5 clears disposable selection hints transactionally.
+Unchanged non-suffixed files retain checkpoints. Alternate paths remain inspection-only while the
+native catalog is available. This corrects lost selected-source evidence, not cross-file deduping.
+
+Tests cover wrong suffix-owner metadata, parent prefixes, native token ownership, restart state,
+old-parser replay, append idempotence and cache-migration failure/rollback/retry. No provider quota
+semantics or normalization unit changes follow from this filename correction.
+
+Post-fix corpus audit: all 367 files stable and owned, 66,839 token observations, zero pre-ownership
+exclusions and zero cross-file candidate pairs. There were 29 scalar-competitor disagreement files,
+one totals-only drop and zero equal-total category changes. Physical-file experiment totals were
+9,239,354,220 incumbent, 8,945,479,838 containment and 9,240,204,806 lineage; these include alternates
+for research and are not canonical account usage. The corpus grew between scans, so the increase
+is not attributed solely to recovered historical rows.
+
+Validation: 453 Core tests passed. One initial run hit an unrelated transient directory-move
+access denial in AppDataLocation; its targeted retry and the full suite passed. Windows Debug
+build passed with zero warnings/errors and deployed/restarted `20260918T234102623Z-5f987e56`.
+After refresh, owned storage had four Desktop-version checkpoints, all native-catalog-selected,
+and 511 native token events for their privacy-safe source labels; state-index version was 5.
+The wider catalog can select paths outside the corpus scanner's roots. No alternate import or
+UI visual acceptance is claimed. Changes staged, without signing or push.
+
+## 20. Retained daily reports and account-switch protection — 2026-09-19
+
+The missing retained daily pair was explained by `ExperimentalCodexBackendEnabled=false`, not
+endpoint failure. An explicitly authorized one-shot collection using the existing adapter returned
+Available for both routes: 27 count-report dates and 31 relative-usage dates. All 27 reported native
+credit values were zero; all on-demand-credit fields were absent. Four relative dates had no count
+row, six had zero/tiny relative usage, and one was the incomplete/end-boundary date. These exclusions
+overlap. Pairing found zero conversion hypotheses. Typed observations are now retained in the
+existing ledger; no raw payload, credentials or identifiers were exported. Background polling
+remains disabled. Zero reported credits do not mean zero work or prove credits can never exist.
+
+`--collect-daily-evidence <telemetry.db>` is now an explicit one-shot research command using the
+same provider/storage owners; it does not change saved preferences or add a silent fallback.
+`--daily-pairing` remains the retained-evidence path. The negative native-scale result leaves TT
+eligible for evaluation, not automatically justified or calibrated.
+
+Transport tests exposed and addressed a separate identity hazard: before/after backend identity
+requests use the captured bearer, so both can succeed for the old account after the local selected
+account changes. The adapter now rereads selected account identity at the end and discards reports
+on a switch. Same-account token rotation alone does not discard evidence. A 401 on either identity
+bracket now reports AuthenticationRequired rather than generic Error; no refresh is attempted.
+Tests use synthetic in-memory auth and a fixed-route handler, with assertions that credentials/raw
+account IDs never enter retained observations. Disabled collection reads neither auth nor network.
+
+Validation: 458 Core tests passed. Retained-evidence CLI reproduced the live collection's zero-ratio
+result without another backend call, and saved background opt-in remained false. Windows Debug
+build passed with zero warnings/errors and installed/restarted `20260918T234940099Z-df4880f9`.
+Changes staged, not signed or pushed. No native UI visual acceptance is claimed.
+
+## 21. Recorded-activity and conditional-session decomposition — 2026-09-19
+
+`recorded-session-outlook/v1` separates the probability of **any positive local token recording**
+in a 30/60-minute interval from the workload conditional on that event. It does not claim human
+presence, continuous activity, activity at the horizon endpoint, or complete account coverage.
+The only inputs are already-retained token observation time, collection time and amount. No new
+tool-call/completion, client/generation, prompt, result or other native metadata retention was
+introduced. A future expansion requires an explicit per-field retention/privacy contract first.
+
+Training uses the preceding 120 matured, disjoint origins, stratified by recent-token age when
+at least 20 matching origins exist, otherwise a labelled global fallback. Activity frequency uses
+Beta(1,1) smoothing. Positive-target mean and empirical 10–90% range need eight positive examples.
+Expected work is the product of probability and conditional mean, never multiplied range endpoints.
+UI probability/expected mean need 64 earlier same-group held-out outcomes, binned calibration error
+<=0.1 and Brier no worse than earlier-only global frequency. The gate is an empirical assumption,
+not proof of permanent calibration. Quiet/stale/sparse states remain explicit. Model Lab and the
+`--session-outlook` CLI expose the methodology and matched outcome diagnostics.
+
+Retained-corpus reconstructed replay produced:
+
+| Horizon | Activity outcomes / positive | Brier / frequency baseline | Binned calibration error | Conditional MAE / matched pace | Expected MAE / matched pace | Historical-range coverage |
+|---|---:|---:|---:|---:|---:|---:|
+| 30 min | 1,701 / 919 | 0.146 / 0.234 | 0.0145 | 6.13M / 6.66M tokens (851 outcomes) | 4.97M / 5.20M tokens | 74.5% |
+| 60 min | 839 / 506 | 0.153 / 0.234 | 0.0235 | 10.51M / 12.03M tokens (499 outcomes) | 7.73M / 8.46M tokens | 70.9% |
+
+These results support an explicitly conditional local-work scenario, not a reliable quota-burn
+distribution. The ranges are deliberately labelled historical rather than calibrated 80% bands.
+No cost-model promotion, TT scale, native credit conversion or new quota-policy inference follows.
+Tests cover chronological maturity, non-overlap, future/late evidence exclusion, sparse/idle cases,
+positive-target conditioning, decomposition arithmetic and same-group probability withholding.
+
+The CLI was then aligned with the actual live reader's **30-day lookback** rather than the initial
+January-to-date research run above. In that live-path-sized replay, 30/60-minute activity outcomes
+were 421/201 (263/137 positive), Brier 0.137/0.169 versus 0.241/0.222, and calibration error
+0.038/0.030. Conditional MAE was 8.98M/16.38M versus matched pace 10.00M/18.54M over 250/137
+positive outcomes. Expected-token MAE was 7.61M/13.47M versus 8.28M/14.28M over 345/201 matched
+outcomes. Historical-range coverage was 74.0%/73.7%. This confirms direction but also substantial
+error; the longer-history table must not be presented as the live window's validation result.
+
+Validation: 462 Core tests passed, including the final matched-outcome count checks. Windows Debug
+build passed with zero warnings/errors and deployed/restarted `20260919T000133149Z-3bd7153f`.
+Both research and live-lookback CLI evaluations ran against owned retained evidence only.
+Changes staged; no signing, push or native UI visual acceptance claimed.
+
+## 22. Joint quota-range replay (2026-09-19)
+
+`composed-quota/v4` shares the live range calibration with chronological replay. Each range
+requires eight earlier completed reset generations; labels must be available at the origin.
+Strict replay uses actual collection time, reconstruction uses event time. Repeated polls do not
+create independent reset generations. The radius uses generation-maximum absolute composed
+errors, an empirical 80% target and a one-percentage-point floor. Model Lab and CLI report range
+origins, coverage of reported remaining quota and mean width, without claiming latent coverage.
+
+After Desktop historical recovery, the native 30-minute cohort currently has no strict held-out
+outcomes: 46 origins are excluded for training collected after the origin and one lacks usable
+composition. The earlier 17-outcome result is a dated pre-recovery snapshot. Backfilled tokens
+must not qualify historical deployment evidence. No ranges or models were promoted.
+
+This closes the shared-calibration/coverage diagnostic gap, not the separate conditional-session
+quota distribution. Endpoint activity prediction and any new metadata retention remain separate
+future decisions; the implemented session target is any positive recorded work in the interval.
+
+Validation: 463 Core tests passed; Windows Debug build passed with zero warnings/errors and
+deployed/restarted `20260919T001245160Z-957c09b1`. Strict replay ran against owned evidence.
+Changes staged without signing or pushing; native UI visual acceptance remains unclaimed.
+
+## 23. Include completed quiet session outcomes (2026-09-19)
+
+Audit found that session replay stopped at the last token timestamp. This censored completed
+quiet targets in the retained snapshot's tail until another token arrived, biasing the activity
+sample toward continuing work. `recorded-session-outlook/v2` now matures targets through the
+earlier of requested evaluation time and dataset capture. The existing two-hour origin-recency
+bound still prevents extrapolating multi-day abandoned sessions. Incomplete targets stay absent;
+an aging snapshot cannot create new negative labels. The target remains recorded local work,
+not proof that collection was complete or that a human stopped working.
+
+A regression fixture verifies quiet outcomes without a subsequent token, stale-snapshot stability,
+capture-boundary exclusion and bounded origin eligibility. The owned 30-day replay currently
+remains 421/201 outcomes for 30/60 minutes with Brier 0.137/0.169 and historical-range coverage
+74.0%/73.7%; its actively updating tail did not expose the synthetic stopped-session case.
+No quota promotion, collection, retention or durable schema change accompanies this correction.
+
+Validation: 464 Core tests passed; Windows Debug build passed with zero warnings/errors and
+deployed/restarted `20260919T001602113Z-5fd658c7`. Work staged; no signing or push attempted.
+
+## 24. Session-workload to quota evaluation (2026-09-19)
+
+Added `session-quota-evaluation/v1` in Model Lab and the read-only `--session-quota` CLI.
+The existing duration/session-count planner is not a token-cost estimator and is not reused under
+a misleading name. This comparison instead uses the existing first-20-interval frozen total-token
+cost model, separately for each known account/source/plan/bucket and 30/60-minute target.
+Session predictions are reconstructed at each quota origin using preceding events and matured
+targets; cost fitting never consumes held-out workload. Local work remains co-observed evidence,
+not proven exhaustive account attribution. This is retrospective, not collection-time validation.
+
+Real polls rarely land exactly 30/60 minutes apart. An initial exact-duration restriction withheld
+all real outcomes. The corrected evaluator trains the workload model for the actual elapsed
+horizon accepted by the existing five-minute meter tolerance, rather than scaling a 30-minute
+prediction or silently treating different durations as identical. Quiet/sparse origins stay withheld;
+quiet outcomes after eligible origins remain in unconditional scores, not conditional-positive MAE.
+
+| Target | Outcomes / positive / resets | Conditional MAE / matched pace | Expected MAE / matched pace | Expected envelope loss / pace |
+|---|---:|---:|---:|---:|
+| 30 min | 32 / 31 / 2 | 1.865 / 2.657pp | 1.847 / 2.576pp | 1.013 / 1.723pp |
+| 60 min | 9 / 8 / 1 | 4.536 / 4.584pp | 4.317 / 4.089pp | 3.317 / 3.223pp |
+
+The 30-day retained-data run withheld 15/3 origins. Joint expected-quota bands use prior completed
+generation-maximum absolute end-to-end errors and the existing eight-generation calibration rule
+(80% empirical target and one-point floor), never multiplied component endpoints. Neither horizon
+has qualifying bands. Conditional quota ranges and live promotion remain unsupported; the mixed
+result is not evidence for a TT scale. The live activity-probability gate is not a selection filter
+for this research candidate, which is explicit in the methodology.
+
+Tests cover future-work exclusion, cohort isolation, absent account identity, horizon-specific
+training, polling jitter and conditional versus unconditional outcome selection. No native
+acquisition, retention, auth, canonical accounting or persistence schema changes were made.
+
+Validation: 468 Core tests passed; Windows Debug build passed with zero warnings/errors and
+deployed/restarted `20260919T002408180Z-e57eb8c3`. Work staged without signing or pushing.
+The Model Lab code path builds successfully; native UI visual acceptance is not claimed.
+
+## 25. Compare session quota against the incumbent (2026-09-19)
+
+`session-quota-evaluation/v2` adds the existing quota policy as a stronger baseline, replayed
+within the same source/account/plan/window cohort. Matching requires both identical origin and
+outcome timestamps. Missing predictions remain absent; candidate and incumbent errors are both
+computed on the resulting paired subset, whose count is shown in Model Lab and CLI.
+
+The owned-data replay has 32 paired 30-minute outcomes: candidate/incumbent MAE **1.847/2.062pp**,
+with measurement-envelope loss **1.013/1.234pp**. At 60 minutes only four of nine outcomes match:
+paired MAE **3.110/3.087pp**, envelope loss **2.110/2.281pp**. The earlier 4.317pp full-sample
+hourly candidate MAE must not be compared with this four-outcome incumbent value.
+
+This strengthens the baseline comparison, not the promotion case: two/one reset generations and
+retrospective reconstruction remain insufficient for live selection or uncertainty claims. Tests
+check replay-derived errors, exact pair counts, same-account isolation and absent comparisons.
+
+Validation: 469 Core tests passed; Windows Debug build passed with zero warnings/errors and
+deployed/restarted `20260919T002751704Z-b6f01560`. Changes staged; no signing or push attempted.
+
+## 26. Frozen TT basis prototype (2026-09-19)
+
+Implemented `tt-lab/v1` in Model Lab and read-only `--tt`. This is an experimental local
+workload index, not a provider quantity or subscription wallet. The first 20 compatible
+known-account cost intervals fit the existing nonnegative category model. A reference basket
+of one million tokens in the first positive training interval's mix is worth 1 TT. Model/effort
+support is pooled; it does not claim model-specific premiums. Tier and context are unmodelled.
+
+`TtWorkloadBasis` defensively copies its values and hashes exact coefficients, reference basket,
+category support, sorted model/effort support and versioned input semantics. Unsupported categories,
+incomplete model/effort mix, and category/total disagreement cannot produce a complete score.
+The next 20 disjoint intervals fit a separate nonnegative quota/TT conversion and local raw-token/
+full-vector competitors. Later supported intervals are held out. Changing calibration/outcome
+labels does not alter the frozen scoring basis or TT assigned to unchanged workload.
+
+The current weekly/half-hour basis is
+`tt:cfc1cbecfe08ff053f7de21787d959f79a3b4a9435fc3be87737a9aaf7ca6ca7`.
+It supports observed `gpt-6-astra` / `low`, with no cache-write support. Category order is
+uncached, cache-read, cache-write, non-reasoning output, reasoning output; reference counts are
+approximately 7,144.24 / 990,739.37 / 0 / 1,168.58 / 947.81. Exact values and coefficients are
+available in CLI output; rounded documentation values are not a basis serialization.
+
+On 27 later intervals from **one reset**, all supported, scalar/full-vector/raw-token
+measurement-envelope losses were **0.0085 / 0.0810 / 0.2419pp**. Displayed-delta MAE was
+**0.4868 / 0.5067 / 0.7908pp**; zero-use envelope loss was **1.7778pp**. The separate fitted
+conversion was 0.274907pp/TT and supported held-out work summed to 253.832 TT under this basis.
+Neither number is a universal rate or allowance. The two-hour cohort has only 14 basis intervals
+and remains unavailable. These results do not prove a scalar works across plans, models or windows.
+
+The comparison has an explicit tradeoff: TT weights use an earlier 20-interval reference, while
+the local competitors use the subsequent 20 calibration intervals. It tests whether a frozen
+older shape plus a new scale is useful, not equal training-information budgets or a universal win.
+Cross-regime tests remain separate; no strict future-work forecast or promotion follows.
+
+The prototype produces reproducible reconstructed results, not durable as-original TT history.
+Revisiting a dataset can create a different basis; it must be described as restatement, never
+as silent mutation of an earlier unit. No native acquisition, auth, retention or canonical
+accounting changed. Tests cover reference anchoring, additive scoring, immutable basis data,
+content identity, unsupported coverage, separate calibration and future-label noninterference.
+
+Validation: 471 Core tests passed. The initial app build caught a missing formatting namespace;
+after correcting it, Windows Debug build passed with zero warnings/errors and deployed/restarted
+`20260919T003901513Z-647d344f`. CLI replay used owned retained evidence only. UI visual acceptance
+and cross-regime/as-original TT-history validation remain unclaimed.
