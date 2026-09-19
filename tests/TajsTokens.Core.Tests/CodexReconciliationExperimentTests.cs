@@ -48,6 +48,11 @@ public sealed class CodexReconciliationExperimentTests(ITestOutputHelper output)
             Assert.Equal(3, report.CrossFileRepeatFingerprints);
             Assert.Equal(3, report.ExtraFileOccurrences);
             Assert.Equal(2, report.DisagreeingFiles);
+            Assert.Equal(report.TokenObservations, report.Transitions.Values.Sum(x => x.Observations));
+            Assert.Equal(report.IncumbentTokens, report.Transitions.Values.Sum(x => x.IncumbentTokens));
+            Assert.Equal(report.HighWatermarkTokens, report.Transitions.Values.Sum(x => x.HighWatermarkTokens));
+            Assert.Equal(report.LineageTokens, report.Transitions.Values.Sum(x => x.LineageTokens));
+            Assert.Equal(2, report.Transitions["above-watermark/unusable-last"].Disagreements);
             Assert.Equal(5, report.PreOwnershipRecordsExcluded);
             Assert.Equal(3, report.PreOwnershipTokenRecordsExcluded);
             Assert.Equal(2, report.FilesWithExcludedPrefix);
@@ -75,6 +80,7 @@ public sealed class CodexReconciliationExperimentTests(ITestOutputHelper output)
         Assert.Equal(1, state.IncompleteCounters);
         Assert.Empty(state.Heads);
         Assert.Equal(0, state.LineageTotal);
+        Assert.Equal(50, state.Transitions["unusable-cumulative/usable-last"].IncumbentTokens);
     }
 
     [Fact]
@@ -117,6 +123,10 @@ public sealed class CodexReconciliationExperimentTests(ITestOutputHelper output)
             Assert.Equal(incumbent, state.IncumbentTotal);
             Assert.Equal(containment, state.ContainmentTotal);
             Assert.Equal(lineage, state.LineageTotal);
+            Assert.Equal(records.Length, state.Transitions.Values.Sum(x => x.Observations));
+            Assert.Equal(incumbent, state.Transitions.Values.Sum(x => x.IncumbentTokens));
+            Assert.Equal(containment, state.Transitions.Values.Sum(x => x.HighWatermarkTokens));
+            Assert.Equal(lineage, state.Transitions.Values.Sum(x => x.LineageTokens));
             if (name.Contains("ambiguous")) Assert.True(state.AmbiguousWithoutLast);
         }
         output.WriteLine($"{name}: incumbent={incumbent}; high-watermark-only={containment}; bounded total-minus-last={lineage}. Not ground truth.");
@@ -163,6 +173,8 @@ public sealed class CodexReconciliationExperimentTests(ITestOutputHelper output)
         Assert.Equal(100, state.LineageTotal);
         Apply(state, Row("source", 1, 100, 100));
         Assert.Equal(100, state.LineageTotal);
+        Assert.Equal(0, state.Transitions["occurrence-retry"].Disagreements);
+        Assert.Equal(0, state.Transitions["occurrence-retry"].IncumbentTokens);
         // If independent native request IDs proved two requests, true workload would be 200.
         // Counters alone cannot resolve that alternative; this result is not a deduplication oracle.
     }

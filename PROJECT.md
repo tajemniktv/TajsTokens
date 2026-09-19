@@ -88,7 +88,11 @@ and first-rejection reasons (overlap, warmup, saturation, absent outcome or poll
 cohort). Model Lab places matching strict-replay candidate counts/reasons beside that stage, without
 adding their overlapping exclusions or treating absent comparisons as zero. These counts are not
 all raw readings, independent outcomes or proof of collection failure.
-**Next implementable slice:** investigate representative composition mismatches and reconciliation
+The reconciliation CLI now partitions physical-file transitions by cumulative watermark relationship
+and complete/nonnegative last-snapshot presence, with per-contender deltas and disagreement counts.
+Only stable, successfully parsed files contribute; aggregate buckets survive experiment restart and
+contain no source identifiers or payload examples. These are descriptive diagnostics, not lineage proof.
+**Next implementable slice:** investigate representative reconciliation
 disagreements using these diagnostics; distinguish source/reporting gaps from absent recorded work
 without inventing completeness. Use existing Model Lab/read-model owners, not a new framework.
 New observations block some validation claims, **not all development**.

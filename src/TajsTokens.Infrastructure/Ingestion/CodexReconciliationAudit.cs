@@ -84,6 +84,12 @@ public static class CodexReconciliationAudit
                 report.IncompleteCounterObservations += state.IncompleteCounters;
                 report.TotalsOnlyDrops += state.TotalsOnlyDrops;
                 report.EqualTotalCategoryChanges += state.EqualTotalCategoryChanges;
+                foreach (var (key, value) in state.Transitions)
+                {
+                    if (!report.Transitions.TryGetValue(key, out var aggregate))
+                        report.Transitions.Add(key, aggregate = new());
+                    aggregate.Add(value);
+                }
                 if (state.IncumbentTotal != state.ContainmentTotal || state.IncumbentTotal != state.LineageTotal)
                     report.DisagreeingFiles++;
                 foreach (var fingerprint in localFingerprints)
@@ -104,12 +110,15 @@ public static class CodexReconciliationAudit
 
 public sealed class ReconciliationAuditReport
 {
-    public string Version => "reconciliation-audit/v3";
+    public string Version => "reconciliation-audit/v4";
     public string Interpretation => "Physical-file experiment, not canonical usage. Candidates use scalar counters; " +
         "cross-file matches are not request identity. Changed/unreadable/malformed files excluded. " +
         "Ordered owned-token sequences classify equal/prefix/divergent/non-prefix overlap candidates, not byte copies. " +
         "Pre-ownership records (including possible inherited history) remain excluded by the production parser. " +
+        "Transition buckets describe pre-step scalar watermark relationships and usable snapshot presence, not lineage. " +
+        "Their token deltas partition physical-file totals, including agreeing transitions; differences can cancel. " +
         "No account attribution, deduplication, quota fit or production promotion.";
+    public Dictionary<string, ReconciliationTransitionTotals> Transitions { get; set; } = [];
     public long PreOwnershipRecordsExcluded { get; set; }
     public long PreOwnershipTokenRecordsExcluded { get; set; }
     public int FilesWithoutEstablishedOwner { get; set; }
@@ -134,6 +143,25 @@ public sealed class ReconciliationAuditReport
     public long ExtraFileOccurrences { get; set; }
 }
 
+/// <summary>Content-free aggregate; no paths, identifiers, timestamps or payload samples.</summary>
+public sealed class ReconciliationTransitionTotals
+{
+    public long Observations { get; set; }
+    public long Disagreements { get; set; }
+    public long IncumbentTokens { get; set; }
+    public long HighWatermarkTokens { get; set; }
+    public long LineageTokens { get; set; }
+
+    public void Add(ReconciliationTransitionTotals other)
+    {
+        Observations += other.Observations;
+        Disagreements += other.Disagreements;
+        IncumbentTokens += other.IncumbentTokens;
+        HighWatermarkTokens += other.HighWatermarkTokens;
+        LineageTokens += other.LineageTokens;
+    }
+}
+
 /// <summary>Serializable experimental state shared by corpus audit and restart fixtures.</summary>
 public sealed class ReconciliationExperimentState
 {
@@ -149,8 +177,31 @@ public sealed class ReconciliationExperimentState
     public bool AmbiguousWithoutLast => TotalsOnlyDrops > 0;
     public List<long> Heads { get; set; } = [];
     public HashSet<string> Occurrences { get; set; } = [];
+    public Dictionary<string, ReconciliationTransitionTotals> Transitions { get; set; } = [];
 
     public void Apply(CodexTokenCountObservation row)
+    {
+        var cumulative = row.TotalTokenUsage is { IsComplete: true, IsNonNegative: true };
+        var last = row.LastTokenUsage is { IsComplete: true, IsNonNegative: true };
+        var relationship = !cumulative ? "unusable-cumulative"
+            : PreviousCompleteSnapshot is null ? "first-cumulative"
+            : row.TotalTokens < HighWatermark ? "below-watermark"
+            : row.TotalTokens == HighWatermark ? "at-watermark" : "above-watermark";
+        var key = Occurrences.Contains(row.SourceEventId) ? "occurrence-retry"
+            : relationship + (last ? "/usable-last" : "/unusable-last");
+        var incumbent = IncumbentTotal;
+        var containment = ContainmentTotal;
+        var lineage = LineageTotal;
+        ApplyCounters(row);
+        var a = IncumbentTotal - incumbent;
+        var b = ContainmentTotal - containment;
+        var c = LineageTotal - lineage;
+        if (!Transitions.TryGetValue(key, out var aggregate)) Transitions.Add(key, aggregate = new());
+        aggregate.Add(new() { Observations = 1, Disagreements = a != b || a != c ? 1 : 0,
+            IncumbentTokens = a, HighWatermarkTokens = b, LineageTokens = c });
+    }
+
+    private void ApplyCounters(CodexTokenCountObservation row)
     {
         var duplicate = !Occurrences.Add(row.SourceEventId);
         var decision = CodexTokenCounterReducer.Reduce(row, Incumbent, duplicate);

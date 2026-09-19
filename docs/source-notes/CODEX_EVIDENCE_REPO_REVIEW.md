@@ -212,6 +212,20 @@ Relevant inspected tests include CodexBar `CostUsageScannerBreakdownTests.swift`
 cases (including >64 observations and checkpoint restart), `CodexSubagentAccountingIntegrationTests.swift`
 and `CodexCompactSubagentAccountingTests.swift`. These are test-design references, not copied code.
 
+The aggregate-only `reconciliation-audit/v4` CLI partitions transitions by pre-step scalar
+watermark relationship and complete/nonnegative last-snapshot presence. Each bucket reports
+observations, disagreements and all three contender deltas; sums recover the physical-file totals.
+“Usable last” here means snapshot fields are present/nonnegative, not that categories sum correctly,
+the last total fits the cumulative total, or native lineage is established. Failed/changed files
+contribute no bucket totals. No identifiers, hashes, paths or payload examples are exported.
+
+The 2026-09-19 read-only scan examined 367 files: 366 stable, one changed and excluded, no failures.
+Among 66,476 observations, 2,272 transitions disagreed: 2,254 below the previous watermark,
+15 above it and three first-cumulative observations. All had complete/nonnegative last snapshots.
+There were 29 disagreeing files and no cross-file sequence-match candidates in this sample.
+This prioritizes investigation of below-watermark histories with last counters; it does not prove
+interleaving, reset lineage, corpus-wide absence of copies or a winner. Canonical accounting is unchanged.
+
 ## 5. Compatibility and evidence-model contracts
 
 These contracts guide existing typed evidence owners. Daily reports, profile/thread projections
