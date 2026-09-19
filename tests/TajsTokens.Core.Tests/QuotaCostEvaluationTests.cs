@@ -9,6 +9,45 @@ public sealed class QuotaCostEvaluationTests
     private static readonly DateTimeOffset Start = DateTimeOffset.Parse("2026-09-01T00:00:00Z");
 
     [Fact]
+    public void LaterWorkCannotIdentifyAnEmptyFrozenTrainingPrefix()
+    {
+        var original = ComposedQuotaEvaluatorTests.TimelyData();
+        var cutoff = original.Quota[0].CapturedAtUtc.AddMinutes(615); // End of the first twenty half-hour targets.
+        var data = original with { Tokens = original.Tokens.Where(x => x.ObservedAtUtc > cutoff).ToArray() };
+        Assert.NotEmpty(data.Tokens);
+        var cost = QuotaCostEvaluation.Evaluate(data).Scores.Where(x => x.HorizonHours == .5).ToArray();
+        Assert.All(cost.Where(x => x.Candidate is "pace" or "persistence"), x => Assert.NotEmpty(x.Trials));
+        Assert.All(cost.Where(x => x.Candidate is not ("pace" or "persistence")), x => {
+            Assert.Equal("no-recorded-training-work", x.Status);
+            Assert.Empty(x.Trials);
+            Assert.Empty(x.Coefficients);
+            Assert.Null(x.IntervalLoss);
+            Assert.False(x.MaterialWin);
+        });
+        var composed = ComposedQuotaEvaluator.Evaluate(data, horizons: [.5]);
+        Assert.All(composed.Scores, x => {
+            Assert.Empty(x.Trials);
+            Assert.Equal(20, x.WithheldReasons["no-recorded-training-work"]);
+        });
+        var session = SessionQuotaEvaluator.Evaluate(data).Scores.Single(x => x.HorizonHours == .5);
+        Assert.Empty(session.Trials);
+        Assert.Equal("no-recorded-training-work", session.TrainingIssue);
+        Assert.True(session.WithheldIntervals > 0);
+    }
+
+    [Fact]
+    public void PositiveWorkAgainstFlatMeterStillPermitsZeroCostFit()
+    {
+        var original = ComposedQuotaEvaluatorTests.TimelyData();
+        var data = original with { Quota = original.Quota.Select(x => x with { UsedPercent = 20 }).ToArray() };
+        var total = QuotaCostEvaluation.Evaluate(data).Scores.Single(x => x.HorizonHours == .5 && x.Candidate == "total");
+        Assert.Equal("evaluation-only", total.Status);
+        Assert.NotEmpty(total.Trials);
+        Assert.All(total.Trials, x => Assert.Equal(0, x.Prediction));
+        Assert.NotEmpty(ComposedQuotaEvaluator.Evaluate(data, horizons: [.5]).Scores.Single(x => x.CostModel == "total").Trials);
+    }
+
+    [Fact]
     public void ConstructionCoveragePartitionsCandidateStartsWithoutChangingSelectedTargets()
     {
         var data = Data(Enumerable.Range(0, 13).Select(i => Quota(i * 15, 20)).ToArray(), []);

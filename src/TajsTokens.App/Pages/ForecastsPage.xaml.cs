@@ -384,13 +384,14 @@ public sealed partial class ForecastsPage : Page
                 .Concat((report.QuotaCost?.Scores ?? []).Select(score => new EvaluationRow(
                     $"Cost calibration (actual work, not forecast) · {FormatKind(score.Cohort.Kind)} · {Horizon(score.HorizonHours)} · {score.Cohort.Source} · {QuotaAccountScope.Describe(score.Cohort.AccountKey)} · {QuotaHistoryPolicy.DescribeCohort(score.Cohort)}",
                     score.Candidate,
+                    score.Status == "no-recorded-training-work" ? "Cost unavailable: no recorded workload in frozen training" :
                     score.HeldOutSamples == 0 ? "Insufficient independent history for held-out cost calibration" :
                         $"Interval loss {score.IntervalLoss:0.###}pp · {score.HeldOutSamples:N0} held-out intervals · {score.HeldOutGenerations} reset generations",
                     $"{score.Status} · training {score.TrainingSamples} intervals / {score.TrainingGenerations} generations. " +
                     $"Incomplete category evidence: {score.IncompleteCategoryTrainingIntervals} training / {score.IncompleteCategoryHeldOutIntervals} held-out intervals withheld from category candidates. " +
-                    $"Displayed-delta MAE {score.DisplayedDeltaMae:0.###}pp; generation-average interval loss {score.GenerationMeanIntervalLoss:0.###}pp. " +
-                    $"Residual p10 / median / p90: {score.ResidualP10:0.###} / {score.ResidualMedian:0.###} / {score.ResidualP90:0.###}pp. " +
-                    $"Mean unexplained movement above envelope lower bound: {score.UnexplainedPositiveMovement:0.###}pp. Not causal attribution. " +
+                    $"Displayed-delta MAE {ResearchMetric(score.DisplayedDeltaMae, "pp")}; generation-average interval loss {ResearchMetric(score.GenerationMeanIntervalLoss, "pp")}. " +
+                    $"Residual p10 / median / p90: {ResearchMetric(score.ResidualP10, "pp")} / {ResearchMetric(score.ResidualMedian, "pp")} / {ResearchMetric(score.ResidualP90, "pp")}. " +
+                    $"Mean unexplained movement above envelope lower bound: {ResearchMetric(score.UnexplainedPositiveMovement, "pp")}. Not causal attribution. " +
                     $"{score.CandidateShiftResets.Count} candidate residual shifts; no automatic alerts or retraining. " +
                     (score.BandSamples > 0 ? $"Band/target intersection {score.BandIntersectsTargetRate:P0} on {score.BandSamples} intervals; not latent coverage. " : "Insufficient generations for bands. ") +
                     (score.RateCardVersion is null ? "" :
@@ -400,14 +401,15 @@ public sealed partial class ForecastsPage : Page
                 .Concat((report.ComposedQuota?.Scores ?? []).Concat(report.ComposedQuotaStrict?.Scores ?? []).Select(score => new EvaluationRow(
                     $"End-to-end quota forecast · {score.Availability} · {FormatKind(score.Cohort.Kind)} · {Horizon(score.HorizonHours)} · {score.Cohort.Source} · {QuotaAccountScope.Describe(score.Cohort.AccountKey)} · {QuotaHistoryPolicy.DescribeCohort(score.Cohort)}",
                     score.CostModel,
+                    score.WithheldReasons.ContainsKey("no-recorded-training-work") ? "Cost unavailable: no recorded workload in frozen training" :
                     score.HeldOutIntervals == 0 ? "Insufficient chronological history" :
                         $"Forecast interval loss {score.IntervalLoss:0.###}pp · {score.HeldOutIntervals} held-out intervals / {score.ResetGenerations} resets",
                     ComposedQuotaPolicy.AssessSelection(score, report.EvaluatedAtUtc,
                         score.Availability == ForecastReplayAvailability.CollectedByOrigin).Explanation + "\n\n" +
-                    $"Actual-work cost loss {score.CostOnlyIntervalLoss:0.###}pp versus forecast loss {score.IntervalLoss:0.###}pp. " +
+                    $"Actual-work cost loss {ResearchMetric(score.CostOnlyIntervalLoss, "pp")} versus forecast loss {ResearchMetric(score.IntervalLoss, "pp")}. " +
                     (score.IntervalOrigins > 0 ? $"Joint range: {score.IntervalCoverage:P0} reported-value coverage on {score.IntervalOrigins} origins; mean width {score.MeanIntervalWidth:0.###}pp. "
                         : "Joint range unavailable: insufficient earlier completed reset calibration. ") +
-                    $"Pace {score.PaceIntervalLoss:0.###}pp; incumbent policy {score.IncumbentIntervalLoss:0.###}pp; displayed-delta MAE {score.DisplayedDeltaMae:0.###}pp. " +
+                    $"Pace {ResearchMetric(score.PaceIntervalLoss, "pp")}; incumbent policy {ResearchMetric(score.IncumbentIntervalLoss, "pp")}; displayed-delta MAE {ResearchMetric(score.DisplayedDeltaMae, "pp")}. " +
                     $"Training: {score.AssertedTrainingIntervals} user-asserted intervals; remaining training and all validation are native cohort evidence. " +
                     $"{score.MissingComposition} intervals withheld for missing/stale composition or unavailable training/meters. " +
                     (score.WithheldReasons.Count == 0 ? "" : "Reasons (may overlap): " + string.Join("; ", score.WithheldReasons.Select(x => $"{x.Key}: {x.Value}")) + ". ") +
@@ -416,9 +418,10 @@ public sealed partial class ForecastsPage : Page
                 .Concat((report.SessionQuota?.Scores ?? []).Select(score => new EvaluationRow(
                     $"Session quota research · {FormatKind(score.Cohort.Kind)} · {Horizon(score.HorizonHours)} · {score.Cohort.Source} · {QuotaAccountScope.Describe(score.Cohort.AccountKey)} · {QuotaHistoryPolicy.DescribeCohort(score.Cohort)}",
                     "activity × conditional workload × frozen total-token cost",
-                    $"{score.Trials.Count} outcomes / {score.ResetGenerations} resets; expected MAE {score.ExpectedMae:0.###}pp vs pace {score.PaceMae:0.###}pp",
-                    $"Conditional MAE {score.ConditionalMae:0.###}pp vs matched pace {score.ConditionalPaceMae:0.###}pp on {score.ActiveOutcomes} positive-work outcomes. " +
-                    $"Expected interval loss {score.IntervalLoss:0.###}pp vs pace {score.PaceIntervalLoss:0.###}pp. {score.TrainingIntervals} training intervals; {score.WithheldIntervals} withheld. " +
+                    $"{score.Trials.Count} outcomes / {score.ResetGenerations} resets; expected MAE {ResearchMetric(score.ExpectedMae, "pp")} vs pace {ResearchMetric(score.PaceMae, "pp")}",
+                    $"Conditional MAE {ResearchMetric(score.ConditionalMae, "pp")} vs matched pace {ResearchMetric(score.ConditionalPaceMae, "pp")} on {score.ActiveOutcomes} positive-work outcomes. " +
+                    $"Expected interval loss {ResearchMetric(score.IntervalLoss, "pp")} vs pace {ResearchMetric(score.PaceIntervalLoss, "pp")}. {score.TrainingIntervals} training intervals; {score.WithheldIntervals} withheld. " +
+                    (score.TrainingIssue is { } issue ? $"Cost training unavailable: {issue}. No recorded work is not evidence of free work or complete collection. " : "") +
                     (score.IncumbentPairedOrigins > 0
                         ? $"Matched incumbent comparison ({score.IncumbentPairedOrigins} outcomes): expected/incumbent MAE {score.PairedExpectedMae:0.###}/{score.IncumbentMae:0.###}pp; interval loss {score.PairedExpectedIntervalLoss:0.###}/{score.IncumbentIntervalLoss:0.###}pp. "
                         : "No identical incumbent origin/outcome pairs; no comparison claimed. ") +

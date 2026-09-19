@@ -6,6 +6,27 @@ namespace TajsTokens.Core.Tests;
 
 public sealed class QuotaTransferEvaluatorTests
 {
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void SourceAndDestinationBothNeedRecordedTrainingWork(bool emptySource)
+    {
+        var start = DateTimeOffset.Parse("2026-01-01T00:00:00Z");
+        var source = Rows(start, "plus", 1, 40);
+        var destination = Rows(start.AddDays(10), "pro", .4, 60);
+        QuotaCostObservation Empty(QuotaCostObservation x) => x with {
+            Features = x.Features with { Tokens = 0 }, TokenCategories = [0, 0, 0, 0, 0] };
+        if (emptySource) source = source.Select(Empty).ToArray();
+        else destination = destination.Select((x, i) => i < 20 ? Empty(x) : x).ToArray();
+        var forward = QuotaTransferEvaluator.Evaluate(source.Concat(destination).ToArray()).Scores.Where(x => x.Source.PlanType == "plus");
+        Assert.All(forward, x => {
+            Assert.Equal("no-recorded-training-work", x.Status);
+            Assert.Null(x.UnscaledLoss);
+            Assert.Null(x.ScaledLoss);
+            Assert.Null(x.LocalOnlyLoss);
+        });
+    }
+
     [Fact]
     public void TransferUsesOnlyEarlierSourceAndDestinationTrainingAndKeepsAccountsSeparate()
     {

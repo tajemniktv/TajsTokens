@@ -178,7 +178,7 @@ if (args.Length == 2 && args[0] == "--session-quota")
     Console.WriteLine(report.Version + ": " + report.Methodology);
     Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(report.Scores.Select(x => new
     {
-        x.Cohort.Kind, x.Cohort.Source, x.HorizonHours, x.TrainingIntervals, x.WithheldIntervals,
+        x.Cohort.Kind, x.Cohort.Source, x.HorizonHours, x.TrainingIntervals, x.TrainingIssue, x.WithheldIntervals,
         Outcomes = x.Trials.Count, x.ResetGenerations, x.ActiveOutcomes, x.ConditionalMae, x.ConditionalPaceMae,
         x.ExpectedMae, x.PaceMae, x.IntervalLoss, x.PaceIntervalLoss, x.BandOrigins, x.ReportedBandCoverage, x.MeanBandWidth,
         x.IncumbentPairedOrigins, x.PairedExpectedMae, x.IncumbentMae, x.PairedExpectedIntervalLoss, x.IncumbentIntervalLoss

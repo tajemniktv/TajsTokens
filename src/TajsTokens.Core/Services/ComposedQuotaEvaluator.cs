@@ -5,7 +5,7 @@ namespace TajsTokens.Core.Services;
 /// <summary>Actual-cost and origin-only forecast errors on identical disjoint outcomes.</summary>
 public static class ComposedQuotaEvaluator
 {
-    public const string Version = "composed-quota/v10";
+    public const string Version = "composed-quota/v11";
     public static IReadOnlyList<double> EvaluationHorizons { get; } = Array.AsReadOnly(new[] { 5d / 60, .25, .5, 2d });
 
     public static ComposedQuotaEvaluation Evaluate(CodexForecastDataset data, CancellationToken cancellationToken = default,
@@ -36,8 +36,10 @@ public static class ComposedQuotaEvaluator
                 void Withheld(string reason) => withheldReasons[reason] = withheldReasons.GetValueOrDefault(reason) + 1;
                 var needsCategories = candidate.Replace("asserted-", "", StringComparison.Ordinal) != "total";
                 var completeTraining = !needsCategories || training.All(x => x.HasCompleteTokenCategories);
+                var hasTrainingWork = QuotaCostEvaluation.HasTrainingWork(training);
+                if (training.Length >= 20 && !hasTrainingWork) withheldReasons["no-recorded-training-work"] = training.Length;
                 if (!completeTraining) withheldReasons["incomplete-category-training"] = training.Count(x => !x.HasCompleteTokenCategories);
-                if (nativeTraining.Length == 20 && completeTraining)
+                if (nativeTraining.Length == 20 && completeTraining && hasTrainingWork)
                 {
                     var fit = QuotaCostEvaluation.FitFrozen(training, candidate.Replace("asserted-", "", StringComparison.Ordinal), cancellationToken);
                     foreach (var row in ordered.Skip(20).Where(x => x.StartUtc >= training[^1].EndUtc))

@@ -5,7 +5,7 @@ namespace TajsTokens.Core.Services;
 /// <summary>Frozen-prefix cost calibration, deliberately separate from future-workload forecasting.</summary>
 public static class QuotaCostEvaluation
 {
-    public const string Version = "quota-cost-evaluation/v3";
+    public const string Version = "quota-cost-evaluation/v4";
     public static readonly string[] Candidates = ["persistence", "pace", "total", "categories", "model-effort",
         "context-ablation", "activity-ablation", "runtime-ablation", "time-ablation"];
     public const string Methodology = "Evaluation only: actual interval workload is an oracle cost input, NOT an end-to-end forecast. " +
@@ -20,7 +20,9 @@ public static class QuotaCostEvaluation
         "API-price weighting is a fixed retrospective standard/short-context baseline, never credits or actual cost; incomplete pricing is withheld. " +
         "Its comparisons use matched outcomes and it cannot earn a promotion label. " +
         "Incomplete category training blocks category-dependent fitting; incomplete held-out composition is withheld. " +
-        "Raw-token baselines retain reported totals. Different held-out target sets cannot earn a comparative promotion.";
+        "Raw-token baselines retain reported totals. Training without any positive recorded workload cannot identify cost weights; " +
+        "it is withheld, not interpreted as free work. Pace and zero-use references remain available. " +
+        "Different held-out target sets cannot earn a comparative promotion.";
 
     public static QuotaCostReport Evaluate(CodexForecastDataset data, CancellationToken cancellationToken = default,
         bool userConfirmedRolloutOwnership = false, IReadOnlyList<double>? horizons = null)
@@ -54,7 +56,8 @@ public static class QuotaCostEvaluation
                 var needsCategories = candidate is not ("total" or "pace" or "persistence" or "api-price");
                 var incompleteTraining = needsCategories ? training.Count(x => !x.HasCompleteTokenCategories) : 0;
                 var incompleteHeldout = needsCategories ? heldout.Count(x => !x.HasCompleteTokenCategories) : 0;
-                var fitted = training.Length >= 20 && unpricedTraining == 0 && incompleteTraining == 0;
+                var noTrainingWork = candidate is not ("pace" or "persistence") && training.Length >= 20 && !HasTrainingWork(training);
+                var fitted = training.Length >= 20 && unpricedTraining == 0 && incompleteTraining == 0 && !noTrainingWork;
                 var fit = fitted && candidate is not "pace" and not "persistence"
                     ? IntervalRidge.Fit(training.Select(vector.Values).ToArray(), training, cancellationToken) : null;
                 foreach (var row in fitted ? heldout : [])
@@ -85,7 +88,7 @@ public static class QuotaCostEvaluation
                     Quantile(residuals, 0.1), Quantile(residuals, 0.5), Quantile(residuals, 0.9),
                     Mean(trials.Select(x => Math.Max(0, x.LowerDelta - x.Prediction))), bands.Length,
                     Mean(bands.Select(x => x.UpperPrediction >= x.LowerDelta && x.LowerPrediction <= x.UpperDelta ? 1d : 0d)),
-                    false, incompleteTraining > 0 ? "incomplete-category-training" : unpricedTraining > 0 ? "unpriced-training-evidence" : fitted ? "evaluation-only" : "insufficient-training-intervals",
+                    false, noTrainingWork ? "no-recorded-training-work" : incompleteTraining > 0 ? "incomplete-category-training" : unpricedTraining > 0 ? "unpriced-training-evidence" : fitted ? "evaluation-only" : "insufficient-training-intervals",
                     fit is null ? new Dictionary<string, double>() : vector.Names.Select((name, i) => (name, value: fit.Weights[i] / fit.Scales[i]))
                         .ToDictionary(x => x.name, x => x.value), trials, DetectShifts(epochs))
                 {
@@ -129,6 +132,8 @@ public static class QuotaCostEvaluation
     private static bool Priceable(QuotaCostObservation row) => row.ApiPriceWeight is { IsComplete: true } price &&
         price.RateCardVersion == ApiPriceWorkload.Version;
 
+    internal static bool HasTrainingWork(IReadOnlyList<QuotaCostObservation> training) => training.Any(x => x.Features.Tokens > 0);
+
     private static bool Beats(QuotaCostScore score, QuotaCostScore parent)
     {
         if (!score.Trials.Select(x => (x.StartUtc, x.EndUtc)).SequenceEqual(parent.Trials.Select(x => (x.StartUtc, x.EndUtc)))) return false;
@@ -142,8 +147,8 @@ public static class QuotaCostEvaluation
     internal static Func<QuotaCostObservation, double> FitFrozen(IReadOnlyList<QuotaCostObservation> training,
         string candidate, CancellationToken cancellationToken)
     {
-        if (training.Count < 20 || candidate is not ("total" or "categories" or "model-effort"))
-            throw new ArgumentException("Composition forecasting requires 20 cost observations and a supported composition model.");
+        if (training.Count < 20 || !HasTrainingWork(training) || candidate is not ("total" or "categories" or "model-effort"))
+            throw new ArgumentException("Composition forecasting requires 20 cost observations, positive recorded training work and a supported composition model.");
         if (candidate != "total" && training.Any(x => !x.HasCompleteTokenCategories))
             throw new ArgumentException("Category fitting requires complete disjoint token evidence.");
         var vector = new CostVector(training, candidate);

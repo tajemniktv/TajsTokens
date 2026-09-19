@@ -15,6 +15,7 @@ public sealed record SessionQuotaScore(QuotaHistoryCohort Cohort, double Horizon
     double? ExpectedMae, double? PaceMae, double? IntervalLoss, double? PaceIntervalLoss,
     int BandOrigins, double? ReportedBandCoverage, double? MeanBandWidth)
 {
+    public string? TrainingIssue { get; init; }
     public int IncumbentPairedOrigins { get; init; }
     public double? PairedExpectedMae { get; init; }
     public double? IncumbentMae { get; init; }

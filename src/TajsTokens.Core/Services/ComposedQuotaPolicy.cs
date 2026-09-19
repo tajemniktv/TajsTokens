@@ -47,7 +47,7 @@ public static class ComposedQuotaPolicy
                 baseline.HorizonHours, ForecastReplayAvailability.CollectedByOrigin, cancellationToken)?.Composition;
             if (workload is null) return baseline;
             var training = QuotaCostTrainingPolicy.Select(observations, selected.Cohort, baseline.HorizonHours, selected.AssertedTrainingIntervals > 0);
-            if (training.Length < 20) return baseline;
+            if (training.Length < 20 || !QuotaCostEvaluation.HasTrainingWork(training)) return baseline;
             if (selected.CostModel.Replace("asserted-", "", StringComparison.Ordinal) != "total" &&
                 training.Any(x => !x.HasCompleteTokenCategories)) return baseline;
             if (workload.ModelShares.Keys.Except(training.SelectMany(x => x.Features.ModelTokenShares.Keys)).Any() ||

@@ -240,6 +240,13 @@ Use separate cost, activity/amount, composition and horizon-specific quota model
 token categories; effort/context/activity may explain workload rather than an extra per-token price.
 Plausible explicit assumptions are allowed, but must remain distinguishable from observed facts.
 
+Frozen cost training without any positive recorded workload is unidentifiable, not a zero-cost model.
+Cost, composed, session and cross-regime transfer evaluations expose `no-recorded-training-work`
+instead of publishing learned errors or coefficients for that prefix. Pace and zero-use references
+remain evaluable. Later workload cannot repair the frozen prefix retroactively; positive training work
+against a flat meter may still legitimately fit zero within the meter envelope. This does not prove
+local/account coverage or lower the existing promotion support requirements.
+
 - **Nowcast:** `rollout-token/v2` predicts recorded local tokens at 5/15 minutes. Recent positive
   tokens, starts or tool activity qualify under the ten-minute policy; settings alone do not.
   Quiet open turns, inactivity and unknown/stale evidence have distinct explanations.
@@ -251,7 +258,7 @@ Plausible explicit assumptions are allowed, but must remain distinguishable from
 - **Completed quiet outcomes:** evaluation ends at the earlier of requested time and dataset capture,
   not the last token. Snapshot age cannot manufacture negative targets; collector gaps remain a
   competing explanation. The session decomposition reuses retained token time/amount fields.
-- **Composed quota:** `composed-quota/v10` preserves separate retrospective and strict collection-time
+- **Composed quota:** `composed-quota/v11` preserves separate retrospective and strict collection-time
   evaluations. Only required cost inputs govern availability; unknown capture time never becomes
   event time. Recovered old work cannot qualify a historical prediction retroactively.
   Descriptive breakdowns expose reset generation, origin activity/model/effort mix and recorded
@@ -275,7 +282,7 @@ Plausible explicit assumptions are allowed, but must remain distinguishable from
 - **Ranges:** shared calibration uses at least eight earlier completed resets with available labels,
   generation-maximum absolute errors, empirical 80% target and 1pp floor. Report count, coverage and
   width; these are not latent-usage coverage, survival probabilities or activity-conditioned bands.
-  `session-quota-evaluation/v2` remains a separate research chain using actual target elapsed times
+  `session-quota-evaluation/v3` remains a separate research chain using actual target elapsed times
   and matched incumbent subsets.
 - **Pace:** even-burn compares consumption and elapsed window at the reading, using explicitly
   inferred reset-minus-duration start. Missing/invalid windows are unavailable; stale cards remain

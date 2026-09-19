@@ -5,7 +5,7 @@ namespace TajsTokens.Core.Services;
 /// <summary>Exact-origin retrospective test of the hurdle-workload to quota-cost chain.</summary>
 public static class SessionQuotaEvaluator
 {
-    public const string Version = "session-quota-evaluation/v2";
+    public const string Version = "session-quota-evaluation/v3";
     public const string Methodology = "Research only, reconstructed event time; not deployment validation. " +
         "Separate known-account/source/plan/bucket/horizon cohorts, frozen first-20-interval total-token cost model. " +
         "Local recorded work is co-observed with account quota, not proven complete account attribution. " +
@@ -31,7 +31,10 @@ public static class SessionQuotaEvaluator
             var training = ordered.Take(20).ToArray();
             var trials = new List<SessionQuotaTrial>();
             var withheld = 0;
-            if (training.Length == 20)
+            var trainingIssue = training.Length < 20 ? "insufficient-training-intervals" :
+                !QuotaCostEvaluation.HasTrainingWork(training) ? "no-recorded-training-work" : null;
+            if (trainingIssue is not null) withheld = ordered.Skip(20).Count(x => x.StartUtc >= training[^1].EndUtc);
+            if (trainingIssue is null)
             {
                 var quota = QuotaHistoryPolicy.ReplayRows(QuotaHistoryPolicy.Streams(QuotaHistoryPolicy.Describe(
                     data.Quota.Where(x => QuotaHistoryPolicy.Cohort(x) == group.Key.Cohort), data.CapturedAtUtc)).SelectMany(x => x));
@@ -83,6 +86,7 @@ public static class SessionQuotaEvaluator
                 Mean(bands.Select(x => x.ObservedQuota >= x.LowerExpectedQuota && x.ObservedQuota <= x.UpperExpectedQuota ? 1d : 0d)),
                 Mean(bands.Select(x => x.UpperExpectedQuota!.Value - x.LowerExpectedQuota!.Value)))
             {
+                TrainingIssue = trainingIssue,
                 IncumbentPairedOrigins = paired.Length,
                 PairedExpectedMae = Mean(paired.Select(x => x.ExpectedError)),
                 IncumbentMae = Mean(paired.Select(x => x.IncumbentError!.Value)),
