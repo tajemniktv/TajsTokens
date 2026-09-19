@@ -16,7 +16,7 @@ public sealed class ComposedQuotaBreakdownsTests
         { OriginActivity = "RecentActivity", RecordedOutcomeTokens = i == 0 ? 0 : 10 };
         var trials = new[] {
             Trial(0, 0, new() { ["m"] = .7 }) with { ZeroUseIntervalLoss = .5, ObservedRemainingPercent = 15, LowerRemainingPercent = 10, UpperRemainingPercent = 20 },
-            Trial(1, .8, new() { ["m"] = .8 }),
+            Trial(1, .8, new() { ["m"] = .8 }) with { CompleteOutcomeTokenCategories = false, OutcomeQualityFlags = ["missing-runtime", "incomplete-token-categories", "missing-runtime"] },
             Trial(2, 1.6, new() { ["m"] = .5, ["n"] = .5 }) with { IncumbentIntervalLoss = 2, ObservedRemainingPercent = 25, LowerRemainingPercent = 0, UpperRemainingPercent = 10 }
         };
         var report = ComposedQuotaBreakdowns.Build(trials);
@@ -37,6 +37,10 @@ public sealed class ComposedQuotaBreakdownsTests
         Assert.Contains(report, x => x.Dimension == "origin-model-mix" && x.Group == "unknown-or-partial");
         Assert.Contains(report, x => x.Dimension == "origin-model-mix" && x.Group == "dominant: m");
         Assert.Contains(report, x => x.Dimension == "origin-model-mix" && x.Group == "mixed");
+        Assert.Contains(report, x => x.Dimension == "outcome-category-coverage" && x.Group == "incomplete-reported-vectors" && x.Outcomes == 1);
+        Assert.Contains(report, x => x.Dimension == "outcome-category-coverage" && x.Group == "unknown" && x.Outcomes == 2);
+        Assert.Contains(report, x => x.Dimension == "outcome-quality" && x.Group == "incomplete-token-categories; missing-runtime" && x.Outcomes == 1);
+        Assert.Contains(report, x => x.Dimension == "outcome-quality" && x.Group == "no-recorded-flags-not-proven-complete" && x.Outcomes == 2);
         Assert.Empty(ComposedQuotaBreakdowns.Build([]));
     }
 
@@ -58,6 +62,10 @@ public sealed class ComposedQuotaBreakdownsTests
             var updated = after.Scores.Single(x => x.Cohort == score.Cohort && x.HorizonHours == score.HorizonHours && x.CostModel == score.CostModel);
             Assert.Equal(score.Breakdowns, updated.Breakdowns);
             Assert.All(updated.Trials, x => Assert.NotNull(x.ZeroUseIntervalLoss));
+            Assert.All(updated.Trials, x => {
+                Assert.NotNull(x.CompleteOutcomeTokenCategories);
+                Assert.Contains("local-co-observation-not-account-attribution", x.OutcomeQualityFlags);
+            });
         }
     }
 }

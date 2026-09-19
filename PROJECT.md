@@ -110,7 +110,10 @@ source offsets and field diagnostics, clearly separated rather than summed. Defa
 zero versus explicit zero is provenance variation, not a numeric candidate conflict. A stable
 367-file scan found 6,090 response keys with no repeats within/across files, so there is no observed
 response-copy case supporting a new canonical rule. Retain the existing accounting.
-**Next implementable slice:** return to horizon/composition/reset-grouped layered evaluation and
+Layered evaluation now exposes horizon/composition/reset-grouped diagnostics plus outcome category
+coverage and quality-flag combinations. Outcome diagnostics are not origin inputs, and complete
+reported token vectors do not establish account-wide coverage. Matched baseline comparisons remain separate.
+**Next implementable slice:** continue layered evaluation and
 its product explanations while ordinary collection supplies more evidence. Legacy adjacency comparison remains in the
 read-only corpus audit, not a stored native join. Accounting promotion is separate.
 Installed rollouts contain this source; some legacy counter falls have nearby records and others
@@ -220,7 +223,7 @@ Plausible explicit assumptions are allowed, but must remain distinguishable from
 - **Completed quiet outcomes:** evaluation ends at the earlier of requested time and dataset capture,
   not the last token. Snapshot age cannot manufacture negative targets; collector gaps remain a
   competing explanation. The session decomposition reuses retained token time/amount fields.
-- **Composed quota:** `composed-quota/v6` preserves separate retrospective and strict collection-time
+- **Composed quota:** `composed-quota/v7` preserves separate retrospective and strict collection-time
   evaluations. Only required cost inputs govern availability; unknown capture time never becomes
   event time. Recovered old work cannot qualify a historical prediction retroactively.
   Descriptive breakdowns expose reset generation, origin activity/model/effort mix and recorded

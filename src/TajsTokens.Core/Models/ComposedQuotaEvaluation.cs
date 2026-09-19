@@ -15,6 +15,9 @@ public sealed record ComposedQuotaTrial(DateTimeOffset OriginUtc, DateTimeOffset
     public string OriginActivity { get; init; } = "unrecorded";
     public long? RecordedOutcomeTokens { get; init; }
     public double? ZeroUseIntervalLoss { get; init; }
+    /// <summary>Later outcome diagnostics, never origin-time predictors or completeness guarantees.</summary>
+    public IReadOnlyList<string> OutcomeQualityFlags { get; init; } = [];
+    public bool? CompleteOutcomeTokenCategories { get; init; }
 }
 
 public sealed record ComposedQuotaScore(QuotaHistoryCohort Cohort, double HorizonHours, string CostModel,

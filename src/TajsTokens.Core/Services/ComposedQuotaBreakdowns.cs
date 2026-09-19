@@ -9,7 +9,8 @@ public static class ComposedQuotaBreakdowns
         "do not add dimensions or candidates. Activity and model/effort mix use origin-available evidence; recorded-work " +
         "groups use the later outcome and are not prediction inputs. Dominant mix means at least 80% of projected token mass " +
         "(a descriptive convention, not a learned threshold); unknown mass is not renormalized. Zero-use and incumbent " +
-        "comparisons use explicitly matched subsets. Bias is predicted minus displayed quota movement. Reset groups use " +
+        "comparisons use explicitly matched subsets. Outcome quality is a later diagnostic; no recorded flags does not " +
+        "prove completeness. Category completeness checks reported vectors, not account-wide coverage. Bias is predicted minus displayed quota movement. Reset groups use " +
         "the existing bounded timestamp tolerance. Small subgroups and meter uncertainty do not establish a winner.";
 
     public static IReadOnlyList<ComposedQuotaBreakdown> Build(IReadOnlyList<ComposedQuotaTrial> trials)
@@ -39,6 +40,10 @@ public static class ComposedQuotaBreakdowns
         Partition("origin-model-mix", x => Mix(x.Workload.ModelShares));
         Partition("origin-effort-mix", x => Mix(x.Workload.EffortShares));
         Partition("recorded-outcome", x => x.RecordedOutcomeTokens is null ? "unknown" : x.RecordedOutcomeTokens > 0 ? "positive-recorded-work" : "no-recorded-work");
+        Partition("outcome-category-coverage", x => x.CompleteOutcomeTokenCategories switch {
+            true => "complete-reported-vectors", false => "incomplete-reported-vectors", _ => "unknown" });
+        Partition("outcome-quality", x => x.OutcomeQualityFlags.Count == 0 ? "no-recorded-flags-not-proven-complete" :
+            string.Join("; ", x.OutcomeQualityFlags.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal)));
         return result;
     }
 
