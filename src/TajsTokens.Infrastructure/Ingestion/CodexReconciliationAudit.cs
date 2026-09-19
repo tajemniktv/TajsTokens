@@ -110,12 +110,13 @@ public static class CodexReconciliationAudit
 
 public sealed class ReconciliationAuditReport
 {
-    public string Version => "reconciliation-audit/v4";
+    public string Version => "reconciliation-audit/v5";
     public string Interpretation => "Physical-file experiment, not canonical usage. Candidates use scalar counters; " +
         "cross-file matches are not request identity. Changed/unreadable/malformed files excluded. " +
         "Ordered owned-token sequences classify equal/prefix/divergent/non-prefix overlap candidates, not byte copies. " +
         "Pre-ownership records (including possible inherited history) remain excluded by the production parser. " +
         "Transition buckets describe pre-step scalar watermark relationships and usable snapshot presence, not lineage. " +
+        "Below-watermark buckets distinguish falling, repeated and recovering totals against the previous complete snapshot. " +
         "Their token deltas partition physical-file totals, including agreeing transitions; differences can cancel. " +
         "No account attribution, deduplication, quota fit or production promotion.";
     public Dictionary<string, ReconciliationTransitionTotals> Transitions { get; set; } = [];
@@ -185,7 +186,9 @@ public sealed class ReconciliationExperimentState
         var last = row.LastTokenUsage is { IsComplete: true, IsNonNegative: true };
         var relationship = !cumulative ? "unusable-cumulative"
             : PreviousCompleteSnapshot is null ? "first-cumulative"
-            : row.TotalTokens < HighWatermark ? "below-watermark"
+            : row.TotalTokens < HighWatermark ? "below-watermark/" +
+                (row.TotalTokens < PreviousCompleteSnapshot.TotalTokens ? "falling"
+                    : row.TotalTokens == PreviousCompleteSnapshot.TotalTokens ? "repeated" : "recovering")
             : row.TotalTokens == HighWatermark ? "at-watermark" : "above-watermark";
         var key = Occurrences.Contains(row.SourceEventId) ? "occurrence-retry"
             : relationship + (last ? "/usable-last" : "/unusable-last");

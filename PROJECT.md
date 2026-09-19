@@ -90,6 +90,8 @@ adding their overlapping exclusions or treating absent comparisons as zero. Thes
 all raw readings, independent outcomes or proof of collection failure.
 The reconciliation CLI now partitions physical-file transitions by cumulative watermark relationship
 and complete/nonnegative last-snapshot presence, with per-contender deltas and disagreement counts.
+Below-watermark rows distinguish actual falls, repeated totals and recovering increments; a low
+total relative to an old maximum is not itself a fresh drop or evidence of interleaving.
 Only stable, successfully parsed files contribute; aggregate buckets survive experiment restart and
 contain no source identifiers or payload examples. These are descriptive diagnostics, not lineage proof.
 **Next implementable slice:** investigate representative reconciliation

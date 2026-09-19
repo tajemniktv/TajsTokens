@@ -108,6 +108,28 @@ public sealed class CodexReconciliationExperimentTests(ITestOutputHelper output)
         yield return ["partial history with last", new long[] { 1000, 1100 }, new long?[] { 10, 20 }, 30L, 1100L, 30L];
     }
 
+    [Fact]
+    public void BelowWatermarkRecoveryIsNotAnotherDropAcrossRestart()
+    {
+        var state = new ExperimentState();
+        state.Apply(Row("source", 0, 100, 100));
+        state.Apply(Row("source", 1, 20, 20));
+        state = JsonSerializer.Deserialize<ExperimentState>(JsonSerializer.Serialize(state))!;
+        state.Apply(Row("source", 2, 20, 20));
+        state.Apply(Row("source", 3, 30, 10));
+        var falling = state.Transitions["below-watermark/falling/usable-last"];
+        var repeated = state.Transitions["below-watermark/repeated/usable-last"];
+        var recovering = state.Transitions["below-watermark/recovering/usable-last"];
+        Assert.Equal(1, falling.Observations);
+        Assert.Equal(20, falling.IncumbentTokens);
+        Assert.Equal(1, repeated.Observations);
+        Assert.Equal(0, repeated.Disagreements);
+        Assert.Equal(1, recovering.Observations);
+        Assert.Equal(10, recovering.IncumbentTokens);
+        Assert.Equal(0, recovering.HighWatermarkTokens);
+        Assert.Equal(10, recovering.LineageTokens);
+    }
+
     [Theory]
     [MemberData(nameof(Cases))]
     public void CompareAssumptionsAndEveryRestartBoundary(string name, long[] totals, long?[] last,

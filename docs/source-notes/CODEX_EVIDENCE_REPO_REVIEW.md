@@ -212,7 +212,7 @@ Relevant inspected tests include CodexBar `CostUsageScannerBreakdownTests.swift`
 cases (including >64 observations and checkpoint restart), `CodexSubagentAccountingIntegrationTests.swift`
 and `CodexCompactSubagentAccountingTests.swift`. These are test-design references, not copied code.
 
-The aggregate-only `reconciliation-audit/v4` CLI partitions transitions by pre-step scalar
+The aggregate-only `reconciliation-audit/v5` CLI partitions transitions by pre-step scalar
 watermark relationship and complete/nonnegative last-snapshot presence. Each bucket reports
 observations, disagreements and all three contender deltas; sums recover the physical-file totals.
 “Usable last” here means snapshot fields are present/nonnegative, not that categories sum correctly,
@@ -225,6 +225,20 @@ Among 66,476 observations, 2,272 transitions disagreed: 2,254 below the previous
 There were 29 disagreeing files and no cross-file sequence-match candidates in this sample.
 This prioritizes investigation of below-watermark histories with last counters; it does not prove
 interleaving, reset lineage, corpus-wide absence of copies or a winner. Canonical accounting is unchanged.
+
+The follow-up v5 scan on the same date included all 367 stable files and 67,182 observations.
+It split the 2,291 below-watermark observations into **30 falling, 2,224 recovering and 37 repeated**
+totals relative to the previous complete snapshot. All falling/recovering rows disagreed; repeated
+rows did not. Thus the dominant count is recovery below an old maximum, not thousands of fresh
+regressions. The scalar high-watermark contender assigns zero to those recovering increments;
+that is an assumption, not evidence they are duplicates. The current next investigation is the
+30 actual falls and their surrounding native identity/lifecycle evidence, not promotion of containment.
+A separate read-only exploratory scan found only one fall immediately preceded by a compaction
+record since the prior token observation; this adjacency does not establish causality or exclude
+unrecorded lifecycle changes. Current upstream `7498521d288b9b3b96ffba4eedf089d8d6e06a84`
+(`core/src/session/mod.rs`, resume/fork initialization) seeds token info from prior rollout history,
+so a generic claim that every resume necessarily resets counters is not supported. This is current
+upstream corroboration, not a version-matched explanation of historical Desktop rows.
 
 ## 5. Compatibility and evidence-model contracts
 
