@@ -275,9 +275,10 @@ failure/change excludes its entire contribution. End-of-file pending records rem
 Tests cover privacy, copies, failed-file exclusion, boundaries, ambiguity, repeated/conflicting identity
 and optional-counter semantics. Native IDs never enter reports and the streams are never summed.
 This is candidate adjacency, not established native request-to-token correspondence or cross-file
-deduplication. Durable retention, pseudonym scope,
-replay migration and canonical selection require a separate explicit contract decision after this
-comparison. Keep existing accounting unchanged.
+deduplication. The subsequent [selected response-evidence contract](../../PROJECT.md#selected-response-evidence-contract)
+defines local identifier/vector retention, occurrence identity, generation handling and required
+replay/read-model tests. This is the chosen next implementation, not shipped acquisition or
+canonical selection. Keep existing accounting unchanged.
 
 The first boundary-aware v6 scan (2026-09-19) included all 367 stable files: 6,043 response records,
 6,007 exact eligible vector pairs, 35 records unpaired at lifecycle boundaries and one at EOF.
@@ -286,8 +287,8 @@ response key was observed. There were 67,366 legacy token records, including con
 of which 61,359 had no pending response. These are not additive workloads or a coverage percentage
 for all historical requests. The earlier 34 naive mismatches were removed by boundary-aware pairing;
 they are not demonstrated same-response inconsistencies. Cross-file identity, collection-time
-provenance, version scope and durable selection remain separate gates. Next define the selected
-typed response evidence contract and its replay tests rather than changing counter heuristics.
+provenance, version scope and canonical selection remain separate gates. Implement the selected
+typed supplemental contract and its replay tests rather than changing counter heuristics.
 
 ## 5. Compatibility and evidence-model contracts
 

@@ -101,8 +101,9 @@ retained/exported, and response records do not add to canonical tokens.
 The first boundary-aware live scan had 6,007 exact eligible vector pairs and no differing pairs;
 35 response records were unpaired at boundaries and one at end-of-file. Earlier naive mismatches
 crossed lifecycle boundaries and are not established usage conflicts.
-**Next implementable slice:** define the selected response-identity/usage contract and replay tests
-before durable collection, then evaluate whether native request identities improve reconciliation.
+**Next implementable slice:** implement the [selected response-evidence contract](#selected-response-evidence-contract)
+through the existing parser, batch/store and bounded thread diagnostics, including safe historical
+replay. The contract and tests are specified before acquisition; accounting promotion is separate.
 Installed rollouts contain this source; some legacy counter falls have nearby records and others
 do not. Preserve missing coverage and conflicting vectors rather than assuming adjacency proves
 equivalence. Distinguish source/reporting gaps from absent recorded work
@@ -905,6 +906,88 @@ replay, and state-index schema 2 invalidates the derived fast-path fingerprints 
 historical rollouts are not skipped. The normalized store does not replace token increments during
 that metadata repair. Retired source generations remain provenance but are not mixed into the
 active-source forecasting feature query. No source-owned SQLite database is modified or mirrored.
+
+### Selected response-evidence contract
+
+**Decision, 2026-09-19; acquisition not implemented yet.** Add a typed supplemental observation
+for top-level `token_usage_record` to the existing rollout pipeline, not another collector or token
+reducer. The product purpose is to explain request-level identity, copied occurrences and conflicts
+in a thread's evidence diagnostics. This is not a new allowance label or an immediate accounting
+replacement. [The evidence review](docs/source-notes/CODEX_EVIDENCE_REPO_REVIEW.md#actual-falls-and-newly-observed-response-identity-2026-09-19)
+records the installed observations and pinned upstream corroboration.
+
+#### Fields and retention
+
+| Selected value | Meaning and policy |
+|---|---|
+| Source record ID, source generation identity, privacy-safe file label, byte offsets | Physical occurrence key and provenance, using existing ingestion owners. Native response identity is not the primary storage key. |
+| Owning rollout thread ID | Filename/metadata ownership established by the existing parser; do not infer ownership from the response payload alone. |
+| Reported thread ID, turn ID, root-turn ID, **runtime session ID**, response ID | Nullable native identifiers, stored locally for exact comparisons. Runtime session must have an explicitly different property/column from the owning thread. A reported-thread mismatch is evidence of conflict, not permission to reassign ownership. |
+| `usage`, `turn_token_usage`, `thread_token_usage` | Three separate nullable snapshots of the six token counters. Only per-response `usage` is an increment candidate; cumulative turn/thread vectors are not additional work. Preserve reported total and category disagreement. Missing snapshot/required field remains unknown; only an absent cache-write field has the pinned upstream zero default, with absence distinguishable from an explicit zero. |
+| Nullable source timestamp and actual capture time | Event time is not collection time. Retain the first actual capture for the same occurrence; replay today cannot claim historical availability. Do not substitute current time for missing event time. |
+| Contract/parser version and shape/validity diagnostics | Identify interpretation and null/invalid fields without retaining raw JSON or arbitrary failure strings. Unknown extra fields are ignored, not copied. |
+
+This expressly selects the five opaque native identifiers and the three numeric snapshots for
+local retention, in addition to existing occurrence provenance. They are not credentials or an
+account attribution. Bound each identifier to 512 UTF-16 code units; blank, wrong-type or oversized fields become
+unknown with a fixed diagnostic, not a truncated identity. No prompts, response bodies, reasoning,
+tool data, arbitrary payloads, URLs, auth material or hidden rollout-budget units are selected.
+No model/effort/tier/account is retroactively attached from current settings. Existing explicit
+associations may be shown separately but never become native response fields.
+
+No age-based expiry is introduced. Retain supplemental occurrences when a path generation is
+replaced, but exclude retired generations from the default active view by joining existing active
+rollout identities; do not apply the token-projection deletion rule to this new evidence table.
+Keep the occurrence's own provenance so retired rows remain interpretable without old bookkeeping.
+This retention exception applies to these new rows only; it does not promise an archive of existing
+token generations. Whole-database backup/recovery includes them. No raw identity or vector export
+is added: CLI/shared reports remain aggregate-only; local bounded diagnostics are not export.
+
+#### Identity, reads and accounting boundary
+
+- Store every physical occurrence idempotently. A matching `(reported thread, response)` within
+  one provider/source-root scope is a **candidate semantic key**, not proof of global uniqueness.
+  Keep runtime session/turn/root identity and all three vectors available for conflict comparison.
+  Do not merge across source roots, account assumptions, missing identity or conflicting payloads.
+- Copies at different source identities/offsets remain separate observations. A repeat may be
+  reported as equal evidence; a changed vector or lineage under the same candidate key stays a
+  conflict. Neither case deletes a source occurrence or automatically chooses the newest payload.
+- The first bounded thread read model shows occurrence counts, active/retired coverage, valid/
+  incomplete snapshots, repeated/conflicting candidates and exact/ambiguous legacy comparisons.
+  Apply thread/source bounds before grouping and disclose truncation; a bounded read cannot claim
+  whole-corpus uniqueness. Metadata-only/missing-source cases remain unavailable, not zero usage.
+- Keep response and legacy streams separate. No sum, backfill of missing token categories,
+  deduplication of canonical events, TT scoring, quota calibration or forecast feature promotion
+  occurs in this slice. Boundary-aware adjacency remains a diagnostic, not a persisted native join.
+
+#### Implementation owners and required proof
+
+Extend `ParsedRolloutRecord`, `ICodexObservatoryStore`, `SqliteCodexObservatoryStore` and
+`SqliteCodexSemanticBatchWriter` with one typed response observation/table. Both batch and fallback
+writes must use the same field semantics. Extend the existing thread evidence/diagnostics owner
+with a bounded read; do not make users run a separate research app to inspect the selected evidence.
+Advance the Observatory migration, typed parser version and derived state-index invalidation so
+unchanged historical files are revisited. Do not reset/recount existing token accounting during
+metadata replay. Existing batch commit precedes checkpoint advancement; failure retries remain safe.
+
+Required tests before completing this slice:
+
+1. Parse real-shape response records with three distinct vectors; missing versus null/defaulted
+   cache-write, negative/oversized counters, missing timestamps, malformed/oversized IDs and wrong
+   owner retain explicit uncertainty. Unknown/content-bearing fields never reach storage.
+2. Same-occurrence retry and restart preserve one row and first capture; copied files preserve
+   separate occurrences. Equal request candidates and conflicting lineage/vectors are distinguishable.
+3. Append, truncation/replacement and selected-path changes retain new evidence provenance while
+   default active reads exclude retired generations. Atomic failure/retry cannot advance a checkpoint
+   without the observations; legacy accounting and quota rows remain unchanged by parser-only replay.
+4. Upgrade from the current schema and replay unchanged historical files, including the state-index
+   fast path. Newly discovered old observations have today's capture time, never fabricated past time.
+5. Bounded thread reads expose truncation/unknown/retired states; aggregate exports contain no native
+   identifiers, paths or payload values. Model Lab/forecasts do not silently consume the new table.
+
+After automated verification, inspect live retained counts and one bounded thread read, then keep
+native UI acceptance distinct from build proof. Promotion into canonical accounting requires a
+subsequent matched corpus/restart/identity evaluation, not just successful acquisition.
 
 ### Evaluation contract
 
