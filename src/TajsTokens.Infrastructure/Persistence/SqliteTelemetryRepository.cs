@@ -10,7 +10,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 public sealed partial class SqliteTelemetryRepository(string databasePath) : ITelemetryRepository, ISessionIngestionCheckpointStore
 {
     private const int CurrentSchemaVersion = 14;
-    private const int IntelligenceSchemaVersion = 5;
+    private const int IntelligenceSchemaVersion = 6;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _intelligenceInitializeGate = new(1, 1);
     private volatile bool _intelligenceInitialized;
@@ -569,6 +569,23 @@ public sealed partial class SqliteTelemetryRepository(string databasePath) : ITe
                 updateVersion.CommandText = "UPDATE intelligence_schema SET version = 5 WHERE component = 'phase4-intelligence';";
                 await updateVersion.ExecuteNonQueryAsync(cancellationToken);
                 transaction.Commit();
+            }
+
+            if (version < 6)
+            {
+                await ExecuteMigrationAsync(connection, """
+                    CREATE TABLE IF NOT EXISTS tt_evaluation_snapshots (
+                        snapshot_id TEXT PRIMARY KEY,
+                        recorded_at_utc TEXT NOT NULL,
+                        provider TEXT NOT NULL,
+                        profile TEXT NOT NULL,
+                        format_version INTEGER NOT NULL,
+                        content_hash TEXT NOT NULL,
+                        payload TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_tt_evaluation_history ON tt_evaluation_snapshots(provider, profile, recorded_at_utc DESC);
+                    UPDATE intelligence_schema SET version = 6 WHERE component = 'phase4-intelligence';
+                    """, cancellationToken);
             }
 
             _intelligenceInitialized = true;

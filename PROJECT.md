@@ -101,7 +101,18 @@ its conversion and local competitors. Pairing requires the same recorded account
 profile, source, session lineage and horizon, with the source cohort ending before the destination
 begins. Basis/calibration end times and both contexts remain visible. There are currently no
 compatible chronological pairs in the retained 30-day sample; no empirical transfer claim follows.
-Persisted as-original scoring still requires separate implementation; existing forecasts are untouched.
+**TT research-output retention:** explicit Model Lab evaluation now saves its original typed TT
+report, exact basis, coefficients, reference/support, calibration, errors, coverage, requested
+range, dataset cutoff and actual save time in owned SQLite intelligence schema 6. Each run has
+an immutable ID and payload hash; retries are idempotent, conflicting content is rejected and
+later reconstructions create new rows rather than replacing originals. Payloads are bounded
+to 512 KiB/512 score rows; reads return at most 20 snapshots. No automatic deletion or background
+collection is added; snapshots share existing whole-database backup/recovery. The UI loads ten
+saved results without rescoring and exposes corrupt/unsupported rows rather than silently using
+older success. Stored fields are selected aggregate research evidence and existing pseudonymous
+cohort labels, not native prompts, titles, auth or raw payloads. This expands owned derived-result
+retention only; there is still no per-task original TT scoring history or live forecast promotion.
+Existing forecast snapshots are untouched. TT results remain explicitly experimental.
 
 **Forecast horizon separation (2026-09-19; partially implemented):**
 separate quota cost conditional on workload from whether future activity occurs. Nowcast targets

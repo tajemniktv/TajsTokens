@@ -310,6 +310,8 @@ public sealed class TelemetryCoordinatorTests : IDisposable
 
     private sealed class BlockingIntelligenceService : IIntelligenceService
     {
+        public Task<IReadOnlyList<TtEvaluationArchiveEntry>> GetTtEvaluationHistoryAsync(string provider, string profile,
+            int take, CancellationToken cancellationToken) => throw new NotSupportedException();
         public bool FailTokenForecast { get; set; }
         public int TokenForecastCalls { get; private set; }
         public Task<TokenWorkloadForecast> ForecastTokenWorkloadAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken)

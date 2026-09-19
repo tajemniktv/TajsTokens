@@ -17,6 +17,11 @@ public sealed class TtWorkloadBasis
     public IReadOnlyList<string> Efforts { get; }
     public double ReferenceScore { get; }
 
+    [System.Text.Json.Serialization.JsonConstructor]
+    public TtWorkloadBasis(IReadOnlyList<double> weights, IReadOnlyList<double> reference,
+        IReadOnlyList<bool> supportedCategories, IReadOnlyList<string> models, IReadOnlyList<string> efforts)
+        : this((IEnumerable<double>)weights, reference, supportedCategories, models, efforts) { }
+
     public TtWorkloadBasis(IEnumerable<double> weights, IEnumerable<double> reference,
         IEnumerable<bool> supportedCategories, IEnumerable<string> models, IEnumerable<string> efforts)
     {

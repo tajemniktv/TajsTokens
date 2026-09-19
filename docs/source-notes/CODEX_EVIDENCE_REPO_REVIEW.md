@@ -1228,3 +1228,40 @@ scoring and empirical cross-regime validation remain separate, unfinished bounda
 
 Validation: 474 Core tests passed; Windows Debug build passed with zero warnings/errors and
 deployed/restarted `20260919T004833138Z-90a9131e`. No live transfer model was promoted.
+
+## 29. Preserve original TT research output (2026-09-19)
+
+Intelligence component schema 6 adds `tt_evaluation_snapshots` to the existing owned database.
+It stores selected typed TT reports: exact scoring basis, support/reference, scalar calibration,
+cohort labels, error/coverage summaries, requested range, dataset cutoff and actual save time.
+There is no native source-content or credential collection. Explicit Model Lab evaluations save
+one original research result; `--save-tt` is the equivalent opt-in CLI operation. Plain `--tt`
+still only reconstructs. The app's saved-results expander and `--tt-history` read old results
+without rerunning the model or rewriting their values.
+
+An immutable run ID plus SHA-256 payload checksum separates retries from conflicting writes.
+Exact retries are idempotent; changed content with the same ID is rejected. The reader verifies
+payload checksum, envelope metadata, basis content ID and input-semantics version. Corrupt,
+oversized or unsupported rows remain visible as unavailable and are never replaced with a fresh
+reconstruction. Payloads are bounded to 512 KiB/512 score rows; query batches to 20 snapshots.
+No automatic deletion is introduced; existing whole-database backups retain the new table.
+These are original **aggregate research outputs**, not originally scored per-task TT history.
+
+Migration tests exposed older fixtures that deliberately rewind the intelligence version while
+retaining newer tables. The additive migration is idempotent and preserves existing data; an
+incompatible view/table still fails transactionally, and retry after resolving it succeeds.
+Persistence tests cover exact round trips, immutable basis identity, conflict rollback, later
+restatements, profile scoping, read/write bounds, corruption, future formats and retry recovery.
+
+During this work the user reported consuming a banked reset. Owned app-server history independently
+showed weekly usage drop from 100% to 0% at `2026-09-19T00:50:42Z`; the reset boundary then settled
+near `2026-09-26T00:51:34Z`. Later readings showed 1% used. Banked-reset cause is user-reported,
+not an inferred backend field. The existing epoch splitter separates downward usage movement;
+this is not a cost-policy change or a reason to redefine TT weights.
+
+Validation: 478 Core tests passed; Windows Debug build passed with zero warnings/errors and
+deployed/restarted `20260919T010110025Z-dcc98ab4`. A live owned-database save/read round trip
+preserved snapshot `0b36f741f5ef44809952b7fda61973a7`, its two score rows and exact basis ID;
+the history reader reported no problem. Native UI visual acceptance remains unverified.
+Incoming ordinary rollouts can supply post-reset evaluation evidence; no synthetic workload
+or assumption that a reset changed the accounting policy is required.

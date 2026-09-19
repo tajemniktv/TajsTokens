@@ -438,8 +438,19 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         using var observatory = new SqliteCodexObservatoryStore(_databasePath);
         await observatory.InitializeAsync(cancellationToken);
         var data = await new SqliteForecastDatasetReader(_databasePath, _accountAssociations()).ReadAsync(provider, profile, fromUtc, toUtc, cancellationToken);
-        return await Task.Run(() => QuotaForecastEvaluation.Evaluate(data, cancellationToken), cancellationToken);
+        var report = await Task.Run(() => QuotaForecastEvaluation.Evaluate(data, cancellationToken), cancellationToken);
+        if (report.Tt is { Scores.Count: > 0 } tt)
+        {
+            var snapshot = new TtEvaluationSnapshot(Guid.NewGuid().ToString("N"), DateTimeOffset.UtcNow,
+                data.CapturedAtUtc, provider, profile, fromUtc, toUtc, tt);
+            await _telemetryRepository.SaveTtEvaluationAsync(snapshot, cancellationToken);
+            report = report with { SavedTtSnapshotId = snapshot.Id };
+        }
+        return report;
     }
+
+    public Task<IReadOnlyList<TtEvaluationArchiveEntry>> GetTtEvaluationHistoryAsync(string provider, string profile,
+        int take, CancellationToken cancellationToken) => _telemetryRepository.GetTtEvaluationHistoryAsync(provider, profile, take, cancellationToken);
 
     private Task EnsureInitializedAsync(CancellationToken cancellationToken) =>
         _telemetryRepository.InitializeIntelligenceAsync(cancellationToken);

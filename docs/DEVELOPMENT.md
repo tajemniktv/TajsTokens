@@ -165,12 +165,21 @@ dotnet run --project src/TajsTokens.App/TajsTokens.App.csproj -p:DogfoodEnabled=
 `dotnet run --project tools/TajsTokens.ForecastEvaluation -- --tt <telemetry.db>`
 reconstructs the experimental TT basis and scalar-cost comparison from 30 days of owned evidence.
 It prints exact basis semantics, weights, reference basket, supported model/effort dimensions,
-coverage and matched cost errors. It does not persist original scores, poll Codex, alter past
+coverage and matched cost errors. `--tt` does not persist original scores, poll Codex, alter past
 forecasts or establish cross-user comparability. Retain the full basis ID with any reported TT;
 newly reconstructed history may yield a different basis, not a revision to the old unit.
 Local and transfer comparisons are labelled separately. A transfer reuses the earlier basis
 and fits destination calibration only; zero transfer comparisons means no compatible chronological
 pair, not proof that scalar conversion generalizes. Basis/calibration end times are included.
+
+`--save-tt <telemetry.db>` performs the same local replay and saves an immutable aggregate TT
+research snapshot. Model Lab saves one automatically after a successful explicit evaluation.
+`--tt-history <telemetry.db>` lists up to 20 saved snapshot summaries without rescoring; the
+app's saved-results expander loads ten. These use the owned database's normal additive schema
+initialization (intelligence component 6), not native Codex acquisition. Original payloads and
+basis identities are checked on read; corrupt or newer-format rows remain stored and are reported
+unavailable. There is no automatic pruning. Whole-database backup/restore retains these rows.
+This is original research-output history, not per-task original TT scores or a live forecast.
 
 `dotnet run --project tools/TajsTokens.ForecastEvaluation -- --session-quota <telemetry.db>`
 evaluates the reconstructed session-workload to quota-cost chain over the same 30-day owned-data

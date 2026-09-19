@@ -162,6 +162,12 @@
                     <Button x:Name="EvaluateButton" Content="Evaluate against recorded outcomes" Click="OnEvaluateClicked" HorizontalAlignment="Left" />
                     <StackPanel Grid.Row="1" Spacing="8" MaxWidth="1000" HorizontalAlignment="Left">
                         <TextBlock x:Name="EvaluationStatusText" Text="Compare predicted quota and tokens with later recorded outcomes. Choose a history range above, then run the local evaluation. Nothing is exported." TextWrapping="Wrap" />
+                        <Expander Header="Saved TT research results — original, not restated" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                            <StackPanel Spacing="8">
+                                <Button Content="Load saved TT results" Click="OnLoadTtHistoryClicked" />
+                                <ScrollViewer MaxHeight="220"><TextBlock x:Name="TtHistoryText" Text="Local evaluations save immutable TT research snapshots. Loading history does not rerun scoring. These are original aggregate research outputs, not per-task TT history." TextWrapping="Wrap" IsTextSelectionEnabled="True" /></ScrollViewer>
+                            </StackPanel>
+                        </Expander>
                         <Expander Header="Evidence and evaluation method" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                             <ScrollViewer MaxHeight="220"><TextBlock x:Name="EvaluationMethodText" Text="Quota comparisons keep source, account, plan and reset histories separate. Token errors use a different unit; neither is an exhaustion probability." TextWrapping="Wrap" IsTextSelectionEnabled="True" /></ScrollViewer>
                         </Expander>

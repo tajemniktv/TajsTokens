@@ -30,4 +30,7 @@ public interface IIntelligenceService
     Task<ForecastEvaluationReport> EvaluateForecastsAsync(
         string provider, string profile, DateTimeOffset fromUtc, DateTimeOffset toUtc,
         CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<TtEvaluationArchiveEntry>> GetTtEvaluationHistoryAsync(string provider, string profile,
+        int take, CancellationToken cancellationToken);
 }

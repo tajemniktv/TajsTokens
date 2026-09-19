@@ -287,6 +287,32 @@ public sealed partial class ForecastsPage : Page
         _ => "Outlook unavailable"
     };
 
+    private async void OnLoadTtHistoryClicked(object sender, RoutedEventArgs e)
+    {
+        var cancellation = _pageCancellation;
+        if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested) return;
+        try
+        {
+            var history = await App.Services.Intelligence.GetTtEvaluationHistoryAsync("codex", "default", 10, cancellation.Token);
+            if (!_isLoaded || cancellation.IsCancellationRequested) return;
+            TtHistoryText.Text = history.Count == 0 ? "No saved TT research results yet. Run Model evaluation to save a result locally." :
+                "Up to 10 latest original research snapshots; no rescoring or restatement.\n\n" + string.Join("\n\n", history.Select(entry =>
+                    entry.Snapshot is { } saved
+                        ? $"Saved {saved.RecordedAtUtc:u} · dataset through {saved.DatasetCapturedAtUtc:u} · {saved.Report.Version} · {saved.Id}\n" +
+                          $"Requested range {saved.FromUtc:u} to {saved.ToUtc:u}\n" + string.Join("\n", saved.Report.Scores.Select(score =>
+                              $"{FormatKind(score.Cohort.Kind)} / {Horizon(score.HorizonHours)} / {QuotaAccountScope.Describe(score.Cohort.AccountKey)} / {score.Cohort.Source}: " +
+                              $"{score.HeldOutTt:0.###} TT; {score.Basis?.BasisId ?? "no basis"}; {score.Status}; " +
+                              $"scalar/full MAE {score.ScalarMae:0.###}/{score.FullVectorMae:0.###}pp; {score.HeldOutIntervals} outcomes, {score.UnsupportedIntervals} unsupported. " +
+                              (score.IsTransfer ? "Transferred basis." : "Local basis.")))
+                        : $"Saved {entry.RecordedAtUtc:u} · {entry.Id}: unavailable ({entry.Problem}); original row retained."));
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception exception)
+        {
+            if (_isLoaded && !cancellation.IsCancellationRequested) TtHistoryText.Text = "Saved TT history unavailable: " + Summarize(exception.Message);
+        }
+    }
+
     private async void OnEvaluateClicked(object sender, RoutedEventArgs e)
     {
         var cancellation = _pageCancellation;
@@ -310,6 +336,7 @@ public sealed partial class ForecastsPage : Page
             if (report.ComposedQuotaStrict is { } strict) EvaluationMethodText.Text += "\n\n" + strict.Methodology;
             if (report.Tt is { } tt) EvaluationMethodText.Text += "\n\n" + tt.Methodology +
                 (tt.Scores.Any(x => x.IsTransfer) ? "" : " No chronological compatible TT transfer pairs in this range; cross-regime scaling remains unvalidated.");
+            if (report.SavedTtSnapshotId is { } savedTtId) EvaluationMethodText.Text += $"\nOriginal TT research snapshot saved locally: {savedTtId}. Later runs are separate reconstructions, not updates to this result.";
             if (report.QuotaTransfer is { } transfer) EvaluationMethodText.Text += "\n\n" + transfer.Methodology +
                 (transfer.Scores.Count == 0 ? " No compatible recorded-account regimes in this range; transfer and TT remain unsupported." : "");
             if (report.SessionScores.Count > 0) EvaluationMethodText.Text += "\n\n" + TajsTokens.Core.Services.SessionWorkloadPredictionService.Methodology + "\n" +

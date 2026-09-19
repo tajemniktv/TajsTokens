@@ -29,4 +29,5 @@ public sealed record ForecastEvaluationReport(
     public QuotaTransferEvaluation? QuotaTransfer { get; init; }
     public SessionQuotaEvaluation? SessionQuota { get; init; }
     public TtEvaluation? Tt { get; init; }
+    public string? SavedTtSnapshotId { get; init; }
 }

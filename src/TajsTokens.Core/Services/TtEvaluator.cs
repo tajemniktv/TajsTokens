@@ -14,7 +14,8 @@ public static class TtEvaluator
         "Transfer trials reuse an earlier cohort's exact basis and fit the first 20 destination intervals separately. " +
         "Only the same recorded account/provider/profile/source/session lineage and horizon may pair; the source cohort must end before the destination starts. " +
         "Pairs are reported evidence contexts, not proof of provider-policy changes. No cross-user comparability is established. Basis is a reproducible research result, " +
-        "not persisted as originally-scored history; later reconstruction can create a different basis and must be labelled restatement. " +
+        "saved Model Lab snapshots preserve original aggregate research output, not per-task scoring history. " +
+        "Later reconstruction can create a different basis and must be labelled restatement. " +
         "No subscription balance, credit equivalence, live promotion or original-forecast rewriting.";
 
     public static TtEvaluation Evaluate(CodexForecastDataset data, CancellationToken cancellationToken = default) =>

@@ -121,11 +121,29 @@ if (args.Length == 2 && args[0] == "--tokens")
         Console.WriteLine(FormattableString.Invariant($"Token +{prediction.HorizonHours}h: {prediction.ExpectedTokens:F0}; model={prediction.Model}; train={prediction.TrainingSamples}; validation={prediction.ValidationSamples}"));
     return;
 }
-if (args.Length == 2 && args[0] == "--tt")
+if (args.Length == 2 && args[0] == "--tt-history")
+{
+    var history = await new SqliteTelemetryRepository(args[1]).GetTtEvaluationHistoryAsync("codex", "default", 20, CancellationToken.None);
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(history.Select(x => new
+    {
+        x.Id, x.RecordedAtUtc, x.Problem, x.Snapshot?.DatasetCapturedAtUtc,
+        Version = x.Snapshot?.Report.Version, Scores = x.Snapshot?.Report.Scores.Count,
+        BasisIds = x.Snapshot?.Report.Scores.Where(s => s.Basis is not null).Select(s => s.Basis!.BasisId).ToArray()
+    })));
+    return;
+}
+if (args.Length == 2 && args[0] is "--tt" or "--save-tt")
 {
     var now = DateTimeOffset.UtcNow;
     var data = await new SqliteForecastDatasetReader(args[1]).ReadAsync("codex", "default", now.AddDays(-30), now, CancellationToken.None);
     var report = TtEvaluator.Evaluate(data);
+    if (args[0] == "--save-tt")
+    {
+        var snapshot = new TtEvaluationSnapshot(Guid.NewGuid().ToString("N"), DateTimeOffset.UtcNow, data.CapturedAtUtc,
+            "codex", "default", now.AddDays(-30), now, report);
+        await new SqliteTelemetryRepository(args[1]).SaveTtEvaluationAsync(snapshot, CancellationToken.None);
+        Console.WriteLine("Saved original aggregate TT research snapshot: " + snapshot.Id);
+    }
     Console.WriteLine(report.Version + ": " + report.Methodology);
     Console.WriteLine($"Transfer comparisons: {report.Scores.Count(x => x.IsTransfer)}; zero means no compatible chronological pair, not successful transfer.");
     Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(report.Scores.Select(x => new
