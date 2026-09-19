@@ -148,6 +148,12 @@ supported joint quota ranges. Ordinary post-reset usage supplies future evidence
 not itself a policy change. Do not lower cycle requirements or generate synthetic prompts to force
 a favorable result.
 
+Daily-report revision diagnostics now include newly reported/omitted completed dates as missingness,
+not zero cost or proven accounting changes. Only strict interior dates of both requested ranges qualify;
+boundary dates remain unverified. Unknown units, changed grouping/contracts, duplicate dates, failures
+and incompatible identities retain the existing comparison barriers. This does not establish endpoint
+inclusive/exclusive semantics or the cause/effective time of a historical revision.
+
 **Optional research, not mandatory scope:** logistic/Gamma or hierarchical challengers, adaptive
 fits, continuous/endpoint presence models, per-task TT history before a product decision, additional
 native-log extraction, renewal/skill/plugin reports without a use case, or a shared cross-user basis.

@@ -18,7 +18,7 @@ public sealed record CodexDriftSignal(string Id, string Policy, string BeforeObs
 
 public static class CodexEvidenceDrift
 {
-    public const string Policy = "codex-evidence-drift/v1";
+    public const string Policy = "codex-evidence-drift/v2";
 
     public static IReadOnlyList<CodexDriftSignal> Analyze(IEnumerable<CodexServerObservation> observations)
     {
@@ -86,7 +86,21 @@ public static class CodexEvidenceDrift
                     if (string.IsNullOrWhiteSpace(oldReport.Units) || oldReport.Units != newReport.Units || oldReport.GroupBy != newReport.GroupBy ||
                         oldReport.Days.GroupBy(x => x.Date).Any(x => x.Count() > 1) || newReport.Days.GroupBy(x => x.Date).Any(x => x.Count() > 1)) continue;
                     var oldDays = oldReport.Days.ToDictionary(x => x.Date);
+                    var newDays = newReport.Days.ToDictionary(x => x.Date);
                     var boundary = DateOnly.FromDateTime(before.FetchStartedAtUtc.UtcDateTime);
+                    // Inclusive/exclusive endpoint semantics are not yet established. Only strict
+                    // interior dates in both requested ranges can support a missing-row comparison.
+                    if (TryDate(oldReport.StartDate, out var oldStart) && TryDate(oldReport.EndDate, out var oldEnd) &&
+                        TryDate(newReport.StartDate, out var newStart) && TryDate(newReport.EndDate, out var newEnd))
+                    {
+                        foreach (var dateText in oldDays.Keys.Union(newDays.Keys).Order(StringComparer.Ordinal))
+                        {
+                            if (!TryDate(dateText, out var date) || date >= boundary || date <= oldStart || date >= oldEnd ||
+                                date <= newStart || date >= newEnd) continue;
+                            Change(dateText + "/reported", oldDays.ContainsKey(dateText) ? "present" : null,
+                                newDays.ContainsKey(dateText) ? "present" : null, CodexDriftKind.Missingness);
+                        }
+                    }
                     foreach (var day in newReport.Days)
                     {
                         if (!DateOnly.TryParseExact(day.Date, "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var date) ||
@@ -104,6 +118,8 @@ public static class CodexEvidenceDrift
 
     private static bool Scoped(CodexServerObservation row) => !string.IsNullOrEmpty(row.CorrelatedAccountKey) &&
         row.AccountEvidence is AccountEvidenceClass.ProviderVerified or AccountEvidenceClass.ServerCorrelated;
+    private static bool TryDate(string text, out DateOnly value) => DateOnly.TryParseExact(text,
+        "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out value);
     private static bool Usable(CodexServerObservation row) => row.State is ServerEvidenceState.Available or ServerEvidenceState.Empty;
     private static string? Value<T>(T? value) where T : struct => value is null ? null :
         value.Value is decimal amount ? amount.ToString("G29", CultureInfo.InvariantCulture) : Convert.ToString(value.Value, CultureInfo.InvariantCulture);

@@ -72,6 +72,28 @@ public sealed class CodexEvidenceDriftTests
     }
 
     [Fact]
+    public void CompletedInteriorDayOmissionsAreMissingnessNotZeroCostOrPolicyChanges()
+    {
+        CodexDailyReportRow Day(string date) => new(date, 0, 0, 10, 0, 0, 10, null);
+        var report = new CodexDailyReport("daily/v1", "counts", "2026-09-15", "2026-09-19", "credit", null,
+            null, "pro", null, null, [Day("2026-09-15"), Day("2026-09-16"), Day("2026-09-18"), Day("2026-09-19")]);
+        var before = Quota(0) with { Surface = CodexServerSurface.DailyCounts, QuotaMetadata = null, DailyReport = report };
+        var after = Quota(1) with { Surface = CodexServerSurface.DailyCounts, QuotaMetadata = null,
+            DailyReport = report with { Days = [Day("2026-09-16"), Day("2026-09-17")] } };
+        var signals = CodexEvidenceDrift.Analyze([before, after]);
+        Assert.Equal(2, signals.Count);
+        Assert.All(signals, x => { Assert.Equal(CodexDriftKind.Missingness, x.Kind); Assert.Null(x.EffectiveAtUtc); });
+        Assert.Contains(signals, x => x.Field == "2026-09-18/reported" && x.Before == "present" && x.After is null);
+        Assert.Contains(signals, x => x.Field == "2026-09-17/reported" && x.Before is null && x.After == "present");
+        // A shifted range, malformed range or duplicate dates cannot establish missing rows.
+        Assert.Empty(CodexEvidenceDrift.Analyze([before, after with { DailyReport = after.DailyReport! with { StartDate = "2026-09-18" } }]));
+        Assert.Empty(CodexEvidenceDrift.Analyze([before, after with { DailyReport = after.DailyReport! with { EndDate = "unknown" } }]));
+        Assert.Empty(CodexEvidenceDrift.Analyze([before, after with { DailyReport = after.DailyReport! with { Days = [Day("2026-09-16"), Day("2026-09-16")] } }]));
+        Assert.DoesNotContain(CodexEvidenceDrift.Analyze([before, after with { DailyReport = after.DailyReport! with { Units = "USD" } }]), x => x.Field.EndsWith("/reported"));
+        Assert.Equal(signals, CodexEvidenceDrift.Analyze([after, before, after]));
+    }
+
+    [Fact]
     public void OnlyComparableCompletedDaysBecomeRevisionSignals()
     {
         CodexDailyReportRow Day(string date, decimal credit) => new(date, credit, 0, 10, 0, 0, 10, null);
