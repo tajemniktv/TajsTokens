@@ -96,14 +96,18 @@ Only stable, successfully parsed files contribute; aggregate buckets survive exp
 contain no source identifiers or payload examples. These are descriptive diagnostics, not lineage proof.
 The read-only response comparison now reports per-file identity repeats/conflicts, missing identity,
 owner mismatch, vector validity and single/multiple/unmatched candidate pairs. Lifecycle boundaries
-break adjacency; only absent cache-write defaults to zero. No response IDs or usage payloads are
-retained/exported, and response records do not add to canonical tokens.
+break adjacency; only absent cache-write defaults to zero. The audit exports no response IDs or
+payloads, and response records do not add to canonical tokens. Selected typed response observations
+are now retained locally under the contract below; the raw source payload is not retained.
 The first boundary-aware live scan had 6,007 exact eligible vector pairs and no differing pairs;
 35 response records were unpaired at boundaries and one at end-of-file. Earlier naive mismatches
 crossed lifecycle boundaries and are not established usage conflicts.
-**Next implementable slice:** implement the [selected response-evidence contract](#selected-response-evidence-contract)
-through the existing parser, batch/store and bounded thread diagnostics, including safe historical
-replay. The contract and tests are specified before acquisition; accounting promotion is separate.
+The [selected response-evidence contract](#selected-response-evidence-contract) now has parser,
+batch/fallback storage and bounded thread Storage diagnostics. Metadata-only v6→v7 replay preserves
+verified source generations and token capture times; rewritten content still changes generation.
+**Next implementable slice:** evaluate cross-file response identity and extend bounded thread
+diagnostics where the retained evidence supports it. Legacy adjacency comparison remains in the
+read-only corpus audit, not a stored native join. Accounting promotion is separate.
 Installed rollouts contain this source; some legacy counter falls have nearby records and others
 do not. Preserve missing coverage and conflicting vectors rather than assuming adjacency proves
 equivalence. Distinguish source/reporting gaps from absent recorded work
@@ -560,6 +564,7 @@ replacement of active accounting projections when a rollout generation changes.
 | --- | --- |
 | `quota_snapshots`, context/workload observations, legacy `token_usage` / `usage_events` / `reset_events` / `announcements` | No age-based expiry. Native sources may disappear and live quota cannot be reacquired retrospectively. Do not assume legacy rows are disposable merely because a newer pipeline exists. |
 | `codex_native_token_events` | Active normalized accounting, not an immutable archive of every physical generation. The existing batch writer retires the replaced path's token generation while activating its new identity, avoiding double counting. No separate historical-generation archive is promised. |
+| `codex_response_observations` | Supplemental selected identity and three typed counter snapshots, not accounting. Preserve first capture per occurrence and retain replaced generations; active reads use current rollout identities. No automatic age expiry or raw-content export. |
 | `sessions`, `agents`, relationships, repositories/workspaces | Retain existing rollout-derived metadata. Some projections can be recalculated while source evidence remains; there is no blanket safe-delete promise after native history is removed. |
 | Rollout file/record identities, parser/counter state, ingestion checkpoints, schema/revision tables | Managed with the associated active replay/checkpoint generation. The batch writer retires obsolete path-generation bookkeeping transactionally. These are not independent user-cleanable caches; deleting a subset can cause re-ingestion or lost continuity. |
 | State-index fingerprints and sync cursor | Rebuildable acquisition acceleration. Existing reconciliation re-anchors on selected-source changes; it does not delete collected history. |
@@ -909,12 +914,19 @@ active-source forecasting feature query. No source-owned SQLite database is modi
 
 ### Selected response-evidence contract
 
-**Decision, 2026-09-19; acquisition not implemented yet.** Add a typed supplemental observation
-for top-level `token_usage_record` to the existing rollout pipeline, not another collector or token
+**Implemented supplemental acquisition, 2026-09-19.** A typed supplemental observation
+for top-level `token_usage_record` uses the existing rollout pipeline, not another collector or token
 reducer. The product purpose is to explain request-level identity, copied occurrences and conflicts
 in a thread's evidence diagnostics. This is not a new allowance label or an immediate accounting
 replacement. [The evidence review](docs/source-notes/CODEX_EVIDENCE_REPO_REVIEW.md#actual-falls-and-newly-observed-response-identity-2026-09-19)
-records the installed observations and pinned upstream corroboration.
+records the installed observations and pinned upstream corroboration. Observatory schema 8 stores
+the selected fields; the three snapshot columns serialize only the closed typed counter DTO, never
+source JSON or extension fields. `typed-v7-response-evidence` and state-index schema 6 revisit old
+files. The verified v6→v7 metadata upgrade retains the original source generation and existing
+token/capture identities; older incompatible upgrades and changed bytes retain generation replay.
+Thread Storage shows bounded active/retired counts, diagnostics, corrupt-row exclusions and
+within-source repeated/conflicting candidate groups. Cross-file grouping and legacy pair details
+are not yet part of this retained read model; the read-only audit remains their research surface.
 
 #### Fields and retention
 

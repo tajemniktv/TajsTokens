@@ -277,8 +277,12 @@ and optional-counter semantics. Native IDs never enter reports and the streams a
 This is candidate adjacency, not established native request-to-token correspondence or cross-file
 deduplication. The subsequent [selected response-evidence contract](../../PROJECT.md#selected-response-evidence-contract)
 defines local identifier/vector retention, occurrence identity, generation handling and required
-replay/read-model tests. This is the chosen next implementation, not shipped acquisition or
-canonical selection. Keep existing accounting unchanged.
+replay/read-model tests. Supplemental acquisition now uses the existing parser and batch/fallback
+store (Observatory 8); the bounded thread Storage view shows active/retired occurrences and per-source
+candidate conflicts. Verified metadata-only v6→v7 replay preserves source identity and first capture;
+state-index 6 invalidates old acceleration hints. Response evidence survives generation replacement
+but retired rows do not enter active candidate grouping. This is not canonical selection, cross-file
+deduplication or a forecast input. Existing accounting remains unchanged.
 
 The first boundary-aware v6 scan (2026-09-19) included all 367 stable files: 6,043 response records,
 6,007 exact eligible vector pairs, 35 records unpaired at lifecycle boundaries and one at EOF.
@@ -287,8 +291,10 @@ response key was observed. There were 67,366 legacy token records, including con
 of which 61,359 had no pending response. These are not additive workloads or a coverage percentage
 for all historical requests. The earlier 34 naive mismatches were removed by boundary-aware pairing;
 they are not demonstrated same-response inconsistencies. Cross-file identity, collection-time
-provenance, version scope and canonical selection remain separate gates. Implement the selected
-typed supplemental contract and its replay tests rather than changing counter heuristics.
+provenance, version scope and canonical selection remain separate gates. The implemented supplemental
+contract tests parser uncertainty/privacy, migration, batch/fallback failure/retry, capture-preserving
+replay, copies, replaced-generation retention, bounded/corrupt reads and identity conflicts. Legacy
+pairing remains a read-only audit comparison, not a durable request-to-token join.
 
 ## 5. Compatibility and evidence-model contracts
 

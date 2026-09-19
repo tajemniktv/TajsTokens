@@ -13,6 +13,8 @@ public interface ICodexObservatoryStore
     Task ApplyCumulativeTokenObservationAsync(CodexTokenCountObservation observation, CancellationToken cancellationToken);
     Task UpsertContextObservationAsync(CodexContextObservation observation, CancellationToken cancellationToken);
     Task UpsertWorkloadObservationAsync(CodexWorkloadObservation observation, CancellationToken cancellationToken);
+    Task UpsertResponseObservationAsync(CodexResponseObservation observation, CancellationToken cancellationToken);
+    Task<CodexResponseEvidencePage> GetResponseEvidenceAsync(string threadId, int take, CancellationToken cancellationToken);
     Task<CodexParserResumeState?> GetParserResumeStateAsync(string sourceIdentity, CancellationToken cancellationToken);
     Task UpsertParserResumeStateAsync(CodexParserResumeState state, CancellationToken cancellationToken);
     Task UpsertRolloutFileAsync(

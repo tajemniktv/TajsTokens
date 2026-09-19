@@ -14,7 +14,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 /// </summary>
 public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObservatoryStore, IDisposable
 {
-    private const int ObservatorySchemaVersion = 7;
+    private const int ObservatorySchemaVersion = 8;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _initializeGate = new(1, 1);
     private volatile bool _initialized;
@@ -331,6 +331,13 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                 version = 7;
             }
 
+            if (version == 7)
+            {
+                await ExecuteMigrationAsync(connection, SqliteCodexResponseEvidence.Schema +
+                    "UPDATE observatory_schema SET version = 8 WHERE component = 'codex-observatory';", cancellationToken);
+                version = 8;
+            }
+
             // Scrub rows written by pre-hardening Phase 3 builds. typed-v3 forces one safe replay so
             // current sources regain basename+hash labels and repository names without retaining paths.
             var privacyScrub = connection.CreateCommand();
@@ -359,6 +366,23 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         {
             _initializeGate.Release();
         }
+    }
+
+    public async Task UpsertResponseObservationAsync(CodexResponseObservation observation, CancellationToken cancellationToken)
+    {
+        await EnsureInitializedAsync(cancellationToken);
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await SqliteCodexResponseEvidence.WriteAsync(connection, null, observation,
+            BuildSafeFileLabel(observation.SourceFile), cancellationToken);
+    }
+
+    public async Task<CodexResponseEvidencePage> GetResponseEvidenceAsync(string threadId, int take, CancellationToken cancellationToken)
+    {
+        await EnsureInitializedAsync(cancellationToken);
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        return await SqliteCodexResponseEvidence.ReadAsync(connection, threadId, take, cancellationToken);
     }
 
     public async Task UpsertWorkloadObservationAsync(CodexWorkloadObservation observation, CancellationToken cancellationToken)

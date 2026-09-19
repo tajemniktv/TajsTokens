@@ -69,6 +69,13 @@ internal sealed partial class CodexRolloutParser
             return ParsedRolloutRecord.StorageOnly(sourceRecordId, eventClass, recordBytes, timestamp, null);
         }
 
+        if (topType == "token_usage_record")
+        {
+            return ParsedRolloutRecord.StorageOnly(sourceRecordId, eventClass, recordBytes, timestamp, state.OwnSessionId)
+                with { ResponseObservation = CodexResponseObservationParser.Parse(payload, record, sourceRecordId,
+                    state.SourceIdentity, state.OwnSessionId!, sourceTimestamp) };
+        }
+
         if (topType == "event_msg" && nestedType == "thread_settings_applied")
         {
             // A source setting, not an executed/billed tier. No carry-forward to token events:
@@ -566,11 +573,12 @@ internal sealed record ParsedRolloutRecord(
     CodexTokenCountObservation? TokenObservation,
     IReadOnlyList<QuotaSnapshot> QuotaSnapshots,
     CodexContextObservation? ContextObservation,
-    CodexWorkloadObservation? WorkloadObservation = null)
+    CodexWorkloadObservation? WorkloadObservation = null,
+    CodexResponseObservation? ResponseObservation = null)
 {
     public bool HasNormalizedTelemetry =>
         Session is not null || Agent is not null || Relationship is not null || UsageEvent is not null ||
-        TokenObservation is not null || QuotaSnapshots.Count > 0 || ContextObservation is not null || WorkloadObservation is not null;
+        TokenObservation is not null || QuotaSnapshots.Count > 0 || ContextObservation is not null || WorkloadObservation is not null || ResponseObservation is not null;
 
     public static ParsedRolloutRecord StorageOnly(
         string sourceRecordId,

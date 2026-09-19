@@ -443,6 +443,9 @@ public sealed partial class ObservatoryPage : Page
                     var storage = await Task.Run(
                         () => readModel.GetSessionStorageAsync(session.SessionId, 500, cancellation.Token),
                         cancellation.Token);
+                    var responses = await Task.Run(
+                        () => store.GetResponseEvidenceAsync(session.SessionId, 500, cancellation.Token),
+                        cancellation.Token);
                     if (!CanApplyDetail(session.SessionId, selectionGeneration, detailGeneration, cancellation))
                     {
                         return;
@@ -452,9 +455,16 @@ public sealed partial class ObservatoryPage : Page
                             Path.GetFileName(item.FilePath),
                             $"{FormatBytes(item.SizeBytes)} · {item.RecordsSeen:N0} records · max {FormatBytes(item.LargestRecordBytes)}"))
                         .ToArray();
-                    StorageList.ItemsSource = rows.Length == 0
-                        ? new[] { new StorageRow("No rollout source", "No current storage row is associated with this session.") }
-                        : rows;
+                    var candidates = responses.CompareActiveCandidates();
+                    var evidence = new StorageRow("Supplemental response evidence",
+                        responses.Rows.Count == 0 && responses.CorruptRows == 0
+                            ? "No retained response records in this thread. Coverage unavailable, not zero usage."
+                            : $"{responses.Active:N0} active / {responses.Retired:N0} retired occurrences · " +
+                              $"{responses.WithDiagnostics:N0} with missing/invalid/conflicting fields · {responses.CorruptRows:N0} unreadable rows. " +
+                              $"Within-source candidate groups: {candidates.Repeated:N0} repeated / {candidates.Conflicting:N0} conflicting. " +
+                              (responses.Truncated ? "Bounded to 500 rows; incomplete coverage. " : "") +
+                              "Separate evidence only; not additional tokens or proven cross-file identity.");
+                    StorageList.ItemsSource = rows.Prepend(evidence).ToArray();
                     break;
                 }
                 case 6:

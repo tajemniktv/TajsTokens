@@ -13,7 +13,7 @@ namespace TajsTokens.Infrastructure.Ingestion;
 public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
 {
     private const string BoundaryParserVersion = "boundary-v2";
-    private const string TypedParserVersion = "typed-v6-service-tier-evidence";
+    private const string TypedParserVersion = "typed-v7-response-evidence";
     private const int DurableBatchSize = 128;
     private readonly ICodexSessionEventProvider _sessionEventProvider;
     private readonly ISessionIngestionCheckpointStore _checkpointStore;
@@ -96,13 +96,16 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             verified == (existing.SourceIdentity, existing.LastByteOffset, knownHash, initialLength, initialWritten);
         var existingPrefix = existing is null ? null : cachedPrefix ? existing.ConsumedPrefixSha256 :
             await HashThroughAsync(Math.Min(existing.LastByteOffset, prefixStream.Length));
-        var canResume = existing is not null &&
-                        string.Equals(existing.ParserVersion, parserVersion, StringComparison.Ordinal) &&
-                        sameFile && existing.LastByteOffset <= prefixStream.Length &&
+        var verifiedContent = existing is not null && sameFile && existing.LastByteOffset <= prefixStream.Length &&
                         existing.ConsumedPrefixSha256 is not null &&
                         existing.ConsumedPrefixSha256 == existingPrefix;
+        var canResume = verifiedContent && string.Equals(existing!.ParserVersion, parserVersion, StringComparison.Ordinal);
+        // This upgrade only adds supplemental response evidence. Keep verified occurrence identity
+        // and prior capture times; ownership/reducer upgrades still require their generation replay.
+        var metadataOnlyReplay = verifiedContent && _observatoryStore is not null &&
+            existing!.ParserVersion == parserVersion.Replace(TypedParserVersion, "typed-v6-service-tier-evidence", StringComparison.Ordinal);
 
-        if (canResume) sourceIdentity = existing!.SourceIdentity!;
+        if (canResume || metadataOnlyReplay) sourceIdentity = existing!.SourceIdentity!;
         else if (sameFile)
             // New generation retires the old projections before replay, even when the OS file ID
             // survived an in-place rewrite. Legacy unverified checkpoints take this path once.
@@ -291,6 +294,8 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         {
             await _observatoryStore.UpsertWorkloadObservationAsync(parsed.WorkloadObservation, cancellationToken);
         }
+        if (parsed.ResponseObservation is not null)
+            await _observatoryStore.UpsertResponseObservationAsync(parsed.ResponseObservation, cancellationToken);
 
         // Focused tests/alternate composition can omit the production batch writer. Preserve complete
         // storage metadata semantics on that compatibility path even though it is intentionally slower.

@@ -187,7 +187,7 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
         Assert.Empty(await index.GetFingerprintsAsync(default));
         Assert.Equal(0, await index.GetWatermarkAsync(default));
         Assert.Equal(1L, await Scalar("SELECT COUNT(*) FROM quota_snapshots;"));
-        Assert.Equal(5L, await Scalar("SELECT version FROM codex_state_index_schema;"));
+        Assert.Equal(6L, await Scalar("SELECT version FROM codex_state_index_schema;"));
     }
 
     private async Task Execute(string sql)

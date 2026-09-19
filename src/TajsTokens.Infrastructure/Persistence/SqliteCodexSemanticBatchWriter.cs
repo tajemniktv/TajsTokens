@@ -296,6 +296,9 @@ internal sealed class SqliteCodexIngestionBatchWriter(
                 await SqliteCodexWorkloadEvidence.WriteAsync(connection, transaction,
                     record.WorkloadObservation, safeFileLabel, cancellationToken);
             }
+            if (record.ResponseObservation is not null)
+                await SqliteCodexResponseEvidence.WriteAsync(connection, transaction,
+                    record.ResponseObservation, safeFileLabel, cancellationToken);
         }
     }
 

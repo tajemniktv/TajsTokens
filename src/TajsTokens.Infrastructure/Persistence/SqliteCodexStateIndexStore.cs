@@ -34,7 +34,7 @@ internal sealed record CodexStateThreadFingerprint(
 /// </summary>
 internal sealed class SqliteCodexStateIndexStore
 {
-    private const int SchemaVersion = 5;
+    private const int SchemaVersion = 6;
     private const string Component = "codex-state-index";
     private readonly string _connectionString;
     private readonly SemaphoreSlim _initializeGate = new(1, 1);
@@ -188,6 +188,21 @@ internal sealed class SqliteCodexStateIndexStore
                 await migration.ExecuteNonQueryAsync(cancellationToken);
                 transaction.Commit();
                 version = 5;
+            }
+
+            if (version == 5)
+            {
+                using var transaction = connection.BeginTransaction();
+                using var migration = connection.CreateCommand();
+                migration.Transaction = transaction;
+                migration.CommandText = """
+                    DELETE FROM codex_state_thread_fingerprints;
+                    UPDATE codex_state_sync SET watermark_updated_at_ms = 0 WHERE component = 'codex-state-index';
+                    UPDATE codex_state_index_schema SET version = 6 WHERE component = 'codex-state-index';
+                    """;
+                await migration.ExecuteNonQueryAsync(cancellationToken);
+                transaction.Commit();
+                version = 6;
             }
 
             if (version != SchemaVersion)
