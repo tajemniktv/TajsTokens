@@ -17,6 +17,7 @@ public sealed partial class CodexSourcesPage : Page
     private bool _logsReloadRequested;
     private int _requestedLogsPageIndex;
     private CodexLogsSource? _logs;
+    private CodexAuxiliaryQuery _auxiliaryQuery = new();
     private string? _logsSnapshotId;
     private bool _refreshLogsSnapshot;
     private string? _initialThreadId;
@@ -53,6 +54,8 @@ public sealed partial class CodexSourcesPage : Page
         {
             FilterTextBox.Text = _initialThreadId;
             LogThreadTextBox.Text = _initialThreadId;
+            AuxiliaryThreadBox.Text = _initialThreadId;
+            _auxiliaryQuery = new(0, _initialThreadId);
         }
         var previous = Interlocked.Exchange(ref _cancellation, new CancellationTokenSource());
         previous?.Cancel();
@@ -150,8 +153,31 @@ public sealed partial class CodexSourcesPage : Page
             SourceInstanceComboBox.SelectedItem is not SourceInstanceChoice choice || _cancellation is null) return;
         if (choice.Path is null) _selectedPaths.Remove(row.Kind);
         else _selectedPaths[row.Kind] = choice.Path;
+        _auxiliaryQuery = _auxiliaryQuery with { PageIndex = 0 };
         Interlocked.Increment(ref _sourceGeneration);
         await LoadAsync(_cancellation.Token);
+    }
+
+    private async void OnAuxiliaryApplyClicked(object sender, RoutedEventArgs e)
+    {
+        _auxiliaryQuery = new(0, string.IsNullOrWhiteSpace(AuxiliaryThreadBox.Text) ? null : AuxiliaryThreadBox.Text.Trim());
+        Interlocked.Increment(ref _sourceGeneration);
+        if (_cancellation is { } cancellation) await LoadAsync(cancellation.Token);
+    }
+
+    private async void OnAuxiliaryPreviousClicked(object sender, RoutedEventArgs e)
+    {
+        _auxiliaryQuery = _auxiliaryQuery with { PageIndex = Math.Max(0, _auxiliaryQuery.PageIndex - 1) };
+        Interlocked.Increment(ref _sourceGeneration);
+        if (_cancellation is { } cancellation) await LoadAsync(cancellation.Token);
+    }
+
+    private async void OnAuxiliaryNextClicked(object sender, RoutedEventArgs e)
+    {
+        if (_snapshot is null || !_snapshot.Sources.Any(x => x.Kind != CodexNativeSourceKind.Logs && x.HasMoreRows)) return;
+        _auxiliaryQuery = _auxiliaryQuery with { PageIndex = _auxiliaryQuery.PageIndex + 1 };
+        Interlocked.Increment(ref _sourceGeneration);
+        if (_cancellation is { } cancellation) await LoadAsync(cancellation.Token);
     }
 
     private void OnFilterChanged(object sender, TextChangedEventArgs e)
@@ -192,6 +218,7 @@ public sealed partial class CodexSourcesPage : Page
                 var query = new CodexNativeSourcesQuery
                 {
                     SelectedPaths = new Dictionary<CodexNativeSourceKind, string>(_selectedPaths),
+                    Auxiliary = _auxiliaryQuery,
                     Logs = logsQuery with { DatabasePath = _selectedPaths.GetValueOrDefault(CodexNativeSourceKind.Logs) }
                 };
                 StatusText.Text = "Inspecting Codex source capabilities…";
@@ -291,6 +318,11 @@ public sealed partial class CodexSourcesPage : Page
 
     private void Apply(CodexNativeSourcesSnapshot snapshot)
     {
+        AuxiliaryStatusText.Text = $"Batch {snapshot.Auxiliary.PageIndex + 1} · up to 250 rows per primary table · " +
+            (snapshot.Auxiliary.ThreadId is null ? "all threads. " : "exact thread scope. ") +
+            "Live pages may shift as Codex changes data. Missing thread columns are unavailable, not unfiltered results. Memory jobs are omitted in thread scope. Logs use their own query.";
+        AuxiliaryPreviousButton.IsEnabled = snapshot.Auxiliary.PageIndex > 0;
+        AuxiliaryNextButton.IsEnabled = snapshot.Sources.Any(x => x.Kind != CodexNativeSourceKind.Logs && x.HasMoreRows);
         _snapshot = snapshot;
         var filter = FilterTextBox.Text.Trim();
         SourceStatusList.ItemsSource = snapshot.Sources.Select(source => new SourceStatusRow(

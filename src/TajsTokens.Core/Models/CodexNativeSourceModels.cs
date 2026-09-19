@@ -312,10 +312,14 @@ public sealed record CodexNativeSourceSelection(
 /// <summary>Per-request choices. Never changes the Codex installation or global discovery state.</summary>
 public sealed record CodexNativeSourcesQuery
 {
+    public CodexAuxiliaryQuery Auxiliary { get; init; } = new();
     public IReadOnlyDictionary<CodexNativeSourceKind, string> SelectedPaths { get; init; } =
         new Dictionary<CodexNativeSourceKind, string>();
     public CodexLogsQuery Logs { get; init; } = new();
 }
+
+/// <summary>Live source-side auxiliary paging; thread ID is exact, never a content search.</summary>
+public sealed record CodexAuxiliaryQuery(int PageIndex = 0, string? ThreadId = null);
 
 public sealed record CodexThreadSummariesSource(
     CodexNativeSourceInfo Source,
@@ -332,6 +336,7 @@ public sealed record CodexNativeSourcesSnapshot(
     CodexThreadSummariesSource ThreadSummaries)
 {
     public IReadOnlyList<CodexNativeSourceSelection> Selections { get; init; } = [];
+    public CodexAuxiliaryQuery Auxiliary { get; init; } = new();
 
     public IReadOnlyList<CodexNativeSourceInfo> Sources =>
     [

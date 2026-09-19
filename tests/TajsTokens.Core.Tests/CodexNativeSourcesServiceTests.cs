@@ -7,6 +7,40 @@ namespace TajsTokens.Core.Tests;
 public sealed class CodexNativeSourcesServiceTests
 {
     [Fact]
+    public async Task AuxiliaryScopeRunsBeforePagingAndKeepsThreadRelations()
+    {
+        var project = new DirectoryInfo(AppContext.BaseDirectory);
+        while (project is not null && !File.Exists(Path.Combine(project.FullName, "PROJECT.md"))) project = project.Parent;
+        Assert.NotNull(project);
+        var directory = Directory.CreateDirectory(Path.Combine(project.FullName, ".codex/temp/aux-query-" + Guid.NewGuid().ToString("N")));
+        try
+        {
+            await CreateDatabaseAsync(Path.Combine(directory.FullName, "goals_1.sqlite"), "CREATE TABLE thread_goals(thread_id TEXT, goal_id TEXT, status TEXT, updated_at_ms INTEGER); CREATE TABLE thread_goal_continuation_deferrals(thread_id TEXT); " +
+                string.Join("", Enumerable.Range(0, 270).Select(i => $"INSERT INTO thread_goals VALUES('thread-{i:D3}','goal-{i}','active',{1000-i});")) +
+                "INSERT INTO thread_goal_continuation_deferrals VALUES('thread-269');");
+            var service = new CodexNativeSourcesService(directory.FullName);
+            var first = await service.ReadAsync(new CodexNativeSourcesQuery());
+            Assert.Equal(250, first.Goals.Goals.Count);
+            Assert.True(first.Goals.Source.HasMoreRows);
+            var second = await service.ReadAsync(new CodexNativeSourcesQuery { Auxiliary = new(1) });
+            Assert.Equal(20, second.Goals.Goals.Count);
+            Assert.False(second.Goals.Source.HasMoreRows);
+            Assert.Empty(first.Goals.Goals.Select(x => x.GoalId).Intersect(second.Goals.Goals.Select(x => x.GoalId)));
+            var scoped = await service.ReadAsync(new CodexNativeSourcesQuery { Auxiliary = new(0, "thread-269") });
+            var goal = Assert.Single(scoped.Goals.Goals);
+            Assert.Equal("thread-269", goal.ThreadId);
+            Assert.True(goal.HasContinuationDeferral);
+            var literal = await service.ReadAsync(new CodexNativeSourcesQuery { Auxiliary = new(0, "thread-269' OR 1=1 --") });
+            Assert.Empty(literal.Goals.Goals);
+            await CreateDatabaseAsync(Path.Combine(directory.FullName, "goals_1.sqlite"), "DROP TABLE thread_goals; CREATE TABLE thread_goals(goal_id TEXT, status TEXT, updated_at_ms INTEGER);");
+            var unsupported = await service.ReadAsync(new CodexNativeSourcesQuery { Auxiliary = new(0, "thread-269") });
+            Assert.Equal(CodexNativeSourceAvailability.Error, unsupported.Goals.Source.Availability);
+            Assert.Contains("no native thread_id", unsupported.Goals.Source.Error);
+        }
+        finally { directory.Delete(recursive: true); }
+    }
+
+    [Fact]
     public async Task LogSnapshotKeepsPagesStableAcrossWritesAndRejectsChangedQueries()
     {
         var project = new DirectoryInfo(AppContext.BaseDirectory);

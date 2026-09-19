@@ -39,6 +39,9 @@ outlooks and usage predictions—with freshness and uncertainty kept visible.
 - **Native log inspection:** WAL-mode log pages share a read-only snapshot for up to two minutes,
   so new writes do not shift your pages. Apply refreshes the snapshot; expired snapshots ask you to
   refresh. Other journal modes are explicitly labelled live pages. Log bodies remain opt-in and local.
+- **Auxiliary source inspection:** query an exact thread ID before paging through memory outputs,
+  goals, queue, artifacts and Desktop records. Separate loaded-row filtering never claims to search
+  the whole source. Auxiliary pages are live and may shift when Codex writes.
 - **Experimental daily backend reports:** opt in on Quota history to collect daily Codex token
   counts and reported per-surface percentages using your existing Codex sign-in. Private endpoints
   may change; failures remain visible. Reports stay local, credentials are not saved, and daily

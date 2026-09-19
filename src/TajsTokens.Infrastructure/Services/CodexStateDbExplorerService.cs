@@ -331,7 +331,8 @@ public sealed class CodexStateDbExplorerService
         CodexOrderedSourceTable sourceTable,
         int pageIndex = 0,
         int pageSize = DefaultPageSize,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? threadId = null)
     {
         pageIndex = Math.Max(0, pageIndex);
         pageSize = Math.Clamp(pageSize, 1, MaxPageSize);
@@ -363,6 +364,17 @@ public sealed class CodexStateDbExplorerService
         var query = specification.RequiredOrderColumns.All(availableColumns.Contains)
             ? specification.OrderedQuery
             : specification.UnorderedQuery;
+        if (threadId is not null)
+        {
+            if (!availableColumns.Contains("thread_id"))
+                throw new NotSupportedException($"{specification.TableName} has no native thread_id; thread-scoped results are unavailable.");
+            var from = "FROM " + specification.TableName;
+            query = query.Replace(from, from + " WHERE thread_id = $thread", StringComparison.Ordinal);
+            using var count = connection.CreateCommand();
+            count.CommandText = $"SELECT COUNT(*) FROM {QuoteIdentifier(specification.TableName)} WHERE thread_id = $thread;";
+            count.Parameters.AddWithValue("$thread", threadId);
+            totalRows = Convert.ToInt64(await count.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
+        }
         return await ReadRawPageAsync(
             connection,
             candidate.Path,
@@ -373,6 +385,7 @@ public sealed class CodexStateDbExplorerService
             () =>
             {
                 var command = new SqliteCommand(query, connection);
+                if (threadId is not null) command.Parameters.AddWithValue("$thread", threadId);
                 command.Parameters.AddWithValue("$limit", pageSize);
                 command.Parameters.AddWithValue("$offset", offset);
                 return command;

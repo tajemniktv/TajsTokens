@@ -36,6 +36,7 @@ public sealed class CodexNativeSourceGateway
         CodexNativeSourcesQuery query, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        query = query with { Auxiliary = new(Math.Max(0, query.Auxiliary.PageIndex), TrimToNull(query.Auxiliary.ThreadId)) };
         var capturedAtUtc = DateTimeOffset.UtcNow;
         var candidates = _explorer.DiscoverCandidates();
         var selections = Enum.GetValues<CodexNativeSourceKind>()
@@ -50,12 +51,12 @@ public sealed class CodexNativeSourceGateway
             query.Logs with { DatabasePath = selections.Single(selection => selection.Kind == CodexNativeSourceKind.Logs).SelectedPath },
             capturedAtUtc,
             cancellationToken);
-        var memoryTask = ReadMemorySafelyAsync(Selected(CodexNativeSourceKind.Memory), capturedAtUtc, cancellationToken);
-        var goalsTask = ReadGoalsSafelyAsync(Selected(CodexNativeSourceKind.Goals), capturedAtUtc, cancellationToken);
-        var queueTask = ReadQueueSafelyAsync(Selected(CodexNativeSourceKind.Queue), capturedAtUtc, cancellationToken);
-        var artifactsTask = ReadArtifactsSafelyAsync(Selected(CodexNativeSourceKind.Artifacts), capturedAtUtc, cancellationToken);
-        var catalogTask = ReadDesktopCatalogSafelyAsync(Selected(CodexNativeSourceKind.DesktopCatalog), capturedAtUtc, cancellationToken);
-        var summariesTask = ReadThreadSummariesSafelyAsync(Selected(CodexNativeSourceKind.ThreadSummaries), capturedAtUtc, cancellationToken);
+        var memoryTask = ReadMemorySafelyAsync(Selected(CodexNativeSourceKind.Memory), capturedAtUtc, cancellationToken, query.Auxiliary);
+        var goalsTask = ReadGoalsSafelyAsync(Selected(CodexNativeSourceKind.Goals), capturedAtUtc, cancellationToken, query.Auxiliary);
+        var queueTask = ReadQueueSafelyAsync(Selected(CodexNativeSourceKind.Queue), capturedAtUtc, cancellationToken, query.Auxiliary);
+        var artifactsTask = ReadArtifactsSafelyAsync(Selected(CodexNativeSourceKind.Artifacts), capturedAtUtc, cancellationToken, query.Auxiliary);
+        var catalogTask = ReadDesktopCatalogSafelyAsync(Selected(CodexNativeSourceKind.DesktopCatalog), capturedAtUtc, cancellationToken, query.Auxiliary);
+        var summariesTask = ReadThreadSummariesSafelyAsync(Selected(CodexNativeSourceKind.ThreadSummaries), capturedAtUtc, cancellationToken, query.Auxiliary);
 
         await Task.WhenAll(logsTask, memoryTask, goalsTask, queueTask, artifactsTask, catalogTask, summariesTask);
         return new CodexNativeSourcesSnapshot(
@@ -66,7 +67,7 @@ public sealed class CodexNativeSourceGateway
             await queueTask,
             await artifactsTask,
             await catalogTask,
-            await summariesTask) { Selections = selections };
+            await summariesTask) { Selections = selections, Auxiliary = query.Auxiliary };
     }
 
     public Task<CodexNativeSourcesSnapshot> InspectAsync(CancellationToken cancellationToken = default) =>
@@ -124,9 +125,9 @@ public sealed class CodexNativeSourceGateway
             DateTimeOffset.UtcNow,
             cancellationToken);
 
-    private async Task<CodexMemorySource> ReadMemorySafelyAsync(CodexStateDatabaseCandidate? candidate, DateTimeOffset capturedAtUtc, CancellationToken cancellationToken)
+    private async Task<CodexMemorySource> ReadMemorySafelyAsync(CodexStateDatabaseCandidate? candidate, DateTimeOffset capturedAtUtc, CancellationToken cancellationToken, CodexAuxiliaryQuery? auxiliary = null)
     {
-        try { return await ReadMemoryAsync(candidate, capturedAtUtc, cancellationToken); }
+        try { return await ReadMemoryAsync(candidate, capturedAtUtc, cancellationToken, auxiliary); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception exception) when (IsSourceFailure(exception)) { return new CodexMemorySource(ErrorInfo(CodexNativeSourceKind.Memory, "Codex memory", candidate, capturedAtUtc, exception), [], []); }
     }
@@ -152,37 +153,37 @@ public sealed class CodexNativeSourceGateway
         }
     }
 
-    private async Task<CodexGoalsSource> ReadGoalsSafelyAsync(CodexStateDatabaseCandidate? candidate, DateTimeOffset capturedAtUtc, CancellationToken cancellationToken)
+    private async Task<CodexGoalsSource> ReadGoalsSafelyAsync(CodexStateDatabaseCandidate? candidate, DateTimeOffset capturedAtUtc, CancellationToken cancellationToken, CodexAuxiliaryQuery? auxiliary = null)
     {
-        try { return await ReadGoalsAsync(candidate, capturedAtUtc, cancellationToken); }
+        try { return await ReadGoalsAsync(candidate, capturedAtUtc, cancellationToken, auxiliary); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception exception) when (IsSourceFailure(exception)) { return new CodexGoalsSource(ErrorInfo(CodexNativeSourceKind.Goals, "Codex goals", candidate, capturedAtUtc, exception), [], []); }
     }
 
-    private async Task<CodexQueueSource> ReadQueueSafelyAsync(CodexStateDatabaseCandidate? candidate, DateTimeOffset capturedAtUtc, CancellationToken cancellationToken)
+    private async Task<CodexQueueSource> ReadQueueSafelyAsync(CodexStateDatabaseCandidate? candidate, DateTimeOffset capturedAtUtc, CancellationToken cancellationToken, CodexAuxiliaryQuery? auxiliary = null)
     {
-        try { return await ReadQueueAsync(candidate, capturedAtUtc, cancellationToken); }
+        try { return await ReadQueueAsync(candidate, capturedAtUtc, cancellationToken, auxiliary); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception exception) when (IsSourceFailure(exception)) { return new CodexQueueSource(ErrorInfo(CodexNativeSourceKind.Queue, "Codex queue", candidate, capturedAtUtc, exception), [], []); }
     }
 
-    private async Task<CodexArtifactsSource> ReadArtifactsSafelyAsync(CodexStateDatabaseCandidate? candidate, DateTimeOffset capturedAtUtc, CancellationToken cancellationToken)
+    private async Task<CodexArtifactsSource> ReadArtifactsSafelyAsync(CodexStateDatabaseCandidate? candidate, DateTimeOffset capturedAtUtc, CancellationToken cancellationToken, CodexAuxiliaryQuery? auxiliary = null)
     {
-        try { return await ReadArtifactsAsync(candidate, capturedAtUtc, cancellationToken); }
+        try { return await ReadArtifactsAsync(candidate, capturedAtUtc, cancellationToken, auxiliary); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception exception) when (IsSourceFailure(exception)) { return new CodexArtifactsSource(ErrorInfo(CodexNativeSourceKind.Artifacts, "Codex thread artifacts", candidate, capturedAtUtc, exception), []); }
     }
 
-    private async Task<CodexDesktopCatalogSource> ReadDesktopCatalogSafelyAsync(CodexStateDatabaseCandidate? candidate, DateTimeOffset capturedAtUtc, CancellationToken cancellationToken)
+    private async Task<CodexDesktopCatalogSource> ReadDesktopCatalogSafelyAsync(CodexStateDatabaseCandidate? candidate, DateTimeOffset capturedAtUtc, CancellationToken cancellationToken, CodexAuxiliaryQuery? auxiliary = null)
     {
-        try { return await ReadDesktopCatalogAsync(candidate, capturedAtUtc, cancellationToken); }
+        try { return await ReadDesktopCatalogAsync(candidate, capturedAtUtc, cancellationToken, auxiliary); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception exception) when (IsSourceFailure(exception)) { return new CodexDesktopCatalogSource(ErrorInfo(CodexNativeSourceKind.DesktopCatalog, "Codex Desktop thread catalog", candidate, capturedAtUtc, exception), []); }
     }
 
-    private async Task<CodexThreadSummariesSource> ReadThreadSummariesSafelyAsync(CodexStateDatabaseCandidate? candidate, DateTimeOffset capturedAtUtc, CancellationToken cancellationToken)
+    private async Task<CodexThreadSummariesSource> ReadThreadSummariesSafelyAsync(CodexStateDatabaseCandidate? candidate, DateTimeOffset capturedAtUtc, CancellationToken cancellationToken, CodexAuxiliaryQuery? auxiliary = null)
     {
-        try { return await ReadThreadSummariesAsync(candidate, capturedAtUtc, cancellationToken); }
+        try { return await ReadThreadSummariesAsync(candidate, capturedAtUtc, cancellationToken, auxiliary); }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (Exception exception) when (IsSourceFailure(exception)) { return new CodexThreadSummariesSource(ErrorInfo(CodexNativeSourceKind.ThreadSummaries, "Codex Desktop thread summaries", candidate, capturedAtUtc, exception), []); }
     }
@@ -212,7 +213,7 @@ public sealed class CodexNativeSourceGateway
     private async Task<CodexMemorySource> ReadMemoryAsync(
         CodexStateDatabaseCandidate? candidate,
         DateTimeOffset capturedAtUtc,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, CodexAuxiliaryQuery? auxiliary = null)
     {
         var context = await PrepareAsync(
             CodexNativeSourceKind.Memory,
@@ -227,14 +228,16 @@ public sealed class CodexNativeSourceGateway
         }
 
         var jobs = context.Tables.Contains("jobs", StringComparer.OrdinalIgnoreCase)
-            ? await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.Jobs, cancellationToken)
+            ? await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.Jobs, cancellationToken, auxiliary)
             : ReadRowsResult.Empty;
         var outputs = context.Tables.Contains("stage1_outputs", StringComparer.OrdinalIgnoreCase)
-            ? await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.Stage1Outputs, cancellationToken)
+            ? await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.Stage1Outputs, cancellationToken, auxiliary)
             : ReadRowsResult.Empty;
 
         var mappedJobs = jobs.Rows.Select(MapMemoryJob).OfType<CodexMemoryJob>().ToArray();
         var mappedOutputs = outputs.Rows.Select(MapMemoryOutput).OfType<CodexMemoryStage1Output>().ToArray();
+        if (!string.IsNullOrWhiteSpace(auxiliary?.ThreadId))
+            context = context with { Info = context.Info with { Warnings = [.. context.Info.Warnings, "jobs: omitted in thread scope; no native thread_id relationship is established."] } };
         return new CodexMemorySource(
             WithCoverage(context.Info, ("jobs", jobs, mappedJobs.Length), ("stage1_outputs", outputs, mappedOutputs.Length)),
             mappedJobs, mappedOutputs);
@@ -424,7 +427,7 @@ public sealed class CodexNativeSourceGateway
     private async Task<CodexGoalsSource> ReadGoalsAsync(
         CodexStateDatabaseCandidate? candidate,
         DateTimeOffset capturedAtUtc,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, CodexAuxiliaryQuery? auxiliary = null)
     {
         var context = await PrepareAsync(
             CodexNativeSourceKind.Goals,
@@ -439,7 +442,7 @@ public sealed class CodexNativeSourceGateway
         }
 
         var goals = context.Tables.Contains("thread_goals", StringComparer.OrdinalIgnoreCase)
-            ? await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.ThreadGoals, cancellationToken)
+            ? await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.ThreadGoals, cancellationToken, auxiliary)
             : ReadRowsResult.Empty;
         var goalThreadIds = goals.Rows
             .Select(row => Text(row.Page, row.Row, "thread_id"))
@@ -471,7 +474,7 @@ public sealed class CodexNativeSourceGateway
     private async Task<CodexQueueSource> ReadQueueAsync(
         CodexStateDatabaseCandidate? candidate,
         DateTimeOffset capturedAtUtc,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, CodexAuxiliaryQuery? auxiliary = null)
     {
         var context = await PrepareAsync(
             CodexNativeSourceKind.Queue,
@@ -486,7 +489,7 @@ public sealed class CodexNativeSourceGateway
         }
 
         var items = context.Tables.Contains("queued_items", StringComparer.OrdinalIgnoreCase)
-            ? await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.QueuedItems, cancellationToken)
+            ? await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.QueuedItems, cancellationToken, auxiliary)
             : ReadRowsResult.Empty;
         var itemThreadIds = items.Rows
             .Select(row => Text(row.Page, row.Row, "thread_id"))
@@ -518,7 +521,7 @@ public sealed class CodexNativeSourceGateway
     private async Task<CodexArtifactsSource> ReadArtifactsAsync(
         CodexStateDatabaseCandidate? candidate,
         DateTimeOffset capturedAtUtc,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, CodexAuxiliaryQuery? auxiliary = null)
     {
         var context = await PrepareAsync(
             CodexNativeSourceKind.Artifacts,
@@ -532,7 +535,7 @@ public sealed class CodexNativeSourceGateway
             return new CodexArtifactsSource(context.Info, []);
         }
 
-        var rows = await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.ThreadArtifacts, cancellationToken);
+        var rows = await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.ThreadArtifacts, cancellationToken, auxiliary);
         var mapped = rows.Rows.Select(MapArtifact).OfType<CodexThreadArtifact>().ToArray();
         return new CodexArtifactsSource(
             WithCoverage(context.Info, ("thread_artifacts", rows, mapped.Length)), mapped);
@@ -541,7 +544,7 @@ public sealed class CodexNativeSourceGateway
     private async Task<CodexDesktopCatalogSource> ReadDesktopCatalogAsync(
         CodexStateDatabaseCandidate? candidate,
         DateTimeOffset capturedAtUtc,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, CodexAuxiliaryQuery? auxiliary = null)
     {
         var context = await PrepareAsync(
             CodexNativeSourceKind.DesktopCatalog,
@@ -555,7 +558,7 @@ public sealed class CodexNativeSourceGateway
             return new CodexDesktopCatalogSource(context.Info, []);
         }
 
-        var rows = await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.LocalThreadCatalog, cancellationToken);
+        var rows = await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.LocalThreadCatalog, cancellationToken, auxiliary);
         var mapped = rows.Rows.Select(MapCatalogEntry).OfType<CodexDesktopCatalogEntry>().ToArray();
         return new CodexDesktopCatalogSource(
             WithCoverage(context.Info, ("local_thread_catalog", rows, mapped.Length)), mapped);
@@ -564,7 +567,7 @@ public sealed class CodexNativeSourceGateway
     private async Task<CodexThreadSummariesSource> ReadThreadSummariesAsync(
         CodexStateDatabaseCandidate? candidate,
         DateTimeOffset capturedAtUtc,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, CodexAuxiliaryQuery? auxiliary = null)
     {
         var context = await PrepareAsync(
             CodexNativeSourceKind.ThreadSummaries,
@@ -578,7 +581,7 @@ public sealed class CodexNativeSourceGateway
             return new CodexThreadSummariesSource(context.Info, []);
         }
 
-        var rows = await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.ThreadTurnSummaries, cancellationToken);
+        var rows = await ReadOrderedRowsAsync(candidate!.Path, CodexOrderedSourceTable.ThreadTurnSummaries, cancellationToken, auxiliary);
         var mapped = rows.Rows.Select(MapSummary).OfType<CodexThreadSummary>().ToArray();
         return new CodexThreadSummariesSource(
             WithCoverage(context.Info, ("thread_turn_summaries", rows, mapped.Length)), mapped);
@@ -654,16 +657,19 @@ public sealed class CodexNativeSourceGateway
     private async Task<ReadRowsResult> ReadOrderedRowsAsync(
         string databasePath,
         CodexOrderedSourceTable sourceTable,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken, CodexAuxiliaryQuery? auxiliary = null)
     {
+        auxiliary ??= new();
+        // Jobs have no native thread_id; do not infer thread ownership from job keys.
+        if (sourceTable == CodexOrderedSourceTable.Jobs && !string.IsNullOrWhiteSpace(auxiliary.ThreadId)) return ReadRowsResult.Empty;
+        var pageIndex = Math.Max(0, auxiliary.PageIndex);
         var page = await _explorer.ReadOrderedPageAsync(
-            databasePath,
-            sourceTable,
-            pageSize: MaxRowsPerTable + 1,
-            cancellationToken: cancellationToken);
+            databasePath, sourceTable, pageIndex: pageIndex,
+            pageSize: MaxRowsPerTable,
+            cancellationToken: cancellationToken, threadId: string.IsNullOrWhiteSpace(auxiliary.ThreadId) ? null : auxiliary.ThreadId.Trim());
         return new ReadRowsResult(
             page.Rows.Take(MaxRowsPerTable).Select(row => new RawRow(page, row)).ToArray(),
-            page.TotalRows > MaxRowsPerTable || page.Rows.Count > MaxRowsPerTable);
+            page.TotalRows > ((long)pageIndex + 1) * MaxRowsPerTable);
     }
 
     private async Task<ReadRowsResult> ReadRowsByTextValuesAsync(

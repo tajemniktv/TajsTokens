@@ -32,8 +32,19 @@
                       HorizontalAlignment="Stretch" DisplayMemberPath="Label"
                       SelectionChanged="OnSourceInstanceChanged" />
             <TextBlock x:Name="SourceSelectionText" TextWrapping="Wrap" IsTextSelectionEnabled="True" Opacity="0.72" />
+            <Expander Header="Auxiliary source query · memory, goals, queue, artifacts and Desktop" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                <StackPanel Spacing="8">
+                    <TextBox x:Name="AuxiliaryThreadBox" Header="Exact thread ID · optional" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Button Content="Apply thread scope" Click="OnAuxiliaryApplyClicked" />
+                        <Button x:Name="AuxiliaryPreviousButton" Content="Previous batch" Click="OnAuxiliaryPreviousClicked" />
+                        <Button x:Name="AuxiliaryNextButton" Content="Next batch" Click="OnAuxiliaryNextClicked" />
+                    </StackPanel>
+                    <TextBlock x:Name="AuxiliaryStatusText" TextWrapping="Wrap" />
+                </StackPanel>
+            </Expander>
             <TextBox x:Name="FilterTextBox"
-                     PlaceholderText="Filter source rows by thread, status, id or host"
+                     PlaceholderText="Filter loaded rows only by thread, status, id or host"
                      TextChanged="OnFilterChanged" />
             <ItemsControl x:Name="SourceStatusList">
             <ItemsControl.ItemsPanel>

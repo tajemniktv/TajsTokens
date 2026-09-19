@@ -294,7 +294,12 @@ ordinary new compatible contexts; do not force task-level storage merely to make
 
 ### Other scoped product gaps
 
-Broader auxiliary pagination/thread-scoped queries remain unfinished. WAL log navigation now shares a
+Auxiliary inspection now supports source-side exact thread scope and 250-row batches across memory
+outputs, goals, queue, artifacts and Desktop catalog/summaries. Relation lookups follow the primary
+page's thread IDs. Jobs are omitted with a warning in thread scope because job keys are not established
+thread identities. Missing native thread columns fail explicitly rather than returning global rows.
+These are live offset pages, not cross-source snapshots; changing sources resets the batch. Local text
+filtering remains limited to loaded rows and is labelled separately. WAL log navigation now shares a
 read-only SQLite transaction for up to two minutes (at most two leases per gateway), released on refresh
 or leaving the view. Counts and pages share the snapshot; changed filters/permissions/source or expired
 leases require Apply, never a silent fresh page. Non-WAL sources use explicitly labelled live pages to
@@ -1307,7 +1312,7 @@ read model: no schema migration, durable content collection or export is introdu
 
 The source UI preserves the chosen family and applied log filters through refresh. Its general
 text filter is explicitly limited to loaded rows; it is not a complete database search. Broader
-auxiliary pagination/thread-scoped querying remains unfinished; current log paging behavior is described above.
+auxiliary source-side paging and thread scope are implemented; current paging limitations are described above.
 
 ## Codex CLI harness boundary
 
