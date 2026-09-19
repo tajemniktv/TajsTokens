@@ -201,6 +201,52 @@ The proposed implementation sequence, to be tracked in PROJECT.md rather than as
 
 No synthetic Codex prompts, personality prediction or deep-learning service is needed.
 
+## 7. Consolidation of the earlier quota-cost roadmap
+
+The local `.codex/roadmap.md` (2026-09-18, "Quota-Cost Modeling & Regime Detection") is
+historical rationale, not a second active plan. Its immediate calibration task has been
+implemented. PROJECT.md's **Current work** owns subsequent priorities and acceptance;
+the [evidence review](CODEX_EVIDENCE_REPO_REVIEW.md) owns dated source findings and experiments.
+This section preserves the useful decisions without requiring that ignored local artifact.
+
+Retain the distinction between actual-workload cost explanation and origin-only future-workload
+forecasting. Build compatible, non-overlapping interval observations with source/account/reset
+provenance and precision-aware quota targets. Local unexplained movement may reflect missing
+coverage, delayed accounting or model error; it is not causal attribution to another device
+or provider policy. Context, compaction, subagents, runtime and time-of-week features are
+separate ablations, not assumed extra prices. In particular, TTFT or time of day cannot by
+themselves establish provider load. Keep frozen definitions, repeated observations, noise
+baselines and residual history rather than adapting away suspected changes.
+
+The earlier roadmap's six slices now map to existing owners:
+
+| Original slice | Current implementation / boundary |
+|---|---|
+| Derived interval dataset | `QuotaCostObservationBuilder`; compatible non-overlapping targets, not raw polling-row regression |
+| Baseline cost models | `QuotaCostEvaluation`; pace, total, categories and model/effort candidates, not automatic promotion |
+| Feature ablations | Context/activity/runtime/time candidates in the same evaluator; inclusion is not proof of benefit |
+| Residual/regime diagnostics | Frozen fit and replicated residual-shift diagnostics; explicit semantic changes remain separately owned by `CodexEvidenceDrift` |
+| End-to-end outlook | `ComposedQuotaEvaluator` and `SessionQuotaEvaluator`; workload uncertainty and collection-time eligibility remain separate from oracle cost accuracy |
+| Transfer / TT research | `TtEvaluator`, immutable `TtWorkloadBasis` and aggregate research snapshots; empirical transfer and per-task original scoring history are not established |
+
+Three older restrictions need qualification, not repetition:
+
+1. A frozen local TT score can compare workload without validated cross-regime scalar transfer.
+   Transfer validation is required for the corresponding quota-conversion claim, not for the
+   mathematical existence of an explicitly experimental index. Preserve the full workload vector.
+2. API-price weighting is now permitted as a versioned counterfactual competitor, not a bill,
+   native credit quantity or provider metering contract.
+3. Interval loss alone is not "primary truth." Zero-use comparisons, signed/accumulated error,
+   coverage, range width and independent-cycle evidence are necessary complementary checks.
+
+The old Desktop analytics inspection suggestion has been investigated; see
+[Desktop analytics acquisition](CODEX_DESKTOP_ANALYTICS.md). Do not repeat that investigation
+without a changed runtime or a new contract question. The old active-benchmark/"nerf checker"
+ideas remain methodological background only: no synthetic prompts, hidden-runtime probing,
+crowdsourcing, telemetry upload or causal "nerf" claim is introduced by this consolidation.
+External-project descriptions in the old artifact are dated observations, not newly verified
+claims about those projects today.
+
 ## User-supplied references
 
 Retained as supplied supporting reading; not independently reviewed while saving this proposal.

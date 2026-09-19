@@ -82,6 +82,9 @@ imply cross-user comparability. This is a research direction, not a released TT 
 universal weights or a claim that challengers beat the incumbent. Existing source/retention and
 promotion gates remain in force. The rationale, formulas, caveats and proposed candidates are
 preserved in [Layered statistical design](docs/source-notes/TT_LAYERED_STATISTICAL_DESIGN.md).
+The older local `.codex/roadmap.md` is historical, not an additional delivery plan. Its retained
+principles and superseded restrictions are mapped in the
+[roadmap consolidation](docs/source-notes/TT_LAYERED_STATISTICAL_DESIGN.md#7-consolidation-of-the-earlier-quota-cost-roadmap).
 
 **TT Model Lab prototype:** `tt-lab/v3` freezes category weights on the first 20 compatible
 known-account intervals, normalizes to one million tokens in the first positive interval's

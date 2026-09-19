@@ -7,6 +7,12 @@ defines a frozen normalized workload basis with separate quota calibration. It i
 direction, not evidence of implemented TT or a universal native-credit scale. PROJECT.md owns
 current implementation scope; this review's dated experiments remain evidence, not competing plans.
 
+The earlier local `.codex/roadmap.md` is superseded as an active plan. Its useful cost-model and
+regime-detection rationale is consolidated in the
+[layered design's roadmap mapping](TT_LAYERED_STATISTICAL_DESIGN.md#7-consolidation-of-the-earlier-quota-cost-roadmap),
+not duplicated here. That mapping distinguishes implemented experiments from empirical validation
+and qualifies the old claim that TT requires cross-regime transfer before it can be useful at all.
+
 **Prefer provider-native accounting quantities over inventing TT, but do not treat all
 credits as one stable unit or daily relative usage as historical quota consumption.**
 The reviewed implementations establish useful acquisition and reconciliation techniques,
