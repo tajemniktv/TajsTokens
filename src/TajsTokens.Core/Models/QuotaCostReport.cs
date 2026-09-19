@@ -14,6 +14,8 @@ public sealed record QuotaCostScore(QuotaHistoryCohort Cohort, double HorizonHou
 {
     public string? RateCardVersion { get; init; }
     public int UnpricedTrainingIntervals { get; init; }
+    public int IncompleteCategoryTrainingIntervals { get; init; }
+    public int IncompleteCategoryHeldOutIntervals { get; init; }
     public int UnpricedHeldOutIntervals { get; init; }
     public decimal UnpricedReportedTokens { get; init; }
     public double? PairedPaceIntervalLoss { get; init; }

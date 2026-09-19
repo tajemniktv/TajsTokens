@@ -22,5 +22,8 @@ public sealed record QuotaCostObservation(
     public QuotaAccountAttribution Attribution { get; init; }
     public string? AccountAssociationId { get; init; }
     public double ObservedDelta => EndUsed - StartUsed;
+    public bool HasCompleteTokenCategories => !QualityFlags.Contains("incomplete-token-categories") &&
+        Features.Tokens >= 0 && TokenCategories.Count == 5 && TokenCategories.All(x => double.IsFinite(x) && x >= 0) &&
+        Math.Abs(TokenCategories.Sum() - Features.Tokens) < .001;
     public double IntervalLoss(double prediction) => Math.Max(0, Math.Max(LowerDelta - prediction, prediction - UpperDelta));
 }

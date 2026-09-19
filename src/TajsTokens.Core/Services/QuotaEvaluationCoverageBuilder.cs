@@ -4,6 +4,11 @@ namespace TajsTokens.Core.Services;
 
 public static class QuotaEvaluationCoverageBuilder
 {
+    public static bool HasCompleteCategories(CodexPredictiveTokenEvent x)
+    {
+        long[] parts = [x.UncachedInputTokens, x.CacheReadTokens, x.CacheWriteTokens, x.NonReasoningOutputTokens, x.ReasoningOutputTokens];
+        return x.ReportedTotalTokens >= 0 && parts.All(v => v >= 0) && parts.Sum(v => (decimal)v) == x.ReportedTotalTokens;
+    }
     public const string Boundary = "Dataset-local recorded evidence, not whole-account completeness. " +
         "Token coverage is amount-weighted; tier counts are physical requested-setting records, not token or billed-tier coverage. " +
         "Collection after event time is not by itself strict-origin ineligibility. Cohort flags overlap and describe built intervals, " +
@@ -17,10 +22,7 @@ public static class QuotaEvaluationCoverageBuilder
         var settings = data.Workload.Where(x => x.EventType == "thread_settings_applied").ToArray();
         return new(data.Tokens.Count, Total(_ => true), Total(x => !string.IsNullOrWhiteSpace(x.Model)),
             Total(x => !string.IsNullOrWhiteSpace(x.ReasoningEffort)),
-            data.Tokens.Count(x => new[] { x.UncachedInputTokens, x.CacheReadTokens, x.CacheWriteTokens,
-                x.NonReasoningOutputTokens, x.ReasoningOutputTokens }.Sum(v => (decimal)v) != x.ReportedTotalTokens ||
-                x.UncachedInputTokens < 0 || x.CacheReadTokens < 0 || x.CacheWriteTokens < 0 ||
-                x.NonReasoningOutputTokens < 0 || x.ReasoningOutputTokens < 0 || x.ReportedTotalTokens < 0),
+            data.Tokens.Count(x => !HasCompleteCategories(x)),
             data.Tokens.Count(x => x.CapturedAtUtc is null),
             data.Tokens.Count(x => x.CapturedAtUtc > x.ObservedAtUtc),
             settings.Where(x => !string.IsNullOrWhiteSpace(x.ServiceTier)).GroupBy(x => x.ServiceTier!, StringComparer.Ordinal)

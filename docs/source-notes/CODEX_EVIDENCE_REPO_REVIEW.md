@@ -375,6 +375,14 @@ These are dated checks, not tests rerun during this consolidation or universal v
 
 ## Remaining evidence gates
 
+Local mismatch investigation (2026-09-19) traced all five flagged retained token rows to native
+`last_token_usage` snapshots with positive totals and zero category counters. This is not an
+import arithmetic error, and cumulative movement is not a justified replacement for the last-turn
+amount. Stored totals/categories remain unchanged. Category-dependent cost, transfer and composition
+models now withhold incomplete evidence; per-record flags survive aggregation even if opposing
+mismatches cancel. Raw-token cost baselines remain eligible. This establishes missing composition,
+not its provider-side cause or a general solution to interleaved lineage.
+
 | Question | Recorded evidence | What can resolve it |
 |---|---|---|
 | Native credit scale | 27 count rows with zero credits and 31 relative rows in the collected sample | Compatible nonzero native pairs with established units, seat, dates and independent freshness |

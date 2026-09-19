@@ -67,6 +67,7 @@ public static class QuotaCostObservationBuilder
                     flags.Add(userConfirmedRolloutOwnership && start.Authority == QuotaObservationAuthority.EmbeddedObservation
                         ? "user-confirmed-rollout-ownership-native-account-id-absent" : "native-account-id-absent");
                 if (tokens.Length == 0) flags.Add("no-recorded-tokens-not-proven-idle");
+                if (tokens.Any(x => !QuotaEvaluationCoverageBuilder.HasCompleteCategories(x))) flags.Add("incomplete-token-categories");
                 if (tokens.Any(x => x.Model is null || x.ReasoningEffort is null)) flags.Add("missing-model-or-effort");
                 if (features.ObservedContextEvents == 0) flags.Add("missing-context");
                 if (runtime.Length == 0) flags.Add("missing-runtime");

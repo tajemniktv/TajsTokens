@@ -9,6 +9,16 @@ public sealed class WorkloadCompositionPredictionTests
     private static readonly TokenHorizonPrediction Prediction = new(0.5, 1000, "fixture", 20, 16, 1, null, null, "fixture");
 
     [Fact]
+    public void OpposingCategoryErrorsCannotCancelIntoApparentlyCompleteComposition()
+    {
+        var missing = new CodexPredictiveTokenEvent("s", Origin.AddMinutes(-1), Origin, "m", "high", 0, 0, 0, 0, 0, 100);
+        var excess = missing with { UncachedInputTokens = 200 };
+        var data = new CodexForecastDataset([], [], [missing, excess], [], Origin, "fixture");
+        Assert.Null(WorkloadCompositionPrediction.Project(data, Origin, Prediction));
+        Assert.Equal(200, data.Tokens.Sum(x => x.ReportedTotalTokens));
+    }
+
+    [Fact]
     public void CompositionConservesPredictionAndNeverSeesFutureModelOrTokens()
     {
         var past = new CodexPredictiveTokenEvent("s", Origin.AddMinutes(-1), Origin, "old", null, 10, 70, 0, 15, 5, 100);

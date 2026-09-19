@@ -32,6 +32,13 @@ public static class QuotaTransferEvaluator
                         0, null, null, null, false, "insufficient-chronological-transfer-evidence"));
                     continue;
                 }
+                if (model != "total" && sourceTraining.Concat(destinationTraining).Concat(heldout).Any(x => !x.HasCompleteTokenCategories))
+                {
+                    scores.Add(new(source.Key.Cohort, destination.Key.Cohort, destination.Key.HorizonHours, model,
+                        sourceTraining.Length, destinationTraining.Length, heldout.Length, generations.Count,
+                        0, null, null, null, false, "incomplete-category-transfer-evidence"));
+                    continue;
+                }
                 var transferred = QuotaCostEvaluation.FitFrozen(sourceTraining, model, cancellationToken);
                 var local = QuotaCostEvaluation.FitFrozen(destinationTraining, model, cancellationToken);
                 var predictions = destinationTraining.Select(transferred).ToArray();
@@ -51,7 +58,7 @@ public static class QuotaTransferEvaluator
                     improvement ? "research-transfer-improvement-not-a-TT-unit" : "transfer-not-supported"));
             }
         }
-        return new("quota-transfer/v1", "Explicit source/destination comparisons only within the same recorded account, source and session lineage. " +
+        return new("quota-transfer/v2", "Explicit source/destination comparisons only within the same recorded account, source and session lineage. " +
             "Source weights use only intervals completed before the destination era. First 20 destination intervals fit one nonnegative scale and a local-only competitor. " +
             "Later disjoint intervals compare unscaled source weights, scale-only transfer and destination-local weights with generation-balanced interval loss. " +
             "No cross-account inference, automatic transfer or TT currency. Missing compatible regimes are no evidence, not successful transfer.", scores);

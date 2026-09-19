@@ -5,7 +5,7 @@ namespace TajsTokens.Core.Services;
 /// <summary>Shared scalar-to-vector projection; retrospective targets never enter composition.</summary>
 public static class WorkloadCompositionPrediction
 {
-    public const string Version = "recent-workload-composition/v1";
+    public const string Version = "recent-workload-composition/v2";
 
     public static PredictedWorkload? Project(CodexForecastDataset data, DateTimeOffset origin,
         TokenHorizonPrediction prediction,
@@ -16,6 +16,7 @@ public static class WorkloadCompositionPrediction
         var rows = data.Tokens.Where(x => x.ObservedAtUtc > origin.AddHours(-2) && x.ObservedAtUtc <= origin &&
             (availability == ForecastReplayAvailability.ReconstructedEventTime || x.CapturedAtUtc <= origin)).ToArray();
         if (rows.Length == 0) return null;
+        if (rows.Any(x => !QuotaEvaluationCoverageBuilder.HasCompleteCategories(x))) return null;
         double Sum(Func<CodexPredictiveTokenEvent, long> field) => rows.Sum(x => (double)Math.Max(0, field(x)));
         double[] parts = [Sum(x => x.UncachedInputTokens), Sum(x => x.CacheReadTokens), Sum(x => x.CacheWriteTokens),
             Sum(x => x.NonReasoningOutputTokens), Sum(x => x.ReasoningOutputTokens)];
@@ -30,6 +31,6 @@ public static class WorkloadCompositionPrediction
             Shares(x => x.ReasoningEffort), rows.Length, rows.Max(x => x.ObservedAtUtc), availability,
             Version + ": scalar token forecast distributed by the preceding two hours' disjoint category composition. " +
             "Model/effort shares retain unknown mass; no future metadata or task completions. " +
-            "Component shares are normalized independently of the native reported total; this is a prediction, not rewritten accounting.");
+            "Incomplete category evidence withholds composition; this is a prediction, not rewritten accounting.");
     }
 }

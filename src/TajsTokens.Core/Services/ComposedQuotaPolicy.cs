@@ -38,6 +38,8 @@ public static class ComposedQuotaPolicy
             var selected = candidates[0];
             var liveEvidence = strict.Scores.Single(x => x.Cohort == selected.Cohort && x.HorizonHours == selected.HorizonHours && x.CostModel == selected.CostModel);
             var total = evaluation.Scores.FirstOrDefault(x => x.Cohort == selected.Cohort && x.HorizonHours == selected.HorizonHours && x.CostModel == "total");
+            if (selected.CostModel != "total" && (total is null || !selected.Trials.Select(x => (x.OriginUtc, x.OutcomeUtc))
+                .SequenceEqual(total.Trials.Select(x => (x.OriginUtc, x.OutcomeUtc))))) return baseline;
             if (selected.CostModel != "total" && (total?.IntervalLoss is not { } totalLoss ||
                 selected.IntervalLoss + 0.1 >= totalLoss || selected.IntervalLoss >= totalLoss * 0.9)) return baseline;
             var workload = TokenWorkloadPredictionService.PredictHorizon(prefix, anchor.CapturedAtUtc,
@@ -45,6 +47,8 @@ public static class ComposedQuotaPolicy
             if (workload is null) return baseline;
             var training = QuotaCostTrainingPolicy.Select(observations, selected.Cohort, baseline.HorizonHours, selected.AssertedTrainingIntervals > 0);
             if (training.Length < 20) return baseline;
+            if (selected.CostModel.Replace("asserted-", "", StringComparison.Ordinal) != "total" &&
+                training.Any(x => !x.HasCompleteTokenCategories)) return baseline;
             if (workload.ModelShares.Keys.Except(training.SelectMany(x => x.Features.ModelTokenShares.Keys)).Any() ||
                 workload.EffortShares.Keys.Except(training.SelectMany(x => x.Features.EffortTokenShares.Keys)).Any()) return baseline;
             var fit = QuotaCostEvaluation.FitFrozen(training, selected.CostModel.Replace("asserted-", "", StringComparison.Ordinal), cancellationToken);

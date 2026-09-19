@@ -194,7 +194,7 @@ Plausible explicit assumptions are allowed, but must remain distinguishable from
 - **Completed quiet outcomes:** evaluation ends at the earlier of requested time and dataset capture,
   not the last token. Snapshot age cannot manufacture negative targets; collector gaps remain a
   competing explanation. The session decomposition reuses retained token time/amount fields.
-- **Composed quota:** `composed-quota/v4` preserves separate retrospective and strict collection-time
+- **Composed quota:** `composed-quota/v5` preserves separate retrospective and strict collection-time
   evaluations. Only required cost inputs govern availability; unknown capture time never becomes
   event time. Recovered old work cannot qualify a historical prediction retroactively.
 - **Promotion:** retain the incumbent unless a supported total/category/model-effort candidate wins
@@ -213,6 +213,12 @@ Plausible explicit assumptions are allowed, but must remain distinguishable from
   or execution tier. Unknown rates withhold fitting/evaluation coverage; not a production candidate.
 
 Additional native fields require per-field source/content/privacy/retention decisions before collection.
+Native rollouts can report positive total tokens with zero category counters. Preserve both;
+do not substitute cumulative movement or fabricate a category allocation. Per-record mismatch flags
+prevent offsetting errors from disappearing during interval aggregation. Category-dependent cost
+training/evaluation, transfer and recent composition now withhold incomplete evidence; raw-token
+cost baselines retain reported totals. Comparison gates require identical target sets rather than
+zipping unequal trial lists. This changes derived model eligibility, not stored token accounting.
 Supported improvements should reach the product after validation, not remain permanently in a harness.
 
 ### TT basis and original research-output contract

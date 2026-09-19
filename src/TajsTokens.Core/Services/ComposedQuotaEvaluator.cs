@@ -5,7 +5,7 @@ namespace TajsTokens.Core.Services;
 /// <summary>Actual-cost and origin-only forecast errors on identical disjoint outcomes.</summary>
 public static class ComposedQuotaEvaluator
 {
-    public const string Version = "composed-quota/v4";
+    public const string Version = "composed-quota/v5";
 
     public static ComposedQuotaEvaluation Evaluate(CodexForecastDataset data, CancellationToken cancellationToken = default,
         ForecastReplayAvailability availability = ForecastReplayAvailability.ReconstructedEventTime)
@@ -31,12 +31,16 @@ public static class ComposedQuotaEvaluator
                 var missing = 0;
                 var withheldReasons = new Dictionary<string, int>();
                 void Withheld(string reason) => withheldReasons[reason] = withheldReasons.GetValueOrDefault(reason) + 1;
-                if (nativeTraining.Length == 20)
+                var needsCategories = candidate.Replace("asserted-", "", StringComparison.Ordinal) != "total";
+                var completeTraining = !needsCategories || training.All(x => x.HasCompleteTokenCategories);
+                if (!completeTraining) withheldReasons["incomplete-category-training"] = training.Count(x => !x.HasCompleteTokenCategories);
+                if (nativeTraining.Length == 20 && completeTraining)
                 {
                     var fit = QuotaCostEvaluation.FitFrozen(training, candidate.Replace("asserted-", "", StringComparison.Ordinal), cancellationToken);
                     foreach (var row in ordered.Skip(20).Where(x => x.StartUtc >= training[^1].EndUtc))
                     {
                         cancellationToken.ThrowIfCancellationRequested();
+                        if (needsCategories && !row.HasCompleteTokenCategories) { Withheld("incomplete-category-outcome"); continue; }
                         if (availability == ForecastReplayAvailability.CollectedByOrigin)
                         {
                             var unavailable = false;

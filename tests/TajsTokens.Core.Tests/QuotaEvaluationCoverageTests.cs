@@ -6,6 +6,48 @@ namespace TajsTokens.Core.Tests;
 public sealed class QuotaEvaluationCoverageTests
 {
     [Fact]
+    public void MissingCategoryTrainingDoesNotEraseRawTotalOrInventCategoryFit()
+    {
+        var rows = QuotaCostEvaluationTests.Observations(40);
+        rows[5] = rows[5] with { TokenCategories = [0, 0, 0, 0, 0] };
+        var report = QuotaCostEvaluation.Evaluate(rows, "fixture");
+        var total = report.Scores.Single(x => x.Candidate == "total");
+        var categories = report.Scores.Single(x => x.Candidate == "categories");
+        Assert.Equal(20, total.HeldOutSamples);
+        Assert.Equal("incomplete-category-training", categories.Status);
+        Assert.Equal(1, categories.IncompleteCategoryTrainingIntervals);
+        Assert.Empty(categories.Coefficients);
+        Assert.Empty(categories.Trials);
+    }
+
+    [Fact]
+    public void MissingHeldOutCategoriesAreWithheldWithoutRefittingOrUnpairedPromotion()
+    {
+        var rows = QuotaCostEvaluationTests.Observations(40);
+        var original = QuotaCostEvaluation.Evaluate(rows, "fixture").Scores.Single(x => x.Candidate == "categories");
+        rows[25] = rows[25] with { QualityFlags = ["incomplete-token-categories"] };
+        var report = QuotaCostEvaluation.Evaluate(rows, "fixture");
+        var categories = report.Scores.Single(x => x.Candidate == "categories");
+        Assert.Equal(original.Coefficients, categories.Coefficients);
+        Assert.Equal(19, categories.HeldOutSamples);
+        Assert.Equal(1, categories.IncompleteCategoryHeldOutIntervals);
+        Assert.Equal(20, report.Scores.Single(x => x.Candidate == "total").HeldOutSamples);
+        Assert.False(categories.MaterialWin);
+    }
+
+    [Fact]
+    public void ComposedCategoryTrainingReportsMissingEvidenceInsteadOfThrowing()
+    {
+        var data = ComposedQuotaEvaluatorTests.TimelyData();
+        data = data with { Tokens = data.Tokens.Select((x, i) => i == 3 ? x with { UncachedInputTokens = 0 } : x).ToArray() };
+        var result = ComposedQuotaEvaluator.Evaluate(data);
+        var category = result.Scores.Single(x => x.HorizonHours == .5 && x.CostModel == "categories");
+        Assert.Empty(category.Trials);
+        Assert.Equal(1, category.WithheldReasons["incomplete-category-training"]);
+        Assert.Contains(QuotaCostObservationBuilder.Build(data), x => x.QualityFlags.Contains("incomplete-token-categories"));
+    }
+
+    [Fact]
     public void DatasetCoverageWeightsTokensAndNeverInfersTierOrTimeliness()
     {
         var now = DateTimeOffset.UtcNow;

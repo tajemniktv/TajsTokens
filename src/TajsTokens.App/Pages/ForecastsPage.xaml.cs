@@ -387,6 +387,7 @@ public sealed partial class ForecastsPage : Page
                     score.HeldOutSamples == 0 ? "Insufficient independent history for held-out cost calibration" :
                         $"Interval loss {score.IntervalLoss:0.###}pp · {score.HeldOutSamples:N0} held-out intervals · {score.HeldOutGenerations} reset generations",
                     $"{score.Status} · training {score.TrainingSamples} intervals / {score.TrainingGenerations} generations. " +
+                    $"Incomplete category evidence: {score.IncompleteCategoryTrainingIntervals} training / {score.IncompleteCategoryHeldOutIntervals} held-out intervals withheld from category candidates. " +
                     $"Displayed-delta MAE {score.DisplayedDeltaMae:0.###}pp; generation-average interval loss {score.GenerationMeanIntervalLoss:0.###}pp. " +
                     $"Residual p10 / median / p90: {score.ResidualP10:0.###} / {score.ResidualMedian:0.###} / {score.ResidualP90:0.###}pp. " +
                     $"Mean unexplained movement above envelope lower bound: {score.UnexplainedPositiveMovement:0.###}pp. Not causal attribution. " +

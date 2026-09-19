@@ -71,6 +71,8 @@ if (args.Length == 2 && args[0] is "--cost" or "--cost-owned-rollouts")
     Console.WriteLine(QuotaEvaluationCoverageBuilder.Boundary);
     Console.WriteLine(QuotaCostObservationBuilder.CoverageBoundary);
     Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { report.EvidenceCoverage, report.ConstructionCoverage, report.CohortCoverage }));
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(report.Scores.Where(x => x.IncompleteCategoryTrainingIntervals > 0 || x.IncompleteCategoryHeldOutIntervals > 0)
+        .Select(x => new { x.Cohort.Source, x.Cohort.Kind, x.HorizonHours, x.Candidate, x.Status, x.IncompleteCategoryTrainingIntervals, x.IncompleteCategoryHeldOutIntervals })));
     Console.WriteLine($"observations={report.Observations}; " + string.Join("; ", report.QualityCounts.Select(x => $"{x.Key}={x.Value}")));
     Console.WriteLine("cohort,source,window,horizon,model,train,train_generations,heldout,heldout_generations,interval_loss,displayed_MAE,generation_loss,residual_p10,residual_median,residual_p90,unexplained_lower,bands,intersection_rate,material_win,shift_candidates,status,rate_card,unpriced_training,unpriced_heldout,unpriced_tokens,paired_pace_loss,paired_total_loss");
     var cohorts = report.Scores.Select(x => x.Cohort).Distinct().ToList();

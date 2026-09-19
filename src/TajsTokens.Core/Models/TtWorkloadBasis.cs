@@ -57,9 +57,7 @@ public sealed class TtWorkloadBasis
         return Score(row.TokenCategories);
     }
 
-    internal static bool CompleteCategories(QuotaCostObservation row) => row.Features.Tokens >= 0 &&
-        row.TokenCategories.Count == 5 && row.TokenCategories.All(x => double.IsFinite(x) && x >= 0) &&
-        Math.Abs(row.TokenCategories.Sum() - row.Features.Tokens) < .001;
+    internal static bool CompleteCategories(QuotaCostObservation row) => row.HasCompleteTokenCategories;
 
     private static bool Supported(IReadOnlyDictionary<string, double> shares, IReadOnlyList<string> support) =>
         shares.Count > 0 && shares.All(x => double.IsFinite(x.Value) && x.Value >= 0 && support.Contains(x.Key)) &&
