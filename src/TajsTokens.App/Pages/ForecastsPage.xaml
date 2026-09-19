@@ -159,10 +159,11 @@
                 </ScrollViewer>
             </PivotItem>
             <PivotItem x:Name="EvaluationTab" Header="Model evaluation">
-                <Grid RowSpacing="12" Padding="4,12,4,0">
-                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                <ListView x:Name="EvaluationList" Padding="4,12,4,0" SelectionMode="None" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Models in selected evaluation cohort">
+                    <ListView.Header>
+                    <StackPanel Spacing="12" Margin="0,0,0,12">
                     <Button x:Name="EvaluateButton" Content="Evaluate against recorded outcomes" Click="OnEvaluateClicked" HorizontalAlignment="Left" />
-                    <StackPanel Grid.Row="1" Spacing="8" MaxWidth="1000" HorizontalAlignment="Left">
+                    <StackPanel Spacing="8" MaxWidth="1000" HorizontalAlignment="Stretch">
                         <TextBlock x:Name="EvaluationStatusText" Text="Compare predicted quota and tokens with later recorded outcomes. Choose a history range above, then run the local evaluation. Nothing is exported." TextWrapping="Wrap" />
                         <Expander Header="Saved TT research results — original, not restated" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                             <StackPanel Spacing="8">
@@ -174,14 +175,15 @@
                             <ScrollViewer MaxHeight="220"><TextBlock x:Name="EvaluationMethodText" Text="Quota comparisons keep source, account, plan and reset histories separate. Token errors use a different unit; neither is an exhaustion probability." TextWrapping="Wrap" IsTextSelectionEnabled="True" /></ScrollViewer>
                         </Expander>
                     </StackPanel>
-                    <ComboBox x:Name="EvaluationGroup" Grid.Row="2" Header="Compare within one source, history cohort and target" MaxWidth="1000" HorizontalAlignment="Stretch" SelectionChanged="OnEvaluationGroupChanged" AutomationProperties.Name="Evaluation cohort and target" />
-                    <TextBlock x:Name="EvaluationSelectionText" Grid.Row="3" Text="No evaluation results yet." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <ListView x:Name="EvaluationList" Grid.Row="4" SelectionMode="None" AutomationProperties.Name="Models in selected evaluation cohort">
+                    <ComboBox x:Name="EvaluationGroup" Header="Compare within one source, history cohort and target" MaxWidth="1000" HorizontalAlignment="Stretch" SelectionChanged="OnEvaluationGroupChanged" AutomationProperties.Name="Evaluation cohort and target" />
+                    <TextBlock x:Name="EvaluationSelectionText" Text="No evaluation results yet." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    </StackPanel>
+                    </ListView.Header>
                         <ListView.ItemTemplate><DataTemplate>
                             <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Margin="0,4">
                                 <Expander.Header>
                                     <StackPanel Spacing="6">
-                                        <TextBlock Text="{Binding Header}" FontSize="18" FontWeight="SemiBold" />
+                                        <TextBlock Text="{Binding Header}" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
                                         <TextBlock Text="{Binding Metric}" TextWrapping="Wrap" />
                                     </StackPanel>
                                 </Expander.Header>
@@ -189,7 +191,6 @@
                             </Expander>
                         </DataTemplate></ListView.ItemTemplate>
                     </ListView>
-                </Grid>
             </PivotItem>
         </Pivot>
     </Grid>

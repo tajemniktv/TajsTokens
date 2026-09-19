@@ -345,7 +345,12 @@ restored page 1 with a new snapshot. Model Lab completed the 30-day evaluation a
 saved TT results without rescoring. Unsupported TT results exposed blank numeric labels; live and
 saved TT presentation now renders missing/nonfinite metrics explicitly as unavailable, preserving
 numeric zero and the original evidence. These are running-app navigation/accessibility checks with
-maximized-layout screenshots, not complete product acceptance. Exact-thread filtering, other window
+maximized-layout screenshots, not complete product acceptance. A restored small-window check found
+expanded research history could push the cohort selector/results outside the viewport. Model Lab
+now keeps its controls in the results list's scrolling header, retaining list virtualization and wrapping
+model labels rather than consuming all available height with fixed controls. The deployed fix was checked
+at approximately 686×643 pixels with loaded saved history expanded: scrolling reached the cohort selector
+and result area. Exact-thread filtering, other window
 sizes, detailed selection/drift presentation and empty/stale/partial/corrupt workflows still need
 native acceptance checks. No native source contents or privacy settings were changed during this pass.
 
