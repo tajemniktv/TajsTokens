@@ -340,10 +340,14 @@ preserving the half-hour duration; estimating returned explicit insufficient-his
 reasons rather than an extrapolated result. Native Sources displayed a two-minute read-only log
 snapshot; moving from page 1 to page 2 preserved its matching count and expiry. Auxiliary navigation
 reached batch 2 and disabled Next at the end, with live-page and loaded-row filtering caveats visible.
-These are running-app navigation/accessibility checks with maximized-layout screenshots, not complete
-product acceptance. Exact-thread filtering, lease-expiry recovery, other window sizes, model-lab/drift
-presentation and empty/stale/partial/corrupt workflows still need native acceptance checks. No native
-source contents or privacy settings were changed during this pass.
+The follow-up exercised expiry: navigation failed explicitly after the lease deadline and Apply
+restored page 1 with a new snapshot. Model Lab completed the 30-day evaluation and loaded original
+saved TT results without rescoring. Unsupported TT results exposed blank numeric labels; live and
+saved TT presentation now renders missing/nonfinite metrics explicitly as unavailable, preserving
+numeric zero and the original evidence. These are running-app navigation/accessibility checks with
+maximized-layout screenshots, not complete product acceptance. Exact-thread filtering, other window
+sizes, detailed selection/drift presentation and empty/stale/partial/corrupt workflows still need
+native acceptance checks. No native source contents or privacy settings were changed during this pass.
 
 ## Local installation and owned data
 

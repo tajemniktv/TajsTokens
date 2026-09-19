@@ -301,8 +301,8 @@ public sealed partial class ForecastsPage : Page
                         ? $"Saved {saved.RecordedAtUtc:u} · dataset through {saved.DatasetCapturedAtUtc:u} · {saved.Report.Version} · {saved.Id}\n" +
                           $"Requested range {saved.FromUtc:u} to {saved.ToUtc:u}\n" + string.Join("\n", saved.Report.Scores.Select(score =>
                               $"{FormatKind(score.Cohort.Kind)} / {Horizon(score.HorizonHours)} / {QuotaAccountScope.Describe(score.Cohort.AccountKey)} / {score.Cohort.Source}: " +
-                              $"{score.HeldOutTt:0.###} TT; {score.Basis?.BasisId ?? "no basis"}; {score.Status}; " +
-                              $"scalar/full MAE {score.ScalarMae:0.###}/{score.FullVectorMae:0.###}pp; {score.HeldOutIntervals} outcomes, {score.UnsupportedIntervals} unsupported. " +
+                              $"Workload {ResearchMetric(score.HeldOutTt, "TT")}; {score.Basis?.BasisId ?? "no basis"}; {score.Status}; " +
+                              $"MAE: scalar {ResearchMetric(score.ScalarMae, "pp")}, full vector {ResearchMetric(score.FullVectorMae, "pp")}; {score.HeldOutIntervals} outcomes, {score.UnsupportedIntervals} unsupported. " +
                               FormatTtBias(score) +
                               (score.IsTransfer ? "Transferred basis." : "Local basis.")))
                         : $"Saved {entry.RecordedAtUtc:u} · {entry.Id}: unavailable ({entry.Problem}); original row retained."));
@@ -429,10 +429,10 @@ public sealed partial class ForecastsPage : Page
                     score.Basis?.BasisId ?? "No scoring basis",
                     $"{score.Status} · {score.HeldOutIntervals} supported outcomes / {score.ResetGenerations} resets",
                     $"Basis/calibration intervals {score.BasisIntervals}/{score.CalibrationIntervals}. Unsupported held-out work: {score.UnsupportedIntervals} intervals / {CompactTokens(score.UnsupportedTokens)} tokens. " +
-                    $"Basis context {QuotaHistoryPolicy.DescribeCohort(score.BasisCohort)}; basis ends {score.BasisEndUtc:u}, calibration ends {score.CalibrationEndUtc:u}. " +
-                    $"Supported held-out workload {score.HeldOutTt:0.###} TT; separate calibration {score.QuotaPointsPerTt:0.######}pp/TT. " +
-                    $"Matched reset-balanced loss: TT scalar {score.ScalarLoss:0.###}, full vector {score.FullVectorLoss:0.###}, raw tokens {score.RawTokenLoss:0.###}pp. " +
-                    $"Zero-use loss {score.ZeroLoss:0.###}pp; displayed-delta MAE (TT/full/raw) {score.ScalarMae:0.###}/{score.FullVectorMae:0.###}/{score.RawTokenMae:0.###}pp. " +
+                    $"Basis context {QuotaHistoryPolicy.DescribeCohort(score.BasisCohort)}; basis ends {score.BasisEndUtc?.ToString("u") ?? "unavailable"}, calibration ends {score.CalibrationEndUtc?.ToString("u") ?? "unavailable"}. " +
+                    $"Supported held-out workload {ResearchMetric(score.HeldOutTt, "TT")}; separate calibration {ResearchMetric(score.QuotaPointsPerTt, "pp/TT", "0.######")}. " +
+                    $"Matched reset-balanced loss: TT scalar {ResearchMetric(score.ScalarLoss, "pp")}, full vector {ResearchMetric(score.FullVectorLoss, "pp")}, raw tokens {ResearchMetric(score.RawTokenLoss, "pp")}. " +
+                    $"Zero-use loss {ResearchMetric(score.ZeroLoss, "pp")}; displayed-delta MAE: TT {ResearchMetric(score.ScalarMae, "pp")}, full {ResearchMetric(score.FullVectorMae, "pp")}, raw {ResearchMetric(score.RawTokenMae, "pp")}. " +
                     FormatTtBias(score) +
                     (score.Basis is { } basis ? "Category weights/token: " + string.Join(", ", basis.Weights.Select(x => x.ToString("G6", CultureInfo.InvariantCulture))) +
                         "; 1-TT reference category counts: " + string.Join(", ", basis.Reference.Select(x => x.ToString("G6", CultureInfo.InvariantCulture))) +
@@ -497,10 +497,15 @@ public sealed partial class ForecastsPage : Page
                 string.Join(", ", x.WithheldReasons.Select(y => $"{y.Key}={y.Value}"))));
     }
 
+    private static string ResearchMetric(double? value, string unit, string format = "0.###") =>
+        value is double number && double.IsFinite(number)
+            ? $"{number.ToString(format, CultureInfo.CurrentCulture)} {unit}"
+            : "unavailable";
+
     private static string FormatTtBias(TtEvaluationScore score) => score.ScalarBias is null
         ? "Signed error unavailable. "
-        : $"Signed bias {score.ScalarBias:+0.###;-0.###;0}pp (positive = overestimate); eligible cumulative error {score.CumulativeError:+0.###;-0.###;0}pp " +
-          $"[{score.CumulativeErrorLower:0.###}, {score.CumulativeErrorUpper:0.###}] meter envelope, not confidence. ";
+        : $"Signed bias {ResearchMetric(score.ScalarBias, "pp", "+0.###;-0.###;0")} (positive = overestimate); eligible cumulative error {ResearchMetric(score.CumulativeError, "pp", "+0.###;-0.###;0")} " +
+          $"[{ResearchMetric(score.CumulativeErrorLower, "pp")}, {ResearchMetric(score.CumulativeErrorUpper, "pp")}] meter envelope, not confidence. ";
 
     private static string Horizon(double hours) => hours < 1 ? $"{hours * 60:0} min" : $"{hours:0.#}h";
 
