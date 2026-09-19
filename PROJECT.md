@@ -149,6 +149,11 @@ Priorities 1 and 3 are the immediate development path. Reconciliation can procee
 disagreements are available; backend expansion is opportunistic, not a prerequisite for local models.
 UI acceptance accompanies each shipped slice, not merely the end of the roadmap.
 
+Saved TT research validates required snapshot/score/cohort structure in addition to its checksum.
+Malformed rows remain individually unavailable with the original bytes retained; valid neighboring
+results still load. Unknown save times are explicit. This is recovery behavior, not rescoring or
+permission to repair original research silently.
+
 **Evidence-dependent, not claimed complete:** native-credit normalization (sampled credits were
 zero), populated plan/task/workspace semantics, empirical cross-context TT conversion and adequately
 supported joint quota ranges. Ordinary post-reset usage supplies future evidence; a banked reset is

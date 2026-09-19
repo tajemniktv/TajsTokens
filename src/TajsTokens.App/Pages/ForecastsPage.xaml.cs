@@ -305,7 +305,7 @@ public sealed partial class ForecastsPage : Page
                               $"MAE: scalar {ResearchMetric(score.ScalarMae, "pp")}, full vector {ResearchMetric(score.FullVectorMae, "pp")}; {score.HeldOutIntervals} outcomes, {score.UnsupportedIntervals} unsupported. " +
                               FormatTtBias(score) +
                               (score.IsTransfer ? "Transferred basis." : "Local basis.")))
-                        : $"Saved {entry.RecordedAtUtc:u} · {entry.Id}: unavailable ({entry.Problem}); original row retained."));
+                        : $"Saved {entry.RecordedAtUtc?.ToString("u") ?? "at an unknown time"} · {entry.Id}: unavailable ({entry.Problem}); original row retained."));
         }
         catch (OperationCanceledException) { }
         catch (Exception exception)

@@ -79,6 +79,56 @@ public sealed class TtEvaluationPersistenceTests : IDisposable
         Assert.Equal("unsupported-or-mismatched-basis", entry.Problem);
     }
 
+    [Theory]
+    [InlineData("cohort")]
+    [InlineData("score")]
+    [InlineData("scores")]
+    [InlineData("report")]
+    [InlineData("horizon")]
+    [InlineData("range")]
+    public async Task MalformedChecksummedSnapshotDoesNotHideValidNeighborsOrGetRewritten(string defect)
+    {
+        var repository = new SqliteTelemetryRepository(Database);
+        var original = Snapshot();
+        await repository.SaveTtEvaluationAsync(original, default);
+        var bad = original with { Id = Guid.NewGuid().ToString("N"), RecordedAtUtc = original.RecordedAtUtc.AddMinutes(1) };
+        bad = defect switch {
+            "cohort" => bad with { Report = bad.Report with { Scores = [bad.Report.Scores[0] with { Cohort = null! }] } },
+            "score" => bad with { Report = bad.Report with { Scores = [null!] } },
+            "scores" => bad with { Report = bad.Report with { Scores = null! } },
+            "report" => bad with { Report = null! },
+            "horizon" => bad with { Report = bad.Report with { Scores = [bad.Report.Scores[0] with { HorizonHours = -1 }] } },
+            _ => bad with { FromUtc = bad.ToUtc }
+        };
+        await Assert.ThrowsAsync<ArgumentException>(() => repository.SaveTtEvaluationAsync(bad, default));
+        var payload = JsonSerializer.Serialize(bad);
+        var hash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(payload)));
+        await using (var connection = new SqliteConnection($"Data Source={Database}"))
+        {
+            await connection.OpenAsync();
+            var insert = connection.CreateCommand();
+            insert.CommandText = "INSERT INTO tt_evaluation_snapshots VALUES($id,$at,'codex','default',1,$hash,$payload)";
+            insert.Parameters.AddWithValue("$id", bad.Id);
+            insert.Parameters.AddWithValue("$at", bad.RecordedAtUtc.ToString("O"));
+            insert.Parameters.AddWithValue("$hash", hash);
+            insert.Parameters.AddWithValue("$payload", payload);
+            await insert.ExecuteNonQueryAsync();
+        }
+        var history = await new SqliteTelemetryRepository(Database).GetTtEvaluationHistoryAsync("codex", "default", 10, default);
+        Assert.Equal(2, history.Count);
+        Assert.Equal(bad.Id, history[0].Id);
+        Assert.Null(history[0].Snapshot);
+        Assert.Equal("invalid-snapshot-metadata", history[0].Problem);
+        Assert.Equal(JsonSerializer.Serialize(original), JsonSerializer.Serialize(history[1].Snapshot));
+        Assert.Null(history[1].Problem);
+        await using var check = new SqliteConnection($"Data Source={Database}");
+        await check.OpenAsync();
+        var read = check.CreateCommand();
+        read.CommandText = "SELECT payload FROM tt_evaluation_snapshots WHERE snapshot_id=$id";
+        read.Parameters.AddWithValue("$id", bad.Id);
+        Assert.Equal(payload, await read.ExecuteScalarAsync());
+    }
+
     [Fact]
     public async Task AdditiveMigrationFailureLeavesVersionAndExistingEvidenceRecoverable()
     {

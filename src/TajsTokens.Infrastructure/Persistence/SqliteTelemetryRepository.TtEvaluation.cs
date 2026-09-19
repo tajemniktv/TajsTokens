@@ -13,8 +13,7 @@ public sealed partial class SqliteTelemetryRepository
 
     public async Task SaveTtEvaluationAsync(TtEvaluationSnapshot snapshot, CancellationToken cancellationToken)
     {
-        if (!Guid.TryParseExact(snapshot.Id, "N", out _) || snapshot.FromUtc >= snapshot.ToUtc ||
-            snapshot.Report.Scores.Count > 512 || string.IsNullOrWhiteSpace(snapshot.Provider) || string.IsNullOrWhiteSpace(snapshot.Profile))
+        if (!ValidTtSnapshot(snapshot))
             throw new ArgumentException("Invalid TT research snapshot.");
         var payload = JsonSerializer.Serialize(snapshot);
         if (Encoding.UTF8.GetByteCount(payload) > TtSnapshotMaxBytes) throw new InvalidOperationException("TT research snapshot exceeds the storage bound.");
@@ -87,8 +86,8 @@ public sealed partial class SqliteTelemetryRepository
                     try
                     {
                         snapshot = JsonSerializer.Deserialize<TtEvaluationSnapshot>(payload);
-                        if (snapshot is null || snapshot.Id != id || snapshot.RecordedAtUtc != at ||
-                            snapshot.Provider != provider || snapshot.Profile != profile || snapshot.Report.Scores.Count > 512)
+                        if (!ValidTtSnapshot(snapshot) || snapshot!.Id != id || snapshot.RecordedAtUtc != at ||
+                            snapshot.Provider != provider || snapshot.Profile != profile)
                             problem = "invalid-snapshot-metadata";
                         else
                         {
@@ -113,4 +112,15 @@ public sealed partial class SqliteTelemetryRepository
     }
 
     private static string TtHash(string payload) => Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(payload)));
+
+    // A matching checksum proves unchanged bytes, not a renderable research contract.
+    // Keep malformed rows as unavailable entries so one record cannot hide valid neighbors.
+    private static bool ValidTtSnapshot(TtEvaluationSnapshot? snapshot) =>
+        snapshot is not null && Guid.TryParseExact(snapshot.Id, "N", out _) && snapshot.FromUtc < snapshot.ToUtc &&
+        !string.IsNullOrWhiteSpace(snapshot.Provider) && !string.IsNullOrWhiteSpace(snapshot.Profile) &&
+        snapshot.Report is { Scores: { } scores } report && scores.Count <= 512 &&
+        !string.IsNullOrWhiteSpace(report.Version) && report.Methodology is not null &&
+        scores.All(score => score is { Cohort: { } cohort } && double.IsFinite(score.HorizonHours) && score.HorizonHours > 0 &&
+            !string.IsNullOrWhiteSpace(score.Status) && !string.IsNullOrWhiteSpace(cohort.Provider) &&
+            !string.IsNullOrWhiteSpace(cohort.Profile) && !string.IsNullOrWhiteSpace(cohort.Source));
 }
