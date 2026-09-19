@@ -30,8 +30,10 @@ This reads the retained database in one transaction and prints aggregate, cohort
 cost diagnostics. It does not migrate/replay sources, change live predictions, or deploy the
 app. For private output, redirect to `.codex/temp/`. The snapshot time and policy version are
 printed. Use `--cost-owned-rollouts` instead of `--cost` only when the user explicitly confirms
-all retained rollouts belong to their account; this records the assertion without rewriting
-native IDs or pooling session histories. No credentials or message content are read/exported.
+all retained rollouts belong to their account; this applies an assertion to this evaluation only,
+without persisting settings, rewriting native IDs or pooling session histories. Durable bounded
+associations use Settings or the separately documented ownership action below.
+No credentials or message content are read/exported.
 
 The same cost comparisons appear under Forecasts → Model evaluation, separately labelled
 from quota and token forecasts. Missing precision/coverage and sparse generations are not
@@ -171,9 +173,14 @@ newly reconstructed history may yield a different basis, not a revision to the o
 Local and transfer comparisons are labelled separately. A transfer reuses the earlier basis
 and fits destination calibration only; zero transfer comparisons means no compatible chronological
 pair, not proof that scalar conversion generalizes. Basis/calibration end times are included.
+Signed bias is prediction minus reported quota cost, balanced across reset generations.
+Cumulative error sums eligible held-out intervals within a cohort/horizon; its meter-envelope
+bounds are not confidence intervals or whole-account totals. Do not sum overlapping horizons
+or sources. These diagnostics remain unavailable in older reports that lack them; the original
+reports remain readable and are not recomputed.
 
 `--save-tt <telemetry.db>` performs the same local replay and saves an immutable aggregate TT
-research snapshot. Model Lab saves one automatically after a successful explicit evaluation.
+research snapshot. Model Lab saves one after a successful explicit evaluation containing TT score rows.
 `--tt-history <telemetry.db>` lists up to 20 saved snapshot summaries without rescoring; the
 app's saved-results expander loads ten. These use the owned database's normal additive schema
 initialization (intelligence component 6), not native Codex acquisition. Original payloads and

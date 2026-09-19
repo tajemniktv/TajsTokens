@@ -25,6 +25,8 @@ outlooks and usage predictions—with freshness and uncertainty kept visible.
   Cost-calibration diagnostics compare actual recorded work with quota movement; they are
   separate from end-to-end forecast and cross-regime transfer diagnostics. Workload composition
   is visible; a learned quota outlook replaces the incumbent only after independent validation gates pass.
+  Explicit Model Lab evaluations with workload-score results save an original local research report for later inspection;
+  these reports are experimental diagnostics, not a subscription balance or per-task accounting.
 - **Quota history:** select points on a quota-used timeline alongside optional local token activity and filter
   quota drops separately from reset-time shifts. Account readings are the default; rollout
   observations remain separate diagnostics, with explicit observation times and detailed deadlines.

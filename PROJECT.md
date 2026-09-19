@@ -94,9 +94,11 @@ model/effort support and input semantics. Missing/mismatched categories or unsup
 are withheld, never silently scored as zero. Later outcomes compare scalar TT against locally
 fitted raw-token and full-vector cost models on the same supported rows with reset-balanced
 envelope loss, displayed-delta MAE and a zero-use reference. Basis and calibration remain separate.
-The current 30-day weekly/half-hour sample supports only Astra/low: 27 held-out intervals in one
-reset, MAE 0.487pp scalar versus 0.507pp full-vector and 0.791pp raw tokens. This is completed-work
-cost research, not future-work forecasting or cross-regime validation. Model Lab/`--tt` expose the
+The initial 2026-09-19 30-day weekly/half-hour evaluation supported only Astra/low: 27 held-out
+intervals in one reset, MAE 0.487pp scalar versus 0.507pp full-vector and 0.791pp raw tokens.
+These are dated results, not live counters; later evaluations are recorded in the evidence review.
+This is completed-work cost research, not future-work forecasting or cross-regime validation.
+Model Lab/`--tt` expose the
 basis, coverage and calibration; no live promotion or per-task original scoring history exists.
 Each run is an explicitly reconstructed/restated scoring result. Cross-context research now
 reuses an earlier cohort's exact basis, with the destination's first 20 intervals fitting only
@@ -470,8 +472,9 @@ real data. This is a focused runtime pass, not exhaustive DPI, accessibility or 
 
 ### Quota-cost calibration experiment (2026-09-18)
 
-Implemented the evaluation-first scope agreed in `.codex/ROADMAP.md`; this section remains
-the product authority. `QuotaCostObservationBuilder` derives non-overlapping 30-minute and
+Implemented the evaluation-first scope from the now-historical local roadmap; its rationale is
+consolidated in [the layered design](docs/source-notes/TT_LAYERED_STATISTICAL_DESIGN.md#7-consolidation-of-the-earlier-quota-cost-roadmap).
+This section remains the product authority. `QuotaCostObservationBuilder` derives non-overlapping 30-minute and
 two-hour targets over the existing read-only `SqliteForecastDatasetReader`. Targets use
 actual `(start, end]` workload, retain full quota cohorts and reset boundaries, and exclude
 cached rollout repeats, invalid/conflicting crossings and saturation. Intervening incompatible
@@ -556,7 +559,7 @@ growth reflects ongoing normal collection. Windows Debug build passed with zero 
 and dogfooded/restarted build `20260918T091810528Z-85fd9411`. App startup was acknowledged;
 the new evaluation view has build proof, not a completed native visual acceptance pass.
 
-**Full-roadmap implementation:** `WorkloadCompositionPrediction` now projects the
+**Composition and transfer implementation (2026-09-18):** `WorkloadCompositionPrediction` projects the
 existing scalar token forecast into five disjoint token categories plus model/effort shares from
 the preceding two hours, retaining missing composition rather than inventing zeros. Current token
 forecasts and retrospective token replay carry the vector. The Forecasts evidence view displays it.
@@ -588,7 +591,7 @@ The transfer evaluator found no compatible native-account-linked regimes in this
 Its chronological scale/local-only comparisons are implemented and synthetically verified,
 but empirical transfer and TT are unsupported, not invented successes.
 
-Full-roadmap validation: 356 Core tests passed, including origin-only composition, backfill
+Validation of that slice: 356 Core tests passed, including origin-only composition, backfill
 availability, paired cost/forecast leakage, transfer chronology/account isolation and live
 selection fallback gates. Windows Debug build passed with zero warnings/errors and installed
 and restarted `20260918T093836657Z-92e92959`. The completion audit is in
@@ -1087,6 +1090,7 @@ replacement of active accounting projections when a rollout generation changes.
 | Rollout file/record identities, parser/counter state, ingestion checkpoints, schema/revision tables | Managed with the associated active replay/checkpoint generation. The batch writer retires obsolete path-generation bookkeeping transactionally. These are not independent user-cleanable caches; deleting a subset can cause re-ingestion or lost continuity. |
 | State-index fingerprints and sync cursor | Rebuildable acquisition acceleration. Existing reconciliation re-anchors on selected-source changes; it does not delete collected history. |
 | `forecast_snapshots`, `quota_reset_events` and in-memory burn/scenario/evaluation results | Derived, not source truth. Recalculation requires the retained inputs and policy; saved results are currently retained, not periodically purged. |
+| `tt_evaluation_snapshots` | Immutable original aggregate research outputs, not native facts or per-task scoring history. Explicit evaluation saves exact basis/calibration and results; later reconstruction is a separate run. No automatic pruning. Existing whole-database backups include these rows; read failures never replace originals with recomputed results. |
 | Settings, local exports, deployment backups and retained binaries | User-owned/local recovery material, retained until explicit removal. Exports are separately user-invoked; this policy does not authorize sharing them. |
 
 Normal local deployment takes stopped-app data/settings backups and supports binary rollback.
@@ -1186,10 +1190,11 @@ and fallback before mixing cohorts. Unknown-account history can support separate
 modelling without becoming evidence about today's account. Transfer into live account forecasts
 requires an explicit, evaluated compatibility policy.
 
-**TT (a TajsTokens workload unit) is optional research, not a committed feature or current metric.**
-A normalized workload score might help cross-window/regime prediction, but adding a scalar does not
-solve the unknown quota conversion. If explored, retain original token composition/model/effort,
-define a reference scale, and version weights and calibration separately. Do not claim provider
+**TT is an implemented experimental Model Lab index, not a released quota unit or balance.**
+A frozen local workload score can support comparisons under the same basis without proven
+cross-regime conversion; adding a scalar does not solve the unknown quota conversion. Retain
+original token composition/model/effort, define a reference scale, and version weights and
+calibration separately. Keep full-vector quota prediction when scalar conversion loses information. Do not claim provider
 compute cost, billing value, a fixed quota percentage or automatic comparability across score versions.
 Weights fitted to quota are not independently validated workload costs. Compare with direct-feature
 baselines before introducing a public TT label.
