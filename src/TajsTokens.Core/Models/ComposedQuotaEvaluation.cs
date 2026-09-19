@@ -18,6 +18,8 @@ public sealed record ComposedQuotaTrial(DateTimeOffset OriginUtc, DateTimeOffset
     /// <summary>Later outcome diagnostics, never origin-time predictors or completeness guarantees.</summary>
     public IReadOnlyList<string> OutcomeQualityFlags { get; init; } = [];
     public bool? CompleteOutcomeTokenCategories { get; init; }
+    public double? LowerObservedDelta { get; init; }
+    public double? UpperObservedDelta { get; init; }
 }
 
 public sealed record ComposedQuotaScore(QuotaHistoryCohort Cohort, double HorizonHours, string CostModel,
@@ -40,6 +42,12 @@ public sealed record ComposedQuotaBreakdown(string Dimension, string Group, int 
     double ForecastIntervalLoss, double CostOnlyIntervalLoss, double PaceIntervalLoss, double SignedBias,
     int IncumbentPairs, double? PairedForecastIntervalLoss, double? IncumbentIntervalLoss,
     int ZeroUsePairs, double? ZeroPairedForecastIntervalLoss, double? ZeroUseIntervalLoss,
-    int BandOutcomes, double? BandCoverage, double? MeanBandWidth);
+    int BandOutcomes, double? BandCoverage, double? MeanBandWidth)
+{
+    public int MeteredOutcomes { get; init; }
+    public int UnderpredictedOutcomes { get; init; }
+    /// <summary>Mean max(0, lower observed delta - prediction), including zero misses in eligible outcomes.</summary>
+    public double? MeanUnderprediction { get; init; }
+}
 
 public sealed record ComposedQuotaEvaluation(string Version, string Methodology, IReadOnlyList<ComposedQuotaScore> Scores);

@@ -6,6 +6,40 @@ namespace TajsTokens.Core.Tests;
 public sealed class ComposedQuotaBreakdownsTests
 {
     [Fact]
+    public void HighMovementMissesRespectMeterUncertaintyAndKeepUnknownDenominatorsSeparate()
+    {
+        var at = DateTimeOffset.Parse("2026-09-01T00:00:00Z");
+        ComposedQuotaTrial Trial(double prediction, double? lower, double? upper) => new(at,
+            at.AddMinutes(30), at.AddDays(7), prediction, 1, 6, 0, 0, 0, 50,
+            new(at, .5, 10, [10, 0, 0, 0, 0], new Dictionary<string, double>(),
+                new Dictionary<string, double>(), 1, at, ForecastReplayAvailability.CollectedByOrigin, "fixture"))
+            { LowerObservedDelta = lower, UpperObservedDelta = upper };
+        var rows = new[] {
+            Trial(2, 5, 7), // Three points below even the meter's lower bound.
+            Trial(5, 5, 7), // Below displayed six, but within the meter envelope: not a miss.
+            Trial(10, 5, 7), // Overprediction cannot cancel the first underprediction.
+            Trial(0, 4, 5), // Exactly touching five is not definitively below five.
+            Trial(0, 0, 4.99),
+            Trial(0, null, null), Trial(0, 7, 5), Trial(0, double.NaN, 7),
+            Trial(double.NaN, 5, 7) // Known group, unusable prediction: excluded from miss denominator.
+        };
+        var report = ComposedQuotaBreakdowns.Build(rows);
+        var groups = report.Where(x => x.Dimension == "outcome-quota-movement").ToArray();
+        Assert.Equal(rows.Length, groups.Sum(x => x.Outcomes));
+        var high = Assert.Single(groups, x => x.Group == "at-least-5pp");
+        Assert.Equal(4, high.Outcomes);
+        Assert.Equal(3, high.MeteredOutcomes);
+        Assert.Equal(1, high.UnderpredictedOutcomes);
+        Assert.Equal(1d, high.MeanUnderprediction);
+        Assert.Single(groups, x => x.Group == "straddles-5pp" && x.Outcomes == 1);
+        Assert.Single(groups, x => x.Group == "below-5pp" && x.UnderpredictedOutcomes == 0);
+        var unknown = Assert.Single(groups, x => x.Group == "unknown-meter-envelope");
+        Assert.Equal(3, unknown.Outcomes);
+        Assert.Equal(0, unknown.MeteredOutcomes);
+        Assert.Null(unknown.MeanUnderprediction);
+    }
+
+    [Fact]
     public void PartitionsConserveOutcomesAndComparisonsUseMatchedSubsets()
     {
         var at = DateTimeOffset.Parse("2026-09-01T00:00:00Z");
@@ -64,6 +98,8 @@ public sealed class ComposedQuotaBreakdownsTests
             Assert.All(updated.Trials, x => Assert.NotNull(x.ZeroUseIntervalLoss));
             Assert.All(updated.Trials, x => {
                 Assert.NotNull(x.CompleteOutcomeTokenCategories);
+                Assert.NotNull(x.LowerObservedDelta);
+                Assert.True(x.UpperObservedDelta >= x.LowerObservedDelta);
                 Assert.Contains("local-co-observation-not-account-attribution", x.OutcomeQualityFlags);
             });
         }

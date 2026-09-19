@@ -239,12 +239,16 @@ Plausible explicit assumptions are allowed, but must remain distinguishable from
 - **Completed quiet outcomes:** evaluation ends at the earlier of requested time and dataset capture,
   not the last token. Snapshot age cannot manufacture negative targets; collector gaps remain a
   competing explanation. The session decomposition reuses retained token time/amount fields.
-- **Composed quota:** `composed-quota/v7` preserves separate retrospective and strict collection-time
+- **Composed quota:** `composed-quota/v8` preserves separate retrospective and strict collection-time
   evaluations. Only required cost inputs govern availability; unknown capture time never becomes
   event time. Recovered old work cannot qualify a historical prediction retroactively.
   Descriptive breakdowns expose reset generation, origin activity/model/effort mix and recorded
   outcome work, including matched incumbent/zero-use comparisons and band coverage/width.
   Outcome work is a later diagnostic, never an origin input; partitions do not change promotion.
+  Quota-movement partitions separate meter envelopes below, at/above and straddling a diagnostic
+  5pp cutoff per target interval. Counts and mean underprediction below the lower meter bound expose
+  missed consumption without cancelling it against overprediction. Unknown envelopes stay separate;
+  the cutoff is not a provider rule, hourly rate or cross-window equivalent. No fitting/gates change.
 - **Promotion:** retain the incumbent unless a supported total/category/model-effort candidate wins
   cost and paired end-to-end comparisons against incumbent and pace, with at least eight independent
   reset generations and current composition/outcomes. Unknown support, identity, shifts or calibration
