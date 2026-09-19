@@ -83,7 +83,7 @@ universal weights or a claim that challengers beat the incumbent. Existing sourc
 promotion gates remain in force. The rationale, formulas, caveats and proposed candidates are
 preserved in [Layered statistical design](docs/source-notes/TT_LAYERED_STATISTICAL_DESIGN.md).
 
-**TT Model Lab prototype:** `tt-lab/v1` freezes category weights on the first 20 compatible
+**TT Model Lab prototype:** `tt-lab/v2` freezes category weights on the first 20 compatible
 known-account intervals, normalizes to one million tokens in the first positive interval's
 category mix, then fits a separate quota/TT scale on the next 20 intervals. The immutable
 content-addressed basis includes exact weights/reference, category support, observed pooled
@@ -95,8 +95,13 @@ The current 30-day weekly/half-hour sample supports only Astra/low: 27 held-out 
 reset, MAE 0.487pp scalar versus 0.507pp full-vector and 0.791pp raw tokens. This is completed-work
 cost research, not future-work forecasting or cross-regime validation. Model Lab/`--tt` expose the
 basis, coverage and calibration; no live promotion or original TT-history persistence exists.
-Each run is an explicitly reconstructed/restated scoring result. Persisted as-original scoring
-and cross-regime conversion require separate implementation; existing forecasts are untouched.
+Each run is an explicitly reconstructed/restated scoring result. Cross-context research now
+reuses an earlier cohort's exact basis, with the destination's first 20 intervals fitting only
+its conversion and local competitors. Pairing requires the same recorded account, provider,
+profile, source, session lineage and horizon, with the source cohort ending before the destination
+begins. Basis/calibration end times and both contexts remain visible. There are currently no
+compatible chronological pairs in the retained 30-day sample; no empirical transfer claim follows.
+Persisted as-original scoring still requires separate implementation; existing forecasts are untouched.
 
 **Forecast horizon separation (2026-09-19; partially implemented):**
 separate quota cost conditional on workload from whether future activity occurs. Nowcast targets

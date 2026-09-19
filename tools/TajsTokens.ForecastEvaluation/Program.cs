@@ -127,9 +127,12 @@ if (args.Length == 2 && args[0] == "--tt")
     var data = await new SqliteForecastDatasetReader(args[1]).ReadAsync("codex", "default", now.AddDays(-30), now, CancellationToken.None);
     var report = TtEvaluator.Evaluate(data);
     Console.WriteLine(report.Version + ": " + report.Methodology);
+    Console.WriteLine($"Transfer comparisons: {report.Scores.Count(x => x.IsTransfer)}; zero means no compatible chronological pair, not successful transfer.");
     Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(report.Scores.Select(x => new
     {
         x.Cohort.Kind, x.Cohort.Source, x.HorizonHours, x.Basis, x.Status, x.BasisIntervals, x.CalibrationIntervals,
+        x.IsTransfer, x.BasisEndUtc, x.CalibrationEndUtc,
+        BasisPlan = x.BasisCohort?.PlanType, DestinationPlan = x.Cohort.PlanType, BasisKind = x.BasisCohort?.Kind,
         x.HeldOutIntervals, x.UnsupportedIntervals, x.UnsupportedTokens, x.ResetGenerations, x.QuotaPointsPerTt,
         x.HeldOutTt, x.ScalarLoss, x.FullVectorLoss, x.RawTokenLoss, x.ScalarMae, x.FullVectorMae, x.RawTokenMae, x.ZeroLoss
     })));

@@ -6,6 +6,45 @@ namespace TajsTokens.Core.Tests;
 public sealed class TtEvaluatorTests
 {
     [Fact]
+    public void LaterCompatibleCohortReusesBasisButFitsItsOwnConversion()
+    {
+        var seed = QuotaCostObservationBuilder.Build(ComposedQuotaEvaluatorTests.TimelyData()).First(x => x.HorizonHours == .5);
+        var rows = Enumerable.Range(0, 60).Select(i => seed with
+        {
+            Cohort = seed.Cohort with { PlanType = i < 20 ? "earlier" : "later" },
+            StartUtc = seed.StartUtc.AddHours(i), EndUtc = seed.StartUtc.AddHours(i).AddMinutes(30),
+            StartUsed = 0, EndUsed = i < 20 ? 2 : 4,
+            LowerDelta = i < 20 ? 1.9 : 3.9, UpperDelta = i < 20 ? 2.1 : 4.1
+        }).ToArray();
+        var report = TtEvaluator.Evaluate(rows);
+        var source = report.Scores.Single(x => !x.IsTransfer && x.Cohort.PlanType == "earlier");
+        var transfer = report.Scores.Single(x => x.IsTransfer);
+        Assert.Equal(source.Basis!.BasisId, transfer.Basis!.BasisId);
+        Assert.Equal("earlier", transfer.BasisCohort!.PlanType);
+        Assert.Equal("later", transfer.Cohort.PlanType);
+        Assert.Equal(20, transfer.CalibrationIntervals);
+        Assert.Equal(20, transfer.HeldOutIntervals);
+        Assert.Equal(rows[19].EndUtc, transfer.BasisEndUtc);
+        Assert.Equal(rows[39].EndUtc, transfer.CalibrationEndUtc);
+        Assert.NotNull(transfer.QuotaPointsPerTt);
+        Assert.Null(source.QuotaPointsPerTt);
+
+        foreach (var change in new[] { "account", "source", "profile", "session", "horizon", "overlap" })
+        {
+            var incompatible = rows.Select((x, i) => i < 20 ? x : change switch
+            {
+                "account" => x with { Cohort = x.Cohort with { AccountKey = "other" } },
+                "source" => x with { Cohort = x.Cohort with { Source = "other" } },
+                "profile" => x with { Cohort = x.Cohort with { Profile = "other" } },
+                "session" => x with { Cohort = x.Cohort with { SessionId = "other" } },
+                "horizon" => x with { HorizonHours = 2 },
+                _ => x with { StartUtc = x.StartUtc.AddHours(-10), EndUtc = x.EndUtc.AddHours(-10) }
+            }).ToArray();
+            Assert.DoesNotContain(TtEvaluator.Evaluate(incompatible).Scores, x => x.IsTransfer);
+        }
+    }
+
+    [Fact]
     public void ScalarCannotHideChangedRelativeCategoryCostsBehindARefittedScale()
     {
         var seed = QuotaCostObservationBuilder.Build(ComposedQuotaEvaluatorTests.TimelyData()).First(x => x.HorizonHours == .5);

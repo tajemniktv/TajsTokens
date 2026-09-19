@@ -168,6 +168,9 @@ It prints exact basis semantics, weights, reference basket, supported model/effo
 coverage and matched cost errors. It does not persist original scores, poll Codex, alter past
 forecasts or establish cross-user comparability. Retain the full basis ID with any reported TT;
 newly reconstructed history may yield a different basis, not a revision to the old unit.
+Local and transfer comparisons are labelled separately. A transfer reuses the earlier basis
+and fits destination calibration only; zero transfer comparisons means no compatible chronological
+pair, not proof that scalar conversion generalizes. Basis/calibration end times are included.
 
 `dotnet run --project tools/TajsTokens.ForecastEvaluation -- --session-quota <telemetry.db>`
 evaluates the reconstructed session-workload to quota-cost chain over the same 30-day owned-data

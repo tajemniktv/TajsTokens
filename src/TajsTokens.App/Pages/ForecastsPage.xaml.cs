@@ -308,6 +308,8 @@ public sealed partial class ForecastsPage : Page
                     string.Join(" · ", cost.QualityCounts.Select(x => $"{x.Key}: {x.Value:N0}"));
             if (report.ComposedQuota is { } composed) EvaluationMethodText.Text += "\n\n" + composed.Methodology;
             if (report.ComposedQuotaStrict is { } strict) EvaluationMethodText.Text += "\n\n" + strict.Methodology;
+            if (report.Tt is { } tt) EvaluationMethodText.Text += "\n\n" + tt.Methodology +
+                (tt.Scores.Any(x => x.IsTransfer) ? "" : " No chronological compatible TT transfer pairs in this range; cross-regime scaling remains unvalidated.");
             if (report.QuotaTransfer is { } transfer) EvaluationMethodText.Text += "\n\n" + transfer.Methodology +
                 (transfer.Scores.Count == 0 ? " No compatible recorded-account regimes in this range; transfer and TT remain unsupported." : "");
             if (report.SessionScores.Count > 0) EvaluationMethodText.Text += "\n\n" + TajsTokens.Core.Services.SessionWorkloadPredictionService.Methodology + "\n" +
@@ -371,10 +373,11 @@ public sealed partial class ForecastsPage : Page
                     (score.BandOrigins > 0 ? $"Joint band coverage {score.ReportedBandCoverage:P0} on {score.BandOrigins} outcomes; mean width {score.MeanBandWidth:0.###}pp. " : "Insufficient completed resets for joint bands. ") +
                     report.SessionQuota!.Methodology)))
                 .Concat((report.Tt?.Scores ?? []).Select(score => new EvaluationRow(
-                    $"TT research · {FormatKind(score.Cohort.Kind)} · {Horizon(score.HorizonHours)} · {score.Cohort.Source} · {QuotaAccountScope.Describe(score.Cohort.AccountKey)} · {QuotaHistoryPolicy.DescribeCohort(score.Cohort)}",
+                    $"TT {(score.IsTransfer ? "transfer" : "local")} research · {FormatKind(score.Cohort.Kind)} · {Horizon(score.HorizonHours)} · {score.Cohort.Source} · {QuotaAccountScope.Describe(score.Cohort.AccountKey)} · {QuotaHistoryPolicy.DescribeCohort(score.Cohort)}",
                     score.Basis?.BasisId ?? "No scoring basis",
                     $"{score.Status} · {score.HeldOutIntervals} supported outcomes / {score.ResetGenerations} resets",
                     $"Basis/calibration intervals {score.BasisIntervals}/{score.CalibrationIntervals}. Unsupported held-out work: {score.UnsupportedIntervals} intervals / {CompactTokens(score.UnsupportedTokens)} tokens. " +
+                    $"Basis context {QuotaHistoryPolicy.DescribeCohort(score.BasisCohort)}; basis ends {score.BasisEndUtc:u}, calibration ends {score.CalibrationEndUtc:u}. " +
                     $"Supported held-out workload {score.HeldOutTt:0.###} TT; separate calibration {score.QuotaPointsPerTt:0.######}pp/TT. " +
                     $"Matched reset-balanced loss: TT scalar {score.ScalarLoss:0.###}, full vector {score.FullVectorLoss:0.###}, raw tokens {score.RawTokenLoss:0.###}pp. " +
                     $"Zero-use loss {score.ZeroLoss:0.###}pp; displayed-delta MAE (TT/full/raw) {score.ScalarMae:0.###}/{score.FullVectorMae:0.###}/{score.RawTokenMae:0.###}pp. " +

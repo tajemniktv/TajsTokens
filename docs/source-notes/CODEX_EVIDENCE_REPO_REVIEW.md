@@ -1199,3 +1199,32 @@ retention and unavailable backend capabilities require their own evidence and co
 
 Validation: 473 Core tests passed; isolated Windows Debug build passed with zero warnings/errors
 (`DogfoodEnabled=false`). This test/documentation-only slice did not deploy or restart the app.
+
+## 28. Reuse a frozen TT basis across compatible contexts (2026-09-19)
+
+`tt-lab/v2` adds explicit source/destination comparisons, without a second scoring implementation.
+The source's first 20 observations create the same content-addressed basis as its local experiment.
+The destination's first 20 observations fit its independent quota/TT scale and local competitors;
+later supported observations are held out. The basis is not refitted to destination labels.
+Rows expose source context, destination context, basis end time and calibration end time.
+
+Compatibility requires the same recorded account/provider/profile/source/session lineage and
+horizon, different cohort labels, and the entire observed source cohort ending before the
+destination begins. Overlapping/interleaved contexts are not treated as successive regimes.
+These are reported evidence contexts, not a causal assertion about provider-policy changes.
+Model/effort/category support checks still apply; no new source or account ownership is inferred.
+
+The retained 30-day replay currently has **zero transfer pairs**. Model Lab and CLI state this
+explicitly rather than treating absence as successful validation. The local weekly/half-hour
+basis ID and calibration remain unchanged with a newly matured 28th held-out interval; local
+MAE is now 0.484pp versus 0.495pp full-vector and 0.795pp raw tokens, still only one reset.
+Those local results are not transfer evidence.
+
+A synthetic plan-context fixture verifies exact basis identity reuse, separate destination
+calibration and chronological boundaries. Account, source, profile, session, horizon mismatch
+and overlapping eras produce no transfer comparisons. Existing relative-cost negative controls
+continue to establish that scalar TT can lose to the richer workload model. Durable as-original
+scoring and empirical cross-regime validation remain separate, unfinished boundaries.
+
+Validation: 474 Core tests passed; Windows Debug build passed with zero warnings/errors and
+deployed/restarted `20260919T004833138Z-90a9131e`. No live transfer model was promoted.

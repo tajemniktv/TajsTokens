@@ -5,6 +5,10 @@ public sealed record TtEvaluationScore(QuotaHistoryCohort Cohort, double Horizon
     double UnsupportedTokens, int ResetGenerations, double? QuotaPointsPerTt, double? HeldOutTt,
     double? ScalarLoss, double? FullVectorLoss, double? RawTokenLoss)
 {
+    public QuotaHistoryCohort? BasisCohort { get; init; }
+    public bool IsTransfer { get; init; }
+    public DateTimeOffset? BasisEndUtc { get; init; }
+    public DateTimeOffset? CalibrationEndUtc { get; init; }
     public double? ScalarMae { get; init; }
     public double? FullVectorMae { get; init; }
     public double? RawTokenMae { get; init; }
