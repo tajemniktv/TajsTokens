@@ -24,6 +24,7 @@ public sealed record CodexObservatoryRefreshResult(
     long BytesObserved)
 {
     public CodexCollectionCoverage? Coverage { get; init; }
+    public int DeferredFiles { get; init; }
     public static CodexObservatoryRefreshResult Empty { get; } = new(0, 0, 0, 0, 0, 0, 0);
 }
 

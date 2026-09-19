@@ -262,7 +262,7 @@ public sealed class TelemetryCoordinator
                 {
                     var observatory = await observatoryTask;
                     var sourcePresent = observatory.FilesDiscovered > 0;
-                    observatoryFresh = sourcePresent && observatory.Errors == 0;
+                    observatoryFresh = sourcePresent && observatory.Errors == 0 && observatory.DeferredFiles == 0;
                     var state = observatoryFresh
                         ? TelemetryHealthState.Live
                         : sourcePresent
@@ -271,7 +271,8 @@ public sealed class TelemetryCoordinator
                     var detail = observatory.FilesDiscovered == 0
                         ? "No local Codex rollout JSONL sources were discovered. Previously normalized history, if any, remains historical rather than live."
                         : $"{observatory.FilesDiscovered} catalog rollout(s), {observatory.FilesScanned} changed file(s) scanned, {observatory.RecordsScanned} new complete record(s), {observatory.RecordsNormalized} normalized, {observatory.SessionsTouched} touched session(s), {FormatByteCount(observatory.BytesObserved)} observed on changed sources." +
-                          (observatory.Errors > 0 ? $" {observatory.Errors} file(s) could not be refreshed and will retry." : string.Empty);
+                          (observatory.Errors > 0 ? $" {observatory.Errors} file(s) could not be refreshed and will retry." : string.Empty) +
+                          (observatory.DeferredFiles > 0 ? $" {observatory.DeferredFiles} changed indexed file(s) remain queued for later bounded passes; token history is not yet fully refreshed." : string.Empty);
                     if (observatory.Coverage is { } coverage)
                     {
                         detail += $" Best-effort path coverage at {coverage.ObservedAtUtc:u}: " +

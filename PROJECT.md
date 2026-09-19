@@ -126,6 +126,13 @@ equivalence. Distinguish source/reporting gaps from absent recorded work
 without inventing completeness. Use existing Model Lab/read-model owners, not a new framework.
 New observations block some validation claims, **not all development**.
 
+Indexed ingestion now uses at most 16 changed files per pass: eight most recently updated, then
+up to eight rotating older candidates so persistent retries do not monopolize backfill. Deferred
+files hold the state cursor back and prevent a fully-fresh token-history claim. Successful file
+fingerprints/checkpoints survive restart; no alternate sources or native accounting rules change.
+This bounds file count, not the time needed for one large file. It addresses full-corpus upgrades
+delaying current capture behind old files; filesystem-only fallback retains its existing behavior.
+
 ### Ordered roadmap and acceptance
 
 | Priority | Remaining work | Acceptance / dependency |

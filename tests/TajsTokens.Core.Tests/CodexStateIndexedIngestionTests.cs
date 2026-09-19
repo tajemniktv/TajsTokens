@@ -8,6 +8,56 @@ namespace TajsTokens.Core.Tests;
 
 public sealed class CodexStateIndexedIngestionTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task RefreshAsync_BoundsUpgradeBatchesPrioritizesRecentAndRetainsDeferredWork(bool failingOldFiles)
+    {
+        var directory = Directory.CreateTempSubdirectory("tajstokens-batched-replay-");
+        try
+        {
+            var sessions = Directory.CreateDirectory(Path.Combine(directory.FullName, "sessions"));
+            var threads = Enumerable.Range(0, 40).Select(i => new StateThread($"t{i:D2}",
+                Path.Combine(sessions.FullName, $"t{i:D2}.jsonl"), 0, (i + 1) * 100_000, 0)).ToArray();
+            foreach (var thread in threads) await File.WriteAllTextAsync(thread.RolloutPath, "{}\n");
+            await CreateStateDatabaseAsync(Path.Combine(directory.FullName, "state_5.sqlite"), threads);
+            var telemetryPath = Path.Combine(directory.FullName, "telemetry.db");
+            await new SqliteTelemetryRepository(telemetryPath).InitializeAsync(CancellationToken.None);
+            var store = new SqliteCodexObservatoryStore(telemetryPath);
+            var index = new SqliteCodexStateIndexStore(telemetryPath);
+            var ingestion = new RecordingIngestionService("fixture");
+            if (failingOldFiles) foreach (var thread in threads.Take(8)) ingestion.FailingPaths.Add(thread.RolloutPath);
+            CodexObservatoryService Service() => new(ingestion, store, new CodexStateCatalog(directory.FullName),
+                index, [sessions.FullName], new ReconciliationClock());
+            var service = Service();
+            var first = await service.RefreshAsync(CancellationToken.None);
+            Assert.Equal(16, first.FilesScanned);
+            Assert.Equal(24, first.DeferredFiles);
+            Assert.Equal(threads.Reverse().Take(8).Select(x => x.RolloutPath), ingestion.Paths.Take(8));
+            Assert.Equal(failingOldFiles ? 40_000 : 840_000, await index.GetWatermarkAsync(CancellationToken.None));
+            // A restart must not turn the batch's newest timestamp into a skip over its deferred middle.
+            if (!failingOldFiles) service = Service();
+            CodexObservatoryRefreshResult last = first;
+            for (var pass = 0; pass < 5; pass++)
+            {
+                last = await service.RefreshAsync(CancellationToken.None);
+                Assert.InRange(last.FilesScanned, 0, 16);
+            }
+            var fingerprints = await index.GetFingerprintsAsync(CancellationToken.None);
+            Assert.Equal(failingOldFiles ? 32 : 40, fingerprints.Count);
+            foreach (var thread in threads.Skip(failingOldFiles ? 8 : 0))
+                Assert.Single(ingestion.Paths, path => path == thread.RolloutPath);
+            Assert.Equal(0, last.DeferredFiles);
+            Assert.Equal(failingOldFiles ? 8 : 0, last.Errors);
+            Assert.Equal(failingOldFiles ? 40_000 : 4_000_000, await index.GetWatermarkAsync(CancellationToken.None));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(recursive: true);
+        }
+    }
+
     [Fact]
     public async Task RefreshAsync_NewStateGenerationDoesNotReuseOldWatermark()
     {
@@ -477,11 +527,13 @@ public sealed class CodexStateIndexedIngestionTests
     private sealed class RecordingIngestionService(string sessionId) : ICodexSessionIngestionService
     {
         public List<string> Paths { get; } = [];
+        public HashSet<string> FailingPaths { get; } = [];
 
         public Task<CodexIngestionResult> IngestAsync(string filePath, CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
             Paths.Add(Path.GetFullPath(filePath));
+            if (FailingPaths.Contains(filePath)) throw new IOException("Synthetic unreadable rollout.");
             var length = new FileInfo(filePath).Length;
             return Task.FromResult(new CodexIngestionResult(1, 1, sessionId)
             {

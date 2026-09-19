@@ -40,15 +40,17 @@ public sealed class TelemetryCoordinatorNativeAccountingTests
         }
     }
 
-    [Fact]
-    public async Task ObservatoryErrorCount_PreservesLastCompleteTokenGenerationAndMarksItStale()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ObservatoryIncompletePass_PreservesLastCompleteTokenGenerationAndMarksItStale(bool deferred)
     {
         var directory = Directory.CreateTempSubdirectory("tajstokens-native-refresh-errors-");
         try
         {
             var observatory = new SequencedObservatoryService(
                 _ => Task.FromResult(Result(errors: 0)),
-                _ => Task.FromResult(Result(errors: 1)));
+                _ => Task.FromResult(Result(errors: deferred ? 0 : 1) with { DeferredFiles = deferred ? 24 : 0 }));
             var tokens = new SequencedTokenProvider(42, 99);
             var coordinator = new TelemetryCoordinator(
                 tokens,
@@ -67,6 +69,7 @@ public sealed class TelemetryCoordinatorNativeAccountingTests
             Assert.Contains(second.Sources, source => source.Provider == "Codex rollouts" && source.State == TelemetryHealthState.Stale);
             Assert.Contains(second.Sources, source => source.Provider == "Native Codex" && source.State == TelemetryHealthState.Stale);
             Assert.Contains(second.Events, item => item.Type == "Token generation stale");
+            if (deferred) Assert.Contains(second.Sources, source => source.Provider == "Codex rollouts" && source.Detail.Contains("24 changed indexed file(s) remain queued"));
         }
         finally
         {

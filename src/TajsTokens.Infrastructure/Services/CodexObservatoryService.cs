@@ -21,6 +21,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
     private long? _lastStateReconciliation;
     private string? _lastStateCatalogPath;
     private CodexCollectionCoverage? _lastCoverage;
+    private int _backfillOffset;
 
     public CodexObservatoryService(
         ICodexSessionIngestionService ingestionService,
@@ -167,6 +168,18 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
                 !fingerprint.Matches(thread))
             .ToArray();
 
+        // Bound indexed refreshes so an upgrade's old corpus cannot hold recent captures behind a
+        // whole-history pass. Reserve half the batch for rotating older work, including retries.
+        // This is a file-count bound, not a latency guarantee for a single large/slow file.
+        var recent = changedThreads.OrderByDescending(x => x.UpdatedAtMs)
+            .ThenBy(x => x.ThreadId, StringComparer.Ordinal).Take(8).ToArray();
+        var older = changedThreads.Except(recent).OrderBy(x => x.UpdatedAtMs)
+            .ThenBy(x => x.ThreadId, StringComparer.Ordinal).ToArray();
+        var offset = older.Length == 0 ? 0 : _backfillOffset % older.Length;
+        var batch = recent.Concat(older.Skip(offset).Concat(older.Take(offset)).Take(8)).ToArray();
+        _backfillOffset = older.Length == 0 ? 0 : (offset + Math.Min(8, older.Length)) % older.Length;
+        var deferred = changedThreads.Except(batch).ToArray();
+
         // Edge persistence is intentionally independent of rollout selection. Codex can insert a
         // spawn edge without changing the child's thread fingerprint, and relationships are cheap to
         // reconcile against the already-normalized TajsTokens graph.
@@ -179,9 +192,9 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
         long bytes = 0;
         var sessionsTouched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var appliedThreads = new List<CodexStateThread>(changedThreads.Length);
-        long? earliestUnappliedUpdatedAtMs = null;
+        long? earliestUnappliedUpdatedAtMs = deferred.Length == 0 ? null : deferred.Min(x => x.UpdatedAtMs);
 
-        foreach (var thread in changedThreads)
+        foreach (var thread in batch)
         {
             cancellationToken.ThrowIfCancellationRequested();
             filesScanned++;
@@ -272,7 +285,8 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
             errors,
             bytes)
         {
-            Coverage = _lastCoverage
+            Coverage = _lastCoverage,
+            DeferredFiles = deferred.Length
         };
     }
 
