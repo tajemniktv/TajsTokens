@@ -71,12 +71,19 @@ work are in [Current work](#current-work); dated audits below describe captured 
 
 ## Current work
 
-This is the single active roadmap, consolidated 2026-09-19. The architecture and source contracts
+This is the single delivery-status and remaining-work record, updated 2026-09-19. The architecture and source contracts
 below remain authoritative. [Historical milestones](docs/archive/PROJECT_CURRENT_WORK_2026-09-19.md)
 preserve the previous chronological log, metrics and validation results; they are not current tasks.
 The [evidence review](docs/source-notes/CODEX_EVIDENCE_REPO_REVIEW.md) maps source findings and
 remaining proof boundaries. The [layered design](docs/source-notes/TT_LAYERED_STATISTICAL_DESIGN.md)
 defines model/TT rationale. Neither is a competing delivery plan.
+
+**Current status: implementation milestone delivered; continuation is evidence-blocked, not complete.**
+The implemented baseline below is shipped through `4b7faf3`. Do not treat the former priority list
+as seven unimplemented features or keep extending evaluation merely to keep development running.
+The next model/accounting promotions require new compatible evidence. Native negative-state UI
+acceptance remains separately open; automated recovery tests do not close that acceptance item.
+Ordinary collection can continue without an active implementation task.
 
 **Evidence-visibility progress:** Model Lab and cost CLI now expose dataset-local token-weighted
 model/effort coverage, category mismatch/invalid counts, unknown/after-event collection times,
@@ -117,14 +124,12 @@ Model Lab and the composed CLI also explain the shared selection-evidence gates:
 reset counts, missing incumbent pairs, recency, collection-time provenance, reset-balanced wins,
 recent-group regressions and stricter asserted-training requirements. Passing these gates is explicitly
 not full live promotion; current composition, cost support and uncertainty calibration remain separate.
-**Next implementable slice:** continue layered evaluation and
-its product explanations while ordinary collection supplies more evidence. Legacy adjacency comparison remains in the
-read-only corpus audit, not a stored native join. Accounting promotion is separate.
-Installed rollouts contain this source; some legacy counter falls have nearby records and others
-do not. Preserve missing coverage and conflicting vectors rather than assuming adjacency proves
-equivalence. Distinguish source/reporting gaps from absent recorded work
-without inventing completeness. Use existing Model Lab/read-model owners, not a new framework.
-New observations block some validation claims, **not all development**.
+**Resume trigger:** new independent reset cycles, compatible transfer contexts, validated native
+copy/interleave lineage, a usable provider capability, or a concrete product defect. Re-evaluate the
+affected gate when its inputs materially change, not on every continuation. Legacy adjacency remains
+a read-only corpus experiment, not a stored native join. Missing coverage and conflicting vectors
+remain explicit; nearby records alone do not establish equivalence. Use existing owners for any
+supported follow-up rather than introducing a replacement framework.
 
 Indexed ingestion now uses at most 16 changed files per pass: eight most recently updated, then
 up to eight rotating older candidates so persistent retries do not monopolize backfill. Deferred
@@ -133,21 +138,23 @@ fingerprints/checkpoints survive restart; no alternate sources or native account
 This bounds file count, not the time needed for one large file. It addresses full-corpus upgrades
 delaying current capture behind old files; filesystem-only fallback retains its existing behavior.
 
-### Ordered roadmap and acceptance
+### Delivery status and remaining gates
 
-| Priority | Remaining work | Acceptance / dependency |
+| Area | Delivered / decided | Still open and what unlocks it |
 |---|---|---|
-| 1. Evidence-quality visibility | Consolidate model/effort/tier coverage, unknown quantities, account attribution, reporting gaps/revisions and reconciliation exclusions in evaluation output | A result explains included/excluded/unobserved evidence and competing explanations; requested settings never become billed tier |
-| 2. Reconciliation investigation | Establish lineage for representative real copy/interleave/reset disagreements; compare existing contenders under identical inputs | Promote only supported identity/overlap rules with replay/restart/replacement parity; ambiguous cases stay explicit. Some cases need better native identity evidence |
-| 3. Layered evaluation | Evaluate cost and future-workload models separately by horizon, composition, coverage and reset; test frozen models on ordinary incoming work | Identical eligible targets for baseline comparisons, no future collection/revision/association leakage; retain raw-token/pace/incumbent competitors |
-| 4. Supported product improvements | Promote by horizon where evidence warrants it; distinguish nowcasts, conditional session scenarios, reset outlooks and user-planned work | Existing promotion gates pass; stale/idle/unknown/sparse cases retain truthful fallback. Joint calibrated ranges need independent completed cycles |
-| 5. TT product decision | Evaluate empirical transfer and choose whether a supported local workload index earns a user-facing role | Freeze identifiable basis/reference, expose partial support, compare scalar conversion with full-vector cost. If task-level TT is chosen, implement original scoring/provenance and explicit restatement first |
-| 6. Useful backend extensions | Establish daily date-boundary/revision behavior; add plan/task/workspace or other reports only for a defined product question and usable capability | Populated source contracts, compatible units/identity/time, typed retention decision and tests; no repeated denied probes or silent auth-boundary expansion |
-| 7. Product acceptance | Inspect new diagnostics, saved research results and outlook explanations in native UI, including empty/stale/partial/corrupt states | Build/test/runtime evidence is separate from user visual acceptance; evidence should be understandable without reading source notes |
+| Evidence-quality visibility | Coverage, attribution, missingness, revisions and reconciliation exclusions are exposed in evaluation/diagnostics | Maintain truthful semantics when a concrete new source shape or defect appears; requested tier is not billed tier |
+| Reconciliation | Shared corpus/sequence audits, competing reducers and replay/restart fixtures | Canonical promotion needs validated real copy/interleave lineage; a smaller total or adjacent response is not proof |
+| Layered evaluation | Separate cost/workload evaluation, horizon/composition/reset diagnostics and matched baseline comparisons | New ordinary history must support held-out conclusions; no future collection/revision/association leakage |
+| Product forecasting | Nowcasts, conditional session scenarios, reset outlooks and workload planner exist | Challenger promotion and joint ranges need sufficient independent cycles and the existing support/calibration gates; retain incumbent/fallback behavior meanwhile |
+| TT | Decision: keep the frozen, identifiable basis and scalar/full-vector comparisons in Model Lab | Public/per-task TT is not selected for implementation. Revisit only after compatible chronological transfer evidence; original scoring/restatement would then be prerequisites |
+| Backend evidence | Opt-in daily reports, range probe, range-qualified pairing and revision safeguards | Normalization formula/lag and populated plan/task/workspace contracts remain unverified. Expand only for a defined question and usable capability; do not repeat denied probes |
+| Native product acceptance | Ordinary navigation, diagnostics, saved research, sparse results and range changes checked as recorded below | Injected empty-history/stale-source/corrupt-row UI states and additional layouts remain unverified; use an isolated test environment, never corrupt live data. User visual acceptance is separate |
 
-Priorities 1 and 3 are the immediate development path. Reconciliation can proceed when concrete
-disagreements are available; backend expansion is opportunistic, not a prerequisite for local models.
-UI acceptance accompanies each shipped slice, not merely the end of the roadmap.
+The latest seven-day audit on 2026-09-19 found at most two reset generations in the composed
+evaluation and no compatible transfer candidates. These are dated observations, not permanent
+limits; more outcomes in the same cycles do not satisfy the minimum eight-generation promotion
+gate. No further model promotion is justified by that sample. UI acceptance is an outstanding
+verification task, not evidence that another model or acquisition framework must be implemented.
 
 Saved TT research validates required snapshot/score/cohort structure in addition to its checksum.
 Malformed rows remain individually unavailable with the original bytes retained; valid neighboring
