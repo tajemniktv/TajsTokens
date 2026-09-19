@@ -333,6 +333,18 @@ visual acceptance distinct. Use AGENTS.md for proportional validation/deployment
 for commands/recovery. Preserve unrelated work and native data; scrutinize overlap, data loss and privacy.
 Update this roadmap when priorities, behavior or verified limitations change—not after every command.
 
+Native acceptance spot-check (2026-09-19, deployed build `20260919T033305427Z-ecd27aad`):
+Overview showed weekly remaining quota, explicitly separate even-burn pace and token nowcasts,
+and collection health. The planner's recent-pattern action filled the observed Astra/low mix while
+preserving the half-hour duration; estimating returned explicit insufficient-history/outside-support
+reasons rather than an extrapolated result. Native Sources displayed a two-minute read-only log
+snapshot; moving from page 1 to page 2 preserved its matching count and expiry. Auxiliary navigation
+reached batch 2 and disabled Next at the end, with live-page and loaded-row filtering caveats visible.
+These are running-app navigation/accessibility checks with maximized-layout screenshots, not complete
+product acceptance. Exact-thread filtering, lease-expiry recovery, other window sizes, model-lab/drift
+presentation and empty/stale/partial/corrupt workflows still need native acceptance checks. No native
+source contents or privacy settings were changed during this pass.
+
 ## Local installation and owned data
 
 Successful local Windows app builds dogfood a verified self-contained publish into
