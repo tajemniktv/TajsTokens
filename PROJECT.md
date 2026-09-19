@@ -125,7 +125,7 @@ missing diagnostics as unavailable; they are not silently recomputed.
 
 **Evidence-review continuation gate (2026-09-19):** the implemented acquisition, reconciliation
 experiments, semantic-change diagnostics and layered Model Lab candidates are mapped in the
-[review audit](docs/source-notes/CODEX_EVIDENCE_REPO_REVIEW.md#31-continuation-audit-2026-09-19).
+[review evidence gates](docs/source-notes/CODEX_EVIDENCE_REPO_REVIEW.md#remaining-evidence-gates).
 The next empirical step is evaluation of naturally arriving post-reset observations with the
 same frozen basis and compatible account/source semantics. Do not generate synthetic Codex
 work or lower independent-cycle requirements to manufacture validation. Nonzero native-credit
@@ -273,7 +273,7 @@ alternate paths for known threads. Catalog-selected acquisition remains authorit
 are not silently imported. Only suffixed paths get a changed typed-parser version and replay;
 state-index schema v5 invalidates disposable selection hints so unchanged indexed files are
 revisited. No observatory payload/schema change or general accounting-rule change is made.
-See the [review continuation](docs/source-notes/CODEX_EVIDENCE_REPO_REVIEW.md#14-real-corpus-reconciliation-and-model-continuation--2026-09-19).
+See the [archived review continuation](docs/archive/CODEX_EVIDENCE_REPO_REVIEW_2026-09-19.md#14-real-corpus-reconciliation-and-model-continuation--2026-09-19).
 
 **Descriptive even-burn comparison (2026-09-19):** Overview quota cards compare reported
 consumption with elapsed window percentage at the same reading's capture time, separately from
@@ -343,7 +343,7 @@ now observed, but populated metric semantics remain unverified. Direct thread v1
 task v2 returned 404; workspace credit/token reports remain unavailable for the tested context.
 These results support an experimental daily-allowance dashboard without waiting for per-thread
 costs. Preserve per-report freshness and observed-versus-estimated amounts. Details:
-[expanded survey](docs/source-notes/CODEX_EVIDENCE_REPO_REVIEW.md#10-expanded-endpoint-survey--2026-09-18).
+[expanded survey](docs/archive/CODEX_EVIDENCE_REPO_REVIEW_2026-09-19.md#10-expanded-endpoint-survey--2026-09-18).
 
 **Direct-backend experiment authorized (2026-09-18):** the user selected
 `how-much-i-get-from-codex` as the closest functional reference and explicitly relaxed the
@@ -357,7 +357,7 @@ no direct requests were made describe the earlier review, not this subsequent ex
 Released acquisition remains unchanged; experimental direct HTTP is now permitted research,
 not categorically excluded. Prioritize daily usage/allowance history and useful explicitly
 estimated capacity over proving a universal normalization scale first. Keep observed amounts
-separate from rate-card estimates. See the [experiment addendum](docs/source-notes/CODEX_EVIDENCE_REPO_REVIEW.md#9-authorized-direct-backend-experiment--2026-09-18).
+separate from rate-card estimates. See the [experiment addendum](docs/archive/CODEX_EVIDENCE_REPO_REVIEW_2026-09-19.md#9-authorized-direct-backend-experiment--2026-09-18).
 
 **External Codex evidence review (2026-09-18, proposals only):** seven pinned implementations
 were compared with current acquisition and accounting. Native daily credits/relative usage

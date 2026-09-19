@@ -531,7 +531,7 @@ Partitions distinguish thread logs from threadless process logs. Filtering, queu
 and logger configuration prevent treating this database as a complete accounting ledger.
 
 Actual useful payloads and their semantic traps are recorded in the
-[repository review, section 13](CODEX_EVIDENCE_REPO_REVIEW.md#13-native-log-evidence--2026-09-19).
+[archived repository review, section 13](../archive/CODEX_EVIDENCE_REPO_REVIEW_2026-09-19.md#13-native-log-evidence--2026-09-19).
 In particular, post-sampling `total_usage_tokens` is active context occupancy, not additive
 workload. Existing TajsTokens bounded native-log inspection remains the owner; this investigation
 does not introduce raw-body retention or a second ingestion pipeline.
