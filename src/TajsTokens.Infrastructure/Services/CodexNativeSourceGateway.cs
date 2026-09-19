@@ -15,6 +15,7 @@ public sealed class CodexNativeSourceGateway
     private const string UpstreamCorroborationCommit = "8e3b180d49";
 
     private readonly CodexStateDbExplorerService _explorer;
+    private readonly CodexLogReadSnapshots _logSnapshots = new();
 
     public CodexNativeSourceGateway(
         string? codexHome = null,
@@ -25,6 +26,8 @@ public sealed class CodexNativeSourceGateway
     }
 
     public CodexStateDbExplorerService Explorer => _explorer;
+
+    public Task ReleaseLogsSnapshotAsync(string id) => _logSnapshots.ReleaseAsync(id);
 
     public Task<CodexNativeSourcesSnapshot> ReadAsync(CancellationToken cancellationToken = default) =>
         ReadAsync(new CodexNativeSourcesQuery(), cancellationToken);
@@ -282,11 +285,16 @@ public sealed class CodexNativeSourceGateway
         }
 
         var warnings = GetLogQueryWarnings(normalizedQuery, capabilities);
-        var page = await _explorer.ReadLogsPageAsync(
+        var snapshot = await _logSnapshots.ReadAsync(_explorer,
             candidate!.Path,
             normalizedQuery,
             capabilities,
             cancellationToken);
+        var page = snapshot.Page;
+        normalizedQuery = normalizedQuery with { SnapshotId = snapshot.Id };
+        warnings = [.. warnings, snapshot.Expires is { } expires
+            ? $"Read-only log snapshot expires at {expires:O}; Apply refreshes it."
+            : "Live page only; navigation can shift as the source changes. WAL snapshot unavailable or not requested."];
         var entries = page.Rows
             .Take(normalizedQuery.PageSize)
             .Select(row => MapLog(new RawRow(page, row)))
@@ -300,6 +308,7 @@ public sealed class CodexNativeSourceGateway
         return new CodexLogsSource(
             context.Info with
             {
+                CapturedAtUtc = snapshot.Expires?.AddMinutes(-2) ?? context.Info.CapturedAtUtc,
                 HasMoreRows = hasMoreRows,
                 Warnings = skipped == 0 ? context.Info.Warnings :
                     [.. context.Info.Warnings, $"logs: {skipped} row(s) omitted because required identity/value fields could not be decoded."]
@@ -309,7 +318,7 @@ public sealed class CodexNativeSourceGateway
             capabilities,
             page.TotalRows,
             hasMoreRows,
-            warnings);
+            warnings) { SnapshotExpiresAtUtc = snapshot.Expires };
     }
 
     private static CodexLogsQuery NormalizeLogsQuery(CodexLogsQuery query) =>

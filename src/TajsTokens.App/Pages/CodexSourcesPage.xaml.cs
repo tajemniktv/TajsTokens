@@ -17,6 +17,8 @@ public sealed partial class CodexSourcesPage : Page
     private bool _logsReloadRequested;
     private int _requestedLogsPageIndex;
     private CodexLogsSource? _logs;
+    private string? _logsSnapshotId;
+    private bool _refreshLogsSnapshot;
     private string? _initialThreadId;
     private readonly Dictionary<CodexNativeSourceKind, string> _selectedPaths = [];
     private bool _updatingSourceSelection;
@@ -64,6 +66,7 @@ public sealed partial class CodexSourcesPage : Page
 
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
+        ReleaseLogsSnapshot();
         _loaded = false;
         _reloadRequested = false;
         var cancellation = Interlocked.Exchange(ref _cancellation, null);
@@ -88,6 +91,8 @@ public sealed partial class CodexSourcesPage : Page
 
     private async void OnLogApplyClicked(object sender, RoutedEventArgs e)
     {
+        _refreshLogsSnapshot = true;
+        ReleaseLogsSnapshot();
         await LoadLogsForPageAsync(0);
     }
 
@@ -170,6 +175,7 @@ public sealed partial class CodexSourcesPage : Page
             return;
         }
 
+        ReleaseLogsSnapshot();
         _loading = true;
         try
         {
@@ -181,7 +187,7 @@ public sealed partial class CodexSourcesPage : Page
                 if (!TryBuildLogsQuery(0, out var logsQuery, out var queryError))
                 {
                     // Invalid log controls must not prevent other source families from refreshing.
-                    logsQuery = _logs is { } previousLogs ? previousLogs.Query with { PageIndex = 0 } : new CodexLogsQuery();
+                    logsQuery = _logs is { } previousLogs ? previousLogs.Query with { PageIndex = 0, SnapshotId = null } : new CodexLogsQuery { KeepSnapshot = true };
                 }
                 var query = new CodexNativeSourcesQuery
                 {
@@ -335,6 +341,7 @@ public sealed partial class CodexSourcesPage : Page
 
     private void ApplyLogs(CodexLogsSource logs)
     {
+        _logsSnapshotId = logs.Query.SnapshotId;
         _logs = logs;
         if (_snapshot is not null && !ReferenceEquals(_snapshot.Logs, logs))
         {
@@ -424,6 +431,11 @@ public sealed partial class CodexSourcesPage : Page
         out string? validationError)
     {
         validationError = null;
+        if (_refreshLogsSnapshot)
+        {
+            ReleaseLogsSnapshot();
+            _refreshLogsSnapshot = false;
+        }
         query = new CodexLogsQuery();
         if (!TryParseLogInstant(LogFromTextBox.Text, out var fromUtc) ||
             !TryParseLogInstant(LogToTextBox.Text, out var toUtcExclusive))
@@ -443,6 +455,8 @@ public sealed partial class CodexSourcesPage : Page
             DatabasePath = _selectedPaths.GetValueOrDefault(CodexNativeSourceKind.Logs) ?? _snapshot?.Logs.Source.DatabasePath,
             PageIndex = Math.Max(0, pageIndex),
             PageSize = 100,
+            KeepSnapshot = true,
+            SnapshotId = _logsSnapshotId,
             Levels = LogLevelsTextBox.Text
                 .Split([',', ';', ' '], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
             TargetContains = LogTargetTextBox.Text,
@@ -455,6 +469,13 @@ public sealed partial class CodexSourcesPage : Page
             IncludeMessages = LogIncludeMessagesCheckBox.IsChecked == true
         };
         return true;
+    }
+
+    private void ReleaseLogsSnapshot()
+    {
+        var id = _logsSnapshotId;
+        _logsSnapshotId = null;
+        if (id is not null) _ = App.Services.CodexNativeSources.ReleaseLogsSnapshotAsync(id);
     }
 
     private static bool TryParseLogInstant(string text, out DateTimeOffset? value)

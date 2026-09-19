@@ -30,6 +30,8 @@ public sealed class CodexNativeSourcesService : TajsTokens.Core.Interfaces.ICode
     public Task<CodexNativeSourcesSnapshot> InspectAsync(CancellationToken cancellationToken = default) =>
         _gateway.InspectAsync(cancellationToken);
 
+    public Task ReleaseLogsSnapshotAsync(string id) => _gateway.ReleaseLogsSnapshotAsync(id);
+
     public Task<CodexLogsSource> ReadLogsAsync(
         CodexLogsQuery? query = null,
         CancellationToken cancellationToken = default) =>

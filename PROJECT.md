@@ -294,8 +294,12 @@ ordinary new compatible contexts; do not force task-level storage merely to make
 
 ### Other scoped product gaps
 
-Broader auxiliary pagination/thread-scoped queries and snapshot-consistent multi-page log reads remain
-unfinished. Alternate-file coverage is best-effort and does not prove full account accounting. Address
+Broader auxiliary pagination/thread-scoped queries remain unfinished. WAL log navigation now shares a
+read-only SQLite transaction for up to two minutes (at most two leases per gateway), released on refresh
+or leaving the view. Counts and pages share the snapshot; changed filters/permissions/source or expired
+leases require Apply, never a silent fresh page. Non-WAL sources use explicitly labelled live pages to
+avoid long-lived writer-blocking read locks. No database copy or durable log-body retention is added.
+Alternate-file coverage is best-effort and does not prove full account accounting. Address
 these through concrete navigation/inspection workflows, not by restarting the foundation. The workload
 planner accepts explicit hypothetical inputs and an optional editable recent-local-pattern suggestion.
 The suggestion uses the same two-hour token-active root/subagent and exclusive model/effort semantics
@@ -1303,7 +1307,7 @@ read model: no schema migration, durable content collection or export is introdu
 
 The source UI preserves the chosen family and applied log filters through refresh. Its general
 text filter is explicitly limited to loaded rows; it is not a complete database search. Broader
-auxiliary pagination/thread-scoped querying and snapshot-consistent log paging remain unfinished.
+auxiliary pagination/thread-scoped querying remains unfinished; current log paging behavior is described above.
 
 ## Codex CLI harness boundary
 

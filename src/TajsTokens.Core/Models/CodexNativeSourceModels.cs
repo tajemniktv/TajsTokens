@@ -26,6 +26,10 @@ public sealed record CodexLogsQuery
 
     public int PageSize { get; init; } = 100;
 
+    /// <summary>Request a short-lived read-only WAL snapshot for navigation.</summary>
+    public bool KeepSnapshot { get; init; }
+    public string? SnapshotId { get; init; }
+
     public DateTimeOffset? FromUtc { get; init; }
 
     /// <summary>Exclusive upper bound for the source timestamp.</summary>
@@ -127,7 +131,10 @@ public sealed record CodexLogsSource(
     CodexLogsCapabilities Capabilities,
     long? TotalMatchingRows,
     bool HasMoreRows,
-    IReadOnlyList<string> Warnings);
+    IReadOnlyList<string> Warnings)
+{
+    public DateTimeOffset? SnapshotExpiresAtUtc { get; init; }
+}
 
 /// <summary>Availability of a source/capability at one inspection point.</summary>
 public enum CodexNativeSourceAvailability

@@ -6,6 +6,57 @@ namespace TajsTokens.Core.Tests;
 
 public sealed class CodexNativeSourcesServiceTests
 {
+    [Fact]
+    public async Task LogSnapshotKeepsPagesStableAcrossWritesAndRejectsChangedQueries()
+    {
+        var project = new DirectoryInfo(AppContext.BaseDirectory);
+        while (project is not null && !File.Exists(Path.Combine(project.FullName, "PROJECT.md"))) project = project.Parent;
+        Assert.NotNull(project);
+        var directory = Directory.CreateDirectory(Path.Combine(project.FullName, ".codex/temp/log-snapshot-" + Guid.NewGuid().ToString("N")));
+        var path = Path.Combine(directory.FullName, "logs_2.sqlite");
+        var service = new CodexNativeSourcesService(directory.FullName);
+        var ids = new List<string>();
+        try
+        {
+            await CreateDatabaseAsync(path, "PRAGMA journal_mode=WAL; CREATE TABLE logs(id INTEGER PRIMARY KEY, ts INTEGER, ts_nanos INTEGER, level TEXT, target TEXT, message TEXT); INSERT INTO logs VALUES(1,1,0,'INFO','t','old'),(2,2,0,'INFO','t','second'),(3,3,0,'INFO','t','third');");
+            var first = await service.ReadLogsAsync(new CodexLogsQuery { PageSize = 1, KeepSnapshot = true, IncludeMessages = true });
+            Assert.NotNull(first.Query.SnapshotId);
+            ids.Add(first.Query.SnapshotId!);
+            Assert.NotNull(first.SnapshotExpiresAtUtc);
+            Assert.Equal(3, Assert.Single(first.Entries).Id);
+            await CreateDatabaseAsync(path, "INSERT INTO logs VALUES(4,4,0,'INFO','t','new'); DELETE FROM logs WHERE id=2; UPDATE logs SET message='changed' WHERE id=1;");
+            var second = await service.ReadLogsAsync(first.Query with { PageIndex = 1 });
+            Assert.Equal(2, Assert.Single(second.Entries).Id);
+            Assert.Equal(3, second.TotalMatchingRows);
+            var last = await service.ReadLogsAsync(first.Query with { PageIndex = 2 });
+            Assert.Equal("old", Assert.Single(last.Entries).Message);
+            var changed = await service.ReadLogsAsync(first.Query with { IncludeMessages = false });
+            Assert.Equal(CodexNativeSourceAvailability.Error, changed.Source.Availability);
+            Assert.Empty(changed.Entries);
+            var fresh = await service.ReadLogsAsync(first.Query with { SnapshotId = null });
+            ids.Add(fresh.Query.SnapshotId!);
+            Assert.Equal(4, Assert.Single(fresh.Entries).Id);
+            var third = await service.ReadLogsAsync(first.Query with { SnapshotId = null });
+            ids.Add(third.Query.SnapshotId!); // The third lease evicts the oldest of the two allowed leases.
+            var expired = await service.ReadLogsAsync(first.Query);
+            Assert.Equal(CodexNativeSourceAvailability.Error, expired.Source.Availability);
+            Assert.Contains("expired", expired.Source.Error);
+            await service.ReleaseLogsSnapshotAsync(third.Query.SnapshotId!);
+            Assert.Equal(CodexNativeSourceAvailability.Error, (await service.ReadLogsAsync(third.Query)).Source.Availability);
+            foreach (var id in ids) await service.ReleaseLogsSnapshotAsync(id);
+            await CreateDatabaseAsync(path, "PRAGMA journal_mode=DELETE;");
+            var live = await service.ReadLogsAsync(first.Query with { SnapshotId = null });
+            Assert.Null(live.Query.SnapshotId);
+            Assert.Null(live.SnapshotExpiresAtUtc);
+            Assert.Contains(live.Warnings, x => x.Contains("Live page only"));
+        }
+        finally
+        {
+            foreach (var id in ids) await service.ReleaseLogsSnapshotAsync(id);
+            directory.Delete(recursive: true);
+        }
+    }
+
     [Theory]
     [InlineData(-1)]
     [InlineData(1_000_000_000)]

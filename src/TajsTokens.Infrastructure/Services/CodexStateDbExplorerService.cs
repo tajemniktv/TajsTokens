@@ -389,7 +389,9 @@ public sealed class CodexStateDbExplorerService
         string databasePath,
         CodexLogsQuery query,
         CodexLogsCapabilities capabilities,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        SqliteConnection? snapshotConnection = null,
+        SqliteTransaction? snapshotTransaction = null)
     {
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(capabilities);
@@ -399,9 +401,12 @@ public sealed class CodexStateDbExplorerService
         var offset = checked((long)pageIndex * pageSize);
         var filters = BuildLogFilters(query, capabilities, out var parameters);
         var candidate = CreateCandidateForPath(databasePath);
-        await using var connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
-
+        await using var ownedConnection = snapshotConnection is null ? await OpenReadOnlyAsync(candidate.Path, cancellationToken) : null;
+        var connection = snapshotConnection ?? ownedConnection!;
+        using var ownedTransaction = snapshotTransaction is null ? connection.BeginTransaction(deferred: true) : null;
+        var transaction = snapshotTransaction ?? ownedTransaction;
         await using var countCommand = connection.CreateCommand();
+        countCommand.Transaction = transaction;
         countCommand.CommandText = $"SELECT COUNT(*) FROM logs{filters};";
         AddLogParameters(countCommand, parameters);
         var scalar = await countCommand.ExecuteScalarAsync(cancellationToken);
@@ -445,6 +450,7 @@ public sealed class CodexStateDbExplorerService
             () =>
             {
                 var command = new SqliteCommand(select, connection);
+                command.Transaction = transaction;
                 AddLogParameters(command, parameters);
                 command.Parameters.AddWithValue("$limit", pageSize + 1);
                 command.Parameters.AddWithValue("$offset", offset);
@@ -1417,7 +1423,7 @@ public sealed class CodexStateDbExplorerService
             .Any(token => tableName.Contains(token, StringComparison.OrdinalIgnoreCase));
     }
 
-    private static async Task<SqliteConnection> OpenReadOnlyAsync(
+    internal static async Task<SqliteConnection> OpenReadOnlyAsync(
         string databasePath,
         CancellationToken cancellationToken)
     {

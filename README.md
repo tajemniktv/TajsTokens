@@ -36,6 +36,9 @@ outlooks and usage predictions—with freshness and uncertainty kept visible.
   quota drops separately from reset-time shifts. Account readings are the default; rollout
   observations remain separate diagnostics, with explicit observation times and detailed deadlines.
 - **Advanced → Diagnostics / Model lab:** check source health, collection coverage and prediction evidence.
+- **Native log inspection:** WAL-mode log pages share a read-only snapshot for up to two minutes,
+  so new writes do not shift your pages. Apply refreshes the snapshot; expired snapshots ask you to
+  refresh. Other journal modes are explicitly labelled live pages. Log bodies remain opt-in and local.
 - **Experimental daily backend reports:** opt in on Quota history to collect daily Codex token
   counts and reported per-surface percentages using your existing Codex sign-in. Private endpoints
   may change; failures remain visible. Reports stay local, credentials are not saved, and daily
