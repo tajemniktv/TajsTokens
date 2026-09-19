@@ -40,6 +40,11 @@ unknown/after-event collection times, physical requested-tier settings and per-c
 Flags overlap; neither horizons nor sources may be summed as independent work. These describe
 built observations, not every rejected quota reading. After-event collection is not automatically
 strict-origin ineligibility. Tier settings do not establish billed-tier or token-level coverage.
+The separate construction summary counts interior start candidates in eligible epochs, partitioned
+into built intervals and first-rejection reasons. Epoch endpoints are outside this denominator;
+overlap candidates are not independent targets. Missing outcomes may reflect reset/range boundaries,
+not collection failure. Model Lab pairs construction summaries with matching strict-replay model
+counts; strict exclusions overlap and are a later stage, not additional construction rejections.
 
 The same cost comparisons appear under Forecasts → Model evaluation, separately labelled
 from quota and token forecasts. Missing precision/coverage and sparse generations are not

@@ -23,11 +23,12 @@ public static class QuotaCostEvaluation
     public static QuotaCostReport Evaluate(CodexForecastDataset data, CancellationToken cancellationToken = default,
         bool userConfirmedRolloutOwnership = false)
     {
-        var rows = QuotaCostObservationBuilder.Build(data, cancellationToken, userConfirmedRolloutOwnership);
-        return Evaluate(rows, (userConfirmedRolloutOwnership ?
+        var built = QuotaCostObservationBuilder.BuildDetailed(data, cancellationToken, userConfirmedRolloutOwnership);
+        return Evaluate(built.Observations, (userConfirmedRolloutOwnership ?
             "User confirms retained rollouts belong to their account. Native account IDs remain absent; sessions/sources are not pooled. " : "") + data.Coverage + " " +
             QuotaHistoryPolicy.Summarize(QuotaHistoryPolicy.Describe(data.Quota, data.CapturedAtUtc)), cancellationToken)
-            with { DatasetCapturedAtUtc = data.CapturedAtUtc, EvidenceCoverage = QuotaEvaluationCoverageBuilder.Build(data) };
+            with { DatasetCapturedAtUtc = data.CapturedAtUtc, EvidenceCoverage = QuotaEvaluationCoverageBuilder.Build(data),
+                ConstructionCoverage = built.Coverage };
     }
 
     public static QuotaCostReport Evaluate(IReadOnlyList<QuotaCostObservation> rows, string coverage,

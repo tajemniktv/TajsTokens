@@ -83,9 +83,14 @@ model/effort coverage, category mismatch/invalid counts, unknown/after-event col
 physical requested-tier setting counts, and per-cohort/horizon quality flags and quota-account/
 assertion counts. Counts do not attribute local tokens to an account, infer billed tier or establish
 copy/interleave coverage. They are rebuildable diagnostics with no new acquisition or retention.
-**Next implementable slice:** connect rejected interval construction and strict-origin exclusions
-to these coverage summaries; distinguish source/reporting gaps from absent recorded work without
-inventing completeness. Use existing Model Lab/read-model owners, not a new framework.
+Construction diagnostics now partition eligible-epoch interior candidate starts into built targets
+and first-rejection reasons (overlap, warmup, saturation, absent outcome or polling gap, incompatible
+cohort). Model Lab places matching strict-replay candidate counts/reasons beside that stage, without
+adding their overlapping exclusions or treating absent comparisons as zero. These counts are not
+all raw readings, independent outcomes or proof of collection failure.
+**Next implementable slice:** investigate representative composition mismatches and reconciliation
+disagreements using these diagnostics; distinguish source/reporting gaps from absent recorded work
+without inventing completeness. Use existing Model Lab/read-model owners, not a new framework.
 New observations block some validation claims, **not all development**.
 
 ### Ordered roadmap and acceptance

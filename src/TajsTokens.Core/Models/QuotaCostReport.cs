@@ -25,5 +25,6 @@ public sealed record QuotaCostReport(string Version, string Methodology, string 
 {
     public DateTimeOffset? DatasetCapturedAtUtc { get; init; }
     public QuotaEvaluationCoverage? EvidenceCoverage { get; init; }
+    public IReadOnlyList<QuotaCostConstructionCoverage> ConstructionCoverage { get; init; } = [];
     public IReadOnlyList<QuotaCostCohortCoverage> CohortCoverage { get; init; } = [];
 }

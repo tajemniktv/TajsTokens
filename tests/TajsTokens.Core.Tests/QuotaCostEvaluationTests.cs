@@ -9,6 +9,37 @@ public sealed class QuotaCostEvaluationTests
     private static readonly DateTimeOffset Start = DateTimeOffset.Parse("2026-09-01T00:00:00Z");
 
     [Fact]
+    public void ConstructionCoveragePartitionsCandidateStartsWithoutChangingSelectedTargets()
+    {
+        var data = Data(Enumerable.Range(0, 13).Select(i => Quota(i * 15, 20)).ToArray(), []);
+        var result = QuotaCostObservationBuilder.BuildDetailed(data, horizons: [.5]);
+        var coverage = Assert.Single(result.Coverage);
+        Assert.Equal(11, coverage.CandidateStarts);
+        Assert.Equal(5, coverage.BuiltIntervals);
+        Assert.Equal(5, coverage.RejectedStarts["overlaps-selected-interval"]);
+        Assert.Equal(1, coverage.RejectedStarts["no-outcome-in-epoch"]);
+        Assert.Equal(coverage.CandidateStarts, coverage.BuiltIntervals + coverage.RejectedStarts.Values.Sum());
+        Assert.Equal(new[] { 15, 45, 75, 105, 135 }, result.Observations.Select(x => (int)(x.StartUtc - Start).TotalMinutes));
+        Assert.All(result.Observations, x => Assert.Equal(TimeSpan.FromMinutes(30), x.EndUtc - x.StartUtc));
+    }
+
+    [Fact]
+    public void ConstructionDistinguishesWarmupAndPollingGapFromAbsentWorkload()
+    {
+        var data = Data(new[] { 0, 5, 15, 45, 60, 90 }.Select(i => Quota(i, 20)).ToArray(), []);
+        var result = QuotaCostObservationBuilder.BuildDetailed(data, horizons: [.5]);
+        var coverage = Assert.Single(result.Coverage);
+        Assert.Equal(4, coverage.CandidateStarts);
+        Assert.Equal(2, coverage.BuiltIntervals);
+        Assert.Equal(1, coverage.RejectedStarts["epoch-warmup"]);
+        Assert.Equal(1, coverage.RejectedStarts["outcome-beyond-poll-tolerance"]);
+        Assert.All(result.Observations, x => Assert.Contains("no-recorded-tokens-not-proven-idle", x.QualityFlags));
+        var empty = QuotaCostObservationBuilder.BuildDetailed(Data([], []));
+        Assert.Empty(empty.Observations);
+        Assert.Empty(empty.Coverage);
+    }
+
+    [Fact]
     public void DatasetUsesHalfOpenWorkloadAndKeepsFlatMeterUncertainty()
     {
         var quota = Enumerable.Range(0, 13).Select(i => Quota(i * 15, 20)).ToArray();
@@ -66,6 +97,9 @@ public sealed class QuotaCostEvaluationTests
         quota[4] = quota[4] with { UsedPercent = 1 };
         var rows = QuotaCostObservationBuilder.Build(Data(quota, []));
         Assert.DoesNotContain(rows, x => x.EndUsed >= 100);
+        var construction = QuotaCostObservationBuilder.BuildDetailed(Data(quota, []));
+        Assert.Contains(construction.Coverage, x => x.RejectedStarts.ContainsKey("saturated-outcome"));
+        Assert.All(construction.Coverage, x => Assert.Equal(x.CandidateStarts, x.BuiltIntervals + x.RejectedStarts.Values.Sum()));
         Assert.DoesNotContain(rows, x => x.StartUtc < quota[4].CapturedAtUtc && x.EndUtc >= quota[4].CapturedAtUtc);
         quota = Enumerable.Range(0, 9).Select(i => Quota(i * 15, 20 + i) with
         { ResetsAtUtc = Start.AddDays(7).AddSeconds(i) }).ToArray();

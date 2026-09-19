@@ -6,36 +6,53 @@ namespace TajsTokens.Core.Services;
 public static class QuotaCostObservationBuilder
 {
     public const string Version = "quota-cost-observations/v2";
+    public const string CoverageBoundary = "Construction counts eligible-epoch interior start candidates, not raw quota readings or independent outcomes. " +
+        "Epoch endpoints are not candidates. Each rejected start has the first applicable reason in selection order; " +
+        "candidate starts can overlap. No outcome in an epoch can mean a reset or range boundary, not missing collection. " +
+        "Strict replay withholding is a later, separate stage and must not be subtracted from these counts.";
 
     public static IReadOnlyList<QuotaCostObservation> Build(CodexForecastDataset data,
+        CancellationToken cancellationToken = default, bool userConfirmedRolloutOwnership = false,
+        IReadOnlyList<double>? horizons = null) =>
+        BuildDetailed(data, cancellationToken, userConfirmedRolloutOwnership, horizons).Observations;
+
+    public static QuotaCostObservationBuild BuildDetailed(CodexForecastDataset data,
         CancellationToken cancellationToken = default, bool userConfirmedRolloutOwnership = false,
         IReadOnlyList<double>? horizons = null)
     {
         var result = new List<QuotaCostObservation>();
+        var coverage = new List<QuotaCostConstructionCoverage>();
         var history = QuotaHistoryPolicy.Describe(data.Quota, data.CapturedAtUtc);
         foreach (var stream in QuotaHistoryPolicy.Streams(history))
         foreach (var epoch in QuotaForecastBacktester.SplitEpochs(QuotaHistoryPolicy.ReplayRows(stream)))
         foreach (var horizon in horizons ?? [0.5, 2d])
         {
             DateTimeOffset? previousEnd = null;
+            var candidates = 0;
+            var initialCount = result.Count;
+            var rejected = new Dictionary<string, int>(StringComparer.Ordinal);
+            void Reject(string reason) => rejected[reason] = rejected.GetValueOrDefault(reason) + 1;
             for (var i = 1; i < epoch.Count - 1; i++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var start = epoch[i];
-                if (start.CapturedAtUtc < previousEnd || start.UsedPercent >= 100 ||
-                    start.CapturedAtUtc - epoch[0].CapturedAtUtc < TimeSpan.FromMinutes(15)) continue;
+                candidates++;
+                if (start.CapturedAtUtc < previousEnd) { Reject("overlaps-selected-interval"); continue; }
+                if (start.UsedPercent >= 100) { Reject("saturated-origin"); continue; }
+                if (start.CapturedAtUtc - epoch[0].CapturedAtUtc < TimeSpan.FromMinutes(15)) { Reject("epoch-warmup"); continue; }
                 var target = start.CapturedAtUtc.AddHours(horizon);
                 var end = epoch.Skip(i + 1).FirstOrDefault(x => x.CapturedAtUtc >= target);
-                if (end is null || end.CapturedAtUtc - target > TimeSpan.FromMinutes(5)) continue;
+                if (end is null) { Reject("no-outcome-in-epoch"); continue; }
+                if (end.CapturedAtUtc - target > TimeSpan.FromMinutes(5)) { Reject("outcome-beyond-poll-tolerance"); continue; }
                 // A -> B -> A metadata must not bridge the intervening regime merely because
                 // GroupBy puts both A portions in one stream. Concurrent incompatible lanes
                 // in the same meter identity are conservatively withheld as ambiguous.
                 if (data.Quota.Any(x => x.CapturedAtUtc > start.CapturedAtUtc && x.CapturedAtUtc <= end.CapturedAtUtc &&
                     x.Provider == start.Provider && x.Profile == start.Profile && x.Source == start.Source &&
                     x.AccountKey == start.AccountKey && x.Kind == start.Kind && x.SessionId == start.SessionId &&
-                    QuotaHistoryPolicy.Cohort(x) != stream.Key)) continue;
+                    QuotaHistoryPolicy.Cohort(x) != stream.Key)) { Reject("intervening-incompatible-cohort"); continue; }
                 // Saturation hides any further usage; it is not an ordinary bounded delta target.
-                if (end.UsedPercent >= 100) continue;
+                if (end.UsedPercent >= 100) { Reject("saturated-outcome"); continue; }
                 previousEnd = end.CapturedAtUtc;
                 var hours = (end.CapturedAtUtc - start.CapturedAtUtc).TotalHours;
                 var features = CodexForecastFeatureBuilder.Build(data, end.CapturedAtUtc, hours);
@@ -96,7 +113,11 @@ public static class QuotaCostObservationBuilder
                     AccountAssociationId = association?.Id
                 });
             }
+            coverage.Add(new(stream.Key, horizon, candidates, result.Count - initialCount, rejected));
         }
-        return result;
+        return new(result, coverage.GroupBy(x => (x.Cohort, x.HorizonHours)).Select(g =>
+            new QuotaCostConstructionCoverage(g.Key.Cohort, g.Key.HorizonHours, g.Sum(x => x.CandidateStarts),
+                g.Sum(x => x.BuiltIntervals), g.SelectMany(x => x.RejectedStarts).GroupBy(x => x.Key, StringComparer.Ordinal)
+                    .OrderBy(x => x.Key, StringComparer.Ordinal).ToDictionary(x => x.Key, x => x.Sum(y => y.Value), StringComparer.Ordinal))).ToArray());
     }
 }

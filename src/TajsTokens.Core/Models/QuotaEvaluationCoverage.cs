@@ -10,3 +10,9 @@ public sealed record QuotaEvaluationCoverage(
 public sealed record QuotaCostCohortCoverage(QuotaHistoryCohort Cohort, double HorizonHours,
     int Intervals, int NativeAccountIntervals, int AssertedAccountIntervals,
     IReadOnlyDictionary<string, int> QualityCounts);
+
+public sealed record QuotaCostConstructionCoverage(QuotaHistoryCohort Cohort, double HorizonHours,
+    int CandidateStarts, int BuiltIntervals, IReadOnlyDictionary<string, int> RejectedStarts);
+
+public sealed record QuotaCostObservationBuild(IReadOnlyList<QuotaCostObservation> Observations,
+    IReadOnlyList<QuotaCostConstructionCoverage> Coverage);

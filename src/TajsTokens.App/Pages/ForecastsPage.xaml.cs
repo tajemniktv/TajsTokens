@@ -369,6 +369,12 @@ public sealed partial class ForecastsPage : Page
                     $"Mean error {CompactTokens(score.MeanAbsoluteError)} tokens · {score.Origins:N0} held-out origins",
                     $"MAE {CompactTokens(score.MeanAbsoluteError)} tokens · RMSE {CompactTokens(score.RootMeanSquaredError)} tokens · reconstructed rollout history · {score.WorkloadOrigins} workload-model predictions" +
                     (score.IntervalOrigins > 0 ? $" · band coverage {score.IntervalCoverage:P0} on {score.IntervalOrigins} origins" : ""))))
+                .Concat((report.QuotaCost?.ConstructionCoverage ?? []).Select(coverage => new EvaluationRow(
+                    $"Evidence construction · {FormatKind(coverage.Cohort.Kind)} · {Horizon(coverage.HorizonHours)} · {coverage.Cohort.Source} · {QuotaAccountScope.Describe(coverage.Cohort.AccountKey)} · {QuotaHistoryPolicy.DescribeCohort(coverage.Cohort)}",
+                    "Target selection, not a model",
+                    $"{coverage.BuiltIntervals:N0} built intervals from {coverage.CandidateStarts:N0} candidate starts",
+                    "First rejection reasons: " + string.Join("; ", coverage.RejectedStarts.Select(x => $"{x.Key}={x.Value:N0}")) +
+                    ". " + QuotaCostObservationBuilder.CoverageBoundary + "\n" + FormatStrictCoverage(report, coverage))))
                 .Concat((report.QuotaCost?.CohortCoverage ?? []).Select(coverage => new EvaluationRow(
                     $"Evidence coverage · {FormatKind(coverage.Cohort.Kind)} · {Horizon(coverage.HorizonHours)} · {coverage.Cohort.Source} · {QuotaAccountScope.Describe(coverage.Cohort.AccountKey)} · {QuotaHistoryPolicy.DescribeCohort(coverage.Cohort)}",
                     "Coverage, not a model",
@@ -462,6 +468,16 @@ public sealed partial class ForecastsPage : Page
         EvaluationList.ItemsSource = rows;
         EvaluationSelectionText.Text = group is null ? "No evaluation results in this range."
             : $"{rows.Length} models · {group}\nComparisons are scoped to this cohort. Counts are not additive across overlapping histories.";
+    }
+
+    private static string FormatStrictCoverage(ForecastEvaluationReport report, QuotaCostConstructionCoverage coverage)
+    {
+        var scores = report.ComposedQuotaStrict?.Scores.Where(x => x.Cohort == coverage.Cohort &&
+            x.HorizonHours == coverage.HorizonHours).ToArray() ?? [];
+        return scores.Length == 0 ? "Strict replay: no matching comparison; not evidence of zero exclusions." :
+            "Strict replay (per candidate; counts overlap, do not sum): " + string.Join(" | ", scores.Select(x =>
+                $"{x.CostModel}: {x.TrainingIntervals} training, {x.HeldOutIntervals} evaluated; " +
+                string.Join(", ", x.WithheldReasons.Select(y => $"{y.Key}={y.Value}"))));
     }
 
     private static string FormatTtBias(TtEvaluationScore score) => score.ScalarBias is null
