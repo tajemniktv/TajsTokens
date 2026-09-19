@@ -5,13 +5,14 @@ namespace TajsTokens.Core.Services;
 /// <summary>Actual-cost and origin-only forecast errors on identical disjoint outcomes.</summary>
 public static class ComposedQuotaEvaluator
 {
-    public const string Version = "composed-quota/v5";
+    public const string Version = "composed-quota/v6";
 
     public static ComposedQuotaEvaluation Evaluate(CodexForecastDataset data, CancellationToken cancellationToken = default,
         ForecastReplayAvailability availability = ForecastReplayAvailability.ReconstructedEventTime)
     {
         var rows = QuotaCostObservationBuilder.Build(data, cancellationToken);
         var predictions = new Dictionary<(DateTimeOffset, double), PredictedWorkload?>();
+        var activities = new Dictionary<DateTimeOffset, string>();
         var scores = new List<ComposedQuotaScore>();
         foreach (var group in rows.GroupBy(x => (x.Cohort, x.HorizonHours)))
         {
@@ -75,6 +76,11 @@ public static class ComposedQuotaEvaluator
                         var projected = Project(row, workload);
                         var predicted = fit(projected);
                         var actualCost = fit(row);
+                        if (!activities.TryGetValue(row.StartUtc, out var activity))
+                        {
+                            activity = CodexNowcastActivity.Evaluate(data, row.StartUtc, availability).State.ToString();
+                            activities.Add(row.StartUtc, activity);
+                        }
                         var calibration = ComposedQuotaPolicy.CalibrateUncertainty(trials, row.StartUtc);
                         var remaining = Math.Clamp(100 - row.StartUsed - predicted, 0, 100 - row.StartUsed);
                         trials.Add(new(row.StartUtc, row.EndUtc, row.ResetUtc, predicted, actualCost, row.ObservedDelta,
@@ -82,6 +88,9 @@ public static class ComposedQuotaEvaluator
                             Math.Clamp(100 - row.StartUsed - predicted, 0, 100), workload)
                         {
                             Availability = availability,
+                            OriginActivity = activity,
+                            RecordedOutcomeTokens = row.Features.Tokens,
+                            ZeroUseIntervalLoss = row.IntervalLoss(0),
                             CalibrationAvailableAtUtc = availability == ForecastReplayAvailability.CollectedByOrigin
                                 ? row.OutcomeCollectedAtUtc : row.EndUtc,
                             ObservedRemainingPercent = 100 - row.EndUsed,
@@ -101,6 +110,7 @@ public static class ComposedQuotaEvaluator
                     Mean(trials.Select(x => x.PaceIntervalLoss)), Mean(trials.Select(x => Math.Abs(x.PredictedDelta - x.ObservedDelta))), trials)
                 {
                     Availability = availability,
+                    Breakdowns = ComposedQuotaBreakdowns.Build(trials),
                     IntervalOrigins = bands.Length,
                     IntervalCoverage = Mean(bands.Select(x => x.ObservedRemainingPercent >= x.LowerRemainingPercent &&
                         x.ObservedRemainingPercent <= x.UpperRemainingPercent ? 1d : 0d)),
@@ -122,7 +132,7 @@ public static class ComposedQuotaEvaluator
             "absolute displayed-delta errors, with eight earlier generations, an empirical 80% target and a one-point minimum radius. " +
             "Calibration labels must already be available at the origin (event time for reconstruction, actual collection for strict replay). " +
             "Coverage measures reported remaining quota, not latent true usage or exhaustion probability. Sparse ranges remain absent. " +
-            "No activity-conditioned quota distribution or live promotion is implied.", scores);
+            "No activity-conditioned quota distribution or live promotion is implied. " + ComposedQuotaBreakdowns.Methodology, scores);
     }
 
     internal static QuotaCostObservation Project(QuotaCostObservation row, PredictedWorkload workload) => row with

@@ -3,7 +3,7 @@ Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Management/Microsoft.PowerShell.Management.psd1')
 Import-Module (Join-Path $PSHOME 'Modules/Microsoft.PowerShell.Utility/Microsoft.PowerShell.Utility.psd1')
 
-# All disposable work stays in the repository. Installed versions/backups are durable.
+# Disposable staging stays in the repository; successful installs prune managed recovery history.
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 $root = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Programs/TajemnikTV/TajsTokens'))
 $data = Join-Path $root 'data'
@@ -41,6 +41,32 @@ function Move-InstallDirectory([string]$Source, [string]$Destination) {
 
 function Get-AppProcesses {
     @(Get-Process -Name 'TajsTokens.App' -ErrorAction SilentlyContinue)
+}
+
+function Remove-ObsoleteDeployments([string]$KeepBackup) {
+    if (Test-Path -LiteralPath $journal) { throw 'Cannot prune an unfinished deployment' }
+    $backupRoot = [IO.Path]::GetFullPath((Join-Path $root 'backups'))
+    $keep = [IO.Path]::GetFullPath($KeepBackup)
+    $generation = '\d{8}T\d{9}Z-[0-9a-f]{8}'
+    if ([IO.Path]::GetDirectoryName($keep) -ne $backupRoot -or
+        [IO.Path]::GetFileName($keep) -notmatch "^$generation`$" -or
+        -not (Test-Path -LiteralPath $keep -PathType Container)) { throw 'Invalid recovery backup to keep' }
+    foreach ($container in @($backupRoot, [IO.Path]::GetFullPath((Join-Path $root 'retained')))) {
+        Assert-PlainTree $container
+        if (-not (Test-Path -LiteralPath $container)) { continue }
+        foreach ($item in Get-ChildItem -LiteralPath $container -Force) {
+            $target = [IO.Path]::GetFullPath($item.FullName)
+            if ($target -eq $keep) { continue }
+            $pattern = if ($container -eq $backupRoot) { "^$generation`$" } else { "^(failed-|unused-)?$generation`$" }
+            if (-not $item.PSIsContainer -or $item.Name -notmatch $pattern -or
+                [IO.Path]::GetDirectoryName($target) -ne $container) {
+                Write-Warning "Unrecognized deployment material preserved: $target" -WarningAction Continue
+                continue
+            }
+            Assert-PlainTree $target
+            Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction Stop
+        }
+    }
 }
 
 function Stop-App {
@@ -255,6 +281,9 @@ try {
         Remove-Item -LiteralPath $journal
         throw "Deployment failed; prior binaries restored where available. Data and backup preserved (no automatic DB downgrade): $failure"
     }
+    # The transaction has committed and startup is verified. Cleanup must never trigger rollback.
+    try { Remove-ObsoleteDeployments $backup }
+    catch { Write-Warning "Deployment succeeded; obsolete recovery material could not be fully pruned: $_" -WarningAction Continue }
 } finally {
     if ($startupLock) { $startupLock.Dispose() }
     $lock.Dispose()

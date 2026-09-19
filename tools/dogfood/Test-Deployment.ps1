@@ -13,10 +13,12 @@ $script:publishFails = $false
 $script:incomplete = $false
 $script:fakeProcesses = @()
 $script:cleanupFails = $false
+$script:retentionFails = $false
 
 function Remove-Item {
     [CmdletBinding()]
     param([string]$LiteralPath, [switch]$Recurse, [switch]$Force)
+    if ($script:retentionFails -and $LiteralPath.Replace('\', '/') -like '*/backups/*') { throw 'Simulated retention failure' }
     if ($script:cleanupFails -and $LiteralPath.Replace('\', '/') -like '*dogfood/staging/*') {
         throw 'Simulated staging deletion failure'
     }
@@ -64,7 +66,7 @@ $controls = @('CI', 'GITHUB_ACTIONS', 'TF_BUILD', 'BUILD_BUILDID', 'JENKINS_URL'
 $ambient = @{}
 foreach ($name in $controls) { $ambient[$name] = [Environment]::GetEnvironmentVariable($name); [Environment]::SetEnvironmentVariable($name, $null) }
 try {
-    foreach ($case in @('success', 'cleanup-success', 'cleanup-failure', 'publish-failure', 'incomplete', 'shutdown-refusal', 'startup-failure', 'rollback', 'rollback-failure', 'lock', 'interrupted', 'move-boundary', 'move-existing', 'shutdown-preflight', 'ci', 'opt-out')) {
+    foreach ($case in @('success', 'retention-failure', 'retention-boundary', 'cleanup-success', 'cleanup-failure', 'publish-failure', 'incomplete', 'shutdown-refusal', 'startup-failure', 'rollback', 'rollback-failure', 'lock', 'interrupted', 'move-boundary', 'move-existing', 'shutdown-preflight', 'ci', 'opt-out')) {
         $repo = Join-Path $testBase "$case/repo"
         $root = [IO.Path]::GetFullPath((Join-Path $testBase "$case/install"))
         $current = Join-Path $root 'current'
@@ -82,7 +84,25 @@ try {
         $script:stopFails = $false; $script:startFailures = 0
         $script:publishFails = $false; $script:incomplete = $false
         $script:cleanupFails = $false
+        $script:retentionFails = $false
+        $oldBackup = Join-Path $root 'backups/20260101T000000000Z-12345678'
+        New-Item -ItemType Directory -Path $oldBackup -Force | Out-Null
+        Set-Content -LiteralPath (Join-Path $oldBackup 'settings.json') -Value 'old backup'
         switch ($case) {
+            'retention-failure' {
+                $script:retentionFails = $true
+                $warnings = @(Invoke-DogfoodDeployment 3>&1)
+                Assert ((Identity $current) -eq 'new' -and $script:starts -eq 1) 'Retention failure rolled back successful deployment'
+                Assert (-not (Test-Path -LiteralPath $journal)) 'Retention failure restored journal'
+                Assert ($warnings.Count -gt 0 -and (Test-Path -LiteralPath $oldBackup)) 'Retention failure not preserved/reported'
+            }
+            'retention-boundary' {
+                Expect-Failure { Remove-ObsoleteDeployments $data } 'Invalid recovery backup'
+                $unknown = Join-Path $root 'retained/user-material'
+                New-Item -ItemType Directory -Path $unknown -Force | Out-Null
+                Invoke-DogfoodDeployment
+                Assert (Test-Path -LiteralPath $unknown) 'Unrecognized material deleted'
+            }
             'cleanup-success' {
                 $script:cleanupFails = $true
                 $warnings = @(Invoke-DogfoodDeployment 3>&1)
@@ -103,6 +123,8 @@ try {
                 Assert (-not (Test-Path -LiteralPath $journal)) 'Journal not committed'
                 Assert ($script:starts -eq 1) 'Did not restart'
                 Assert (@(Get-ChildItem -LiteralPath (Join-Path $root 'backups') -Recurse -Filter settings.json).Count -eq 1) 'No settings backup'
+                Assert (-not (Test-Path -LiteralPath $oldBackup)) 'Old backup retained'
+                Assert (@(Get-ChildItem -LiteralPath (Join-Path $root 'retained')).Count -eq 0) 'Old binaries retained'
                 $manifest = Get-Content -LiteralPath (Join-Path $current 'build-identity.json') -Raw | ConvertFrom-Json
                 Assert ($manifest.schemaVersion -eq 1 -and $manifest.appName -eq 'TajsTokens' -and $manifest.files.Count -eq 9) 'Build manifest contract differs'
             }
@@ -130,11 +152,13 @@ try {
                 Assert ((Identity $current) -eq 'old') 'Failed to restore prior build'
                 Assert ((Identity $previous) -eq 'older') 'Lost earlier rollback after startup failure'
                 Assert ($script:starts -eq 2) 'Prior build not restarted'
+                Assert (Test-Path -LiteralPath $oldBackup) 'Failed deployment pruned recovery history'
             }
             'rollback' {
                 Invoke-DogfoodDeployment -Rollback
                 Assert ((Identity $current) -eq 'older') 'Rollback did not promote previous'
                 Assert ((Identity $previous) -eq 'old') 'Rollback did not retain replaced build'
+                Assert (@(Get-ChildItem -LiteralPath (Join-Path $root 'backups') -Directory).Count -eq 1) 'Rollback retained extra backups'
             }
             'rollback-failure' {
                 $script:startFailures = 1

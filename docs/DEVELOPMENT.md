@@ -88,8 +88,8 @@ The stable per-user layout is:
   current/       installed app (TajsTokens.App.exe)
   previous/      last replaced build; explicit rollback remains available
   data/          live telemetry.db, settings.json, and local InspectionExports
-  backups/       pre-deployment database/settings snapshots (including WAL/SHM)
-  retained/      older binary generations, never automatically deleted
+  backups/       one latest pre-deployment database/settings snapshot (including WAL/SHM)
+  retained/      temporary recovery binaries; pruned after verified successful deployment
 ```
 
 Launch **TajsTokens** from the Start menu. Its shortcut always targets `current`; the existing
@@ -149,14 +149,19 @@ could not finish. Further deployments refuse to overwrite this state. Exit TajsT
 the journal plus `current`, `previous`, and `retained` (including failed candidates). Preserve the
 candidate you move aside, restore the desired complete build as `current`, and only then remove
 the journal and relaunch. Do not blindly delete a journal while a deployment is still running.
-`pending` and `retained/unused-*` contain unpromoted candidates; retry safely retains them.
+`pending` and `retained/unused-*` contain unpromoted candidates; retry preserves them until success.
 
 Binary rollback deliberately does **not** downgrade or overwrite live data. A future incompatible
 schema migration may require manually restoring its matching stopped-app backup: preserve the
 entire live `data` directory first, restore the database/settings snapshot to a new `data`
 directory, and copy any local exports you want to retain. Never combine a backed-up database
 with a different generation's WAL/SHM. Backups, legacy data, and exports remain private local
-files; nothing is uploaded. No automatic retention deletion is performed.
+files; nothing is uploaded. After verified successful startup, deployment keeps only `current`,
+`previous` and the newly created backup, deleting older managed backup/binary generations.
+Failed or interrupted deployment does not prune recovery history. Unknown directory names are
+preserved; locked/unsafe cleanup warns without rolling back a successful install. Preserve any
+older recovery snapshot you need outside the managed `backups`/`retained` directories beforehand.
+Live data, legacy migration copies and exports are never pruned by deployment.
 
 All SDK build/intermediate/publish outputs use the SDK's centralized repo-level `artifacts/`
 layout, which Git ignores. Existing legacy `bin`/`obj` directories are excluded from compilation

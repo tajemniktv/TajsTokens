@@ -220,9 +220,12 @@ Plausible explicit assumptions are allowed, but must remain distinguishable from
 - **Completed quiet outcomes:** evaluation ends at the earlier of requested time and dataset capture,
   not the last token. Snapshot age cannot manufacture negative targets; collector gaps remain a
   competing explanation. The session decomposition reuses retained token time/amount fields.
-- **Composed quota:** `composed-quota/v5` preserves separate retrospective and strict collection-time
+- **Composed quota:** `composed-quota/v6` preserves separate retrospective and strict collection-time
   evaluations. Only required cost inputs govern availability; unknown capture time never becomes
   event time. Recovered old work cannot qualify a historical prediction retroactively.
+  Descriptive breakdowns expose reset generation, origin activity/model/effort mix and recorded
+  outcome work, including matched incumbent/zero-use comparisons and band coverage/width.
+  Outcome work is a later diagnostic, never an origin input; partitions do not change promotion.
 - **Promotion:** retain the incumbent unless a supported total/category/model-effort candidate wins
   cost and paired end-to-end comparisons against incumbent and pace, with at least eight independent
   reset generations and current composition/outcomes. Unknown support, identity, shifts or calibration
@@ -304,8 +307,10 @@ instance to be running. This is a local storage relocation, not new collection o
 
 Deployment never writes Codex-owned sources. Binary rollback does not imply that a newer
 database schema can be downgraded; live data is never automatically overwritten on rollback.
-Matching backups and failed binary generations remain available for deliberate recovery.
-No automatic deletion/retention policy is introduced. Startup acknowledgement proves shell
+After verified successful deployment, keep one current build, one previous build and the new
+stopped-app recovery backup. Older managed backups and retired binaries are deleted; failures
+preserve recovery material until a successful retry. Unknown material is not pruned. Live data,
+legacy migration copies and exports are unaffected. Startup acknowledgement proves shell
 initialization, not source availability, full workflow correctness, or user visual acceptance.
 
 ## Working principles
@@ -575,7 +580,8 @@ replacement of active accounting projections when a rollout generation changes.
 | State-index fingerprints and sync cursor | Rebuildable acquisition acceleration. Existing reconciliation re-anchors on selected-source changes; it does not delete collected history. |
 | `forecast_snapshots`, `quota_reset_events` and in-memory burn/scenario/evaluation results | Derived, not source truth. Recalculation requires the retained inputs and policy; saved results are currently retained, not periodically purged. |
 | `tt_evaluation_snapshots` | Immutable original aggregate research outputs, not native facts or per-task scoring history. Explicit evaluation saves exact basis/calibration and results; later reconstruction is a separate run. No automatic pruning. Existing whole-database backups include these rows; read failures never replace originals with recomputed results. |
-| Settings, local exports, deployment backups and retained binaries | User-owned/local recovery material, retained until explicit removal. Exports are separately user-invoked; this policy does not authorize sharing them. |
+| Settings and local exports | User-owned, retained until explicit removal. Exports are separately user-invoked; this policy does not authorize sharing them. |
+| Deployment backups and binaries | One current, one previous and one latest pre-deployment backup after successful deployment. Failed/interrupted deployment material survives until successful recovery; unrecognized material is preserved. |
 
 Normal local deployment takes stopped-app data/settings backups and supports binary rollback.
 Restoring data remains an explicit stopped-app operation described in [the contributor guide](docs/DEVELOPMENT.md); preserve the

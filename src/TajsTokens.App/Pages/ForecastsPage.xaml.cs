@@ -409,7 +409,8 @@ public sealed partial class ForecastsPage : Page
                     $"Training: {score.AssertedTrainingIntervals} user-asserted intervals; remaining training and all validation are native cohort evidence. " +
                     $"{score.MissingComposition} intervals withheld for missing/stale composition or unavailable training/meters. " +
                     (score.WithheldReasons.Count == 0 ? "" : "Reasons (may overlap): " + string.Join("; ", score.WithheldReasons.Select(x => $"{x.Key}: {x.Value}")) + ". ") +
-                    (score.Availability == ForecastReplayAvailability.CollectedByOrigin ? report.ComposedQuotaStrict!.Methodology : report.ComposedQuota!.Methodology))))
+                    (score.Availability == ForecastReplayAvailability.CollectedByOrigin ? report.ComposedQuotaStrict!.Methodology : report.ComposedQuota!.Methodology) +
+                    "\n\n" + FormatComposedBreakdowns(score))))
                 .Concat((report.SessionQuota?.Scores ?? []).Select(score => new EvaluationRow(
                     $"Session quota research · {FormatKind(score.Cohort.Kind)} · {Horizon(score.HorizonHours)} · {score.Cohort.Source} · {QuotaAccountScope.Describe(score.Cohort.AccountKey)} · {QuotaHistoryPolicy.DescribeCohort(score.Cohort)}",
                     "activity × conditional workload × frozen total-token cost",
@@ -469,6 +470,19 @@ public sealed partial class ForecastsPage : Page
         EvaluationList.ItemsSource = rows;
         EvaluationSelectionText.Text = group is null ? "No evaluation results in this range."
             : $"{rows.Length} models · {group}\nComparisons are scoped to this cohort. Counts are not additive across overlapping histories.";
+    }
+
+    private static string FormatComposedBreakdowns(ComposedQuotaScore score)
+    {
+        if (score.Breakdowns.Count == 0) return "No held-out breakdowns available.";
+        string Number(double? value) => value is { } n ? $"{n:0.###}" : "unavailable";
+        return "Held-out diagnostic partitions (not model selection):\n" + string.Join("\n", score.Breakdowns.Take(60).Select(x =>
+            $"{x.Dimension} / {x.Group}: {x.Outcomes} outcomes, {x.ResetGenerations} resets; " +
+            $"forecast/cost-only/pace loss {x.ForecastIntervalLoss:0.###}/{x.CostOnlyIntervalLoss:0.###}/{x.PaceIntervalLoss:0.###}pp; bias {x.SignedBias:+0.###;-0.###;0}pp. " +
+            $"Matched forecast/incumbent {Number(x.PairedForecastIntervalLoss)}/{Number(x.IncumbentIntervalLoss)}pp ({x.IncumbentPairs}); " +
+            $"matched forecast/zero-use {Number(x.ZeroPairedForecastIntervalLoss)}/{Number(x.ZeroUseIntervalLoss)}pp ({x.ZeroUsePairs}). " +
+            (x.BandOutcomes > 0 ? $"Band coverage {x.BandCoverage:P0}, width {x.MeanBandWidth:0.###}pp ({x.BandOutcomes})." : "No evaluated band outcomes."))) +
+            (score.Breakdowns.Count > 60 ? $"\n{score.Breakdowns.Count - 60} additional groups omitted here; full breakdowns remain in the evaluation CLI output." : "");
     }
 
     private static string FormatStrictCoverage(ForecastEvaluationReport report, QuotaCostConstructionCoverage coverage)

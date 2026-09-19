@@ -12,6 +12,9 @@ public sealed record ComposedQuotaTrial(DateTimeOffset OriginUtc, DateTimeOffset
     public double? LowerRemainingPercent { get; init; }
     public double? UpperRemainingPercent { get; init; }
     public int CalibrationGenerations { get; init; }
+    public string OriginActivity { get; init; } = "unrecorded";
+    public long? RecordedOutcomeTokens { get; init; }
+    public double? ZeroUseIntervalLoss { get; init; }
 }
 
 public sealed record ComposedQuotaScore(QuotaHistoryCohort Cohort, double HorizonHours, string CostModel,
@@ -27,6 +30,13 @@ public sealed record ComposedQuotaScore(QuotaHistoryCohort Cohort, double Horizo
     public int AssertedTrainingIntervals { get; init; }
     /// <summary>Overlapping diagnostic counts; their sum is not the number of withheld intervals.</summary>
     public IReadOnlyDictionary<string, int> WithheldReasons { get; init; } = new Dictionary<string, int>();
+    public IReadOnlyList<ComposedQuotaBreakdown> Breakdowns { get; init; } = [];
 }
+
+public sealed record ComposedQuotaBreakdown(string Dimension, string Group, int Outcomes, int ResetGenerations,
+    double ForecastIntervalLoss, double CostOnlyIntervalLoss, double PaceIntervalLoss, double SignedBias,
+    int IncumbentPairs, double? PairedForecastIntervalLoss, double? IncumbentIntervalLoss,
+    int ZeroUsePairs, double? ZeroPairedForecastIntervalLoss, double? ZeroUseIntervalLoss,
+    int BandOutcomes, double? BandCoverage, double? MeanBandWidth);
 
 public sealed record ComposedQuotaEvaluation(string Version, string Methodology, IReadOnlyList<ComposedQuotaScore> Scores);
