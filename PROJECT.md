@@ -94,8 +94,11 @@ Below-watermark rows distinguish actual falls, repeated totals and recovering in
 total relative to an old maximum is not itself a fresh drop or evidence of interleaving.
 Only stable, successfully parsed files contribute; aggregate buckets survive experiment restart and
 contain no source identifiers or payload examples. These are descriptive diagnostics, not lineage proof.
-**Next implementable slice:** investigate representative reconciliation
-disagreements using these diagnostics; distinguish source/reporting gaps from absent recorded work
+**Next implementable slice:** extend read-only reconciliation research to native per-response
+`token_usage_record` identity and vector comparisons before considering durable collection or
+canonical promotion. Installed rollouts contain this source; some legacy counter falls have nearby
+records and others do not. Preserve missing coverage and conflicting vectors rather than assuming
+adjacency proves equivalence. Distinguish source/reporting gaps from absent recorded work
 without inventing completeness. Use existing Model Lab/read-model owners, not a new framework.
 New observations block some validation claims, **not all development**.
 

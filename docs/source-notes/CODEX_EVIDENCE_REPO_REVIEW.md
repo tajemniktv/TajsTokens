@@ -240,6 +240,38 @@ unrecorded lifecycle changes. Current upstream `7498521d288b9b3b96ffba4eedf089d8
 so a generic claim that every resume necessarily resets counters is not supported. This is current
 upstream corroboration, not a version-matched explanation of historical Desktop rows.
 
+#### Actual falls and newly observed response identity (2026-09-19)
+
+A follow-up stable-file scan found 30 falls: 26 new totals equal the last reported increment,
+one cumulative zero and three other positive regressions. All 30 had a `task_started` record
+since the preceding token observation; 22 also had settings applied, 23 completion, two abort,
+and one compaction. These overlapping counts describe adjacency, not causes. The legacy
+`token_count` payload/info had no response/thread/session/turn identity fields at those falls.
+This does not justify replacing the incumbent with whole-file containment.
+
+The same stable scan found **6,024 top-level `token_usage_record` records**. Current upstream
+`7498521d288b9b3b96ffba4eedf089d8d6e06a84` defines `TokenUsageRecord` in
+`codex-rs/protocol/src/protocol.rs` as best-effort completed-response usage with `thread_id`,
+`turn_id`, `session_id`, `root_turn_id`, `response_id`, `usage`, `turn_token_usage` and
+`thread_token_usage`. `core/src/session/mod.rs::record_observed_response_completed` persists
+it only when usage is present. `core/src/state/session.rs::record_token_usage` accumulates turn
+and thread vectors separately. This is an observed local source with corroborating current
+upstream, not proof every historical Desktop version implements the same semantics.
+
+A subsequent exploratory scan while collection continued saw 6,026 records across 38 files,
+all with those five identity fields; 5,992 single-record/next-token pairs had exact JSON usage/
+last-vector equality, leaving 34 non-exact pairs. Eleven of the 30 falls had a response record
+between legacy token observations, 19 did not. No repeated thread/response key within a file
+was observed. These are exploratory coverage counts, not a stable snapshot, completeness claim,
+cross-file identity proof or verified explanation of the 34 differences.
+
+**Next bounded implementation:** read-only aggregate response-record comparison in the existing
+corpus audit. Verify serialization/optional category semantics, pairing across lifecycle boundaries,
+identity conflicts and repeated/copy records; expose unmatched/ambiguous pairs. Do not add native
+IDs to shared reports or sum both legacy and response streams. Durable retention, pseudonym scope,
+replay migration and canonical selection require a separate explicit contract decision after this
+comparison. Keep existing accounting unchanged while investigating the 34 vector differences.
+
 ## 5. Compatibility and evidence-model contracts
 
 These contracts guide existing typed evidence owners. Daily reports, profile/thread projections
