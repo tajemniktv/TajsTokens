@@ -161,6 +161,15 @@ not itself a policy change. Do not lower cycle requirements or generate syntheti
 a favorable result.
 
 Daily-report revision diagnostics now include newly reported/omitted completed dates as missingness,
+with drift v4 requiring identical requested ranges for relative-usage value comparisons. A bounded
+2026-09-19 probe returned September 18 as 43.62271459400965 percent in September 17–18,
+but 100 percent in September 18–18 and September 18–19; counts stayed at 143,623,176 tokens
+and zero credits. Thus these values are request-range-dependent, not fixed daily allowance usage.
+Both endpoints included the completed start/end dates in this sample; current-day counts were
+absent while relative usage included a zero row. This is observed behavior, not a universal contract.
+The adapter supports explicit ranges at most 30 days apart for bounded research; scheduled collection
+still uses the existing UTC today-minus-30 through today range. No new credentials or retention.
+Revision diagnostics treat missing dates as missingness,
 not zero cost or proven accounting changes. Only strict interior dates of both requested ranges qualify;
 boundary dates remain unverified. Unknown units, changed grouping/contracts, duplicate dates, failures
 and incompatible identities retain the existing comparison barriers. This does not establish endpoint

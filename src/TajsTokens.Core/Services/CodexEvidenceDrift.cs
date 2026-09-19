@@ -18,7 +18,7 @@ public sealed record CodexDriftSignal(string Id, string Policy, string BeforeObs
 
 public static class CodexEvidenceDrift
 {
-    public const string Policy = "codex-evidence-drift/v3";
+    public const string Policy = "codex-evidence-drift/v4";
     // Diagnostic convention, not a provider precision contract. Exact values remain in observations/signals.
     public const decimal RelativeUsageNoiseThreshold = 0.000000000001m;
 
@@ -83,6 +83,9 @@ public static class CodexEvidenceDrift
                     Change("units", oldReport.Units, newReport.Units, CodexDriftKind.ReportedConfiguration);
                     Change("group-by", oldReport.GroupBy, newReport.GroupBy, CodexDriftKind.ReportedConfiguration);
                     Change("plan", oldReport.Plan, newReport.Plan, CodexDriftKind.ReportedConfiguration);
+                    // Relative values change with the requested range even for unchanged completed work.
+                    if (current.Surface == CodexServerSurface.DailyRelativeUsage &&
+                        (oldReport.StartDate != newReport.StartDate || oldReport.EndDate != newReport.EndDate)) continue;
                     // Compare only overlapping completed UTC days with unchanged quantity/group semantics.
                     // Moving report ranges and an in-progress current day are not historical drift.
                     if (string.IsNullOrWhiteSpace(oldReport.Units) || oldReport.Units != newReport.Units || oldReport.GroupBy != newReport.GroupBy ||

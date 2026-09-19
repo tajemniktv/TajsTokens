@@ -12,6 +12,41 @@ public sealed class CodexBackendDailyEvidenceProviderTests
     private const string Identity = """{"account_id":"test-account","plan_type":"pro"}""";
 
     [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(30)]
+    public async Task ExplicitRangePreservesQueryAndReportDates(int days)
+    {
+        using var handler = new Responses([Identity, """{"data":[]}""", """{"data":[]}""", Identity]);
+        using var client = new HttpClient(handler);
+        var provider = new CodexBackendDailyEvidenceProvider(() => true, client, _ => Task.FromResult(Auth("test-account")));
+        var start = new DateOnly(2026, 1, 1);
+        var end = start.AddDays(days);
+        var result = await provider.CollectRangeAsync(start, end, default);
+        Assert.Equal(4, handler.Calls);
+        Assert.All(handler.Queries.Skip(1).Take(2), query =>
+            Assert.Contains($"start_date=2026-01-01&end_date={end:yyyy-MM-dd}&group_by=day", query));
+        Assert.All(result.Observations, row =>
+        {
+            Assert.Equal("2026-01-01", row.DailyReport!.StartDate);
+            Assert.Equal(end.ToString("yyyy-MM-dd"), row.DailyReport.EndDate);
+        });
+    }
+
+    [Fact]
+    public async Task InvalidRangesRejectBeforeCredentialsOrNetwork()
+    {
+        using var handler = new Responses([]);
+        using var client = new HttpClient(handler);
+        var provider = new CodexBackendDailyEvidenceProvider(() => true, client,
+            _ => throw new InvalidOperationException("Credentials must not be read"));
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        foreach (var (start, end) in new[] { (today, today.AddDays(-1)), (today.AddDays(-31), today), (today, today.AddDays(1)) })
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => provider.CollectRangeAsync(start, end, default));
+        Assert.Equal(0, handler.Calls);
+    }
+
+    [Theory]
     [InlineData(false)]
     [InlineData(true)]
     public async Task LocalAccountSwitchDiscardsReportsEvenWhenBothBackendBracketsMatch(bool change)
@@ -69,6 +104,7 @@ public sealed class CodexBackendDailyEvidenceProviderTests
     private sealed class Responses(string[] responses, int unauthorizedAt = -1) : HttpMessageHandler
     {
         public int Calls { get; private set; }
+        public List<string> Queries { get; } = [];
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Assert.Equal("https", request.RequestUri!.Scheme);
@@ -79,6 +115,7 @@ public sealed class CodexBackendDailyEvidenceProviderTests
             Assert.Equal("Bearer", request.Headers.Authorization!.Scheme);
             Assert.Equal("test-account", Assert.Single(request.Headers.GetValues("ChatGPT-Account-ID")));
             var index = Calls++;
+            Queries.Add(request.RequestUri.Query);
             return Task.FromResult(new HttpResponseMessage(index == unauthorizedAt ? HttpStatusCode.Unauthorized : HttpStatusCode.OK)
             { Content = new StringContent(responses[index]) });
         }

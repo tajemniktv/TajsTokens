@@ -87,6 +87,14 @@ public sealed class CodexEvidenceDriftTests
             before with { DailyReport = Report(9.658874161270091m, "fraction") },
             after with { DailyReport = Report(9.65887416127009m, "fraction") }])).Kind);
         Assert.Empty(CodexEvidenceDrift.Analyze([before, after with { DailyReport = before.DailyReport }]));
+        Assert.Empty(CodexEvidenceDrift.Analyze([before, after with
+        {
+            DailyReport = Report(100m) with { StartDate = "2026-09-15" }
+        }])); // Same completed day can be renormalized by a different requested range.
+        Assert.Empty(CodexEvidenceDrift.Analyze([before, after with
+        {
+            DailyReport = Report(100m) with { EndDate = "2026-09-20" }
+        }]));
     }
 
     [Fact]

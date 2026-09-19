@@ -37,16 +37,26 @@ public sealed class CodexBackendDailyEvidenceProvider : ICodexServerEvidenceProv
         return await File.ReadAllTextAsync(path, token);
     }
 
-    public async Task<CodexServerCollection> CollectAsync(IReadOnlyList<string> threadIds, CancellationToken cancellationToken)
+    public Task<CodexServerCollection> CollectAsync(IReadOnlyList<string> threadIds, CancellationToken cancellationToken)
     {
+        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        return CollectRangeAsync(today.AddDays(-30), today, cancellationToken);
+    }
+
+    /// <summary>Explicit bounded research range; dates are sent verbatim, without assuming endpoint inclusivity.</summary>
+    public async Task<CodexServerCollection> CollectRangeAsync(DateOnly startDate, DateOnly endDate,
+        CancellationToken cancellationToken)
+    {
+        if (endDate < startDate || endDate.DayNumber - startDate.DayNumber > 30 ||
+            endDate > DateOnly.FromDateTime(DateTime.UtcNow))
+            throw new ArgumentOutOfRangeException(nameof(endDate), "Range must be ordered, at most 30 days apart, and not future-dated.");
         if (!_enabled()) return new([]);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(90));
         var token = timeout.Token;
         var started = DateTimeOffset.UtcNow;
-        var today = DateOnly.FromDateTime(started.UtcDateTime);
-        var start = today.AddDays(-30).ToString("yyyy-MM-dd");
-        var end = today.ToString("yyyy-MM-dd");
+        var start = startDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
+        var end = endDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
         var query = $"?start_date={start}&end_date={end}&group_by=day";
         var routes = new[] { "wham/analytics/daily-workspace-usage-counts", "wham/usage/daily-token-usage-breakdown" };
         var rows = routes.Select((_, index) => New(index == 1, started)).ToArray();

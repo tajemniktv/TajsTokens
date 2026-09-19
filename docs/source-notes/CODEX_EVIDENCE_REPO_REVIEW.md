@@ -132,6 +132,16 @@ stability guarantee or proof that this account can call each route. Primary sour
 | Thread estimate v1 | POST `usage/thread_usage/query`, `{thread_ids:[...]}`; backend client permits 1–100 distinct IDs. Result credits in integer millionths, optional USD millionths, groups by model/effort/speed and nullable token categories. Public `account/usage/read` exposes one optional `threadId`. | Estimated lifetime accounting, not balance debit or a quota-window delta. App-server maps route 403/404 to null. Omitted/null is not zero; no native account ID in the usage response. Root/child totals cannot be summed without ownership coverage. |
 | Task/thread v2 | POST `usage/thread_usage/query_v2`, `{threads:[{thread_id,created_at,descendant_thread_ids}]}`. Client bounds: 100 roots, 1,000 disjoint participating IDs. Response `data_as_of`, thread `data_status`, `usage_source`, nullable `five_hour_limit_percent`, `weekly_limit_percent`, decimal-string `balance_usage_credits`, dimensional groups. | Lifetime work measured against the **current full allowance**, distinct from historical-period basis points and v1 estimates. Preserve partial/unavailable, negative credit adjustments and values above 100; do not clamp lifetime usage to a gauge. No app-server method found. |
 
+Runtime follow-up (2026-09-19): bounded authenticated requests for September 17–18, 18–18,
+and 18–19 included the completed boundary dates on both daily routes. September 18 counts
+remained 143,623,176 tokens / zero credits, but its `desktop_app` percent changed from
+43.62271459400965 to 100 to 100. The relative quantity therefore depends on requested range;
+it is not fixed daily allowance consumption. Peak-relative normalization is a hypothesis, not
+an established formula. Current-day counts were omitted while relative usage returned a zero
+row; absence is not zero. Probes were transient, using the existing read-only authenticated
+adapter and account brackets; no raw payload or credentials were retained. Drift v4 compares
+relative values only within identical requested ranges. No universal inclusivity guarantee follows.
+
 Date-boundary warning: current backend-client documents an inclusive UTC date range; the
 userscript sends `end_date = requested end + 1 day`. This disagreement must be tested on
 bounded fixtures/authorized observations before joining reports. Do not assume all routes
@@ -497,7 +507,7 @@ not its provider-side cause or a general solution to interleaved lineage.
 | Question | Recorded evidence | What can resolve it |
 |---|---|---|
 | Native credit scale | 27 count rows with zero credits and 31 relative rows in the collected sample | Compatible nonzero native pairs with established units, seat, dates and independent freshness |
-| Lag/date boundaries | Client inclusive range conflicts with userscript end-plus-one behavior | Completed-day observations and revisions; no silent cross-route alignment |
+| Lag/date boundaries | September 19 probe included completed boundary dates; relative percentages changed with requested range | Require identical ranges for relative revisions; normalization formula and lag remain unverified |
 | Plan/task/workspace reports | Plan history 404, sampled v1 403 and v2 404; further account-scoped failures in archived survey | Real capability change or supported seam, then populated contract tests |
 | Code-review metrics | Tested route returned 200/empty | Independent populated-row corroboration before retention or interpretation |
 | TT transfer | Prototype/negative controls exist; evaluated sample had no compatible chronological pairs | Later compatible contexts with disjoint calibration and held-out evidence |
