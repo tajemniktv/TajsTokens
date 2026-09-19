@@ -152,7 +152,8 @@ if (args.Length == 2 && args[0] is "--tt" or "--save-tt")
         x.IsTransfer, x.BasisEndUtc, x.CalibrationEndUtc,
         BasisPlan = x.BasisCohort?.PlanType, DestinationPlan = x.Cohort.PlanType, BasisKind = x.BasisCohort?.Kind,
         x.HeldOutIntervals, x.UnsupportedIntervals, x.UnsupportedTokens, x.ResetGenerations, x.QuotaPointsPerTt,
-        x.HeldOutTt, x.ScalarLoss, x.FullVectorLoss, x.RawTokenLoss, x.ScalarMae, x.FullVectorMae, x.RawTokenMae, x.ZeroLoss
+        x.HeldOutTt, x.ScalarLoss, x.FullVectorLoss, x.RawTokenLoss, x.ScalarMae, x.FullVectorMae, x.RawTokenMae, x.ZeroLoss,
+        x.ScalarBias, x.CumulativeError, x.CumulativeErrorLower, x.CumulativeErrorUpper
     })));
     return;
 }

@@ -4,13 +4,15 @@ namespace TajsTokens.Core.Services;
 
 public static class TtEvaluator
 {
-    public const string Version = "tt-lab/v2";
+    public const string Version = "tt-lab/v3";
     public const string Methodology = "Experimental local index, reconstructed completed-work cost evaluation, not a forecast. " +
         "First 20 compatible known-account intervals freeze nonnegative category weights. Reference is one million tokens " +
         "in the first positive training interval's category mix; models/efforts are pooled within observed support, not separately priced. " +
         "Basis identity covers exact weights, reference, supported dimensions and token semantics. Tier/context are unmodelled. " +
         "Next 20 disjoint intervals fit a separate nonnegative quota/TT scale and raw-token/full-vector competitors. " +
         "Later matched supported intervals report reset-balanced measurement-envelope loss. Unknown model/effort/category work is withheld, not zero. " +
+        "Signed bias is predicted minus reported cost, reset-balanced; cumulative error sums eligible held-out intervals only, " +
+        "with summed meter-envelope bounds, not a confidence interval or whole-account total. " +
         "Transfer trials reuse an earlier cohort's exact basis and fit the first 20 destination intervals separately. " +
         "Only the same recorded account/provider/profile/source/session lineage and horizon may pair; the source cohort must end before the destination starts. " +
         "Pairs are reported evidence contexts, not proof of provider-policy changes. No cross-user comparability is established. Basis is a reproducible research result, " +
@@ -96,6 +98,14 @@ public static class TtEvaluator
                 scalarLoss, vectorLoss, rawLoss)
             {
                 ScalarMae = scalarMae, FullVectorMae = vectorMae, RawTokenMae = rawMae, ZeroLoss = zeroLoss,
+                ScalarBias = scale is { } a && generations.Count > 0
+                    ? generations.Average(g => g.Average(x => a * basis!.Score(x)!.Value - x.ObservedDelta)) : null,
+                CumulativeError = scale is { } b && supported.Length > 0
+                    ? supported.Sum(x => b * basis!.Score(x)!.Value - x.ObservedDelta) : null,
+                CumulativeErrorLower = scale is { } c && supported.Length > 0
+                    ? supported.Sum(x => c * basis!.Score(x)!.Value - x.UpperDelta) : null,
+                CumulativeErrorUpper = scale is { } d && supported.Length > 0
+                    ? supported.Sum(x => d * basis!.Score(x)!.Value - x.LowerDelta) : null,
                 BasisCohort = comparison.Source.Cohort, IsTransfer = comparison.Transfer,
                 BasisEndUtc = training[^1].EndUtc, CalibrationEndUtc = calibration.LastOrDefault()?.EndUtc
             });

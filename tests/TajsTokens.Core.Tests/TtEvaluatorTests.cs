@@ -6,6 +6,29 @@ namespace TajsTokens.Core.Tests;
 public sealed class TtEvaluatorTests
 {
     [Fact]
+    public void SignedErrorSeparatesResetBalancedBiasFromCumulativeMeterEnvelope()
+    {
+        var seed = QuotaCostObservationBuilder.Build(ComposedQuotaEvaluatorTests.TimelyData()).First(x => x.HorizonHours == .5);
+        var rows = Enumerable.Range(0, 44).Select(i => seed with
+        {
+            StartUtc = seed.StartUtc.AddHours(i), EndUtc = seed.StartUtc.AddHours(i).AddMinutes(30),
+            ResetUtc = seed.StartUtc.AddDays(i < 41 ? 7 : 14),
+            StartUsed = 0, EndUsed = i < 40 ? 2 : i == 40 ? 4 : 1,
+            LowerDelta = i < 40 ? 2 : i == 40 ? 3.5 : .5,
+            UpperDelta = i < 40 ? 2 : i == 40 ? 4.5 : 1.5
+        }).ToArray();
+        var score = TtEvaluator.Evaluate(rows).Scores.Single();
+        Assert.Equal(2, score.ResetGenerations);
+        Assert.Equal(-.5, score.ScalarBias!.Value, 6); // One -2 interval, three +1 intervals, equal cycle weight.
+        Assert.Equal(1, score.CumulativeError!.Value, 6);
+        Assert.Equal(-1, score.CumulativeErrorLower!.Value, 6);
+        Assert.Equal(3, score.CumulativeErrorUpper!.Value, 6);
+        var noOutcomes = TtEvaluator.Evaluate(rows.Take(40).ToArray()).Scores.Single();
+        Assert.Null(noOutcomes.ScalarBias);
+        Assert.Null(noOutcomes.CumulativeError);
+    }
+
+    [Fact]
     public void LaterCompatibleCohortReusesBasisButFitsItsOwnConversion()
     {
         var seed = QuotaCostObservationBuilder.Build(ComposedQuotaEvaluatorTests.TimelyData()).First(x => x.HorizonHours == .5);
@@ -89,6 +112,8 @@ public sealed class TtEvaluatorTests
         Assert.Equal("insufficient-or-unsupported-calibration", score.Status);
         Assert.Null(score.QuotaPointsPerTt);
         Assert.Null(score.ScalarLoss);
+        Assert.Null(score.ScalarBias);
+        Assert.Null(score.CumulativeError);
         Assert.NotNull(score.HeldOutTt); // Observed workload scoring does not require a quota conversion.
         var unavailableBasis = TtEvaluator.Evaluate(rows.Select((x, i) => i == 0
             ? x with { Features = x.Features with { ModelTokenShares = new Dictionary<string, double>() } } : x).ToArray()).Scores.Single();

@@ -83,7 +83,7 @@ universal weights or a claim that challengers beat the incumbent. Existing sourc
 promotion gates remain in force. The rationale, formulas, caveats and proposed candidates are
 preserved in [Layered statistical design](docs/source-notes/TT_LAYERED_STATISTICAL_DESIGN.md).
 
-**TT Model Lab prototype:** `tt-lab/v2` freezes category weights on the first 20 compatible
+**TT Model Lab prototype:** `tt-lab/v3` freezes category weights on the first 20 compatible
 known-account intervals, normalizes to one million tokens in the first positive interval's
 category mix, then fits a separate quota/TT scale on the next 20 intervals. The immutable
 content-addressed basis includes exact weights/reference, category support, observed pooled
@@ -113,6 +113,10 @@ older success. Stored fields are selected aggregate research evidence and existi
 cohort labels, not native prompts, titles, auth or raw payloads. This expands owned derived-result
 retention only; there is still no per-task original TT scoring history or live forecast promotion.
 Existing forecast snapshots are untouched. TT results remain explicitly experimental.
+TT evaluation also reports reset-balanced signed bias (prediction minus reported cost) and
+cumulative error over eligible held-out intervals with summed meter-envelope bounds. These
+bounds are not confidence intervals or complete account totals. Saved older reports retain
+missing diagnostics as unavailable; they are not silently recomputed.
 
 **Forecast horizon separation (2026-09-19; partially implemented):**
 separate quota cost conditional on workload from whether future activity occurs. Nowcast targets

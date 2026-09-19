@@ -303,6 +303,7 @@ public sealed partial class ForecastsPage : Page
                               $"{FormatKind(score.Cohort.Kind)} / {Horizon(score.HorizonHours)} / {QuotaAccountScope.Describe(score.Cohort.AccountKey)} / {score.Cohort.Source}: " +
                               $"{score.HeldOutTt:0.###} TT; {score.Basis?.BasisId ?? "no basis"}; {score.Status}; " +
                               $"scalar/full MAE {score.ScalarMae:0.###}/{score.FullVectorMae:0.###}pp; {score.HeldOutIntervals} outcomes, {score.UnsupportedIntervals} unsupported. " +
+                              FormatTtBias(score) +
                               (score.IsTransfer ? "Transferred basis." : "Local basis.")))
                         : $"Saved {entry.RecordedAtUtc:u} · {entry.Id}: unavailable ({entry.Problem}); original row retained."));
         }
@@ -408,6 +409,7 @@ public sealed partial class ForecastsPage : Page
                     $"Supported held-out workload {score.HeldOutTt:0.###} TT; separate calibration {score.QuotaPointsPerTt:0.######}pp/TT. " +
                     $"Matched reset-balanced loss: TT scalar {score.ScalarLoss:0.###}, full vector {score.FullVectorLoss:0.###}, raw tokens {score.RawTokenLoss:0.###}pp. " +
                     $"Zero-use loss {score.ZeroLoss:0.###}pp; displayed-delta MAE (TT/full/raw) {score.ScalarMae:0.###}/{score.FullVectorMae:0.###}/{score.RawTokenMae:0.###}pp. " +
+                    FormatTtBias(score) +
                     (score.Basis is { } basis ? "Category weights/token: " + string.Join(", ", basis.Weights.Select(x => x.ToString("G6", CultureInfo.InvariantCulture))) +
                         "; 1-TT reference category counts: " + string.Join(", ", basis.Reference.Select(x => x.ToString("G6", CultureInfo.InvariantCulture))) +
                         "; supported models: " + string.Join(", ", basis.Models) + "; efforts: " + string.Join(", ", basis.Efforts) + ". " : "") +
@@ -447,6 +449,11 @@ public sealed partial class ForecastsPage : Page
         EvaluationSelectionText.Text = group is null ? "No evaluation results in this range."
             : $"{rows.Length} models · {group}\nComparisons are scoped to this cohort. Counts are not additive across overlapping histories.";
     }
+
+    private static string FormatTtBias(TtEvaluationScore score) => score.ScalarBias is null
+        ? "Signed error unavailable. "
+        : $"Signed bias {score.ScalarBias:+0.###;-0.###;0}pp (positive = overestimate); eligible cumulative error {score.CumulativeError:+0.###;-0.###;0}pp " +
+          $"[{score.CumulativeErrorLower:0.###}, {score.CumulativeErrorUpper:0.###}] meter envelope, not confidence. ";
 
     private static string Horizon(double hours) => hours < 1 ? $"{hours * 60:0} min" : $"{hours:0.#}h";
 

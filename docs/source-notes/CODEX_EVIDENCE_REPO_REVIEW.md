@@ -1265,3 +1265,24 @@ preserved snapshot `0b36f741f5ef44809952b7fda61973a7`, its two score rows and ex
 the history reader reported no problem. Native UI visual acceptance remains unverified.
 Incoming ordinary rollouts can supply post-reset evaluation evidence; no synthetic workload
 or assumption that a reset changed the accounting policy is required.
+
+## 30. Signed TT calibration error (2026-09-19)
+
+`tt-lab/v3` adds signed prediction-minus-reported-cost bias, balanced equally across reset
+generations, and cumulative error over eligible held-out intervals. Summed lower/upper meter
+envelopes preserve precision uncertainty; they are not confidence intervals, whole-account
+totals or evidence that OpenAI changed policy. The existing observation builder selects
+non-overlapping intervals separately per cohort/horizon. Horizons must not be summed together.
+Model Lab, saved-result viewing and CLI expose these diagnostics; older saved reports keep
+them unavailable rather than being rescored. Basis weights and quota calibration are unchanged.
+
+A negative-control test uses unequal cycle sizes to distinguish cycle-balanced bias from the
+cumulative sum, verifies envelope direction, and checks unavailable calibration/outcomes.
+The current replay has 28 weekly half-hour outcomes in one reset: signed bias +0.00708pp,
+cumulative error +0.19823pp, summed meter bounds [-27.80177, +23.19823]pp. The wide bounds
+illustrate why near-zero aggregate displayed error is not proof of exact accounting accuracy.
+No new post-reset half-hour outcome had matured for this replay and no model was promoted.
+
+Validation: 479 Core tests passed; Windows Debug build passed with zero warnings/errors and
+deployed/restarted `20260919T010652623Z-19d40ff7`. CLI evaluation ran against the owned database.
+Native UI visual acceptance remains unverified.

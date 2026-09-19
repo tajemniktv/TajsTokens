@@ -13,6 +13,10 @@ public sealed record TtEvaluationScore(QuotaHistoryCohort Cohort, double Horizon
     public double? FullVectorMae { get; init; }
     public double? RawTokenMae { get; init; }
     public double? ZeroLoss { get; init; }
+    public double? ScalarBias { get; init; }
+    public double? CumulativeError { get; init; }
+    public double? CumulativeErrorLower { get; init; }
+    public double? CumulativeErrorUpper { get; init; }
 }
 
 public sealed record TtEvaluation(string Version, string Methodology, IReadOnlyList<TtEvaluationScore> Scores);
