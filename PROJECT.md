@@ -94,7 +94,7 @@ envelope loss, displayed-delta MAE and a zero-use reference. Basis and calibrati
 The current 30-day weekly/half-hour sample supports only Astra/low: 27 held-out intervals in one
 reset, MAE 0.487pp scalar versus 0.507pp full-vector and 0.791pp raw tokens. This is completed-work
 cost research, not future-work forecasting or cross-regime validation. Model Lab/`--tt` expose the
-basis, coverage and calibration; no live promotion or original TT-history persistence exists.
+basis, coverage and calibration; no live promotion or per-task original scoring history exists.
 Each run is an explicitly reconstructed/restated scoring result. Cross-context research now
 reuses an earlier cohort's exact basis, with the destination's first 20 intervals fitting only
 its conversion and local competitors. Pairing requires the same recorded account, provider,
@@ -117,6 +117,17 @@ TT evaluation also reports reset-balanced signed bias (prediction minus reported
 cumulative error over eligible held-out intervals with summed meter-envelope bounds. These
 bounds are not confidence intervals or complete account totals. Saved older reports retain
 missing diagnostics as unavailable; they are not silently recomputed.
+
+**Evidence-review continuation gate (2026-09-19):** the implemented acquisition, reconciliation
+experiments, semantic-change diagnostics and layered Model Lab candidates are mapped in the
+[review audit](docs/source-notes/CODEX_EVIDENCE_REPO_REVIEW.md#31-continuation-audit-2026-09-19).
+The next empirical step is evaluation of naturally arriving post-reset observations with the
+same frozen basis and compatible account/source semantics. Do not generate synthetic Codex
+work or lower independent-cycle requirements to manufacture validation. Nonzero native-credit
+calibration, populated plan/task semantics and empirical cross-context transfer remain unproven.
+Per-task TT persistence and endpoint/continuous-activity models are distinct future product
+extensions, not requirements to replace already working aggregate research or any-work targets.
+The review goal is not declared fully validated while those evidence-dependent claims are open.
 
 **Forecast horizon separation (2026-09-19; partially implemented):**
 separate quota cost conditional on workload from whether future activity occurs. Nowcast targets

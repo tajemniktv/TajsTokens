@@ -1286,3 +1286,37 @@ No new post-reset half-hour outcome had matured for this replay and no model was
 Validation: 479 Core tests passed; Windows Debug build passed with zero warnings/errors and
 deployed/restarted `20260919T010652623Z-19d40ff7`. CLI evaluation ran against the owned database.
 Native UI visual acceptance remains unverified.
+
+## 31. Continuation audit (2026-09-19)
+
+Current-state inspection confirms that frozen-reference drift diagnostics already exist in
+`QuotaCostEvaluation`: the first 20 observations fit a fixed model; three held-out reset
+generations establish a residual reference; two later generations must repeat a same-direction
+shift above the conservative threshold. `ReplicatedResidualShiftIsVisibleWithoutRefitting`
+checks that a shift survives without retraining. Model Lab exposes candidate-shift counts,
+and the CLI exposes the same diagnostic. This is an association diagnostic, not causal policy
+attribution. A second TT-specific detector would duplicate that owner without new evidence.
+
+The implementation map in section 27 remains applicable, with two superseding additions:
+section 29 delivers durable original **aggregate** TT research reports, and section 30 adds
+signed/cumulative error. Neither claims per-task scoring history or empirical transfer.
+
+The remaining evidence gates are concrete:
+
+| Gate | Current evidence | What can resolve it |
+|---|---|---|
+| Native credit normalization | Observed daily count credits were zero; pairing rejects these as ratio evidence | Compatible nonzero native quantities with established units and dates, not API-price substitutes |
+| Cross-context TT conversion | No compatible chronological transfer pairs in the evaluated sample | Supported later account/source-compatible context with enough disjoint calibration and held-out intervals |
+| Session quota uncertainty | Insufficient independent completed cycles for joint ranges | Naturally collected eligible cycles; more rows in one cycle do not substitute |
+| New plan/task/workspace semantics | Prior endpoint outcomes do not provide populated usable reports | A real capability change or supported Codex-owned seam, followed by source-specific contract tests |
+| Canonical copy/interleave promotion | Competitors disagree; real audit does not establish which ambiguous lineage is true | Validated source identity/lineage evidence; lower totals alone do not prove better accounting |
+
+The user explicitly intends to supply ordinary incoming rollouts after the banked reset.
+That supplies future evaluation data, not advance evidence that any candidate passes. No
+synthetic prompts, repeated denied-endpoint probes, automatic model promotion or new auth
+boundary are warranted by the audit. Endpoint/continuous-presence prediction and per-task TT
+history are separate extensions, not missing implementations of the current any-work target
+and aggregate research archive. The overall goal remains open for evidence-dependent validation.
+
+This audit changed documentation only. The immediately preceding implementation passed 479
+Core tests and the Windows build; no tests, build, deployment or app restart were repeated here.
