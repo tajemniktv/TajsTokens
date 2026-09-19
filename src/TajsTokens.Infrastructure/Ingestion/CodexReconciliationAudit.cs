@@ -28,6 +28,7 @@ public static class CodexReconciliationAudit
                 var written = before.LastWriteTimeUtc;
                 var parseState = new RolloutParseState(path, path);
                 var state = new ReconciliationExperimentState();
+                var responses = new CodexResponseUsageComparison();
                 var localFingerprints = new HashSet<string>();
                 var sequence = new List<string>();
                 long unownedRecords = 0;
@@ -37,6 +38,8 @@ public static class CodexReconciliationAudit
                 {
                     if (raw.EndByteOffset > length) break;
                     var parsed = parser.Parse(raw, parseState);
+                    if (parseState.OwnershipEstablished)
+                        responses.Observe(raw.Payload, parseState.OwnSessionId!);
                     if (!parseState.OwnershipEstablished)
                     {
                         unownedRecords++;
@@ -63,6 +66,9 @@ public static class CodexReconciliationAudit
                     continue;
                 }
                 report.StableFiles++;
+                responses.Complete();
+                foreach (var (key, count) in responses.Counts)
+                    report.ResponseComparison[key] = report.ResponseComparison.GetValueOrDefault(key) + count;
                 report.PreOwnershipRecordsExcluded += unownedRecords;
                 report.PreOwnershipTokenRecordsExcluded += unownedTokenRecords;
                 if (!parseState.OwnershipEstablished)
@@ -110,7 +116,8 @@ public static class CodexReconciliationAudit
 
 public sealed class ReconciliationAuditReport
 {
-    public string Version => "reconciliation-audit/v5";
+    public string Version => "reconciliation-audit/v6";
+    public Dictionary<string, long> ResponseComparison { get; set; } = [];
     public string Interpretation => "Physical-file experiment, not canonical usage. Candidates use scalar counters; " +
         "cross-file matches are not request identity. Changed/unreadable/malformed files excluded. " +
         "Ordered owned-token sequences classify equal/prefix/divergent/non-prefix overlap candidates, not byte copies. " +
@@ -118,6 +125,9 @@ public sealed class ReconciliationAuditReport
         "Transition buckets describe pre-step scalar watermark relationships and usable snapshot presence, not lineage. " +
         "Below-watermark buckets distinguish falling, repeated and recovering totals against the previous complete snapshot. " +
         "Their token deltas partition physical-file totals, including agreeing transitions; differences can cancel. " +
+        "Response comparison uses per-file thread/response keys and single pending records, breaks at lifecycle boundaries, " +
+        "and compares vectors without claiming native pairing, complete coverage or category consistency. Counts overlap; " +
+        "response records never add tokens and no identity values leave the audit. " +
         "No account attribution, deduplication, quota fit or production promotion.";
     public Dictionary<string, ReconciliationTransitionTotals> Transitions { get; set; } = [];
     public long PreOwnershipRecordsExcluded { get; set; }

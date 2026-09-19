@@ -31,17 +31,23 @@ public sealed class CodexReconciliationExperimentTests(ITestOutputHelper output)
                     output_tokens = 0, reasoning_output_tokens = 0, total_tokens = total } } } });
             var source = Path.Combine(directory, $"rollout-{id}.jsonl");
             var copy = Path.Combine(directory, $"copy-{id}.jsonl");
-            var broken = Path.Combine(directory, "broken.jsonl");
+            var broken = Path.Combine(directory, $"broken-{id}.jsonl");
             var unowned = Path.Combine(directory, "no-filename-owner.jsonl");
-            await File.WriteAllTextAsync(source, string.Join('\n', Meta("parent"), Tokens(900), Meta(id), Tokens(100), Tokens(20), Tokens(110)) + "\n");
+            var response = JsonSerializer.Serialize(new { type = "token_usage_record", payload = new {
+                thread_id = id, turn_id = "private-turn", root_turn_id = "private-root", session_id = "private-session",
+                response_id = "private-response", usage = new { input_tokens = 100, cached_input_tokens = 0,
+                    output_tokens = 0, reasoning_output_tokens = 0, total_tokens = 100 } } });
+            await File.WriteAllTextAsync(source, string.Join('\n', Meta("parent"), Tokens(900), Meta(id), response, Tokens(100), Tokens(20), Tokens(110)) + "\n");
             File.Copy(source, copy);
-            await File.WriteAllTextAsync(broken, "{malformed}\n");
+            await File.WriteAllTextAsync(broken, string.Join('\n', Meta(id), response, "{malformed}") + "\n");
             await File.WriteAllTextAsync(unowned, Tokens(700) + "\n");
             var report = await TajsTokens.Infrastructure.Ingestion.CodexReconciliationAudit.RunAsync([source, copy, source, broken, unowned]);
             Assert.Equal(4, report.FilesExamined);
             Assert.Equal(3, report.StableFiles);
             Assert.Equal(1, report.FailedFilesExcluded);
             Assert.Equal(6, report.TokenObservations);
+            Assert.Equal(2, report.ResponseComparison["response-records"]);
+            Assert.Equal(2, report.ResponseComparison["invalid-legacy-vector-pair"]);
             Assert.Equal(380, report.IncumbentTokens);
             Assert.Equal(220, report.HighWatermarkTokens);
             Assert.Equal(220, report.LineageTokens);
@@ -65,6 +71,7 @@ public sealed class CodexReconciliationExperimentTests(ITestOutputHelper output)
             var serialized = JsonSerializer.Serialize(report);
             Assert.DoesNotContain(id, serialized);
             Assert.DoesNotContain(directory, serialized);
+            Assert.DoesNotContain("private-response", serialized);
         }
         finally { Directory.Delete(directory, true); }
     }

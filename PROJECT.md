@@ -94,11 +94,18 @@ Below-watermark rows distinguish actual falls, repeated totals and recovering in
 total relative to an old maximum is not itself a fresh drop or evidence of interleaving.
 Only stable, successfully parsed files contribute; aggregate buckets survive experiment restart and
 contain no source identifiers or payload examples. These are descriptive diagnostics, not lineage proof.
-**Next implementable slice:** extend read-only reconciliation research to native per-response
-`token_usage_record` identity and vector comparisons before considering durable collection or
-canonical promotion. Installed rollouts contain this source; some legacy counter falls have nearby
-records and others do not. Preserve missing coverage and conflicting vectors rather than assuming
-adjacency proves equivalence. Distinguish source/reporting gaps from absent recorded work
+The read-only response comparison now reports per-file identity repeats/conflicts, missing identity,
+owner mismatch, vector validity and single/multiple/unmatched candidate pairs. Lifecycle boundaries
+break adjacency; only absent cache-write defaults to zero. No response IDs or usage payloads are
+retained/exported, and response records do not add to canonical tokens.
+The first boundary-aware live scan had 6,007 exact eligible vector pairs and no differing pairs;
+35 response records were unpaired at boundaries and one at end-of-file. Earlier naive mismatches
+crossed lifecycle boundaries and are not established usage conflicts.
+**Next implementable slice:** define the selected response-identity/usage contract and replay tests
+before durable collection, then evaluate whether native request identities improve reconciliation.
+Installed rollouts contain this source; some legacy counter falls have nearby records and others
+do not. Preserve missing coverage and conflicting vectors rather than assuming adjacency proves
+equivalence. Distinguish source/reporting gaps from absent recorded work
 without inventing completeness. Use existing Model Lab/read-model owners, not a new framework.
 New observations block some validation claims, **not all development**.
 

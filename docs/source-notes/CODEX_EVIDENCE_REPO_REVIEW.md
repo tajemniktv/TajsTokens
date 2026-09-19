@@ -212,7 +212,7 @@ Relevant inspected tests include CodexBar `CostUsageScannerBreakdownTests.swift`
 cases (including >64 observations and checkpoint restart), `CodexSubagentAccountingIntegrationTests.swift`
 and `CodexCompactSubagentAccountingTests.swift`. These are test-design references, not copied code.
 
-The aggregate-only `reconciliation-audit/v5` CLI partitions transitions by pre-step scalar
+The aggregate-only `reconciliation-audit/v6` CLI partitions transitions by pre-step scalar
 watermark relationship and complete/nonnegative last-snapshot presence. Each bucket reports
 observations, disagreements and all three contender deltas; sums recover the physical-file totals.
 “Usable last” here means snapshot fields are present/nonnegative, not that categories sum correctly,
@@ -265,12 +265,29 @@ between legacy token observations, 19 did not. No repeated thread/response key w
 was observed. These are exploratory coverage counts, not a stable snapshot, completeness claim,
 cross-file identity proof or verified explanation of the 34 differences.
 
-**Next bounded implementation:** read-only aggregate response-record comparison in the existing
-corpus audit. Verify serialization/optional category semantics, pairing across lifecycle boundaries,
-identity conflicts and repeated/copy records; expose unmatched/ambiguous pairs. Do not add native
-IDs to shared reports or sum both legacy and response streams. Durable retention, pseudonym scope,
+**Implemented read-only comparison:** the existing corpus audit now counts per-file response-key
+repeats/conflicts (usage and turn/session/root lineage), missing identity, owner conflicts and invalid
+vectors. Exactly one eligible pending response is compared with the next legacy last vector; multiple
+candidates stay ambiguous. Task start/completion/abort, settings, metadata and compaction break pairing.
+An absent cache-write field defaults to zero as upstream specifies; null/missing required counters
+remain invalid. Categories are compared, not repaired or certified internally consistent. File-level
+failure/change excludes its entire contribution. End-of-file pending records remain unpaired.
+Tests cover privacy, copies, failed-file exclusion, boundaries, ambiguity, repeated/conflicting identity
+and optional-counter semantics. Native IDs never enter reports and the streams are never summed.
+This is candidate adjacency, not established native request-to-token correspondence or cross-file
+deduplication. Durable retention, pseudonym scope,
 replay migration and canonical selection require a separate explicit contract decision after this
-comparison. Keep existing accounting unchanged while investigating the 34 vector differences.
+comparison. Keep existing accounting unchanged.
+
+The first boundary-aware v6 scan (2026-09-19) included all 367 stable files: 6,043 response records,
+6,007 exact eligible vector pairs, 35 records unpaired at lifecycle boundaries and one at EOF.
+No different eligible vector pair, invalid vector, missing/conflicting identity or repeated per-file
+response key was observed. There were 67,366 legacy token records, including context-only rows,
+of which 61,359 had no pending response. These are not additive workloads or a coverage percentage
+for all historical requests. The earlier 34 naive mismatches were removed by boundary-aware pairing;
+they are not demonstrated same-response inconsistencies. Cross-file identity, collection-time
+provenance, version scope and durable selection remain separate gates. Next define the selected
+typed response evidence contract and its replay tests rather than changing counter heuristics.
 
 ## 5. Compatibility and evidence-model contracts
 
