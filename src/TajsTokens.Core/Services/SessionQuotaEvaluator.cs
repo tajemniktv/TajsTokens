@@ -5,7 +5,7 @@ namespace TajsTokens.Core.Services;
 /// <summary>Exact-origin retrospective test of the hurdle-workload to quota-cost chain.</summary>
 public static class SessionQuotaEvaluator
 {
-    public const string Version = "session-quota-evaluation/v3";
+    public const string Version = "session-quota-evaluation/v4";
     public const string Methodology = "Research only, reconstructed event time; not deployment validation. " +
         "Separate known-account/source/plan/bucket/horizon cohorts, frozen first-20-interval total-token cost model. " +
         "Local recorded work is co-observed with account quota, not proven complete account attribution. " +
@@ -38,9 +38,9 @@ public static class SessionQuotaEvaluator
             {
                 var quota = QuotaHistoryPolicy.ReplayRows(QuotaHistoryPolicy.Streams(QuotaHistoryPolicy.Describe(
                     data.Quota.Where(x => QuotaHistoryPolicy.Cohort(x) == group.Key.Cohort), data.CapturedAtUtc)).SelectMany(x => x));
-                var incumbent = QuotaPredictionService.Replay(data with { Quota = quota }, group.Key.HorizonHours,
-                        ForecastReplayAvailability.ReconstructedEventTime, cancellationToken)
-                    .ToDictionary(x => (x.Observation.OriginUtc, x.Observation.OutcomeUtc));
+                var incumbent = QuotaPredictionService.ReplayAtTargets(data with { Quota = quota }, group.Key.HorizonHours,
+                    ForecastReplayAvailability.ReconstructedEventTime,
+                    ordered.Skip(20).Select(x => (x.StartUtc, x.EndUtc)).ToArray(), cancellationToken);
                 var fit = QuotaCostEvaluation.FitFrozen(training, "total", cancellationToken);
                 foreach (var row in ordered.Skip(20).Where(x => x.StartUtc >= training[^1].EndUtc))
                 {
@@ -61,8 +61,8 @@ public static class SessionQuotaEvaluator
                             x.EndUtc <= row.StartUtc && x.ResetUtc < row.StartUtc - QuotaResetGenerationPolicy.Tolerance), x => x.ResetUtc)
                         .Select(g => g.Max(x => x.ExpectedError)).ToArray();
                     var radius = QuotaForecastBacktester.ErrorRadius(errors);
-                    double? incumbentUsage = incumbent.TryGetValue((row.StartUtc, row.EndUtc), out var baseline)
-                        ? 100 - row.StartUsed - baseline.Prediction.RemainingPercent : null;
+                    double? incumbentUsage = incumbent.TryGetValue(row.StartUtc, out var baseline) && baseline.TargetUtc == row.EndUtc
+                        ? 100 - row.StartUsed - baseline.RemainingPercent : null;
                     trials.Add(new(row.StartUtc, row.EndUtc, row.ResetUtc, row.Features.Tokens > 0,
                         prediction.RecordedActivityProbability, conditional, expected, row.ObservedDelta,
                         Math.Abs(conditional - row.ObservedDelta), Math.Abs(expected - row.ObservedDelta),

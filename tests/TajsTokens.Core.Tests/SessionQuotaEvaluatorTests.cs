@@ -5,6 +5,30 @@ namespace TajsTokens.Core.Tests;
 public sealed class SessionQuotaEvaluatorTests
 {
     [Fact]
+    public void HourlySessionComparisonsRecoverOriginsMissedByOrdinaryReplaySampling()
+    {
+        var original = ComposedQuotaEvaluatorTests.TimelyData();
+        var start = original.Quota[0].CapturedAtUtc;
+        DateTimeOffset At(int i) => start.AddMinutes(i * 15 + (i % 11 == 0 ? 2 : 0));
+        var data = original with {
+            CapturedAtUtc = start.AddDays(3),
+            Quota = Enumerable.Range(0, 150).Select(i => original.Quota[0] with {
+                CapturedAtUtc = At(i), CollectedAtUtc = At(i), UsedPercent = i / 3d }).ToArray(),
+            Tokens = Enumerable.Range(0, 150).Select(i => original.Tokens[0] with {
+                ObservedAtUtc = At(i), CapturedAtUtc = At(i) }).ToArray()
+        };
+        var score = SessionQuotaEvaluator.Evaluate(data).Scores.Single(x => x.HorizonHours == 1);
+        Assert.NotEmpty(score.Trials);
+        var sampled = QuotaPredictionService.Replay(data, 1,
+            TajsTokens.Core.Models.ForecastReplayAvailability.ReconstructedEventTime);
+        Assert.Contains(score.Trials, x => sampled.All(y => y.Observation.OriginUtc != x.OriginUtc));
+        Assert.Equal(score.Trials.Count, score.IncumbentPairedOrigins);
+        Assert.All(score.Trials, x => { Assert.NotNull(x.IncumbentError); Assert.NotNull(x.IncumbentIntervalLoss); });
+        Assert.Equal(score.Trials.Average(x => x.ExpectedError), score.PairedExpectedMae);
+        Assert.Equal(score.Trials.Average(x => x.IncumbentError!.Value), score.IncumbentMae);
+    }
+
+    [Fact]
     public void IncumbentComparisonUsesOnlyIdenticalOriginAndOutcomePairs()
     {
         var data = ComposedQuotaEvaluatorTests.TimelyData();

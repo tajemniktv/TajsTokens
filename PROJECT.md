@@ -282,8 +282,9 @@ local/account coverage or lower the existing promotion support requirements.
 - **Ranges:** shared calibration uses at least eight earlier completed resets with available labels,
   generation-maximum absolute errors, empirical 80% target and 1pp floor. Report count, coverage and
   width; these are not latent-usage coverage, survival probabilities or activity-conditioned bands.
-  `session-quota-evaluation/v3` remains a separate research chain using actual target elapsed times
-  and matched incumbent subsets.
+  `session-quota-evaluation/v4` remains a separate research chain using actual target elapsed times
+  and exact-target incumbent queries, including origins outside its ordinary replay sample;
+  comparison queries do not enter incumbent training or calibration history.
 - **Pace:** even-burn compares consumption and elapsed window at the reading, using explicitly
   inferred reset-minus-duration start. Missing/invalid windows are unavailable; stale cards remain
   last-known and wall-clock passage alone does not improve their comparison.
