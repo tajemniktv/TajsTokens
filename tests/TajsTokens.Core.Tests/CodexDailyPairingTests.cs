@@ -69,6 +69,7 @@ public sealed class CodexDailyPairingTests
     [InlineData("policy")]
     [InlineData("freshness")]
     [InlineData("version")]
+    [InlineData("range")]
     public void IncompatibleEvidenceNeverProducesRatios(string change)
     {
         var relative = Snapshot(true);
@@ -79,11 +80,31 @@ public sealed class CodexDailyPairingTests
             "units" => relative with { DailyReport = relative.DailyReport! with { Units = "credits" } },
             "policy" => relative with { DailyReport = relative.DailyReport! with { PolicyAfter = "changed" } },
             "freshness" => relative with { DailyReport = relative.DailyReport! with { DataFreshness = "later" } },
+            "range" => relative with { DailyReport = relative.DailyReport! with { StartDate = "2026-09-02" } },
             _ => relative with { ClientVersion = "changed" }
         };
         var report = CodexDailyPairing.Evaluate([Snapshot(false, 500), relative]);
         Assert.NotEmpty(report.Exclusions);
         Assert.Null(Assert.Single(report.Days).CreditsPerPercentagePoint);
+    }
+
+    [Fact]
+    public void RangeDependentNormalizationRetainsContextRatherThanImplyingAStableQuotaRate()
+    {
+        var counts = Snapshot(false, 100);
+        var relative = Snapshot(true, 40);
+        var wide = CodexDailyPairing.Evaluate([counts, relative]);
+        var narrow = CodexDailyPairing.Evaluate([
+            counts with { DailyReport = counts.DailyReport! with { StartDate = "2026-09-18" } },
+            Snapshot(true, 100) with { DailyReport = Snapshot(true, 100).DailyReport! with { StartDate = "2026-09-18" } }
+        ]);
+        Assert.Equal(2.5m, Assert.Single(wide.Days).CreditsPerPercentagePoint);
+        Assert.Equal(1m, Assert.Single(narrow.Days).CreditsPerPercentagePoint);
+        Assert.Equal("2026-09-01", wide.RelativeRangeStart);
+        Assert.Equal("2026-09-18", narrow.RelativeRangeStart);
+        Assert.Equal("2026-09-19", narrow.RelativeRangeEnd);
+        Assert.Contains("not allowance consumption", narrow.ToDisplayText());
+        Assert.Contains("different ranges are not comparable", wide.ToDisplayText());
     }
 
     [Fact]

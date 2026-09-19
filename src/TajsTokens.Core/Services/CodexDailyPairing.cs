@@ -10,16 +10,20 @@ public sealed record CodexDailyPairingReport(string Policy, string? CountsObserv
     string? RelativeObservationId, IReadOnlyList<string> Exclusions, IReadOnlyList<string> Assumptions,
     IReadOnlyList<CodexDailyPair> Days)
 {
+    public string? RelativeRangeStart { get; init; }
+    public string? RelativeRangeEnd { get; init; }
+
     public string ToDisplayText()
     {
         var hypotheses = Days.Where(x => x.CreditsPerPercentagePoint is not null).ToArray();
         var lines = new List<string> { $"Native daily pairing ({Policy}): {hypotheses.Length} ratio hypotheses / {Days.Count} observed dates. Not a validated workload scale or current quota conversion." };
+        lines.Add($"Relative report requested range: {RelativeRangeStart ?? "unknown"} through {RelativeRangeEnd ?? "unknown"}. Values depend on this range; reported percent is not allowance consumption. Ratios from different ranges are not comparable.");
         if (Exclusions.Count > 0) lines.Add("Report exclusions: " + string.Join("; ", Exclusions));
         if (Assumptions.Count > 0) lines.Add("Hypothesis assumptions: " + string.Join("; ", Assumptions));
         foreach (var reason in Days.SelectMany(x => x.Exclusions).GroupBy(x => x).OrderBy(x => x.Key))
             lines.Add($"  {reason.Key}: {reason.Count()} dates (reasons can overlap)");
         foreach (var day in hypotheses)
-            lines.Add(FormattableString.Invariant($"  {day.Date}: {day.NativeCredits} native reported credits / {day.RelativePercent} reported pp = {day.CreditsPerPercentagePoint:0.######} credits/pp (hypothesis only)"));
+            lines.Add(FormattableString.Invariant($"  {day.Date}: {day.NativeCredits} native reported credits / {day.RelativePercent} report-relative percent = {day.CreditsPerPercentagePoint:0.######} credits per report-relative point (range-local hypothesis only)"));
         return string.Join(Environment.NewLine, lines);
     }
 }
@@ -27,7 +31,7 @@ public sealed record CodexDailyPairingReport(string Policy, string? CountsObserv
 /// <summary>Pairs immutable daily snapshots, never price-derived credits or overlapping polls.</summary>
 public static class CodexDailyPairing
 {
-    public const string Policy = "codex-daily-native-pairing/v1";
+    public const string Policy = "codex-daily-native-pairing/v2";
     public const decimal MinimumPercent = 0.01m;
 
     public static CodexDailyPairingReport Evaluate(IEnumerable<CodexServerObservation> observations)
@@ -43,7 +47,8 @@ public static class CodexDailyPairing
         {
             "UTC daily buckets from the inspected endpoint contract",
             "count totals and summed relative surfaces describe the same disjoint product scope; seat scope is not independently reported",
-            "historical denominator era is unknown; ratios cannot label a five-hour or weekly cycle"
+            "historical denominator era is unknown; ratios cannot label a five-hour or weekly cycle",
+            "relative normalization depends on requested range; its formula and stability within a fixed range remain unverified"
         };
         var a = counts?.DailyReport;
         var b = relative?.DailyReport;
@@ -116,7 +121,11 @@ public static class CodexDailyPairing
                 days.Add(new(date, count?.Credits, percent, ratio, reasons));
             }
         }
-        return new(Policy, counts?.Id, relative?.Id, exclusions, assumptions, days);
+        return new(Policy, counts?.Id, relative?.Id, exclusions, assumptions, days)
+        {
+            RelativeRangeStart = b?.StartDate,
+            RelativeRangeEnd = b?.EndDate
+        };
     }
 
     private static bool Available(CodexServerObservation? row) => row is { DailyReport: not null, State: ServerEvidenceState.Available or ServerEvidenceState.Empty };

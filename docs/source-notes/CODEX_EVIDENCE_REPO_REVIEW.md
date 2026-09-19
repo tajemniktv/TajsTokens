@@ -70,9 +70,11 @@ with the sum of `daily-token-usage-breakdown.data[].product_surface_usage_values
 `inferred denominator in credits = 100 × reported daily credits / daily percentage`.
 
 Its author reports 49.897 credits per percentage point on 26 active days, hence 4,989.7
-credits per allowance, including a day at 100%. This is credible evidence of a shared
-accounting denominator for that observed account/report era. It is not evidence that all
-plans, buckets, periods or current short/weekly limits use that denominator.
+credits per inferred allowance, including a day at 100%. This supports proportionality
+within that observed report, not identification of an allowance denominator. The September 19
+range probe below demonstrates that a completed day's reported percent can change when only
+the requested range changes. Thus even a stable within-report ratio or a day at 100% does not
+independently establish subscription capacity, across plans or within one account.
 
 Crucially, `smoketest.html:436–465` constructs percentages from `ALLOWANCE_CREDITS = 4989.7`.
 Those scenarios exercise the implementation but cannot independently validate the ratio.

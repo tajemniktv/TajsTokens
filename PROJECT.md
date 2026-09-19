@@ -169,6 +169,10 @@ Both endpoints included the completed start/end dates in this sample; current-da
 absent while relative usage included a zero row. This is observed behavior, not a universal contract.
 The adapter supports explicit ranges at most 30 days apart for bounded research; scheduled collection
 still uses the existing UTC today-minus-30 through today range. No new credentials or retention.
+Daily pairing v2 retains the relative report's requested dates in its derived result and displays
+ratios as range-local credits per report-relative point, never allowance percentage points.
+Even a nonzero, internally consistent ratio would not identify subscription capacity. Cross-range
+ratios are not comparable; no daily report is promoted to a quota calibration target.
 Revision diagnostics treat missing dates as missingness,
 not zero cost or proven accounting changes. Only strict interior dates of both requested ranges qualify;
 boundary dates remain unverified. Unknown units, changed grouping/contracts, duplicate dates, failures
