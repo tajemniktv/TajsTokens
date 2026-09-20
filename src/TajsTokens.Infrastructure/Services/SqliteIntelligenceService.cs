@@ -1,3 +1,4 @@
+using TajsTokens.Core.Research;
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -21,7 +22,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
     private readonly string _connectionString;
     private readonly string _databasePath;
     private readonly SqliteTelemetryRepository _telemetryRepository;
-    private readonly ScenarioPlannerService _scenarioPlanner = new();
+
     private readonly Func<string, CancellationToken, Task>? _queryStageObserver;
     private readonly Func<IReadOnlyList<RolloutAccountAssociation>> _accountAssociations = () => [];
 
@@ -422,7 +423,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         var samples = request.AccountKey is not null && latest is not null && now - latest.CapturedAtUtc <= TimeSpan.FromHours(6)
             ? CodexScenarioHistoryBuilder.Build(data with { Quota = data.Quota.Where(item => item.AccountKey == latest.AccountKey).ToArray() })
             : [];
-        var estimate = _scenarioPlanner.Estimate(request, samples, now);
+        var estimate = QuotaPredictionService.Simulate(request, samples, now);
         return estimate with { Methodology = $"{QuotaAccountScope.Describe(request.AccountKey)}. " +
             "Quota targets stay within this reported backend account; local workload features are co-observed installation signals, not verified account membership. " + estimate.Methodology };
     }

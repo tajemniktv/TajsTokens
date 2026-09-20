@@ -4,7 +4,7 @@ using TajsTokens.Core.Services;
 
 namespace TajsTokens.Core.Tests;
 
-public sealed class QuotaForecastBacktesterTests
+public sealed class QuotaForecastCalibrationTests
 {
     private static readonly DateTimeOffset Start = DateTimeOffset.Parse("2026-08-01T00:00:00Z");
 
@@ -13,7 +13,7 @@ public sealed class QuotaForecastBacktesterTests
     {
         var steady = Enumerable.Range(0, 49).Select(i => Point(i / 12d, 10 + i)).ToArray();
         var jitter = steady.Select((row, i) => row with { ResetsAtUtc = row.ResetsAtUtc!.Value.AddSeconds(i % 2) }).ToArray();
-        Assert.Single(QuotaForecastBacktester.SplitEpochs(jitter));
+        Assert.Single(QuotaForecastCalibration.SplitEpochs(jitter));
         var forecast = QuotaPredictionService.BuildResetOutlook(jitter, jitter[^1].CapturedAtUtc);
         Assert.NotEqual(ForecastState.Learning, forecast.State);
         Assert.Equal(49, forecast.Evidence!.ObservationCount);
@@ -21,13 +21,13 @@ public sealed class QuotaForecastBacktesterTests
         Assert.Equal(steady[^1].ResetsAtUtc, jitter[^1].ResetsAtUtc);
         foreach (var model in new[] { "persistence", "epoch", "legacy-ewma" })
         {
-            var expected = QuotaForecastBacktester.Replay(steady, model, 0.5);
-            var actual = QuotaForecastBacktester.Replay(jitter, model, 0.5);
+            var expected = QuotaForecastCalibration.Replay(steady, model, 0.5);
+            var actual = QuotaForecastCalibration.Replay(jitter, model, 0.5);
             Assert.NotEmpty(actual);
             Assert.Equal(expected.Select(x => (x.OriginUtc, x.OutcomeUtc, x.PredictedRemaining, x.ObservedRemaining)),
                 actual.Select(x => (x.OriginUtc, x.OutcomeUtc, x.PredictedRemaining, x.ObservedRemaining)));
             // Appending future data cannot change already matured predictions.
-            var prefix = QuotaForecastBacktester.Replay(jitter.Take(25).ToArray(), model, 0.5);
+            var prefix = QuotaForecastCalibration.Replay(jitter.Take(25).ToArray(), model, 0.5);
             Assert.Equal(prefix, actual.Where(x => x.OutcomeUtc <= jitter[24].CapturedAtUtc));
         }
     }
@@ -37,7 +37,7 @@ public sealed class QuotaForecastBacktesterTests
     {
         var drift = Enumerable.Range(0, 4).Select(i => Point(i, 10 + i) with
             { ResetsAtUtc = Start.AddHours(5).AddSeconds(i) }).ToArray();
-        Assert.Equal(new[] { 2, 2 }, QuotaForecastBacktester.SplitEpochs(drift).Select(x => x.Count));
+        Assert.Equal(new[] { 2, 2 }, QuotaForecastCalibration.SplitEpochs(drift).Select(x => x.Count));
         var first = Point(0, 50);
         foreach (var changed in new[]
         {
@@ -46,7 +46,7 @@ public sealed class QuotaForecastBacktesterTests
             Point(1, 60) with { WindowMinutes = 301 },
             Point(1, 60) with { LimitId = "other" },
             Point(5, 60) with { CapturedAtUtc = Start.AddHours(5).AddMilliseconds(500), ResetsAtUtc = Start.AddHours(5).AddSeconds(1) }
-        }) Assert.Equal(2, QuotaForecastBacktester.SplitEpochs([first, changed]).Count);
+        }) Assert.Equal(2, QuotaForecastCalibration.SplitEpochs([first, changed]).Count);
     }
 
     [Fact]
@@ -55,17 +55,17 @@ public sealed class QuotaForecastBacktesterTests
         var trials = Enumerable.Range(0, 10).Select(i => new QuotaForecastTrial("epoch", "2h",
             Start.AddDays(-2).AddMinutes(i), Start.AddDays(-2).AddHours(2).AddMinutes(i),
             Start.AddDays(-1).AddSeconds(i % 2), 2, 60, 50, null, null, 0, null, false, null)).ToArray();
-        Assert.Single(QuotaForecastBacktester.ResetGenerations(trials));
-        var errors = QuotaForecastBacktester.CalibrationErrors(trials, Start, Start.AddHours(5), 2);
+        Assert.Single(QuotaForecastCalibration.ResetGenerations(trials));
+        var errors = QuotaForecastCalibration.CalibrationErrors(trials, Start, Start.AddHours(5), 2);
         Assert.Single(errors);
-        Assert.Null(QuotaForecastBacktester.ErrorRadius(errors));
+        Assert.Null(QuotaForecastCalibration.ErrorRadius(errors));
     }
 
     [Fact]
     public void ReanchorsAndUnannouncedDropsTerminateSegments()
     {
         var rows = new[] { Point(0, 10), Point(1, 50), Point(2, 5), Point(3, 15) };
-        var epochs = QuotaForecastBacktester.SplitEpochs(rows);
+        var epochs = QuotaForecastCalibration.SplitEpochs(rows);
         Assert.Equal(2, epochs.Count);
         Assert.Equal(10, QuotaPaceModels.Estimate(epochs[1], "epoch"));
         var forecast = QuotaPredictionService.BuildResetOutlook(rows, Start.AddHours(3));
@@ -81,7 +81,7 @@ public sealed class QuotaForecastBacktesterTests
     }
 
     [Fact]
-    public void CalibrationCannotSeeFutureOutcomesOrCurrentResetAndUsesOneScorePerEpoch()
+    public void FixedHorizonCalibrationIncludesCurrentCycleButCannotSeeFutureOutcomes()
     {
         QuotaForecastTrial Trial(DateTimeOffset reset, DateTimeOffset outcome, double error) => new("epoch", "2h", outcome.AddHours(-2),
             outcome, reset, 2, 50 + error, 50, null, null, 0, null, false, null);
@@ -92,19 +92,22 @@ public sealed class QuotaForecastBacktesterTests
             Trial(Start.AddHours(5), Start.AddHours(-1), 999),
             Trial(Start.AddDays(-3), Start.AddHours(1), 999)
         };
-        var errors = QuotaForecastBacktester.CalibrationErrors(trials, Start, Start.AddHours(5), 2);
-        Assert.Equal(4, Assert.Single(errors));
-        Assert.Null(QuotaForecastBacktester.ErrorRadius(errors));
+        var errors = QuotaForecastCalibration.CalibrationErrors(trials, Start, Start.AddHours(5), 2);
+        Assert.Equal(new[] { 3d, 4d, 999d }, errors);
+        var resetErrors = QuotaForecastCalibration.CalibrationErrors(
+            trials.Select(x => x with { Target = "near-reset-proxy" }), Start, Start.AddHours(5), 2);
+        Assert.Equal(4, Assert.Single(resetErrors));
+        Assert.Null(QuotaForecastCalibration.ErrorRadius(errors));
     }
 
     [Fact]
     public void MissingTerminalObservationDoesNotBecomeSurvivalLabel()
     {
         var rows = Enumerable.Range(0, 9).Select(i => Point(i * 0.5, 10 + i)).ToArray();
-        var trials = QuotaForecastBacktester.Replay(rows, "epoch", 0.5);
+        var trials = QuotaForecastCalibration.Replay(rows, "epoch", 0.5);
         Assert.NotEmpty(trials);
         Assert.All(trials, trial => Assert.Null(trial.ObservedExhaustion));
-        Assert.Empty(QuotaForecastBacktester.Replay(rows, "epoch", null));
+        Assert.Empty(QuotaForecastCalibration.Replay(rows, "epoch", null));
     }
 
     [Fact]

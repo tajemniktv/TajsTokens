@@ -5,13 +5,19 @@ namespace TajsTokens.Core.Services;
 
 public static class RolloutAccountAssociationPolicy
 {
+    public static IReadOnlyList<RolloutAccountAssociation> Matches(string provider, string profile,
+        string? sourceIdentity, string? sessionId, DateTimeOffset observedAt,
+        IReadOnlyList<RolloutAccountAssociation> associations, DateTimeOffset asOf) =>
+        associations.Where(x => x.IsValid && x.AssertedAtUtc <= asOf && x.Provider == provider &&
+            x.Profile == profile && x.SourceIdentity == sourceIdentity && x.SessionId == sessionId &&
+            observedAt >= x.FromUtc && observedAt <= x.ThroughUtc).ToArray();
+
     public static RolloutAccountAssociation? Resolve(QuotaSnapshot row,
         IReadOnlyList<RolloutAccountAssociation> associations, DateTimeOffset asOf)
     {
         if (row.AccountKey is not null || row.Authority != QuotaObservationAuthority.EmbeddedObservation) return null;
-        var matches = associations.Where(x => x.IsValid && x.AssertedAtUtc <= asOf && x.Provider == row.Provider &&
-            x.Profile == row.Profile && x.SourceIdentity == row.SourceIdentity && x.SessionId == row.SessionId &&
-            row.CapturedAtUtc >= x.FromUtc && row.CapturedAtUtc <= x.ThroughUtc).ToArray();
+        var matches = Matches(row.Provider, row.Profile, row.SourceIdentity, row.SessionId,
+            row.CapturedAtUtc, associations, asOf);
         // Ambiguous overlapping ownership is unusable, not last-writer-wins attribution.
         return matches.Select(x => x.AccountKey).Distinct().Count() == 1
             ? matches.OrderBy(x => x.AssertedAtUtc).First() : null;

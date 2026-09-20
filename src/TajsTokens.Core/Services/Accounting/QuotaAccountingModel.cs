@@ -3,20 +3,19 @@ using TajsTokens.Core.Models;
 namespace TajsTokens.Core.Services;
 
 /// <summary>Frozen-prefix cost calibration, deliberately separate from future-workload forecasting.</summary>
-public static class QuotaCostEvaluation
+public static class QuotaAccountingModel
 {
-    public const string Version = "quota-cost-evaluation/v4";
-    public static readonly string[] Candidates = ["persistence", "pace", "total", "categories", "model-effort",
-        "context-ablation", "activity-ablation", "runtime-ablation", "time-ablation"];
+    public const string Version = "quota-cost-evaluation/v5-blocks";
+    private static readonly string[] Candidates = ["persistence", "pace", "total", "categories", "model-effort"];
     public const string Methodology = "Evaluation only: actual interval workload is an oracle cost input, NOT an end-to-end forecast. " +
         "Disjoint targets within each cohort/horizon; overlapping sources and horizons are never pooled. " +
         "First 20 non-overlapping matured observations fit a frozen nonnegative, no-intercept interval-distance ridge model. " +
         "Vocabulary/scaling use training only. Unknown model/effort mass is explicit. All later disjoint intervals are held out; no rolling refit hides drift. " +
         "Loss is distance to the measurement envelope; displayed-delta MAE is secondary. Rollout envelopes are sensitivity assumptions, not measured precision. " +
-        "Residuals are associations, not causal attribution or proof of provider changes. Bands use earlier completed held-out generation maximum errors " +
-        "after eight generations and target 80% envelope intersection, not calibrated latent coverage or exhaustion probability. " +
-        "A diagnostic win needs 16 held-out intervals in three generations and >=10% and 0.1pp generation-average loss improvement over both pace and total; " +
-        "richer candidates must also beat their simpler parent and win on most generations. No automatic production promotion. " +
+        "Residuals are associations, not causal attribution or proof of provider changes. Bands use earlier completed held-out block maximum errors " +
+        "after eight blocks and target 80% envelope intersection, not calibrated latent coverage or exhaustion probability. " +
+        "A diagnostic win needs 16 held-out intervals in three blocks and >=10% and 0.1pp block-average loss improvement over both pace and total; " +
+        "richer candidates must also beat their simpler parent and win on most blocks. No automatic production promotion. " +
         "API-price weighting is a fixed retrospective standard/short-context baseline, never credits or actual cost; incomplete pricing is withheld. " +
         "Its comparisons use matched outcomes and it cannot earn a promotion label. " +
         "Incomplete category training blocks category-dependent fitting; incomplete held-out composition is withheld. " +
@@ -25,18 +24,18 @@ public static class QuotaCostEvaluation
         "Different held-out target sets cannot earn a comparative promotion.";
 
     public static QuotaCostReport Evaluate(CodexForecastDataset data, CancellationToken cancellationToken = default,
-        bool userConfirmedRolloutOwnership = false, IReadOnlyList<double>? horizons = null)
+        bool userConfirmedRolloutOwnership = false, IReadOnlyList<double>? horizons = null, IReadOnlyList<string>? candidates = null, Func<string, QuotaCostFeatureExtension?>? extensions = null)
     {
         var built = QuotaCostObservationBuilder.BuildDetailed(data, cancellationToken, userConfirmedRolloutOwnership, horizons);
         return Evaluate(built.Observations, (userConfirmedRolloutOwnership ?
             "User confirms retained rollouts belong to their account. Native account IDs remain absent; sessions/sources are not pooled. " : "") + data.Coverage + " " +
-            QuotaHistoryPolicy.Summarize(QuotaHistoryPolicy.Describe(data.Quota, data.CapturedAtUtc)), cancellationToken)
+            QuotaHistoryPolicy.Summarize(QuotaHistoryPolicy.Describe(data.Quota, data.CapturedAtUtc)), cancellationToken, candidates, extensions)
             with { DatasetCapturedAtUtc = data.CapturedAtUtc, EvidenceCoverage = QuotaEvaluationCoverageBuilder.Build(data),
                 ConstructionCoverage = built.Coverage };
     }
 
     public static QuotaCostReport Evaluate(IReadOnlyList<QuotaCostObservation> rows, string coverage,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, IReadOnlyList<string>? candidates = null, Func<string, QuotaCostFeatureExtension?>? extensions = null)
     {
         var scores = new List<QuotaCostScore>();
         foreach (var group in rows.GroupBy(x => (x.Cohort, x.HorizonHours)))
@@ -46,11 +45,11 @@ public static class QuotaCostEvaluation
             var trainingGenerations = QuotaResetGenerationPolicy.Group(training, x => x.ResetUtc).Count;
             var heldout = ordered.Skip(training.Length).Where(x => x.StartUtc >= training[^1].EndUtc).ToArray();
             var local = new List<QuotaCostScore>();
-            foreach (var candidate in ordered.Any(x => x.ApiPriceWeight is not null) ? Candidates.Append("api-price") : Candidates)
+            foreach (var candidate in candidates ?? Candidates)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var trials = new List<QuotaCostTrial>();
-                var vector = new CostVector(training, candidate);
+                var vector = new CostVector(training, candidate, extensions?.Invoke(candidate));
                 var unpricedTraining = candidate == "api-price" ? training.Count(x => !Priceable(x)) : 0;
                 var unpricedHeldout = candidate == "api-price" ? heldout.Count(x => !Priceable(x)) : 0;
                 var needsCategories = candidate is not ("total" or "pace" or "persistence" or "api-price");
@@ -70,19 +69,19 @@ public static class QuotaCostEvaluation
                         "persistence" => 0,
                         _ => fit!.Predict(vector.Values(row))
                     };
-                    var errors = QuotaResetGenerationPolicy.Group(trials.Where(x =>
-                            x.ResetUtc < row.StartUtc - QuotaResetGenerationPolicy.Tolerance), x => x.ResetUtc)
+                    var errors = ChronologicalEvidence.Blocks(trials.Where(x => x.EndUtc < row.StartUtc),
+                            x => x.StartUtc, x => x.EndUtc, x => x.ResetUtc)
                         .Select(g => g.Max(x => x.IntervalLoss)).ToArray();
                     var radius = errors.Length >= 8 ? Quantile(errors, Math.Min(1, Math.Ceiling((errors.Length + 1) * 0.8) / errors.Length)) : null;
                     trials.Add(new(row.StartUtc, row.EndUtc, row.ResetUtc, row.ObservedDelta, row.LowerDelta, row.UpperDelta,
                         prediction, row.IntervalLoss(prediction), row.ObservedDelta - prediction,
                         radius is { } r ? Math.Max(0, prediction - r) : null, radius is { } r2 ? prediction + r2 : null));
                 }
-                var epochs = QuotaResetGenerationPolicy.Group(trials, x => x.ResetUtc);
+                var epochs = ChronologicalEvidence.Blocks(trials, x => x.StartUtc, x => x.EndUtc, x => x.ResetUtc);
                 var bands = trials.Where(x => x.LowerPrediction is not null).ToArray();
                 var residuals = trials.Select(x => x.Residual).ToArray();
                 local.Add(new(group.Key.Cohort, group.Key.HorizonHours, candidate, ordered.Length,
-                    training.Length, trainingGenerations, trials.Count, epochs.Count,
+                    training.Length, trainingGenerations, trials.Count, QuotaResetGenerationPolicy.Group(trials, x => x.ResetUtc).Count,
                     Mean(trials.Select(x => x.IntervalLoss)), Mean(residuals.Select(Math.Abs)),
                     Mean(epochs.Select(g => g.Average(x => x.IntervalLoss))),
                     Quantile(residuals, 0.1), Quantile(residuals, 0.5), Quantile(residuals, 0.9),
@@ -90,7 +89,7 @@ public static class QuotaCostEvaluation
                     Mean(bands.Select(x => x.UpperPrediction >= x.LowerDelta && x.LowerPrediction <= x.UpperDelta ? 1d : 0d)),
                     false, noTrainingWork ? "no-recorded-training-work" : incompleteTraining > 0 ? "incomplete-category-training" : unpricedTraining > 0 ? "unpriced-training-evidence" : fitted ? "evaluation-only" : "insufficient-training-intervals",
                     fit is null ? new Dictionary<string, double>() : vector.Names.Select((name, i) => (name, value: fit.Weights[i] / fit.Scales[i]))
-                        .ToDictionary(x => x.name, x => x.value), trials, DetectShifts(epochs))
+                        .ToDictionary(x => x.name, x => x.value), trials, CodexRegimeModel.DetectPersistentShifts(epochs))
                 {
                     RateCardVersion = candidate == "api-price" ? ApiPriceWorkload.Version : null,
                     IncompleteCategoryTrainingIntervals = incompleteTraining, IncompleteCategoryHeldOutIntervals = incompleteHeldout,
@@ -118,7 +117,7 @@ public static class QuotaCostEvaluation
                 }}.Distinct().Where(x => x != score.Candidate).Select(name => local.Single(x => x.Candidate == name)).ToArray();
                 var supportedPrecision = heldout.All(x => !x.QualityFlags.Contains("meter-precision-unverified-sensitivity-only"));
                 var win = score.Candidate is not "pace" and not "persistence" && supportedPrecision &&
-                    score.Cohort.AccountKey is not null && score.HeldOutSamples >= 16 && score.HeldOutGenerations >= 3 &&
+                    score.Cohort.AccountKey is not null && score.HeldOutSamples >= 16 && ChronologicalEvidence.Blocks(score.Trials, x => x.StartUtc, x => x.EndUtc, x => x.ResetUtc).Count >= 3 &&
                     training.Count(x => x.Features.Tokens > 0) >= 12 &&
                     parents.All(parent => Beats(score, parent));
                 scores.Add(score with { MaterialWin = win, Status = win ? "cost-only-win-requires-end-to-end-validation" : score.Status });
@@ -137,10 +136,10 @@ public static class QuotaCostEvaluation
     private static bool Beats(QuotaCostScore score, QuotaCostScore parent)
     {
         if (!score.Trials.Select(x => (x.StartUtc, x.EndUtc)).SequenceEqual(parent.Trials.Select(x => (x.StartUtc, x.EndUtc)))) return false;
-        if (score.GenerationMeanIntervalLoss is not { } loss || parent.GenerationMeanIntervalLoss is not { } baseline ||
+        if (score.BlockMeanIntervalLoss is not { } loss || parent.BlockMeanIntervalLoss is not { } baseline ||
             loss > baseline * 0.9 || baseline - loss < 0.1) return false;
         var pairs = score.Trials.Zip(parent.Trials).ToArray();
-        var generations = QuotaResetGenerationPolicy.Group(pairs, x => x.First.ResetUtc);
+        var generations = ChronologicalEvidence.Blocks(pairs, x => x.First.StartUtc, x => x.First.EndUtc, x => x.First.ResetUtc);
         return generations.Count(g => g.Average(x => x.First.IntervalLoss) < g.Average(x => x.Second.IntervalLoss)) > generations.Count / 2;
     }
 
@@ -172,25 +171,6 @@ public static class QuotaCostEvaluation
             fit.Weights.Select((w, i) => -w / fit.Scales[i]).ToArray(), 0, remaining);
     }
 
-    private static IReadOnlyList<DateTimeOffset> DetectShifts(IReadOnlyList<IReadOnlyList<QuotaCostTrial>> epochs)
-    {
-        // Freeze the reference after three held-out generations; require two later generations
-        // with a replicated same-direction shift. This is a diagnostic, not a causal alarm.
-        if (epochs.Count < 5) return [];
-        var reference = epochs.Take(3).SelectMany(x => x).Select(x => x.Residual).ToArray();
-        var center = Quantile(reference, 0.5)!.Value;
-        var threshold = Math.Max(2, 3 * Quantile(reference.Select(x => Math.Abs(x - center)), 0.5)!.Value);
-        var shifts = new List<DateTimeOffset>();
-        for (var i = 4; i < epochs.Count; i++)
-        {
-            var a = Quantile(epochs[i - 1].Select(x => x.Residual), 0.5)!.Value - center;
-            var b = Quantile(epochs[i].Select(x => x.Residual), 0.5)!.Value - center;
-            if (epochs[i - 1].Count >= 3 && epochs[i].Count >= 3 && Math.Abs(a) > threshold &&
-                Math.Abs(b) > threshold && Math.Sign(a) == Math.Sign(b)) shifts.Add(epochs[i][0].ResetUtc);
-        }
-        return shifts;
-    }
-
     private static double? Mean(IEnumerable<double> values)
     {
         var rows = values.ToArray();
@@ -208,11 +188,13 @@ public static class QuotaCostEvaluation
         private readonly string candidate;
         private readonly string[] models;
         private readonly string[] efforts;
+        private readonly QuotaCostFeatureExtension? extension;
         public string[] Names { get; }
 
-        public CostVector(IReadOnlyList<QuotaCostObservation> training, string candidate)
+        public CostVector(IReadOnlyList<QuotaCostObservation> training, string candidate, QuotaCostFeatureExtension? extension = null)
         {
             this.candidate = candidate;
+            this.extension = extension;
             if (candidate == "api-price")
             {
                 models = []; efforts = []; Names = ["standard-short-context-api-weight"]; return;
@@ -222,14 +204,7 @@ public static class QuotaCostEvaluation
             var names = new List<string>(candidate == "total" ? ["reported-total/M"] :
                 new[] { "uncached/M", "cache-read/M", "cache-write/M", "normal-output/M", "reasoning-output/M" });
             if (Rich) names.AddRange(models.Select(x => "model:" + x).Concat(efforts.Select(x => "effort:" + x)).Concat(["unknown-model", "unknown-effort"]));
-            names.AddRange(candidate switch
-            {
-                "context-ablation" => ["compactions", "context-pressure", "context-missing"],
-                "activity-ablation" => ["root-sessions", "subagent-sessions", "unknown-sessions", "completed-turn-hours", "peak-overlap"],
-                "runtime-ablation" => ["ttft-seconds", "runtime-missing"],
-                "time-ablation" => ["utc-week-sin", "utc-week-cos"],
-                _ => Array.Empty<string>()
-            });
+            if (extension is not null) names.AddRange(extension.Names);
             Names = names.ToArray();
         }
 
@@ -250,18 +225,10 @@ public static class QuotaCostEvaluation
             }
             // Optional features are workload interactions: time or missing telemetry cannot
             // generate predicted local cost in an interval with no recorded tokens.
-            values.AddRange((candidate switch
-            {
-                "context-ablation" => new[] { (double)f.Compactions, f.LastInputWindowRatio ?? 0, f.LastInputWindowRatio is null ? 1d : 0d },
-                "activity-ablation" => new[] { (double)f.TokenActiveRootSessions, f.TokenActiveSubagentSessions, f.TokenActiveUnknownSessions, f.CompletedTurnWallHours, f.PeakObservedTurnOverlap },
-                "runtime-ablation" => new[] { (row.MeanTtftMilliseconds ?? 0) / 1000, row.RuntimeSamples == 0 ? 1d : 0d },
-                "time-ablation" => new[] { 1 + Math.Sin(WeekAngle(row.StartUtc)), 1 + Math.Cos(WeekAngle(row.StartUtc)) },
-                _ => Array.Empty<double>()
-            }).Select(x => x * total));
+            if (extension is not null) values.AddRange(extension.Values(row).Select(x => x * total));
             return values.ToArray();
         }
 
-        private static double WeekAngle(DateTimeOffset time) => 2 * Math.PI * ((int)time.UtcDateTime.DayOfWeek * 24 + time.UtcDateTime.TimeOfDay.TotalHours) / 168;
     }
 
     private sealed record IntervalRidge(double[] Weights, double[] Scales)

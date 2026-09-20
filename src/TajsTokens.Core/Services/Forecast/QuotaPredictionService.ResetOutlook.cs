@@ -17,7 +17,7 @@ public static partial class QuotaPredictionService
         var latest = eligible[^1];
         if (eligible.Any(x => x.Kind != latest.Kind || x.Provider != latest.Provider || x.Profile != latest.Profile))
             throw new ArgumentException("Forecast snapshots must belong to one quota window/provider/profile.", nameof(snapshots));
-        var model = QuotaForecastBacktester.DefaultModel(latest);
+        var model = QuotaForecastCalibration.DefaultModel(latest);
         ForecastEvidence Evidence(int count, double hours, string description) => new(ResetOutlookPolicyVersion, "not-estimated",
             latest.Source, count, hours, 0, null, null, null, null, description)
         {
@@ -40,7 +40,7 @@ public static partial class QuotaPredictionService
         // A rate never bridges distinct source lanes. Drops/invalid values/metadata changes
         // terminate the whole segment. Reused reset identities cannot resurrect old slopes.
         var stream = eligible.Where(x => QuotaHistoryPolicy.Cohort(x) == QuotaHistoryPolicy.Cohort(latest)).ToArray();
-        var epoch = QuotaForecastBacktester.SplitEpochs(stream).LastOrDefault();
+        var epoch = QuotaForecastCalibration.SplitEpochs(stream).LastOrDefault();
         if (epoch is null || epoch[^1] != latest) return Unknown("No unambiguous current segment is available.", sustainable);
         var observedHours = (latest.CapturedAtUtc - epoch[0].CapturedAtUtc).TotalHours;
         var evidence = Evidence(epoch.Count, observedHours,
@@ -60,8 +60,8 @@ public static partial class QuotaPredictionService
 
         var lead = (reset - latest.CapturedAtUtc).TotalHours;
         var candidates = QuotaPaceModels.Candidates.ToDictionary(candidate => candidate,
-            candidate => QuotaForecastBacktester.Replay(stream, candidate, null));
-        model = QuotaForecastBacktester.SelectModel(candidates, latest.CapturedAtUtc, reset, lead, model);
+            candidate => QuotaForecastCalibration.Replay(stream, candidate, null));
+        model = QuotaForecastCalibration.SelectModel(candidates, latest.CapturedAtUtc, reset, lead, model);
         var rate = QuotaPaceModels.Estimate(epoch, model);
         var elapsed = Math.Max(0, (nowUtc - latest.CapturedAtUtc).TotalHours);
         var remainingNow = QuotaPaceModels.ProjectRemaining(epoch, model, elapsed);
@@ -79,9 +79,9 @@ public static partial class QuotaPredictionService
             else survives = true; // Exhaustion exactly at reset is not before reset.
         }
         // Calibrate the actual prequential selection policy, not its in-sample winning candidate.
-        var adaptiveTrials = QuotaForecastBacktester.ReplayAdaptive(candidates, QuotaForecastBacktester.DefaultModel(latest));
-        var errors = QuotaForecastBacktester.CalibrationErrors(adaptiveTrials, latest.CapturedAtUtc, reset, lead);
-        var radius = QuotaForecastBacktester.ErrorRadius(errors);
+        var adaptiveTrials = QuotaForecastCalibration.ReplayAdaptive(candidates, QuotaForecastCalibration.DefaultModel(latest));
+        var errors = QuotaForecastCalibration.CalibrationErrors(adaptiveTrials, latest.CapturedAtUtc, reset, lead);
+        var radius = QuotaForecastCalibration.ErrorRadius(errors);
         evidence = evidence with
         {
             Model = model,
@@ -89,7 +89,7 @@ public static partial class QuotaPredictionService
             HistoricalAbsoluteErrorPercent = errors.Count > 0 ? errors.Average() : null,
             RemainingAtResetLowerPercent = radius is double r ? Math.Max(0, margin - r) : null,
             RemainingAtResetUpperPercent = radius is double r2 ? Math.Min(100, margin + r2) : null,
-            NominalIntervalCoverage = radius is not null ? QuotaForecastBacktester.NominalCoverage : null,
+            NominalIntervalCoverage = radius is not null ? QuotaForecastCalibration.NominalCoverage : null,
             UncertaintyDescription = radius is not null
                 ? "Empirical 80%-target band from prior completed same-source generations at similar lead; one error per generation. Outcomes are within 5 minutes of reset, not exact reset truth. Changing workload can change coverage. This is not an exhaustion probability."
                 : evidence.UncertaintyDescription

@@ -1,17 +1,19 @@
 using TajsTokens.Core.Models;
 
-namespace TajsTokens.Core.Services;
+using TajsTokens.Core.Services;
+
+namespace TajsTokens.Core.Research;
 
 public static class TtEvaluator
 {
-    public const string Version = "tt-lab/v3";
+    public const string Version = "tt-lab/v4-blocks";
     public const string Methodology = "Experimental local index, reconstructed completed-work cost evaluation, not a forecast. " +
         "First 20 compatible known-account intervals freeze nonnegative category weights. Reference is one million tokens " +
         "in the first positive training interval's category mix; models/efforts are pooled within observed support, not separately priced. " +
         "Basis identity covers exact weights, reference, supported dimensions and token semantics. Tier/context are unmodelled. " +
         "Next 20 disjoint intervals fit a separate nonnegative quota/TT scale and raw-token/full-vector competitors. " +
-        "Later matched supported intervals report reset-balanced measurement-envelope loss. Unknown model/effort/category work is withheld, not zero. " +
-        "Signed bias is predicted minus reported cost, reset-balanced; cumulative error sums eligible held-out intervals only, " +
+        "Later matched supported intervals report block-balanced measurement-envelope loss. Unknown model/effort/category work is withheld, not zero. " +
+        "Signed bias is predicted minus reported cost, block-balanced; cumulative error sums eligible held-out intervals only, " +
         "with summed meter-envelope bounds, not a confidence interval or whole-account total. " +
         "Transfer trials reuse an earlier cohort's exact basis and fit the first 20 destination intervals separately. " +
         "Only the same recorded account/provider/profile/source/session lineage and horizon may pair; the source cohort must end before the destination starts. " +
@@ -45,7 +47,7 @@ public static class TtEvaluator
             if (training.Length == 20 && training.All(TtWorkloadBasis.CompleteCategories) &&
                 training.FirstOrDefault(x => x.TokenCategories.Sum() > 0) is { } reference)
             {
-                var weights = QuotaCostEvaluation.FitCategoryWeights(training, cancellationToken);
+                var weights = QuotaAccountingModel.FitCategoryWeights(training, cancellationToken);
                 var basket = reference.TokenCategories.Select(x => x / reference.TokenCategories.Sum() * 1e6).ToArray();
                 if (basket.Select((x, i) => x * weights[i]).Sum() > 0)
                     basis = new(weights, basket, Enumerable.Range(0, 5).Select(i => training.Any(x => x.TokenCategories[i] > 0)),
@@ -56,7 +58,7 @@ public static class TtEvaluator
             var heldout = calibration.Length == 20 ? ordered.Where(x => x.StartUtc >= calibration[^1].EndUtc).ToArray() : [];
             var supported = heldout.Where(x => basis?.Score(x) is not null).ToArray();
             var unsupported = heldout.Except(supported).ToArray();
-            var generations = QuotaResetGenerationPolicy.Group(supported, x => x.ResetUtc);
+            var generations = ChronologicalEvidence.Blocks(supported, x => x.StartUtc, x => x.EndUtc, x => x.ResetUtc);
             var ready = basis is not null && calibration.Length == 20 && calibration.All(x => basis.Score(x) is not null);
             double? scale = null, scalarLoss = null, vectorLoss = null, rawLoss = null;
             double? scalarMae = null, vectorMae = null, rawMae = null, zeroLoss = null;
@@ -76,8 +78,8 @@ public static class TtEvaluator
                         alpha = next;
                     }
                     scale = alpha;
-                    var full = QuotaCostEvaluation.FitFrozen(calibration, "model-effort", cancellationToken);
-                    var raw = QuotaCostEvaluation.FitFrozen(calibration, "total", cancellationToken);
+                    var full = QuotaAccountingModel.FitFrozen(calibration, "model-effort", cancellationToken);
+                    var raw = QuotaAccountingModel.FitFrozen(calibration, "total", cancellationToken);
                     if (generations.Count > 0)
                     {
                         scalarLoss = generations.Average(g => g.Average(x => x.IntervalLoss(alpha * basis!.Score(x)!.Value)));
@@ -94,7 +96,7 @@ public static class TtEvaluator
                 basis is null ? "insufficient-unsupported-or-degenerate-basis" : !ready ? "insufficient-or-unsupported-calibration" :
                 scale is null ? "zero-calibration-work" : supported.Length == 0 ? "no-supported-heldout-work" : "research-only-not-promoted",
                 training.Length, calibration.Length, supported.Length, unsupported.Length, unsupported.Sum(x => (double)x.Features.Tokens),
-                generations.Count, scale, supported.Length > 0 ? supported.Sum(x => basis!.Score(x)!.Value) : null,
+                QuotaResetGenerationPolicy.Group(supported, x => x.ResetUtc).Count, scale, supported.Length > 0 ? supported.Sum(x => basis!.Score(x)!.Value) : null,
                 scalarLoss, vectorLoss, rawLoss)
             {
                 ScalarMae = scalarMae, FullVectorMae = vectorMae, RawTokenMae = rawMae, ZeroLoss = zeroLoss,

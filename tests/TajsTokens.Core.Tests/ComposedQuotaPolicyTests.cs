@@ -7,7 +7,7 @@ namespace TajsTokens.Core.Tests;
 public sealed class ComposedQuotaPolicyTests
 {
     [Fact]
-    public void JointUncertaintyNeedsEightCompletedAvailableGenerationsNotPollingVolume()
+    public void JointUncertaintyNeedsEightAvailableBlocksNotPollingVolume()
     {
         var now = DateTimeOffset.Parse("2026-09-19T10:00:00Z");
         var workload = new PredictedWorkload(now, .5, 10, [10, 0, 0, 0, 0],
@@ -17,7 +17,7 @@ public sealed class ComposedQuotaPolicyTests
             now.AddDays(-i).AddHours(-1), now.AddDays(-i), 10, 0, 12, 0, 0, 0, 90, workload)
         { CalibrationAvailableAtUtc = now.AddDays(-i), Availability = ForecastReplayAvailability.CollectedByOrigin }).ToArray();
         var ready = ComposedQuotaPolicy.CalibrateUncertainty(trials, now);
-        Assert.Equal(8, ready.Generations);
+        Assert.Equal(8, ready.Blocks);
         Assert.Equal(2, ready.Radius);
         Assert.Null(ComposedQuotaPolicy.CalibrateUncertainty(trials.Take(7), now).Radius);
         Assert.Null(ComposedQuotaPolicy.CalibrateUncertainty(Enumerable.Repeat(trials[0], 100), now).Radius);
@@ -27,7 +27,7 @@ public sealed class ComposedQuotaPolicyTests
         { ObservedDelta = 1000, CalibrationAvailableAtUtc = now.AddSeconds(1) }), now));
         Assert.Equal(ready, ComposedQuotaPolicy.CalibrateUncertainty(trials.Append(trials[0] with
         { ObservedDelta = 1000, OutcomeUtc = now.AddSeconds(1) }), now));
-        Assert.Null(ComposedQuotaPolicy.CalibrateUncertainty(trials.Select(x => x with { ResetUtc = now }), now).Radius);
+        Assert.Equal(2, ComposedQuotaPolicy.CalibrateUncertainty(trials.Select(x => x with { ResetUtc = now }), now).Radius);
         Assert.Equal(1, ComposedQuotaPolicy.CalibrateUncertainty(trials.Select(x => x with { ObservedDelta = 10 }), now).Radius);
     }
 
@@ -59,19 +59,19 @@ public sealed class ComposedQuotaPolicyTests
         var ready = ComposedQuotaPolicy.AssessSelection(strict, now, true);
         Assert.True(ready.Passed);
         Assert.Empty(ready.Reasons);
-        Assert.Equal(.1, ready.ResetBalancedLoss!.Value, 8);
-        Assert.Equal(1, ready.ResetBalancedIncumbentLoss);
+        Assert.Equal(.1, ready.BlockBalancedLoss!.Value, 8);
+        Assert.Equal(1, ready.BlockBalancedIncumbentLoss);
         Assert.Contains("not a live promotion decision", ready.Explanation);
         var unpaired = ComposedQuotaPolicy.AssessSelection(strict with {
             Trials = strict.Trials.Select((x, i) => i == 0 ? x with { IncumbentIntervalLoss = null } : x).ToArray()
         }, now, true);
         Assert.False(unpaired.Passed);
         Assert.Equal(15, unpaired.IncumbentPairs);
-        Assert.Null(unpaired.ResetBalancedIncumbentLoss);
+        Assert.Null(unpaired.BlockBalancedIncumbentLoss);
         Assert.Contains(unpaired.Reasons, x => x.Contains("matched incumbent"));
         var noTrials = ComposedQuotaPolicy.AssessSelection(strict with { Trials = [], HeldOutIntervals = 0, ResetGenerations = 0 }, now, true);
         Assert.False(noTrials.Passed);
-        Assert.Null(noTrials.ResetBalancedLoss);
+        Assert.Null(noTrials.BlockBalancedLoss);
         Assert.Contains(noTrials.Reasons, x => x.Contains("No held-out"));
         Assert.Contains(ComposedQuotaPolicy.AssessSelection(score, now, true).Reasons, x => x.Contains("Collection-time replay"));
         Assert.Contains(ComposedQuotaPolicy.AssessSelection(strict with { AssertedTrainingIntervals = 1 }, now, true).Reasons,
@@ -84,7 +84,7 @@ public sealed class ComposedQuotaPolicyTests
         }, now, true).Reasons, x => x.Contains("improvement over incumbent"));
         Assert.Contains(ComposedQuotaPolicy.AssessSelection(strict with {
             Trials = strict.Trials.Select(x => x.ResetUtc == now ? x with { IntervalLoss = 1.1 } : x).ToArray()
-        }, now, true).Reasons, x => x.Contains("latest two reset"));
+        }, now, true).Reasons, x => x.Contains("latest two blocks"));
         Assert.False(ComposedQuotaPolicy.SupportsStrictSelection(strict with
         {
             Trials = strict.Trials.Select(x => x.ResetUtc == now ? x with { IntervalLoss = 1.1 } : x).ToArray()
@@ -92,7 +92,7 @@ public sealed class ComposedQuotaPolicyTests
         Assert.False(ComposedQuotaPolicy.SupportsStrictSelection(strict with { AssertedTrainingIntervals = 10 }, now));
         Assert.False(ComposedQuotaPolicy.SupportsStrictSelection(strict with { Trials = trials }, now));
         Assert.False(ComposedQuotaPolicy.SupportsSelection(score, now.AddDays(1)));
-        Assert.False(ComposedQuotaPolicy.SupportsSelection(score with
+        Assert.True(ComposedQuotaPolicy.SupportsSelection(score with
         { Trials = trials.Select(x => x with { ResetUtc = now }).ToArray() }, now));
         Assert.False(ComposedQuotaPolicy.SupportsSelection(score with
         { Trials = trials.Select(x => x with { IncumbentIntervalLoss = null }).ToArray() }, now));

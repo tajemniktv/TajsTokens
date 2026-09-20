@@ -8,7 +8,7 @@ public sealed class QuotaAlertEngine
     private int[] _thresholds;
     private readonly HashSet<string> _emittedKeys = new(StringComparer.Ordinal);
     private readonly Dictionary<string, int> _fallbackWindowGenerations = new(StringComparer.Ordinal);
-    private TelemetrySnapshot? _previous;
+    private CodexCurrentState? _previous;
 
     public QuotaAlertEngine(IEnumerable<int>? thresholds = null)
     {
@@ -20,7 +20,9 @@ public sealed class QuotaAlertEngine
         _thresholds = RuntimeSettings.NormalizeLowQuotaThresholds(thresholds);
     }
 
-    public IReadOnlyList<AlertNotification> Evaluate(TelemetrySnapshot current)
+    public IReadOnlyList<AlertNotification> Evaluate(TelemetrySnapshot current) => Evaluate(CodexIntelligenceProjection.CurrentState(current));
+
+    public IReadOnlyList<AlertNotification> Evaluate(CodexCurrentState current)
     {
         var alerts = new List<AlertNotification>();
 
@@ -30,9 +32,9 @@ public sealed class QuotaAlertEngine
         return alerts;
     }
 
-    public IReadOnlyList<AlertNotification> Evaluate(CodexIntelligenceSnapshot current) => Evaluate(current.RuntimeEvidence);
+    public IReadOnlyList<AlertNotification> Evaluate(CodexIntelligenceSnapshot current) => Evaluate(current.CurrentState);
 
-    private void EvaluateQuotaAlerts(TelemetrySnapshot current, ICollection<AlertNotification> alerts)
+    private void EvaluateQuotaAlerts(CodexCurrentState current, ICollection<AlertNotification> alerts)
     {
         foreach (var quota in current.QuotaSnapshots.Where(snapshot =>
                      (snapshot.Kind is QuotaWindowKind.FiveHour or QuotaWindowKind.Weekly) &&
@@ -127,7 +129,7 @@ public sealed class QuotaAlertEngine
         return generation;
     }
 
-    private void EvaluateProviderHealthAlerts(TelemetrySnapshot current, ICollection<AlertNotification> alerts)
+    private void EvaluateProviderHealthAlerts(CodexCurrentState current, ICollection<AlertNotification> alerts)
     {
         foreach (var source in current.Sources.Where(source =>
                      source.State is TelemetryHealthState.Unavailable or TelemetryHealthState.Error))

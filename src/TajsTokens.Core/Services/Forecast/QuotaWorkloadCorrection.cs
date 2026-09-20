@@ -13,10 +13,9 @@ public sealed record QuotaWorkloadPrediction(double Remaining, int TrainingSampl
     public CodexNumericInference? Inference { get; init; }
 }
 
-/// <summary>Authoritative-target walk-forward feature ablations. Future workloads never enter a training prefix.</summary>
-public static class QuotaWorkloadBacktester
+/// <summary>Forecast owner's account-local correction, fitted only to matured outcomes.</summary>
+public static class QuotaWorkloadCorrection
 {
-    public static readonly string[] Candidates = ["pace-ridge", "token-ridge", "activity-ridge", "model-effort-ridge"];
     public const int MinimumTrainingSamples = 12;
 
     internal static IEnumerable<QuotaForecastTrial> Independent(IEnumerable<QuotaForecastTrial> trials)
@@ -28,51 +27,6 @@ public static class QuotaWorkloadBacktester
             previousEnd = trial.OutcomeUtc;
             yield return trial;
         }
-    }
-
-    public static IReadOnlyList<QuotaWorkloadTrial> Replay(CodexForecastDataset data, QuotaWindowKind kind,
-        string candidate, double? horizonHours, ForecastReplayAvailability availability,
-        CancellationToken cancellationToken = default,
-        string baselineModel = "legacy-ewma")
-    {
-        if (!Candidates.Contains(candidate)) throw new ArgumentException("Unknown workload candidate.", nameof(candidate));
-        var results = new List<QuotaWorkloadTrial>();
-        foreach (var stream in data.Quota.Where(x => x.Kind == kind)
-                     .GroupBy(QuotaHistoryPolicy.Cohort))
-        {
-            var baseline = QuotaForecastBacktester.Replay(stream.ToArray(), baselineModel, horizonHours, cancellationToken);
-            var featureRows = baseline.ToDictionary(x => x.OriginUtc,
-                x => CodexForecastFeatureBuilder.Build(data, x.OriginUtc, 2, availability));
-            var origins = stream.GroupBy(x => x.CapturedAtUtc).ToDictionary(x => x.Key, x => x.Last());
-            foreach (var trial in baseline)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                bool Supported(QuotaForecastTrial x) => candidate == "pace-ridge" ||
-                    (featureRows[x.OriginUtc].ObservedTokenEvents > 0 &&
-                     (candidate != "model-effort-ridge" ||
-                      (featureRows[x.OriginUtc].ModelTokenShares.Count > 0 && featureRows[x.OriginUtc].EffortTokenShares.Count > 0)));
-                var training = Independent(baseline.Where(x => x.OutcomeUtc <= trial.OriginUtc && x.OriginUtc < trial.OriginUtc && Supported(x)))
-                    .TakeLast(120).ToArray();
-                var prediction = trial.PredictedRemaining;
-                var used = false;
-                if (training.Length >= MinimumTrainingSamples && Supported(trial))
-                {
-                    // The vocabulary is selected only from the training prefix, not from future models.
-                    var models = training.SelectMany(x => featureRows[x.OriginUtc].ModelTokenShares.Keys).Distinct().Order().Take(8).ToArray();
-                    var efforts = training.SelectMany(x => featureRows[x.OriginUtc].EffortTokenShares.Keys).Distinct().Order().Take(8).ToArray();
-                    double[] Features(QuotaForecastTrial x) => Vector(x, origins[x.OriginUtc].RemainingPercent!.Value, featureRows[x.OriginUtc], candidate, models, efforts);
-                    var fit = AccountLocalRidge.Fit(training.Select(Features).ToArray(),
-                        training.Select(x => x.ObservedRemaining - x.PredictedRemaining).ToArray(), penalty: 10);
-                    if (fit is not null)
-                    {
-                        prediction = Math.Clamp(trial.PredictedRemaining + fit.Predict(Features(trial)), 0, origins[trial.OriginUtc].RemainingPercent!.Value);
-                        used = true;
-                    }
-                }
-                results.Add(new QuotaWorkloadTrial(trial, candidate, prediction, training.Length, used, featureRows[trial.OriginUtc]));
-            }
-        }
-        return results;
     }
 
     /// <summary>The live counterpart of the full model/effort ablation, fitted only to matured outcomes.</summary>
@@ -109,11 +63,11 @@ public static class QuotaWorkloadBacktester
         };
     }
 
-    private static double[] Vector(QuotaForecastTrial trial, double anchorRemaining, CodexForecastFeatures features,
+    internal static double[] Vector(QuotaForecastTrial trial, double anchorRemaining, CodexForecastFeatures features,
         string candidate, string[] models, string[] efforts)
         => Vector(trial.LeadHours, anchorRemaining, trial.PredictedRemaining, features, candidate, models, efforts);
 
-    private static double[] Vector(double leadHours, double anchorRemaining, double baselinePrediction, CodexForecastFeatures features,
+    internal static double[] Vector(double leadHours, double anchorRemaining, double baselinePrediction, CodexForecastFeatures features,
         string candidate, string[] models, string[] efforts)
     {
         var vector = new List<double> { leadHours, anchorRemaining, baselinePrediction };

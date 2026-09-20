@@ -1,3 +1,4 @@
+using TajsTokens.Core.Research;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 using TajsTokens.Core.Services;
@@ -146,18 +147,19 @@ public sealed class QuotaCostEvaluationTests
     }
 
     [Fact]
-    public void BandsNeedEarlierIndependentGenerationsNotManyRowsInOneReset()
+    public void BandsUseEarlierChronologicalBlocksWithinOneReset()
     {
         var rows = Observations(130);
         var report = QuotaCostEvaluation.Evaluate(rows, "fixture");
         var score = report.Scores.Single(x => x.Candidate == "total");
         Assert.True(score.BandSamples > 0);
-        Assert.All(score.Trials.Where(x => x.StartUtc < Start.AddDays(10)), x => Assert.Null(x.LowerPrediction));
+        Assert.All(score.Trials.Take(8), x => Assert.Null(x.LowerPrediction));
         var oneReset = rows.Select(x => x with { ResetUtc = Start.AddDays(100) }).ToArray();
         Assert.All(QuotaCostEvaluation.Evaluate(oneReset, "fixture").Scores, x =>
         {
-            Assert.Equal(0, x.BandSamples);
-            Assert.False(x.MaterialWin);
+            Assert.True(x.BandSamples > 0);
+            Assert.Equal(1, x.HeldOutGenerations);
+            Assert.True(x.EvidenceSupport.EvaluationBlocks > 8);
         });
     }
 
@@ -201,7 +203,7 @@ public sealed class QuotaCostEvaluationTests
         // Training: two generations; reference: next three; shift: three later generations.
         rows = rows.Select((x, i) => i >= 50 ? x with { EndUsed = 30, LowerDelta = 19, UpperDelta = 21 } : x).ToArray();
         var score = QuotaCostEvaluation.Evaluate(rows, "fixture").Scores.Single(x => x.Candidate == "total");
-        Assert.NotEmpty(score.CandidateShiftResets);
+        Assert.NotEmpty(score.CandidateShiftTimes);
         Assert.Equal(0, score.BandSamples);
         Assert.False(score.MaterialWin);
     }

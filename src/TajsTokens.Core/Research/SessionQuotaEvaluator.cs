@@ -1,11 +1,13 @@
 using TajsTokens.Core.Models;
 
-namespace TajsTokens.Core.Services;
+using TajsTokens.Core.Services;
+
+namespace TajsTokens.Core.Research;
 
 /// <summary>Exact-origin retrospective test of the hurdle-workload to quota-cost chain.</summary>
 public static class SessionQuotaEvaluator
 {
-    public const string Version = "session-quota-evaluation/v4";
+    public const string Version = "session-quota-evaluation/v5-blocks";
     public const string Methodology = "Research only, reconstructed event time; not deployment validation. " +
         "Separate known-account/source/plan/bucket/horizon cohorts, frozen first-20-interval total-token cost model. " +
         "Local recorded work is co-observed with account quota, not proven complete account attribution. " +
@@ -15,7 +17,7 @@ public static class SessionQuotaEvaluator
         "Missing, quiet and sparse origins are withheld, not zero-filled. " +
         "Conditional MAE uses positive-work outcomes; unconditional errors and pace use all matched outcomes. " +
         "The existing quota policy is compared only on identical origin/outcome pairs in the same cohort; missing baseline predictions remain absent. " +
-        "Joint expected-quota bands use maximum absolute errors from eight earlier completed reset generations; " +
+        "Joint expected-quota bands use maximum absolute errors from eight earlier completed chronological blocks; " +
         "80% empirical target, reported-value coverage, not latent coverage or exhaustion probability. " +
         "No multiplication of range endpoints, TT scale, native-credit conversion or automatic live promotion.";
 
@@ -32,7 +34,7 @@ public static class SessionQuotaEvaluator
             var trials = new List<SessionQuotaTrial>();
             var withheld = 0;
             var trainingIssue = training.Length < 20 ? "insufficient-training-intervals" :
-                !QuotaCostEvaluation.HasTrainingWork(training) ? "no-recorded-training-work" : null;
+                !QuotaAccountingModel.HasTrainingWork(training) ? "no-recorded-training-work" : null;
             if (trainingIssue is not null) withheld = ordered.Skip(20).Count(x => x.StartUtc >= training[^1].EndUtc);
             if (trainingIssue is null)
             {
@@ -41,7 +43,7 @@ public static class SessionQuotaEvaluator
                 var incumbent = QuotaPredictionService.ReplayAtTargets(data with { Quota = quota }, group.Key.HorizonHours,
                     ForecastReplayAvailability.ReconstructedEventTime,
                     ordered.Skip(20).Select(x => (x.StartUtc, x.EndUtc)).ToArray(), cancellationToken);
-                var fit = QuotaCostEvaluation.FitFrozen(training, "total", cancellationToken);
+                var fit = QuotaAccountingModel.FitFrozen(training, "total", cancellationToken);
                 foreach (var row in ordered.Skip(20).Where(x => x.StartUtc >= training[^1].EndUtc))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
@@ -57,10 +59,10 @@ public static class SessionQuotaEvaluator
                     // The existing frozen total-token model is linear, nonnegative and has no intercept.
                     var conditional = fit(row with { Features = row.Features with { Tokens = (long)Math.Clamp(tokens, 0, long.MaxValue) } });
                     var expected = conditional * prediction.RecordedActivityProbability;
-                    var errors = QuotaResetGenerationPolicy.Group(trials.Where(x =>
-                            x.EndUtc <= row.StartUtc && x.ResetUtc < row.StartUtc - QuotaResetGenerationPolicy.Tolerance), x => x.ResetUtc)
+                    var errors = ChronologicalEvidence.Blocks(trials.Where(x => x.EndUtc <= row.StartUtc),
+                            x => x.OriginUtc, x => x.EndUtc, x => x.ResetUtc)
                         .Select(g => g.Max(x => x.ExpectedError)).ToArray();
-                    var radius = QuotaForecastBacktester.ErrorRadius(errors);
+                    var radius = QuotaForecastCalibration.ErrorRadius(errors);
                     double? incumbentUsage = incumbent.TryGetValue(row.StartUtc, out var baseline) && baseline.TargetUtc == row.EndUtc
                         ? 100 - row.StartUsed - baseline.RemainingPercent : null;
                     trials.Add(new(row.StartUtc, row.EndUtc, row.ResetUtc, row.Features.Tokens > 0,

@@ -1,6 +1,8 @@
 using TajsTokens.Core.Models;
 
-namespace TajsTokens.Core.Services;
+using TajsTokens.Core.Services;
+
+namespace TajsTokens.Core.Research;
 
 /// <summary>Explicit cross-regime research only. Never supplies a live model or creates TT units.</summary>
 public static class QuotaTransferEvaluator
@@ -24,30 +26,30 @@ public static class QuotaTransferEvaluator
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 var heldout = destination.Rows.Skip(20).Where(x => x.StartUtc >= destinationTraining[^1].EndUtc).ToArray();
-                var generations = QuotaResetGenerationPolicy.Group(heldout, x => x.ResetUtc);
+                var generations = ChronologicalEvidence.Blocks(heldout, x => x.StartUtc, x => x.EndUtc, x => x.ResetUtc);
                 if (sourceTraining.Length < 20 || destinationTraining.Length < 20 || heldout.Length == 0)
                 {
                     scores.Add(new(source.Key.Cohort, destination.Key.Cohort, destination.Key.HorizonHours, model,
-                        sourceTraining.Length, destinationTraining.Length, heldout.Length, generations.Count,
+                        sourceTraining.Length, destinationTraining.Length, heldout.Length, QuotaResetGenerationPolicy.Group(heldout, x => x.ResetUtc).Count,
                         0, null, null, null, false, "insufficient-chronological-transfer-evidence"));
                     continue;
                 }
                 if (model != "total" && sourceTraining.Concat(destinationTraining).Concat(heldout).Any(x => !x.HasCompleteTokenCategories))
                 {
                     scores.Add(new(source.Key.Cohort, destination.Key.Cohort, destination.Key.HorizonHours, model,
-                        sourceTraining.Length, destinationTraining.Length, heldout.Length, generations.Count,
+                        sourceTraining.Length, destinationTraining.Length, heldout.Length, QuotaResetGenerationPolicy.Group(heldout, x => x.ResetUtc).Count,
                         0, null, null, null, false, "incomplete-category-transfer-evidence"));
                     continue;
                 }
-                if (!QuotaCostEvaluation.HasTrainingWork(sourceTraining) || !QuotaCostEvaluation.HasTrainingWork(destinationTraining))
+                if (!QuotaAccountingModel.HasTrainingWork(sourceTraining) || !QuotaAccountingModel.HasTrainingWork(destinationTraining))
                 {
                     scores.Add(new(source.Key.Cohort, destination.Key.Cohort, destination.Key.HorizonHours, model,
-                        sourceTraining.Length, destinationTraining.Length, heldout.Length, generations.Count,
+                        sourceTraining.Length, destinationTraining.Length, heldout.Length, QuotaResetGenerationPolicy.Group(heldout, x => x.ResetUtc).Count,
                         0, null, null, null, false, "no-recorded-training-work"));
                     continue;
                 }
-                var transferred = QuotaCostEvaluation.FitFrozen(sourceTraining, model, cancellationToken);
-                var local = QuotaCostEvaluation.FitFrozen(destinationTraining, model, cancellationToken);
+                var transferred = QuotaAccountingModel.FitFrozen(sourceTraining, model, cancellationToken);
+                var local = QuotaAccountingModel.FitFrozen(destinationTraining, model, cancellationToken);
                 var predictions = destinationTraining.Select(transferred).ToArray();
                 var scale = FitScale(predictions, destinationTraining);
                 var directLoss = generations.Average(g => g.Average(x => x.IntervalLoss(transferred(x))));
@@ -60,14 +62,14 @@ public static class QuotaTransferEvaluator
                     generations.Count(g => g.Average(x => x.IntervalLoss(transferred(x) * scale)) <
                         g.Average(x => x.IntervalLoss(local(x)))) > generations.Count / 2;
                 scores.Add(new(source.Key.Cohort, destination.Key.Cohort, destination.Key.HorizonHours, model,
-                    sourceTraining.Length, destinationTraining.Length, heldout.Length, generations.Count,
+                    sourceTraining.Length, destinationTraining.Length, heldout.Length, QuotaResetGenerationPolicy.Group(heldout, x => x.ResetUtc).Count,
                     scale, directLoss, scaledLoss, localLoss, improvement,
                     improvement ? "research-transfer-improvement-not-a-TT-unit" : "transfer-not-supported"));
             }
         }
-        return new("quota-transfer/v3", "Explicit source/destination comparisons only within the same recorded account, source and session lineage. " +
+        return new("quota-transfer/v4-blocks", "Explicit source/destination comparisons only within the same recorded account, source and session lineage. " +
             "Source weights use only intervals completed before the destination era. First 20 destination intervals fit one nonnegative scale and a local-only competitor. " +
-            "Later disjoint intervals compare unscaled source weights, scale-only transfer and destination-local weights with generation-balanced interval loss. " +
+            "Later disjoint intervals compare unscaled source weights, scale-only transfer and destination-local weights with block-balanced interval loss. " +
             "No cross-account inference, automatic transfer or TT currency. Missing compatible regimes are no evidence, not successful transfer.", scores);
     }
 

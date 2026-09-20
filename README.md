@@ -12,11 +12,9 @@ outlooks and usage predictions—with freshness and uncertainty kept visible.
   is explicitly unavailable under narrower work filters, not allocated in proportion to tokens.
   The same screen includes current outlooks, scenario planning, evidence health and an inference manifest.
   Retrospective accounting analysis is an explicit action, not a new background model.
-- **Advanced → Collector overview:** check prominent remaining-quota values, resets, labelled hourly token usage,
-  quota outlooks and 5/15-minute local-token nowcasts, paused after ten minutes without observed
-  activity (quiet open turns are not treated as confirmed idle sessions). A separate even-burn comparison shows usage
-  against elapsed time at the reading, with an explicitly inferred window start—not a forecast.
-  Collection details stay available on demand.
+- **Codex current outlook:** reported quota, resets, local-token nowcasts and an even-burn comparison
+  against elapsed time at the reading. Its window start is explicitly inferred; even-burn is not a forecast.
+  Collection controls and failures stay in Diagnostics rather than a second overview page.
 - **Codex → Inspect chats and agents:** navigate workspaces, threads and subagents; inspect turns, tools,
   context and supported native source details. Jump from a thread to its token usage.
   Thread Storage also shows bounded supplemental response-evidence coverage, selected counter snapshots and identity conflicts;

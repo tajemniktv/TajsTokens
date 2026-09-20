@@ -5,8 +5,9 @@ namespace TajsTokens.Core.Services;
 
 public static class SystemTrayStatusPresenter
 {
-    public static SystemTrayStatus Build(CodexIntelligenceSnapshot snapshot) => Build(snapshot.RuntimeEvidence);
-    public static SystemTrayStatus Build(TelemetrySnapshot snapshot)
+    public static SystemTrayStatus Build(CodexIntelligenceSnapshot snapshot) => Build(snapshot.CurrentState);
+    public static SystemTrayStatus Build(TelemetrySnapshot snapshot) => Build(CodexIntelligenceProjection.CurrentState(snapshot));
+    public static SystemTrayStatus Build(CodexCurrentState snapshot)
     {
         var fiveHour = LatestQuota(snapshot, QuotaWindowKind.FiveHour);
         var weekly = LatestQuota(snapshot, QuotaWindowKind.Weekly);
@@ -37,13 +38,13 @@ public static class SystemTrayStatusPresenter
         return new SystemTrayStatus(tooltip, constrained, allFreshLanes, health);
     }
 
-    private static QuotaSnapshot? LatestQuota(TelemetrySnapshot snapshot, QuotaWindowKind kind) =>
+    private static QuotaSnapshot? LatestQuota(CodexCurrentState snapshot, QuotaWindowKind kind) =>
         snapshot.QuotaSnapshots
             .Where(item => item.Kind == kind && snapshot.FindQuotaLane(item)?.NotReportedByProvider != true)
             .OrderByDescending(item => item.CapturedAtUtc)
             .FirstOrDefault();
 
-    private static string FormatQuota(TelemetrySnapshot telemetry, QuotaWindowKind kind, QuotaSnapshot? snapshot) =>
+    private static string FormatQuota(CodexCurrentState telemetry, QuotaWindowKind kind, QuotaSnapshot? snapshot) =>
         telemetry.QuotaLanes.Any(lane => lane.Kind == kind && lane.NotReportedByProvider)
             ? "not reported"
             : snapshot?.RemainingPercent is double remaining ? $"{remaining:0}%" : "?";

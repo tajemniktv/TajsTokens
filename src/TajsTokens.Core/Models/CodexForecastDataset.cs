@@ -21,6 +21,7 @@ public sealed record CodexForecastDataset(
     string Coverage)
 {
     public IReadOnlyList<RolloutAccountAssociation> AccountAssociations { get; init; } = [];
+    public IReadOnlyList<CodexLedgerEntry> Ledger { get; init; } = [];
 }
 
 /// <summary>Derived features known at one origin, not durable source observations.</summary>

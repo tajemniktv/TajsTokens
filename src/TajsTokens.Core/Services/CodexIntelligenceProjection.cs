@@ -9,6 +9,9 @@ public static class CodexIntelligenceProjection
 {
     public const string Version = "codex-intelligence/v1";
 
+    public static CodexCurrentState CurrentState(TelemetrySnapshot telemetry) => new(telemetry.CapturedAtUtc,
+        telemetry.QuotaSnapshots, telemetry.QuotaLanes, telemetry.QuotaDataFresh, telemetry.Sources);
+
     public static CodexIntelligenceSnapshot Live(TelemetrySnapshot telemetry)
     {
         var at = telemetry.CapturedAtUtc;
@@ -24,7 +27,7 @@ public static class CodexIntelligenceProjection
         return new(at, selection, [], [], [], [], current, telemetry.TokenForecast, ApiPriceWorkload.Calculate([]), [],
             [new("Live collection", telemetry.QuotaDataFresh ? "Reported" : "Partial or stale", "History is loaded separately for the selected range.")],
             Manifest(selection, Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { current, telemetry.TokenForecast }))))))
-            { RuntimeEvidence = telemetry };
+            { CurrentState = CurrentState(telemetry) };
     }
 
     public static IReadOnlyList<CodexLedgerEntry> Select(IEnumerable<CodexLedgerEntry> ledger, CodexSelection selection) =>
@@ -39,7 +42,7 @@ public static class CodexIntelligenceProjection
         var components = new SortedDictionary<string, string>(StringComparer.Ordinal)
         {
             ["projection"] = Version, ["workload"] = TokenWorkloadPredictionService.PolicyVersion,
-            ["accounting"] = QuotaCostEvaluation.Version, ["forecast"] = QuotaPredictionService.PolicyVersion,
+            ["accounting"] = QuotaAccountingModel.Version, ["forecast"] = QuotaPredictionService.PolicyVersion,
             ["reset-outlook"] = QuotaPredictionService.ResetOutlookPolicyVersion,
             ["evidence"] = CodexEvidenceDrift.Policy, ["daily-pairing"] = CodexDailyPairing.Policy,
             ["api-reference"] = ApiPriceWorkload.Version,

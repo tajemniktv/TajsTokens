@@ -6,12 +6,14 @@ public sealed record QuotaCostTrial(DateTimeOffset StartUtc, DateTimeOffset EndU
 
 public sealed record QuotaCostScore(QuotaHistoryCohort Cohort, double HorizonHours, string Candidate,
     int Observations, int TrainingSamples, int TrainingGenerations, int HeldOutSamples, int HeldOutGenerations,
-    double? IntervalLoss, double? DisplayedDeltaMae, double? GenerationMeanIntervalLoss,
+    double? IntervalLoss, double? DisplayedDeltaMae, double? BlockMeanIntervalLoss,
     double? ResidualP10, double? ResidualMedian, double? ResidualP90, double? UnexplainedPositiveMovement,
     int BandSamples, double? BandIntersectsTargetRate, bool MaterialWin, string Status,
     IReadOnlyDictionary<string, double> Coefficients, IReadOnlyList<QuotaCostTrial> Trials,
-    IReadOnlyList<DateTimeOffset> CandidateShiftResets)
+    IReadOnlyList<DateTimeOffset> CandidateShiftTimes)
 {
+    public Services.ChronologicalEvidence.Support EvidenceSupport => Services.ChronologicalEvidence.Describe(
+        Trials, x => x.StartUtc, x => x.EndUtc, x => x.ResetUtc, x => x.Residual);
     public string? RateCardVersion { get; init; }
     public int UnpricedTrainingIntervals { get; init; }
     public int IncompleteCategoryTrainingIntervals { get; init; }

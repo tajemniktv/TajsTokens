@@ -11,7 +11,7 @@ public sealed record ComposedQuotaTrial(DateTimeOffset OriginUtc, DateTimeOffset
     public double? ObservedRemainingPercent { get; init; }
     public double? LowerRemainingPercent { get; init; }
     public double? UpperRemainingPercent { get; init; }
-    public int CalibrationGenerations { get; init; }
+    public int CalibrationBlocks { get; init; }
     public string OriginActivity { get; init; } = "unrecorded";
     public long? RecordedOutcomeTokens { get; init; }
     public double? ZeroUseIntervalLoss { get; init; }
@@ -27,6 +27,8 @@ public sealed record ComposedQuotaScore(QuotaHistoryCohort Cohort, double Horizo
     double? IntervalLoss, double? CostOnlyIntervalLoss, double? PaceIntervalLoss,
     double? DisplayedDeltaMae, IReadOnlyList<ComposedQuotaTrial> Trials)
 {
+    public Services.ChronologicalEvidence.Support EvidenceSupport => Services.ChronologicalEvidence.Describe(
+        Trials, x => x.OriginUtc, x => x.OutcomeUtc, x => x.ResetUtc, x => x.ObservedDelta - x.PredictedDelta);
     public double? IncumbentIntervalLoss { get; init; }
     public ForecastReplayAvailability Availability { get; init; }
     public int IntervalOrigins { get; init; }

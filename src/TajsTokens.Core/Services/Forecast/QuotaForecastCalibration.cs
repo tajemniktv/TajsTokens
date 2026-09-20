@@ -14,7 +14,7 @@ public sealed record QuotaForecastTrial(
     double ObservedRemaining,
     double? LowerRemaining,
     double? UpperRemaining,
-    int CalibrationEpochs,
+    int CalibrationGroups,
     bool? ObservedExhaustion,
     bool PredictedExhaustion,
     double? ExhaustionEtaBracketErrorHours,
@@ -23,11 +23,12 @@ public sealed record QuotaForecastTrial(
 
 /// <summary>
 /// Source-homogeneous chronological replay. Calibration sees only outcomes from earlier
-/// generations already observed at the origin. No target is interpolated across a reset.
+/// blocks already observed at the origin (completed cycles for reset outlooks).
+/// No target is interpolated across a reset.
 /// </summary>
-public static class QuotaForecastBacktester
+public static class QuotaForecastCalibration
 {
-    public const int MinimumCalibrationEpochs = 8;
+    public const int MinimumCalibrationGroups = 8;
     public const double NominalCoverage = 0.8;
     // Observed app-server reset timestamps alternate by one second. This is a derived
     // segmentation tolerance, never a normalization of provider facts or anchor identity.
@@ -41,7 +42,7 @@ public static class QuotaForecastBacktester
     {
         var scores = candidates.Select(pair => (Model: pair.Key,
             Errors: CalibrationErrors(pair.Value, origin, reset, lead)))
-            .Where(x => x.Errors.Count >= MinimumCalibrationEpochs)
+            .Where(x => x.Errors.Count >= MinimumCalibrationGroups)
             .Select(x => (x.Model, Error: x.Errors.Average())).ToArray();
         if (scores.Length == 0) return fallback;
         var best = scores.Min(x => x.Error);
@@ -76,7 +77,7 @@ public static class QuotaForecastBacktester
                 Model = "adaptive/" + model,
                 LowerRemaining = radius is double r ? Math.Max(0, point.PredictedRemaining - r) : null,
                 UpperRemaining = radius is double r2 ? Math.Min(100, point.PredictedRemaining + r2) : null,
-                CalibrationEpochs = errors.Count
+                CalibrationGroups = errors.Count
             });
         }
         return selected;
@@ -195,18 +196,24 @@ public static class QuotaForecastBacktester
         => QuotaResetGenerationPolicy.Group(trials, x => x.ResetUtc);
 
     public static IReadOnlyList<double> CalibrationErrors(IEnumerable<QuotaForecastTrial> trials,
-        DateTimeOffset origin, DateTimeOffset reset, double leadHours) => ResetGenerations(trials
-        .Where(x => x.OutcomeUtc < origin && x.ResetUtc < origin - ResetJitterTolerance &&
-                    !QuotaResetGenerationPolicy.SameTimestamp(x.ResetUtc, reset) &&
-                    x.LeadHours >= leadHours / 2 && x.LeadHours <= leadHours * 2))
-        // One score per jitter-bounded reset generation, not correlated polling samples.
-        .Select(g => g.OrderBy(x => Math.Abs(x.LeadHours - leadHours)).ThenByDescending(x => x.OriginUtc).First())
-        .OrderByDescending(x => x.ResetUtc).Take(40)
-        .Select(x => Math.Abs(x.PredictedRemaining - x.ObservedRemaining)).ToArray();
+        DateTimeOffset origin, DateTimeOffset reset, double leadHours)
+    {
+        var available = trials.Where(x => x.OutcomeUtc < origin &&
+            x.LeadHours >= leadHours / 2 && x.LeadHours <= leadHours * 2).ToArray();
+        // End-of-window validation genuinely needs completed cycles. Fixed horizons do not.
+        if (available.Any(x => x.Target == "near-reset-proxy"))
+            return ResetGenerations(available.Where(x => x.ResetUtc < origin - ResetJitterTolerance &&
+                !QuotaResetGenerationPolicy.SameTimestamp(x.ResetUtc, reset)))
+                .Select(g => g.OrderBy(x => Math.Abs(x.LeadHours - leadHours)).ThenByDescending(x => x.OriginUtc).First())
+                .OrderByDescending(x => x.ResetUtc).Take(40)
+                .Select(x => Math.Abs(x.PredictedRemaining - x.ObservedRemaining)).ToArray();
+        return ChronologicalEvidence.Blocks(available, x => x.OriginUtc, x => x.OutcomeUtc, x => x.ResetUtc)
+            .TakeLast(40).Select(g => g.Max(x => Math.Abs(x.PredictedRemaining - x.ObservedRemaining))).ToArray();
+    }
 
     public static double? ErrorRadius(IReadOnlyList<double> errors)
     {
-        if (errors.Count < MinimumCalibrationEpochs) return null;
+        if (errors.Count < MinimumCalibrationGroups) return null;
         var sorted = errors.Order().ToArray();
         var rank = (int)Math.Ceiling((sorted.Length + 1) * NominalCoverage);
         // One point is a conservative meter-resolution policy, not a provider precision guarantee.

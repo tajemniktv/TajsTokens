@@ -3,9 +3,9 @@ using TajsTokens.Core.Models;
 namespace TajsTokens.Core.Services;
 
 /// <summary>Actual-cost and origin-only forecast errors on identical disjoint outcomes.</summary>
-public static class ComposedQuotaEvaluator
+public static class ComposedQuotaValidation
 {
-    public const string Version = "composed-quota/v11";
+    public const string Version = "composed-quota/v12-blocks";
     public static IReadOnlyList<double> EvaluationHorizons { get; } = Array.AsReadOnly(new[] { 5d / 60, .25, .5, 2d });
 
     public static ComposedQuotaEvaluation Evaluate(CodexForecastDataset data, CancellationToken cancellationToken = default,
@@ -36,12 +36,12 @@ public static class ComposedQuotaEvaluator
                 void Withheld(string reason) => withheldReasons[reason] = withheldReasons.GetValueOrDefault(reason) + 1;
                 var needsCategories = candidate.Replace("asserted-", "", StringComparison.Ordinal) != "total";
                 var completeTraining = !needsCategories || training.All(x => x.HasCompleteTokenCategories);
-                var hasTrainingWork = QuotaCostEvaluation.HasTrainingWork(training);
+                var hasTrainingWork = QuotaAccountingModel.HasTrainingWork(training);
                 if (training.Length >= 20 && !hasTrainingWork) withheldReasons["no-recorded-training-work"] = training.Length;
                 if (!completeTraining) withheldReasons["incomplete-category-training"] = training.Count(x => !x.HasCompleteTokenCategories);
                 if (nativeTraining.Length == 20 && completeTraining && hasTrainingWork)
                 {
-                    var fit = QuotaCostEvaluation.FitFrozen(training, candidate.Replace("asserted-", "", StringComparison.Ordinal), cancellationToken);
+                    var fit = QuotaAccountingModel.FitFrozen(training, candidate.Replace("asserted-", "", StringComparison.Ordinal), cancellationToken);
                     foreach (var row in ordered.Skip(20).Where(x => x.StartUtc >= training[^1].EndUtc))
                     {
                         cancellationToken.ThrowIfCancellationRequested();
@@ -104,7 +104,7 @@ public static class ComposedQuotaEvaluator
                             ObservedRemainingPercent = 100 - row.EndUsed,
                             LowerRemainingPercent = calibration.Radius is { } low ? Math.Max(0, remaining - low) : null,
                             UpperRemainingPercent = calibration.Radius is { } high ? Math.Min(100 - row.StartUsed, remaining + high) : null,
-                            CalibrationGenerations = calibration.Generations,
+                            CalibrationBlocks = calibration.Blocks,
                             IncumbentIntervalLoss = incumbent.TryGetValue(row.StartUtc, out var baseline) &&
                                 baseline.TargetUtc == row.EndUtc
                                 ? row.IntervalLoss(100 - row.StartUsed - baseline.RemainingPercent) : null
@@ -136,8 +136,8 @@ public static class ComposedQuotaEvaluator
             "and an outcome meter collected within five minutes of its event; token prediction uses origin-time availability. " +
             "Unused activity/context/tier backfills do not change token-cost training availability. Withheld reason counts can overlap. " +
             "Backfilled history alone cannot qualify. No future workload/model/context features enter predictions. " +
-            "Missing/stale composition is withheld, not zero. Joint workload/cost ranges use the live policy's completed-reset maximum " +
-            "absolute displayed-delta errors, with eight earlier generations, an empirical 80% target and a one-point minimum radius. " +
+            "Missing/stale composition is withheld, not zero. Joint workload/cost ranges use the live policy's completed-block maximum " +
+            "absolute displayed-delta errors, with eight earlier blocks, an empirical 80% target and a one-point minimum radius. " +
             "Calibration labels must already be available at the origin (event time for reconstruction, actual collection for strict replay). " +
             "Coverage measures reported remaining quota, not latent true usage or exhaustion probability. Sparse ranges remain absent. " +
             "No activity-conditioned quota distribution or live promotion is implied. " + ComposedQuotaBreakdowns.Methodology, scores);

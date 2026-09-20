@@ -45,7 +45,8 @@ public sealed class CodexIntelligenceTests
                 TaskUsage = null, Activity = new(35, 35, null, null, null, [new("2026-09-01", 35)]) }]), default);
             await Assert.ThrowsAsync<InvalidOperationException>(() => repository.SaveServerEvidenceAsync(new([capture with { Detail = "overwrite" }]), default));
             var service = new SqliteIntelligenceService(database, repository);
-            var engine = new CodexIntelligenceEngine(database, service, () => TelemetrySnapshot.Empty, () => []);
+            var evidence = new CodexServerEvidenceService(database, repository, new CodexAppServerEvidenceProvider());
+            var engine = new CodexIntelligenceEngine(() => new SqliteForecastDatasetReader(database), evidence, service, () => TelemetrySnapshot.Empty);
             var selection = new CodexSelection(Start, Start.AddDays(1));
             var result = await engine.QueryAsync(selection, default);
             Assert.Equal(35, Assert.Single(Assert.Single(result.ProviderEvidence, x => x.Activity is not null).Activity!.DailyUsageBuckets!).Tokens);
@@ -54,8 +55,14 @@ public sealed class CodexIntelligenceTests
             Assert.Equal(35, Assert.Single(result.Chats).SelectedLocalTokens);
             Assert.Contains("ownership incomplete", result.Chats[0].Compatibility);
             Assert.Empty((await engine.QueryAsync(selection with { AccountKey = "account" }, default)).Ledger);
-            var asserted = new CodexIntelligenceEngine(database, service, () => TelemetrySnapshot.Empty, () =>
-                [new("claim", "codex", "default", "source", "session", Start, Start, "account", Start.AddDays(1))]);
+            var canonical = await new SqliteForecastDatasetReader(database,
+                [new("wrong-provider", "other", "default", "source", "session", Start, Start, "account", Start)])
+                .ReadAsync("codex", "default", Start, Start.AddDays(1), default, includeLedger: true);
+            Assert.Equal(Assert.Single(canonical.Tokens), Assert.Single(canonical.Ledger).Workload);
+            Assert.Equal(AccountEvidenceClass.Unattributed, canonical.Ledger[0].Ownership);
+            var asserted = new CodexIntelligenceEngine(() => new SqliteForecastDatasetReader(database,
+                [new("claim", "codex", "default", "source", "session", Start, Start, "account", Start.AddDays(1))]),
+                evidence, service, () => TelemetrySnapshot.Empty);
             var attributed = await asserted.QueryAsync(selection with { AccountKey = "account", ThreadId = "native-thread" }, default);
             Assert.Single(attributed.Ledger); Assert.Single(attributed.Chats);
             Assert.Empty(attributed.Current); Assert.Empty(attributed.QuotaTimeline);
@@ -77,6 +84,7 @@ public sealed class CodexIntelligenceTests
         Assert.Equal(quota, Assert.Single(live.Current).Current);
         Assert.Null(live.Current[0].Forecast);
         Assert.Equal(SystemTrayStatusPresenter.Build(telemetry), SystemTrayStatusPresenter.Build(live));
+        Assert.DoesNotContain(typeof(CodexIntelligenceSnapshot).GetProperties(), p => p.PropertyType == typeof(TelemetrySnapshot));
         var artifact = new CodexNumericInference("fixture", 50, [2, 3], [-1, -2], 0, 100);
         Assert.Equal(42, JsonSerializer.Deserialize<CodexNumericInference>(JsonSerializer.Serialize(artifact))!.Reconstruct());
         Assert.Equal(artifact, JsonSerializer.Deserialize<CodexNumericInference>(JsonSerializer.Serialize(artifact)));

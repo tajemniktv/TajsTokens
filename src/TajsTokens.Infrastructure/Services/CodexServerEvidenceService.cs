@@ -12,8 +12,68 @@ namespace TajsTokens.Infrastructure.Services;
 /// <summary>One bounded cadence, separate evidence store/read model. Never feeds live quota policy.</summary>
 public sealed class CodexServerEvidenceService(string databasePath, SqliteTelemetryRepository repository,
     ICodexServerEvidenceProvider provider, Func<IReadOnlyList<RolloutAccountAssociation>>? associations = null,
-    ICodexServerEvidenceProvider? backendProvider = null)
+    ICodexServerEvidenceProvider? backendProvider = null) : ICodexServerEvidenceReader
 {
+    public async Task<CodexServerEvidenceHistory> ReadHistoryAsync(DateTimeOffset fromUtc, DateTimeOffset asOf,
+        string? accountKey, CancellationToken token)
+    {
+        await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder
+            { DataSource = databasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
+        await connection.OpenAsync(token);
+        using var transaction = connection.BeginTransaction(deferred: true);
+        using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.Parameters.AddWithValue("$from", fromUtc.ToUniversalTime().ToString("O"));
+        command.CommandText = """
+            SELECT evidence_json,activity_bucket_set_id FROM codex_server_evidence
+            WHERE collected_at_utc >= $from AND collected_at_utc <= $asof AND surface<>'QuotaMetadata'
+              AND ($account IS NULL OR correlated_account_key=$account OR correlated_account_key IS NULL)
+            ORDER BY collected_at_utc DESC,observation_id DESC LIMIT 1001;
+            """;
+        command.Parameters.AddWithValue("$asof", asOf.ToString("O"));
+        command.Parameters.AddWithValue("$account", accountKey ?? (object)DBNull.Value);
+        var evidence = new List<CodexServerObservation>();
+        long evidenceBytes = 0;
+        var evidenceTruncated = false;
+        var invalidEvidence = 0;
+        var bucketSets = new Dictionary<string, long>();
+        await using (var reader = await command.ExecuteReaderAsync(token))
+        {
+            while (await reader.ReadAsync(token))
+            {
+                var json = reader.GetString(0);
+                evidenceBytes += json.Length * 2L;
+                if (evidence.Count >= 1000 || evidenceBytes > 16 * 1024 * 1024) { evidenceTruncated = true; break; }
+                try
+                {
+                    var row = JsonSerializer.Deserialize<CodexServerObservation>(json);
+                    if (row is not null)
+                    {
+                        evidence.Add(row);
+                        if (!reader.IsDBNull(1)) bucketSets[row.Id] = reader.GetInt64(1);
+                    }
+                    else invalidEvidence++;
+                }
+                catch (JsonException) { invalidEvidence++; }
+            }
+        }
+        var dayCache = new Dictionary<long, IReadOnlyList<CodexAccountDay>>();
+        for (var i = 0; i < evidence.Count; i++)
+        {
+            if (evidence[i].Activity is not { } activity || !bucketSets.TryGetValue(evidence[i].Id, out var set)) continue;
+            if (!dayCache.TryGetValue(set, out var days))
+            {
+                days = await CodexServerEvidenceStorage.ReadDaysAsync(connection, transaction, set, token);
+                evidenceBytes += days.Count * 64L;
+                if (evidenceBytes > 16 * 1024 * 1024) { evidenceTruncated = true; break; }
+                dayCache.Add(set, days);
+            }
+            evidence[i] = evidence[i] with { Activity = activity with { DailyUsageBuckets = days } };
+        }
+        transaction.Commit();
+        return new(evidence, evidenceTruncated, invalidEvidence, asOf);
+    }
+
     private readonly SemaphoreSlim _gate = new(1, 1);
     private DateTimeOffset _nextAttempt;
     private bool _historicalAvailable;

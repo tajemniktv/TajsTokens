@@ -186,7 +186,7 @@ public sealed class QuotaAccountScopeTests : IDisposable
         var first = Point(Now.AddHours(-1), 90, "A");
         var second = Point(Now, 5, "B");
         Assert.Empty(new QuotaResetDetector().Detect([first, second]));
-        Assert.Throws<ArgumentException>(() => QuotaForecastBacktester.SplitEpochs([first, second]));
+        Assert.Throws<ArgumentException>(() => QuotaForecastCalibration.SplitEpochs([first, second]));
         var own = new[] { Point(Now.AddHours(-1), 10, "B"), Point(Now, 20, "B") };
 
         Assert.Equal(QuotaPredictionService.BuildResetOutlook(own, Now), QuotaPredictionService.BuildResetOutlook([first, .. own], Now));
@@ -215,9 +215,9 @@ public sealed class QuotaAccountScopeTests : IDisposable
         var samples = Enumerable.Range(1, 20).Select(i => new ScenarioHistorySample(
             QuotaWindowKind.FiveHour, Now.AddHours(-i - 1), Now.AddHours(-i), 5, 1, 0, null, null,
             Source: "codex-app-server:codex", AccountKey: "A")).ToArray();
-        var planner = new ScenarioPlannerService();
-        Assert.True(planner.Estimate(new(1, 1, 0, AccountKey: "A"), samples, Now).FiveHour.HasEnoughHistory);
-        Assert.False(planner.Estimate(new(1, 1, 0, AccountKey: "B"), samples, Now).FiveHour.HasEnoughHistory);
+
+        Assert.True(QuotaPredictionService.Simulate(new(1, 1, 0, AccountKey: "A"), samples, Now).FiveHour.HasEnoughHistory);
+        Assert.False(QuotaPredictionService.Simulate(new(1, 1, 0, AccountKey: "B"), samples, Now).FiveHour.HasEnoughHistory);
     }
 
     [Fact]

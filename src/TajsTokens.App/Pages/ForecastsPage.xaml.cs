@@ -132,7 +132,7 @@ public sealed partial class ForecastsPage : Page
         CurrentOutlooks.ItemsSource = current.Select(x =>
         {
             var forecast = snapshot.FindCurrentForecast(x);
-            return ViewModels.OverviewViewModel.BuildQuotaCard(x.Kind == QuotaWindowKind.Weekly ? "Weekly quota" : "5-hour quota", x,
+            return ViewModels.QuotaCardPresenter.BuildQuotaCard(x.Kind == QuotaWindowKind.Weekly ? "Weekly quota" : "5-hour quota", x,
                 forecast is { IsFresh: true } ? forecast.Forecast : null, snapshot.IsQuotaSnapshotFresh(x));
         }).ToArray();
         var trusted = current.Select(snapshot.FindCurrentForecast).Where(x => x is { IsFresh: true }).ToArray();
@@ -386,13 +386,13 @@ public sealed partial class ForecastsPage : Page
                     score.Candidate,
                     score.Status == "no-recorded-training-work" ? "Cost unavailable: no recorded workload in frozen training" :
                     score.HeldOutSamples == 0 ? "Insufficient independent history for held-out cost calibration" :
-                        $"Interval loss {score.IntervalLoss:0.###}pp · {score.HeldOutSamples:N0} held-out intervals · {score.HeldOutGenerations} reset generations",
+                        $"Interval loss {score.IntervalLoss:0.###}pp · {score.HeldOutSamples:N0} held-out intervals · {score.EvidenceSupport.EvaluationBlocks} blocks / {score.HeldOutGenerations} resets · ESS estimate {score.EvidenceSupport.EffectiveSampleSize:0.#}",
                     $"{score.Status} · training {score.TrainingSamples} intervals / {score.TrainingGenerations} generations. " +
                     $"Incomplete category evidence: {score.IncompleteCategoryTrainingIntervals} training / {score.IncompleteCategoryHeldOutIntervals} held-out intervals withheld from category candidates. " +
-                    $"Displayed-delta MAE {ResearchMetric(score.DisplayedDeltaMae, "pp")}; generation-average interval loss {ResearchMetric(score.GenerationMeanIntervalLoss, "pp")}. " +
+                    $"Displayed-delta MAE {ResearchMetric(score.DisplayedDeltaMae, "pp")}; block-average interval loss {ResearchMetric(score.BlockMeanIntervalLoss, "pp")}. " +
                     $"Residual p10 / median / p90: {ResearchMetric(score.ResidualP10, "pp")} / {ResearchMetric(score.ResidualMedian, "pp")} / {ResearchMetric(score.ResidualP90, "pp")}. " +
                     $"Mean unexplained movement above envelope lower bound: {ResearchMetric(score.UnexplainedPositiveMovement, "pp")}. Not causal attribution. " +
-                    $"{score.CandidateShiftResets.Count} candidate residual shifts; no automatic alerts or retraining. " +
+                    $"{score.CandidateShiftTimes.Count} candidate residual shifts; no automatic alerts or retraining. " +
                     (score.BandSamples > 0 ? $"Band/target intersection {score.BandIntersectsTargetRate:P0} on {score.BandSamples} intervals; not latent coverage. " : "Insufficient generations for bands. ") +
                     (score.RateCardVersion is null ? "" :
                         $"API-price baseline {score.RateCardVersion}: {score.UnpricedTrainingIntervals} unpriced training / {score.UnpricedHeldOutIntervals} unpriced held-out intervals; {score.UnpricedReportedTokens:N0} unpriced reported tokens. " +
@@ -403,7 +403,7 @@ public sealed partial class ForecastsPage : Page
                     score.CostModel,
                     score.WithheldReasons.ContainsKey("no-recorded-training-work") ? "Cost unavailable: no recorded workload in frozen training" :
                     score.HeldOutIntervals == 0 ? "Insufficient chronological history" :
-                        $"Forecast interval loss {score.IntervalLoss:0.###}pp · {score.HeldOutIntervals} held-out intervals / {score.ResetGenerations} resets",
+                        $"Forecast interval loss {score.IntervalLoss:0.###}pp · {score.HeldOutIntervals} held-out intervals / {score.EvidenceSupport.EvaluationBlocks} blocks / {score.ResetGenerations} resets · ESS estimate {score.EvidenceSupport.EffectiveSampleSize:0.#}",
                     ComposedQuotaPolicy.AssessSelection(score, report.EvaluatedAtUtc,
                         score.Availability == ForecastReplayAvailability.CollectedByOrigin).Explanation + "\n\n" +
                     $"Actual-work cost loss {ResearchMetric(score.CostOnlyIntervalLoss, "pp")} versus forecast loss {ResearchMetric(score.IntervalLoss, "pp")}. " +
@@ -434,7 +434,7 @@ public sealed partial class ForecastsPage : Page
                     $"Basis/calibration intervals {score.BasisIntervals}/{score.CalibrationIntervals}. Unsupported held-out work: {score.UnsupportedIntervals} intervals / {CompactTokens(score.UnsupportedTokens)} tokens. " +
                     $"Basis context {QuotaHistoryPolicy.DescribeCohort(score.BasisCohort)}; basis ends {score.BasisEndUtc?.ToString("u") ?? "unavailable"}, calibration ends {score.CalibrationEndUtc?.ToString("u") ?? "unavailable"}. " +
                     $"Supported held-out workload {ResearchMetric(score.HeldOutTt, "TT")}; separate calibration {ResearchMetric(score.QuotaPointsPerTt, "pp/TT", "0.######")}. " +
-                    $"Matched reset-balanced loss: TT scalar {ResearchMetric(score.ScalarLoss, "pp")}, full vector {ResearchMetric(score.FullVectorLoss, "pp")}, raw tokens {ResearchMetric(score.RawTokenLoss, "pp")}. " +
+                    $"Matched block-balanced loss: TT scalar {ResearchMetric(score.ScalarLoss, "pp")}, full vector {ResearchMetric(score.FullVectorLoss, "pp")}, raw tokens {ResearchMetric(score.RawTokenLoss, "pp")}. " +
                     $"Zero-use loss {ResearchMetric(score.ZeroLoss, "pp")}; displayed-delta MAE: TT {ResearchMetric(score.ScalarMae, "pp")}, full {ResearchMetric(score.FullVectorMae, "pp")}, raw {ResearchMetric(score.RawTokenMae, "pp")}. " +
                     FormatTtBias(score) +
                     (score.Basis is { } basis ? "Category weights/token: " + string.Join(", ", basis.Weights.Select(x => x.ToString("G6", CultureInfo.InvariantCulture))) +

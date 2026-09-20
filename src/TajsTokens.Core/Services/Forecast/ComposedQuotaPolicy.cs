@@ -19,13 +19,13 @@ public static class ComposedQuotaPolicy
             Workload = data.Workload.Where(x => x.ObservedAtUtc <= anchor.CapturedAtUtc && x.CapturedAtUtc <= anchor.CapturedAtUtc).ToArray(),
             Context = data.Context.Where(x => x.ObservedAtUtc <= anchor.CapturedAtUtc && x.CapturedAtUtc <= anchor.CapturedAtUtc).ToArray()
         };
-        var cost = QuotaCostEvaluation.Evaluate(prefix, cancellationToken);
-        var eligible = cost.Scores.Where(x => x.Cohort == QuotaHistoryPolicy.Cohort(anchor) && x.MaterialWin && x.CandidateShiftResets.Count == 0 &&
+        var cost = QuotaAccountingModel.Evaluate(prefix, cancellationToken);
+        var eligible = cost.Scores.Where(x => x.Cohort == QuotaHistoryPolicy.Cohort(anchor) && x.MaterialWin && x.CandidateShiftTimes.Count == 0 &&
             x.Candidate is "total" or "categories" or "model-effort").ToArray();
         if (eligible.Length == 0 && prefix.AccountAssociations.Count == 0) return incumbent;
         // Extra short-horizon research does not expand the released forecast/promotion surface.
-        var evaluation = ComposedQuotaEvaluator.Evaluate(prefix, cancellationToken, horizons: [.5, 2d]);
-        var strict = ComposedQuotaEvaluator.Evaluate(prefix, cancellationToken, ForecastReplayAvailability.CollectedByOrigin, [.5, 2d]);
+        var evaluation = ComposedQuotaValidation.Evaluate(prefix, cancellationToken, horizons: [.5, 2d]);
+        var strict = ComposedQuotaValidation.Evaluate(prefix, cancellationToken, ForecastReplayAvailability.CollectedByOrigin, [.5, 2d]);
         var observations = QuotaCostObservationBuilder.Build(prefix, cancellationToken);
         return incumbent.Select(baseline =>
         {
@@ -47,28 +47,28 @@ public static class ComposedQuotaPolicy
                 baseline.HorizonHours, ForecastReplayAvailability.CollectedByOrigin, cancellationToken)?.Composition;
             if (workload is null) return baseline;
             var training = QuotaCostTrainingPolicy.Select(observations, selected.Cohort, baseline.HorizonHours, selected.AssertedTrainingIntervals > 0);
-            if (training.Length < 20 || !QuotaCostEvaluation.HasTrainingWork(training)) return baseline;
+            if (training.Length < 20 || !QuotaAccountingModel.HasTrainingWork(training)) return baseline;
             if (selected.CostModel.Replace("asserted-", "", StringComparison.Ordinal) != "total" &&
                 training.Any(x => !x.HasCompleteTokenCategories)) return baseline;
             if (workload.ModelShares.Keys.Except(training.SelectMany(x => x.Features.ModelTokenShares.Keys)).Any() ||
                 workload.EffortShares.Keys.Except(training.SelectMany(x => x.Features.EffortTokenShares.Keys)).Any()) return baseline;
-            var inference = QuotaCostEvaluation.CaptureFrozenInference(training, selected.CostModel.Replace("asserted-", "", StringComparison.Ordinal),
-                ComposedQuotaEvaluator.Project(training[0], workload), anchor.RemainingPercent!.Value, cancellationToken);
+            var inference = QuotaAccountingModel.CaptureFrozenInference(training, selected.CostModel.Replace("asserted-", "", StringComparison.Ordinal),
+                ComposedQuotaValidation.Project(training[0], workload), anchor.RemainingPercent!.Value, cancellationToken);
             var calibration = CalibrateUncertainty(liveEvidence.Trials, anchor.CapturedAtUtc);
             if (calibration.Radius is not { } radius) return baseline;
             var remaining = inference.Reconstruct();
             return baseline with
             {
                 RemainingPercent = remaining, ExpectedUsagePercent = anchor.RemainingPercent.Value - remaining, Inference = inference,
-                Model = ComposedQuotaEvaluator.Version + "/" + selected.CostModel, UsesWorkload = true,
+                Model = ComposedQuotaValidation.Version + "/" + selected.CostModel, UsesWorkload = true,
                 TrainingSamples = training.Length, ValidationSamples = selected.HeldOutIntervals,
                 ValidationMeanAbsoluteError = selected.DisplayedDeltaMae,
                 LowerRemainingPercent = Math.Max(0, remaining - radius),
                 UpperRemainingPercent = Math.Min(anchor.RemainingPercent.Value, remaining + radius),
-                IntervalSamples = calibration.Generations,
+                IntervalSamples = calibration.Blocks,
                 Explanation = "Origin-only predicted workload composition through frozen account/cohort-local cost weights earned selection over pace and incumbent. " +
                     $"{selected.HeldOutIntervals} retrospective outcomes; {liveEvidence.HeldOutIntervals} collection-time outcomes across {liveEvidence.ResetGenerations} reset generations; {selected.AssertedTrainingIntervals} user-asserted training intervals. " +
-                    "Empirical 80%-target range from completed-generation maximum errors; not an exhaustion probability or guarantee. " +
+                    "Empirical 80%-target range from completed-block maximum errors; not an exhaustion probability or guarantee. " +
                     "Unobserved account activity remains unexplained; unsupported/stale composition falls back to the incumbent."
             };
         }).ToArray();
@@ -76,12 +76,12 @@ public static class ComposedQuotaPolicy
 
     // Caller supplies a single source/account/cohort/horizon/model. Calibrate combined workload
     // and cost error directly; never multiply separate uncertainty endpoints.
-    public static (double? Radius, int Generations) CalibrateUncertainty(
+    public static (double? Radius, int Blocks) CalibrateUncertainty(
         IEnumerable<ComposedQuotaTrial> trials, DateTimeOffset origin)
     {
-        var errors = QuotaResetGenerationPolicy.Group(trials.Where(x =>
-                x.OutcomeUtc <= origin && x.CalibrationAvailableAtUtc <= origin &&
-                x.ResetUtc < origin - QuotaResetGenerationPolicy.Tolerance), x => x.ResetUtc)
+        var errors = ChronologicalEvidence.Blocks(trials.Where(x =>
+                x.OutcomeUtc <= origin && x.CalibrationAvailableAtUtc <= origin),
+                x => x.OriginUtc, x => x.OutcomeUtc, x => x.ResetUtc)
             .Select(g => g.Max(x => Math.Abs(x.PredictedDelta - x.ObservedDelta))).Order().ToArray();
         return (errors.Length < 8 ? null : Math.Max(1,
             errors[Math.Min(errors.Length - 1, (int)Math.Ceiling((errors.Length + 1) * .8) - 1)]), errors.Length);
@@ -94,10 +94,11 @@ public static class ComposedQuotaPolicy
     public static ComposedSelectionAssessment AssessSelection(ComposedQuotaScore score, DateTimeOffset origin, bool requireStrict = false)
     {
         var reasons = new List<string>();
-        var generations = QuotaResetGenerationPolicy.Group(score.Trials, x => x.ResetUtc);
+        var generations = ChronologicalEvidence.Blocks(score.Trials, x => x.OriginUtc, x => x.OutcomeUtc, x => x.ResetUtc);
         var pairs = score.Trials.Count(x => x.IncumbentIntervalLoss is not null);
         if (score.HeldOutIntervals < 16 || score.Trials.Count < 16) reasons.Add("At least 16 held-out outcomes are required.");
-        if (score.ResetGenerations < 8 || generations.Count < 8) reasons.Add("At least eight independent reset generations are required.");
+        if (generations.Sum(x => x.Count) < 16) reasons.Add("At least 16 non-overlapping valid outcomes are required; duplicate polls do not add support.");
+        if (generations.Count < 8) reasons.Add("At least eight chronological evaluation blocks are required.");
         if (score.MissingComposition > score.HeldOutIntervals) reasons.Add("Withheld intervals exceed evaluated outcomes.");
         if (score.Trials.Any(x => x.OutcomeUtc > origin)) reasons.Add("Some outcomes occur after the assessment time.");
         if (score.Trials.Count == 0) reasons.Add("No held-out trials are available.");
@@ -109,12 +110,12 @@ public static class ComposedQuotaPolicy
         double? incumbentLoss = generations.Count == 0 || pairs != score.Trials.Count ? null :
             generations.Average(g => g.Average(x => x.IncumbentIntervalLoss!.Value));
         if (loss is { } l && paceLoss is { } p && !(l + .1 < p && l < p * .9))
-            reasons.Add("The reset-balanced improvement over pace is not both greater than 0.1pp and 10%.");
+            reasons.Add("The block-balanced improvement over pace is not both greater than 0.1pp and 10%.");
         if (loss is { } il && incumbentLoss is { } b)
         {
-            if (!(il + .1 < b && il < b * .9)) reasons.Add("The reset-balanced improvement over incumbent is not both greater than 0.1pp and 10%.");
+            if (!(il + .1 < b && il < b * .9)) reasons.Add("The block-balanced improvement over incumbent is not both greater than 0.1pp and 10%.");
             if (generations.Count(g => g.Average(x => x.IntervalLoss) < g.Average(x => x.IncumbentIntervalLoss!.Value)) <= generations.Count / 2)
-                reasons.Add("The challenger does not beat incumbent in a majority of reset generations.");
+                reasons.Add("The challenger does not beat incumbent in a majority of chronological blocks.");
         }
         if (requireStrict)
         {
@@ -124,9 +125,9 @@ public static class ComposedQuotaPolicy
             if (incumbentLoss is not null && !generations.OrderByDescending(g => g.Max(x => x.OutcomeUtc)).Take(2)
                 .All(g => g.Average(x => x.IntervalLoss) <= g.Average(x => x.IncumbentIntervalLoss!.Value) &&
                     g.Average(x => x.IntervalLoss) <= g.Average(x => x.PaceIntervalLoss)))
-                reasons.Add("One of the latest two reset groups loses to pace or incumbent.");
+                reasons.Add("One of the latest two blocks loses to pace or incumbent.");
             if (score.AssertedTrainingIntervals > 0 && (score.HeldOutIntervals < 32 || generations.Count < 12))
-                reasons.Add("User-asserted training requires at least 32 strict outcomes across 12 reset generations.");
+                reasons.Add("User-asserted training requires at least 32 strict outcomes across 12 chronological blocks.");
         }
         return new(reasons.Count == 0, requireStrict, score.Trials.Count, generations.Count, pairs, loss, incumbentLoss, paceLoss, reasons);
     }
@@ -141,7 +142,7 @@ public static class ComposedQuotaPolicy
         if (local is null || score.Trials.Count < 16) return false;
         var lookup = local.Trials.ToDictionary(x => x.OriginUtc);
         if (score.Trials.Any(x => !lookup.ContainsKey(x.OriginUtc))) return false;
-        var generations = QuotaResetGenerationPolicy.Group(score.Trials, x => x.ResetUtc);
+        var generations = ChronologicalEvidence.Blocks(score.Trials, x => x.OriginUtc, x => x.OutcomeUtc, x => x.ResetUtc);
         var loss = generations.Average(g => g.Average(x => x.CostOnlyIntervalLoss));
         var baseline = generations.Average(g => g.Average(x => lookup[x.OriginUtc].CostOnlyIntervalLoss));
         return loss + 0.1 < baseline && loss < baseline * 0.9;

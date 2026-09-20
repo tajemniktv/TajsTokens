@@ -15,7 +15,7 @@ public static class CodexRegimeModel
         "Measurement-envelope residuals; at least eight intervals on either side, robust median shift exceeding max(2pp, 3 MAD), " +
         "and at least 25% absolute-error reduction. Matched time-ablation residuals must corroborate a candidate when available. " +
         "A candidate is not proof of provider policy or a calibrated probability; coverage, model mix and reporting remain competing explanations. " +
-        "Boundary bounds are adjacent observation origins, not a claimed exact change time. Production reset-generation gates remain unchanged.";
+        "Boundary bounds are adjacent observation origins, not a claimed exact change time. This analysis does not promote a runtime model.";
 
     public static CodexRegimeReport Analyze(QuotaCostReport report, CancellationToken token = default)
     {
@@ -77,5 +77,29 @@ public static class CodexRegimeModel
     {
         var sorted = values.Order().ToArray();
         return sorted.Length % 2 == 1 ? sorted[sorted.Length / 2] : (sorted[sorted.Length / 2 - 1] + sorted[sorted.Length / 2]) / 2;
+    }
+    internal static IReadOnlyList<DateTimeOffset> DetectPersistentShifts(IReadOnlyList<IReadOnlyList<QuotaCostTrial>> epochs)
+    {
+        // Freeze the reference after three held-out blocks; require two later blocks
+        // with a replicated same-direction shift. This is a diagnostic, not a causal alarm.
+        if (epochs.Count < 5) return [];
+        var reference = epochs.Take(3).SelectMany(x => x).Select(x => x.Residual).ToArray();
+        var center = ResidualQuantile(reference, 0.5)!.Value;
+        var threshold = Math.Max(2, 3 * ResidualQuantile(reference.Select(x => Math.Abs(x - center)), 0.5)!.Value);
+        var shifts = new List<DateTimeOffset>();
+        for (var i = 4; i < epochs.Count; i++)
+        {
+            var a = ResidualQuantile(epochs[i - 1].Select(x => x.Residual), 0.5)!.Value - center;
+            var b = ResidualQuantile(epochs[i].Select(x => x.Residual), 0.5)!.Value - center;
+            if (epochs[i - 1].Count >= 3 && epochs[i].Count >= 3 && Math.Abs(a) > threshold &&
+                Math.Abs(b) > threshold && Math.Sign(a) == Math.Sign(b)) shifts.Add(epochs[i][0].StartUtc);
+        }
+        return shifts;
+    }
+
+    private static double? ResidualQuantile(IEnumerable<double> values, double quantile)
+    {
+        var rows = values.Order().ToArray();
+        return rows.Length == 0 ? null : rows[Math.Clamp((int)Math.Ceiling(rows.Length * quantile) - 1, 0, rows.Length - 1)];
     }
 }

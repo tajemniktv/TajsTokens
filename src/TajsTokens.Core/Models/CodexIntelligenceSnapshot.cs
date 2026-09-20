@@ -27,8 +27,7 @@ public sealed record CodexIntelligenceSnapshot(DateTimeOffset AsOfUtc, CodexSele
     ApiPriceWeight ApiEquivalent, IReadOnlyList<CodexServerObservation> ProviderEvidence,
     IReadOnlyList<CodexEvidenceHealth> EvidenceHealth, CodexInferenceManifest Manifest)
 {
-    // Source snapshot retained for existing alert/tray policies; no second collector or alert state.
-    public TelemetrySnapshot RuntimeEvidence { get; init; } = TelemetrySnapshot.Empty;
+    public CodexCurrentState CurrentState { get; init; } = CodexCurrentState.Empty;
     public IReadOnlyList<CodexChatAccounting> Chats { get; init; } = [];
     public IReadOnlyList<Services.CodexPeriodReconciliation> HistoricalPeriods { get; init; } = [];
     public QuotaCostReport? Accounting { get; init; }

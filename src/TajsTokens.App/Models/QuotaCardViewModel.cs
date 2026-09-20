@@ -19,14 +19,3 @@ public sealed record QuotaCardViewModel(
     public bool IsReported { get; init; } = true;
     public string EvenBurn { get; init; } = "Even burn unavailable";
 }
-
-public sealed record TokenSummaryCard(string Label, string Value, string Detail);
-
-public sealed record ForecastPoint(string Label, double Value, string Tooltip, string Amount);
-
-public sealed record DataSourceStatusCard(string Name, string State, string Detail);
-
-public sealed record EventItem(string Time, string Type, string Description);
-
-// Kept for the dedicated Agents phase. The Phase 1 Overview no longer renders synthetic agents.
-public sealed record AgentNode(string Name, string State, string Model, IReadOnlyList<AgentNode>? Children = null);

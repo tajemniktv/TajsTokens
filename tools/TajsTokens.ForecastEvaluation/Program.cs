@@ -1,3 +1,4 @@
+using TajsTokens.Core.Research;
 using System.Globalization;
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Enums;
@@ -80,11 +81,12 @@ if (args.Length == 2 && args[0] is "--cost" or "--cost-owned-rollouts")
     Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { report.EvidenceCoverage, report.ConstructionCoverage, report.CohortCoverage }));
     Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(report.Scores.Where(x => x.IncompleteCategoryTrainingIntervals > 0 || x.IncompleteCategoryHeldOutIntervals > 0)
         .Select(x => new { x.Cohort.Source, x.Cohort.Kind, x.HorizonHours, x.Candidate, x.Status, x.IncompleteCategoryTrainingIntervals, x.IncompleteCategoryHeldOutIntervals })));
+    Console.WriteLine("evidence_support=" + System.Text.Json.JsonSerializer.Serialize(report.Scores.Select(x => new { x.Candidate, x.HorizonHours, x.EvidenceSupport })));
     Console.WriteLine($"observations={report.Observations}; " + string.Join("; ", report.QualityCounts.Select(x => $"{x.Key}={x.Value}")));
-    Console.WriteLine("cohort,source,window,horizon,model,train,train_generations,heldout,heldout_generations,interval_loss,displayed_MAE,generation_loss,residual_p10,residual_median,residual_p90,unexplained_lower,bands,intersection_rate,material_win,shift_candidates,status,rate_card,unpriced_training,unpriced_heldout,unpriced_tokens,paired_pace_loss,paired_total_loss");
+    Console.WriteLine("cohort,source,window,horizon,model,train,train_generations,heldout,heldout_generations,interval_loss,displayed_MAE,block_loss,residual_p10,residual_median,residual_p90,unexplained_lower,bands,intersection_rate,material_win,shift_candidates,status,rate_card,unpriced_training,unpriced_heldout,unpriced_tokens,paired_pace_loss,paired_total_loss");
     var cohorts = report.Scores.Select(x => x.Cohort).Distinct().ToList();
     foreach (var score in report.Scores)
-        Console.WriteLine(FormattableString.Invariant($"cohort-{cohorts.IndexOf(score.Cohort) + 1},{score.Cohort.Source},{score.Cohort.Kind},{score.HorizonHours},{score.Candidate},{score.TrainingSamples},{score.TrainingGenerations},{score.HeldOutSamples},{score.HeldOutGenerations},{score.IntervalLoss:F4},{score.DisplayedDeltaMae:F4},{score.GenerationMeanIntervalLoss:F4},{score.ResidualP10:F4},{score.ResidualMedian:F4},{score.ResidualP90:F4},{score.UnexplainedPositiveMovement:F4},{score.BandSamples},{score.BandIntersectsTargetRate:F4},{score.MaterialWin},{score.CandidateShiftResets.Count},{score.Status},{score.RateCardVersion},{score.UnpricedTrainingIntervals},{score.UnpricedHeldOutIntervals},{score.UnpricedReportedTokens},{score.PairedPaceIntervalLoss:F4},{score.PairedTotalIntervalLoss:F4}"));
+        Console.WriteLine(FormattableString.Invariant($"cohort-{cohorts.IndexOf(score.Cohort) + 1},{score.Cohort.Source},{score.Cohort.Kind},{score.HorizonHours},{score.Candidate},{score.TrainingSamples},{score.TrainingGenerations},{score.HeldOutSamples},{score.HeldOutGenerations},{score.IntervalLoss:F4},{score.DisplayedDeltaMae:F4},{score.BlockMeanIntervalLoss:F4},{score.ResidualP10:F4},{score.ResidualMedian:F4},{score.ResidualP90:F4},{score.UnexplainedPositiveMovement:F4},{score.BandSamples},{score.BandIntersectsTargetRate:F4},{score.MaterialWin},{score.CandidateShiftTimes.Count},{score.Status},{score.RateCardVersion},{score.UnpricedTrainingIntervals},{score.UnpricedHeldOutIntervals},{score.UnpricedReportedTokens},{score.PairedPaceIntervalLoss:F4},{score.PairedTotalIntervalLoss:F4}"));
     return;
 }
 
@@ -219,7 +221,7 @@ if (args.Length == 2 && args[0] is "--evaluate" or "--quota")
     foreach (var prediction in tokenForecast.Predictions)
         Console.WriteLine(FormattableString.Invariant($"Token +{prediction.HorizonHours}h: {prediction.ExpectedTokens:F0}; model={prediction.Model}; train={prediction.TrainingSamples}; validation={prediction.ValidationSamples}"));
     var scenarioHistory = CodexScenarioHistoryBuilder.Build(data);
-    var scenario = new ScenarioPlannerService().Estimate(new ScenarioRequest(0.5, 1, 0), scenarioHistory, data.CapturedAtUtc);
+    var scenario = QuotaPredictionService.Simulate(new ScenarioRequest(0.5, 1, 0), scenarioHistory, data.CapturedAtUtc);
     Console.WriteLine($"Scenario 5h: {scenario.FiveHour.Explanation}");
     Console.WriteLine($"Scenario weekly: {scenario.Weekly.Explanation}");
     foreach (var stream in data.Quota.Where(x => x.Authority == QuotaObservationAuthority.ProviderAuthoritative)
@@ -255,8 +257,8 @@ foreach (var stream in rows.GroupBy(x => (x.Provider, x.Profile, x.Kind, x.Sourc
     foreach (var horizon in new[] { 0.5, 2.0, 24.0, -1.0 })
     {
         var trials = model == "adaptive"
-            ? QuotaForecastBacktester.ReplayAdaptive(stream.ToArray(), horizon < 0 ? null : horizon)
-            : QuotaForecastBacktester.Replay(stream.ToArray(), model, horizon < 0 ? null : horizon);
+            ? QuotaForecastCalibration.ReplayAdaptive(stream.ToArray(), horizon < 0 ? null : horizon)
+            : QuotaForecastCalibration.Replay(stream.ToArray(), model, horizon < 0 ? null : horizon);
         if (trials.Count == 0) continue;
         var errors = trials.Select(x => x.PredictedRemaining - x.ObservedRemaining).ToArray();
         var bands = trials.Where(x => x.LowerRemaining is not null).ToArray();

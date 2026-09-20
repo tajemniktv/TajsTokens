@@ -52,15 +52,18 @@ public sealed partial class CodexIntelligencePage : Page
         if (selection.HasWorkFilter || selection.FromUtc > DateTimeOffset.UtcNow || selection.ToUtc < DateTimeOffset.UtcNow.AddMinutes(-5)) return;
         var live = App.Services.CodexIntelligence.Current;
         _snapshot = _snapshot with { Current = live.Current.Where(x => selection.AccountKey is null || x.Current.AccountKey == selection.AccountKey).ToArray(),
-            Workload = selection.AccountKey is null ? live.Workload : null, RuntimeEvidence = live.RuntimeEvidence };
+            Workload = selection.AccountKey is null ? live.Workload : null, CurrentState = live.CurrentState };
         RenderCurrent();
     });
 
     private void RenderCurrent()
     {
         if (_snapshot is not { } snapshot) return;
+        static string EvenBurn(QuotaSnapshot quota) => QuotaEvenBurn.FromSnapshot(quota) is { } pace
+            ? $"\nEven burn at reading: {pace.UsedPercent:0.#}% used / {pace.ElapsedPercent:0.#}% elapsed; {Math.Abs(pace.ExcessPercentagePoints):0.#} pp {(pace.ExcessPercentagePoints >= 0 ? "above" : "below")} even burn. Inferred window start; not a forecast."
+            : "\nEven burn unavailable: reset/duration missing.";
         CurrentText.Text = snapshot.Current.Count == 0 ? "Current quota unavailable for this scope. Filtered workload cannot allocate account-wide quota." :
-            string.Join("\n", snapshot.Current.Select(x => $"REPORTED {x.Current.Kind}: {x.Current.UsedPercent?.ToString("0.##") ?? "unknown"}% used · {x.State} · captured {x.Current.CapturedAtUtc.ToLocalTime():g} · reset {x.Current.ResetsAtUtc?.ToLocalTime().ToString("g") ?? "unknown"}"));
+            string.Join("\n", snapshot.Current.Select(x => $"REPORTED {x.Current.Kind}: {x.Current.UsedPercent?.ToString("0.##") ?? "unknown"}% used · {x.State} · captured {x.Current.CapturedAtUtc.ToLocalTime():g} · reset {x.Current.ResetsAtUtc?.ToLocalTime().ToString("g") ?? "unknown"}" + EvenBurn(x.Current)));
         ForecastText.Text = string.Join("\n", snapshot.Current.Select(x =>
             $"ESTIMATED {x.Current.Kind}: {x.Forecast?.ProjectedRemainingAtResetPercent?.ToString("0.##") ?? "unavailable"}% remaining at reset · sustainable {x.Forecast?.SustainablePercentPerHour?.ToString("0.##") ?? "unknown"} pp/hour\n{x.HistoryPolicy}\n{x.Diagnostic}" +
             (x.Forecast?.Evidence?.HorizonPredictions is { } horizons ? "\n" + string.Join("\n", horizons.Select(h => $"{h.HorizonHours * 60:g} min: {h.ExpectedUsagePercent:0.##} pp · {h.Model} · {h.ValidationSamples} validation samples")) : "")));
@@ -201,7 +204,7 @@ public sealed partial class CodexIntelligencePage : Page
         {
             var result = await App.Services.CodexIntelligence.AnalyzeAsync(snapshot, request.Token);
             if (!_loaded || !ReferenceEquals(_snapshot?.Ledger, snapshot.Ledger) || request.IsCancellationRequested) return;
-            _snapshot = result with { Current = _snapshot!.Current, RuntimeEvidence = _snapshot.RuntimeEvidence, Workload = _snapshot.Workload };
+            _snapshot = result with { Current = _snapshot!.Current, CurrentState = _snapshot.CurrentState, Workload = _snapshot.Workload };
             AccountingText.Text = string.Join("\n", result.Accounting!.Scores.Where(x => x.Candidate is "total" or "categories")
                 .Select(x => $"{x.Cohort.Kind} · {x.Cohort.Source} · {x.HorizonHours * 60:g} min · {x.Candidate}: {x.HeldOutSamples} held-out / {x.HeldOutGenerations} resets · error {x.IntervalLoss?.ToString("0.###") ?? "unavailable"} pp · {x.Status}")) +
                 "\n\n" + result.Regime!.Methodology + "\n" +

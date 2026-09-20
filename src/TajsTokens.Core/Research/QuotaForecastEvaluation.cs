@@ -1,7 +1,9 @@
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 
-namespace TajsTokens.Core.Services;
+using TajsTokens.Core.Services;
+
+namespace TajsTokens.Core.Research;
 
 public static class QuotaForecastEvaluation
 {
@@ -24,8 +26,8 @@ public static class QuotaForecastEvaluation
                 foreach (var model in QuotaPaceModels.Candidates.Append("adaptive"))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    var trials = model == "adaptive" ? QuotaForecastBacktester.ReplayAdaptive(rows, horizon, cancellationToken)
-                        : QuotaForecastBacktester.Replay(rows, model, horizon, cancellationToken);
+                    var trials = model == "adaptive" ? QuotaForecastCalibration.ReplayAdaptive(rows, horizon, cancellationToken)
+                        : QuotaForecastCalibration.Replay(rows, model, horizon, cancellationToken);
                     scores.Add(Score(stream.Key.Kind, stream.Key.Source, model, target, "ReconstructedEventTime", trials) with { AccountKey = stream.Key.AccountKey, HistoryCohort = stream.Key });
                 }
                 foreach (var availability in Enum.GetValues<ForecastReplayAvailability>())
@@ -100,7 +102,7 @@ public static class QuotaForecastEvaluation
             previousEnd = trial.OutcomeUtc;
         }
         return new ForecastEvaluationScore(kind, source, model, target, availability, trials.Count,
-            QuotaForecastBacktester.ResetGenerations(trials).Count, Mean(trials.Select(x => Math.Abs(x.PredictedRemaining - x.ObservedRemaining))),
+            QuotaForecastCalibration.ResetGenerations(trials).Count, Mean(trials.Select(x => Math.Abs(x.PredictedRemaining - x.ObservedRemaining))),
             mse is double value ? Math.Sqrt(value) : null, bands.Length,
             Mean(bands.Select(x => x.ObservedRemaining >= x.LowerRemaining && x.ObservedRemaining <= x.UpperRemaining ? 1d : 0d)),
             Mean(bands.Select(x => x.UpperRemaining!.Value - x.LowerRemaining!.Value)), labels.Length,

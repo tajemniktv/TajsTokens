@@ -30,7 +30,7 @@ public sealed class QuotaHistoryPolicyTests
             Point(1.5, 13), Point(1.5, 15) with { ObservationId = "alternative" }, Point(2, 16), Point(2.5, 18)], Start.AddHours(3));
         Assert.Single(decisions, x => x.Reason == "possibly-cached-repeat");
         Assert.Equal(2, decisions.Count(x => x.Reason == "same-time-conflict"));
-        var epochs = QuotaForecastBacktester.SplitEpochs(QuotaHistoryPolicy.ReplayRows(Assert.Single(QuotaHistoryPolicy.Streams(decisions))));
+        var epochs = QuotaForecastCalibration.SplitEpochs(QuotaHistoryPolicy.ReplayRows(Assert.Single(QuotaHistoryPolicy.Streams(decisions))));
         Assert.Equal(2, epochs.Count);
         Assert.Equal(new[] { 2, 2 }, epochs.Select(x => x.Count));
         Assert.Equal(Start.AddHours(2), epochs[1][0].CapturedAtUtc);
@@ -62,9 +62,9 @@ public sealed class QuotaHistoryPolicyTests
     {
         var rows = new[] { Point(0, 10), Point(0.5, 12), Point(1, 14), Point(1.5, 16) }
             .Select(x => x with { CollectedAtUtc = Start.AddDays(1) }).ToArray();
-        Assert.NotEmpty(QuotaForecastBacktester.Replay(rows, "persistence", 0.5));
+        Assert.NotEmpty(QuotaForecastCalibration.Replay(rows, "persistence", 0.5));
         var strict = QuotaHistoryPolicy.AvailableRows(rows, ForecastReplayAvailability.CollectedByOrigin);
-        Assert.Empty(QuotaForecastBacktester.Replay(strict, "persistence", 0.5));
+        Assert.Empty(QuotaForecastCalibration.Replay(strict, "persistence", 0.5));
         Assert.Equal(Start, rows[0].CapturedAtUtc); // Read policy never rewrites durable event time.
     }
 

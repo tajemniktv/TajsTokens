@@ -11,7 +11,7 @@ public static class CodexScenarioHistoryBuilder
         var result = new List<ScenarioHistorySample>();
         foreach (var stream in data.Quota.Where(x => x.Authority == QuotaObservationAuthority.ProviderAuthoritative)
                      .GroupBy(x => (x.Provider, x.Profile, x.Kind, x.Source, x.AccountKey)))
-        foreach (var epoch in QuotaForecastBacktester.SplitEpochs(stream))
+        foreach (var epoch in QuotaForecastCalibration.SplitEpochs(stream))
         {
             var start = 0;
             for (var end = 1; end < epoch.Count; end++)

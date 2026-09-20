@@ -2,15 +2,17 @@ using System.Globalization;
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
+using TajsTokens.Core.Interfaces;
+using TajsTokens.Core.Services;
 
 namespace TajsTokens.Infrastructure.Services;
 
 /// <summary>One read transaction over durable, content-free evidence. Never queries raw Codex payloads.</summary>
-public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyList<RolloutAccountAssociation>? accountAssociations = null)
+public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyList<RolloutAccountAssociation>? accountAssociations = null) : ICodexForecastDatasetReader
 {
     public async Task<CodexForecastDataset> ReadAsync(string provider, string profile,
         DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken cancellationToken, string? accountKey = null,
-        bool includeQuota = true)
+        bool includeQuota = true, bool includeLedger = false)
     {
         if (fromUtc >= toUtc) throw new ArgumentException("A non-empty chronological range is required.");
         await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = databasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
@@ -86,16 +88,34 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
                     Text(reader, 12), Text(reader, 13), Number(reader, 14), reader.GetString(15), Number(reader, 16), Number(reader, 17), Number(reader, 18), Number(reader, 19), Text(reader, 20), Text(reader, 21)));
         if (workload.Count > 100000) throw new InvalidOperationException("Workload metadata exceeds the supported replay bound; a paged evidence read is required.");
         command.CommandText = """
-            SELECT session_id,observed_at_utc,captured_at_utc,model,reasoning_effort,uncached_input_tokens,
-                   cache_read_tokens,cache_write_tokens,non_reasoning_output_tokens,reasoning_output_tokens,reported_total_tokens
-            FROM codex_native_token_events WHERE observed_at_utc > $lookback AND observed_at_utc <= $to
-            ORDER BY observed_at_utc LIMIT 500001;
+            SELECT e.session_id,e.observed_at_utc,e.captured_at_utc,e.model,e.reasoning_effort,e.uncached_input_tokens,
+                   e.cache_read_tokens,e.cache_write_tokens,e.non_reasoning_output_tokens,e.reasoning_output_tokens,e.reported_total_tokens
+            """ + (includeLedger ? """
+            ,e.source_event_id,
+             (SELECT CASE WHEN COUNT(*)=1 THEN MAX(f.source_identity) END FROM rollout_files f WHERE f.file_path=e.source_file),
+             COALESCE(s.repository,'(unknown)'),COALESCE(s.thread_id,e.session_id)
+            """ : "") + " FROM codex_native_token_events e " +
+            (includeLedger ? "LEFT JOIN sessions s ON s.session_id=e.session_id " : "") + """
+            WHERE e.observed_at_utc > $lookback AND e.observed_at_utc <= $to
+            ORDER BY e.observed_at_utc LIMIT 500001;
             """;
         var tokens = new List<CodexPredictiveTokenEvent>();
+        var ledger = new List<CodexLedgerEntry>();
         await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
             while (await reader.ReadAsync(cancellationToken))
-                tokens.Add(new CodexPredictiveTokenEvent(reader.GetString(0), Time(reader.GetString(1)), OptionalTime(reader, 2), Text(reader, 3), Text(reader, 4),
-                    reader.GetInt64(5), reader.GetInt64(6), reader.GetInt64(7), reader.GetInt64(8), reader.GetInt64(9), reader.GetInt64(10)));
+            {
+                var work = new CodexPredictiveTokenEvent(reader.GetString(0), Time(reader.GetString(1)), OptionalTime(reader, 2), Text(reader, 3), Text(reader, 4),
+                    reader.GetInt64(5), reader.GetInt64(6), reader.GetInt64(7), reader.GetInt64(8), reader.GetInt64(9), reader.GetInt64(10));
+                tokens.Add(work);
+                if (!includeLedger || work.ObservedAtUtc < fromUtc || work.ObservedAtUtc >= toUtc) continue;
+                var identity = Text(reader, 12);
+                var matches = RolloutAccountAssociationPolicy.Matches(provider, profile, identity, work.SessionId,
+                    work.ObservedAtUtc, accountAssociations ?? [], captured).Select(x => x.AccountKey).Distinct().ToArray();
+                ledger.Add(new(reader.GetString(11), identity, reader.GetString(14), reader.GetString(13),
+                    work.ObservedAtUtc, work.CapturedAtUtc, matches.Length == 1 ? matches[0] : null,
+                    matches.Length == 1 ? AccountEvidenceClass.UserDeclaredSingleAccount :
+                    matches.Length > 1 ? AccountEvidenceClass.Conflicting : AccountEvidenceClass.Unattributed, work));
+            }
         if (tokens.Count > 500000) throw new InvalidOperationException("Token replay exceeds 500,000 rows; narrow the range.");
         command.CommandText = """
             SELECT event_id,session_id,agent_id,observed_at_utc,model,input_tokens,context_window_tokens,is_compaction,record_bytes,captured_at_utc
@@ -111,6 +131,6 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
         transaction.Commit();
         return new CodexForecastDataset(quota, workload, tokens, context, captured,
             "Quota history includes app-server and rollout evidence; eligibility is decided by quota-history/v1. Legacy missing provenance remains unknown. Workload is local installation history, not verified account identity. Backfilled event-time reconstruction and strict collection-time replay are separate modes.")
-        { AccountAssociations = accountAssociations ?? [] };
+        { AccountAssociations = accountAssociations ?? [], Ledger = ledger };
     }
 }

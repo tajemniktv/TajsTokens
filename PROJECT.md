@@ -57,7 +57,7 @@ not mean copying every native table, losing provenance or adding overlapping cou
 
 A production-quality local Windows application should let the user:
 
-- **Understand now:** open Overview and immediately see reported quota windows, usage, recent activity, freshness, and actionable problems. Missing windows, source failures, and stale history must look different.
+- **Understand now:** open Codex and immediately see reported quota windows, usage, recent activity, freshness, and actionable problems. Missing windows, source failures, and stale history must look different.
 - **Understand work:** navigate workspaces, threads, turns, and supported root/subagent relationships; inspect relevant history and token/context behavior without manually joining SQLite rows and JSONL files.
 - **Understand changes:** investigate quota movement, lifecycle events, source disagreements, and collection gaps through concise summaries with evidence available on demand. Correlation must not masquerade as causality.
 - **Plan ahead:** see conditional quota outlooks, sustainable pace, supported workload scenarios, and useful uncertainty. Calibrated probabilities are an earned capability, not a release requirement that can be satisfied by inventing confidence.
@@ -78,7 +78,7 @@ The [evidence review](docs/source-notes/CODEX_EVIDENCE_REPO_REVIEW.md) maps sour
 remaining proof boundaries. The [layered design](docs/source-notes/TT_LAYERED_STATISTICAL_DESIGN.md)
 defines model/TT rationale. Neither is a competing delivery plan.
 
-**Current status (2026-09-20): Codex intelligence and presentation consolidation delivered; provider capability and visual acceptance remain open.**
+**Current status (2026-09-20): runtime/research and canonical-read consolidation implemented; provider capability and visual acceptance remain open.**
 The user adopted the "Define TajsTokens Features" discussion: one Codex product surface, a shared
 time/account/model/project/chat selection and typed intelligence snapshot, retaining workload,
 accounting, regime and forecast responsibilities internally. This supersedes the previous blanket
@@ -100,8 +100,25 @@ existing native thread view rather than creating a second thread reader.
 
 The old `ForecastingService` reset head is folded into `QuotaPredictionService.BuildResetOutlook`;
 its unused interface and redundant presentation helpers were removed after tracing callers.
-Workload activity/composition heads, accounting candidates and chronological evaluators still have
-live or research consumers and are not dead code. Their policies and promotion thresholds remain intact.
+The [ownership audit](docs/source-notes/INTELLIGENCE_OWNERSHIP_AUDIT.md) classifies every prediction/evaluation
+class and records removals. Runtime has one workload owner (`TokenWorkloadPredictionService`), one cost
+owner (`QuotaAccountingModel`), one forecast/scenario owner (`QuotaPredictionService`) and one structural
+change owner (`CodexRegimeModel`). Candidate algorithms and chronological calibration are supporting
+implementations. Explicit ablations, TT, transfer and comparison drivers live under `Core.Research`;
+runtime does not depend on that namespace. Shared numerical/validation routines are not duplicated.
+
+The product snapshot contains a small `CodexCurrentState`, not the collector's `TelemetrySnapshot`.
+The intelligence engine contains no SQL: canonical dataset reads project ledger and prediction inputs
+in one transaction; the existing server-evidence service owns bounded provider-history hydration.
+`OverviewPage`/presenter, unused placeholder and orphaned card contracts are deleted. Even-burn is on
+Codex; collection controls/problems remain in Diagnostics/Settings. Unique advanced tools remain.
+
+Reset identity and statistical support are now separate. `ChronologicalEvidence` supplies disjoint
+six-hour-block summaries and diagnostic effective sample size; cost/composed, scenario, TT and transfer
+evaluation can learn within a weekly cycle. Six-hour spacing and 8/12-block support floors are provisional
+assumptions, not demonstrated independence or calibrated coverage. Actual cycle counts remain visible.
+The direct short-horizon forecast already used matured non-overlapping outcomes. True reset-horizon
+bands still require completed cycles. Strict collection-time, matching, coverage and fallback gates remain.
 New persisted forecast diagnostics include component/input/output identity and the selected numeric
 calculation (pace output or frozen ridge/cost inputs and weights). This reconstructs that calculation,
 not missing historical training data or predictions created before artifact capture was introduced.
@@ -132,9 +149,18 @@ unchanging accounting. The new backend check timed out at its initial `/wham/usa
 before requesting plan/task reports, so their availability remains unverified on this runtime.
 Native accessibility inspection confirmed the primary page loads. Interactive/visual acceptance is
 still open; foreground gameplay was not interrupted for UI automation.
-Automated validation: 540 Core tests passed; the evaluation CLI and Windows app build passed with
+Prior integration validation: 540 Core tests passed; the evaluation CLI and Windows app build passed with
 zero warnings/errors. The app build dogfooded/restarted `20260920T153704243Z-e90aefc2`, preserving
 the existing data directory and current/previous/one-backup deployment policy.
+
+Consolidation validation (2026-09-20): **545 Core tests passed**; evaluation CLI and Windows app
+builds passed with zero warnings/errors. The final app build deployed/restarted
+`20260920T162126990Z-f0501da4`. Read-only chronological cost evaluation covered 2,035 target intervals
+across separate cohorts/horizons, producing 3,290 candidate rows (120 with held-out support).
+These are not 2,035 independent samples. The inspected history had no single-cycle score with
+multiple six-hour blocks; synthetic tests establish that within-cycle learning is allowed, not that
+this corpus already demonstrates it. No new model promotion or calibrated-coverage claim is made.
+Native visual acceptance remains open.
 
 **Evidence-visibility progress:** Model Lab and cost CLI now expose dataset-local token-weighted
 model/effort coverage, category mismatch/invalid counts, unknown/after-event collection times,
@@ -172,10 +198,10 @@ Layered evaluation now exposes horizon/composition/reset-grouped diagnostics plu
 coverage and quality-flag combinations. Outcome diagnostics are not origin inputs, and complete
 reported token vectors do not establish account-wide coverage. Matched baseline comparisons remain separate.
 Model Lab and the composed CLI also explain the shared selection-evidence gates: actual outcome/
-reset counts, missing incumbent pairs, recency, collection-time provenance, reset-balanced wins,
+block/reset counts, missing incumbent pairs, recency, collection-time provenance, block-balanced wins,
 recent-group regressions and stricter asserted-training requirements. Passing these gates is explicitly
 not full live promotion; current composition, cost support and uncertainty calibration remain separate.
-**Resume trigger:** new independent reset cycles, compatible transfer contexts, validated native
+**Resume trigger:** new compatible non-overlapping evidence blocks (completed cycles for reset-horizon claims), compatible transfer contexts, validated native
 copy/interleave lineage, a usable provider capability, or a concrete product defect. Re-evaluate the
 affected gate when its inputs materially change, not on every continuation. Legacy adjacency remains
 a read-only corpus experiment, not a stored native join. Missing coverage and conflicting vectors
@@ -347,13 +373,13 @@ local/account coverage or lower the existing promotion support requirements.
   outside the incumbent's ordinary replay sample. Additional comparison queries do not enter its
   training, selection or calibration history; only already-matured ordinary outcomes contribute.
 - **Promotion:** retain the incumbent unless a supported total/category/model-effort candidate wins
-  cost and paired end-to-end comparisons against incumbent and pace, with at least eight independent
-  reset generations and current composition/outcomes. Unknown support, identity, shifts or calibration
+  cost and paired end-to-end comparisons against incumbent and pace, with at least eight chronological
+  blocks and current composition/outcomes. Unknown support, identity, shifts or calibration
   preserve fallback. Oracle context/activity/runtime features cannot leak into live forecasts.
-- **Ranges:** shared calibration uses at least eight earlier completed resets with available labels,
-  generation-maximum absolute errors, empirical 80% target and 1pp floor. Report count, coverage and
+- **Ranges:** shared composed calibration uses at least eight earlier chronological blocks with available labels,
+  block-maximum absolute errors, empirical 80% target and 1pp floor. Report count, coverage and
   width; these are not latent-usage coverage, survival probabilities or activity-conditioned bands.
-  `session-quota-evaluation/v4` remains a separate research chain using actual target elapsed times
+  `session-quota-evaluation/v5-blocks` remains a separate research chain using actual target elapsed times
   and exact-target incumbent queries, including origins outside its ordinary replay sample;
   comparison queries do not enter incumbent training or calibration history.
 - **Pace:** even-burn compares consumption and elapsed window at the reading, using explicitly
@@ -384,7 +410,7 @@ Transfer uses the exact earlier basis and destination-local calibration only, re
 account/provider/profile/source/session lineage and horizon, with source context ending before
 destination begins. No compatible pair is not successful transfer. Frozen weights and revisable quota
 calibration remain separate; historical restatement must not rewrite original forecasts or scores.
-Signed bias is prediction minus reported cost, reset-balanced; cumulative eligible-interval error
+Signed bias is prediction minus reported cost, block-balanced; cumulative eligible-interval error
 has summed meter-envelope bounds, not confidence intervals or complete account totals.
 
 Explicit Model Lab evaluation saves original aggregate reports in intelligence schema 6:
@@ -1303,7 +1329,7 @@ The current production baseline is deliberately simple:
 - `QuotaPredictionService.BuildResetOutlook` isolates the active source/reset epoch and retains EWMA as the incumbent until comparable matured outcomes support another candidate. Model selection is chronological; empirical uncertainty requires sufficient prior reset generations. Outputs are conditional projections or explicit learning states, not heuristic confidence probabilities.
 - Flat quantized histories produce `IdleWithinMeterPrecision` rather than a confident zero-burn forecast.
 - `SqliteIntelligenceService.BuildAndPersistCurrentForecastsAsync` owns current forecast generation, requires a fresh provider-authoritative anchor, excludes history newer than it, persists the exact forecast shown to the app, and prevents stale/non-authoritative lanes from borrowing a competing forecast.
-- `ScenarioPlannerService` uses non-overlapping, source-isolated authoritative intervals (including unchanged meters), with reconstructed workload evidence bounded at interval start. It compares an elapsed-time baseline with account-local ridge on matured chronological outcomes. Recent token-active session counts are not simultaneous compute or agent-hours. Exact requested model/effort cohorts require support; unsupported intensity scaling and extrapolation return unavailable. Uncertainty requires eight comparable held-out reset generations, never training residuals or heuristic confidence percentages. Reconstruction is not proof the app had collected those inputs at the historical origin.
+- `QuotaPredictionService.Simulate` uses non-overlapping, source-isolated authoritative intervals (including unchanged meters), with reconstructed workload evidence bounded at interval start. It compares an elapsed-time baseline with account-local ridge on matured chronological outcomes. Recent token-active session counts are not simultaneous compute or agent-hours. Exact requested model/effort cohorts require support; unsupported intensity scaling and extrapolation return unavailable. Uncertainty requires eight comparable held-out chronological blocks, never training residuals or heuristic confidence percentages. Reconstruction is not proof the app had collected those inputs at the historical origin.
 
 These implementations are **baselines, not architecture**. Their formulas, coefficients, thresholds, confidence logic, and feature sets may be replaced when evaluation demonstrates a better production choice. Persisted forecast snapshots are derived historical outputs and should retain enough lineage to identify the anchor and policy/model used; they must remain rebuildable from durable evidence.
 

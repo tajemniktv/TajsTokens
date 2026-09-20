@@ -25,7 +25,7 @@ public static class QuotaCostObservationBuilder
         var coverage = new List<QuotaCostConstructionCoverage>();
         var history = QuotaHistoryPolicy.Describe(data.Quota, data.CapturedAtUtc);
         foreach (var stream in QuotaHistoryPolicy.Streams(history))
-        foreach (var epoch in QuotaForecastBacktester.SplitEpochs(QuotaHistoryPolicy.ReplayRows(stream)))
+        foreach (var epoch in QuotaForecastCalibration.SplitEpochs(QuotaHistoryPolicy.ReplayRows(stream)))
         foreach (var horizon in horizons ?? [0.5, 2d])
         {
             DateTimeOffset? previousEnd = null;

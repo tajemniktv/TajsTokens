@@ -65,8 +65,8 @@ public sealed class AppServices
             Repository,
             CodexObservatory,
             Intelligence, ServerEvidence);
-        CodexIntelligence = new CodexIntelligenceEngine(DatabasePath, Intelligence, () => Telemetry.Latest,
-            () => Settings.RolloutAccountAssociations);
+        CodexIntelligence = new CodexIntelligenceEngine(() => new SqliteForecastDatasetReader(DatabasePath, Settings.RolloutAccountAssociations),
+            ServerEvidence, Intelligence, () => Telemetry.Latest);
         AlertEngine = new QuotaAlertEngine(Settings.LowQuotaThresholds);
     }
 

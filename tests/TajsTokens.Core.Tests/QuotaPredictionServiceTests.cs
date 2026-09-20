@@ -1,3 +1,4 @@
+using TajsTokens.Core.Research;
 using System.Text.Json;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
@@ -125,7 +126,7 @@ public sealed class QuotaPredictionServiceTests
     public void WorkloadTrainingRequiresNonOverlappingOutcomes()
     {
         var quota = Enumerable.Range(0, 120).Select(i => Point(i * 0.5, i * 0.5)).ToArray();
-        var trials = QuotaForecastBacktester.Replay(quota, "time-ewma-2h", 24);
+        var trials = QuotaForecastCalibration.Replay(quota, "time-ewma-2h", 24);
         Assert.True(trials.Count > 12);
         var workload = QuotaWorkloadBacktester.Replay(Data(quota), QuotaWindowKind.Weekly, "pace-ridge", 24,
             ForecastReplayAvailability.ReconstructedEventTime, baselineModel: "time-ewma-2h");

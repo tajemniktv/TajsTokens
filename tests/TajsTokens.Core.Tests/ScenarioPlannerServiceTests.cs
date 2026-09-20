@@ -7,7 +7,7 @@ namespace TajsTokens.Core.Tests;
 public sealed class ScenarioPlannerServiceTests
 {
     private static readonly DateTimeOffset s_evaluationTime = new(2026, 8, 24, 0, 0, 0, TimeSpan.Zero);
-    private readonly ScenarioPlannerService _planner = new();
+
 
     [Theory]
     [InlineData(4, false)]
@@ -21,11 +21,11 @@ public sealed class ScenarioPlannerServiceTests
             { ResetUtc = s_evaluationTime.AddDays(-generations + g).AddHours(18).AddSeconds(i % 2) };
         })).ToArray();
         var request = new ScenarioRequest(1, 1, 0);
-        var estimate = _planner.Estimate(request, history, s_evaluationTime).FiveHour;
+        var estimate = QuotaPredictionService.Simulate(request, history, s_evaluationTime).FiveHour;
         Assert.True(estimate.HasEnoughHistory);
         Assert.Equal(expectedBand, estimate.LowerQuotaDeltaPercent.HasValue);
         var steady = history.Select(x => x with { ResetUtc = x.ResetUtc!.Value.AddSeconds(-x.ResetUtc.Value.Second) }).ToArray();
-        Assert.Equal(_planner.Estimate(request, steady, s_evaluationTime).FiveHour, estimate);
+        Assert.Equal(QuotaPredictionService.Simulate(request, steady, s_evaluationTime).FiveHour, estimate);
     }
 
     [Fact]
@@ -36,7 +36,7 @@ public sealed class ScenarioPlannerServiceTests
         var history = BuildSyntheticHistory().Where(x => x.Kind == QuotaWindowKind.FiveHour)
             .Select((x, i) => x with { AccountKey = "account", Source = "app-server",
                 Cohort = i < 10 ? cohort : cohort with { PlanType = "new-plan" } }).ToArray();
-        var result = _planner.Estimate(new ScenarioRequest(1, 1, 1, AccountKey: "account"), history, s_evaluationTime).FiveHour;
+        var result = QuotaPredictionService.Simulate(new ScenarioRequest(1, 1, 1, AccountKey: "account"), history, s_evaluationTime).FiveHour;
         Assert.False(result.HasEnoughHistory);
         Assert.Equal(8, result.SampleCount);
     }
@@ -48,7 +48,7 @@ public sealed class ScenarioPlannerServiceTests
             .Select(index => Sample(QuotaWindowKind.FiveHour, s_evaluationTime.AddHours(-index - 2), 4 + index, 1, 0))
             .ToArray();
 
-        var estimate = _planner.Estimate(new ScenarioRequest(2, 1, 0), history, s_evaluationTime);
+        var estimate = QuotaPredictionService.Simulate(new ScenarioRequest(2, 1, 0), history, s_evaluationTime);
 
         Assert.False(estimate.FiveHour.HasEnoughHistory);
         Assert.False(estimate.Weekly.HasEnoughHistory);
@@ -61,7 +61,7 @@ public sealed class ScenarioPlannerServiceTests
     {
         var history = BuildSyntheticHistory();
 
-        var estimate = _planner.Estimate(
+        var estimate = QuotaPredictionService.Simulate(
             new ScenarioRequest(2, 1, 2, 1.0, "gpt-5.6-luna", "xhigh"),
             history,
             s_evaluationTime);
@@ -81,13 +81,13 @@ public sealed class ScenarioPlannerServiceTests
     {
         var history = BuildSyntheticHistory();
 
-        var light = _planner.Estimate(new ScenarioRequest(1, 1, 0, 0.7), history, s_evaluationTime);
-        var heavy = _planner.Estimate(new ScenarioRequest(3, 2, 4, 1.4), history, s_evaluationTime);
+        var light = QuotaPredictionService.Simulate(new ScenarioRequest(1, 1, 0, 0.7), history, s_evaluationTime);
+        var heavy = QuotaPredictionService.Simulate(new ScenarioRequest(3, 2, 4, 1.4), history, s_evaluationTime);
 
         Assert.False(light.FiveHour.HasEnoughHistory);
         Assert.False(heavy.FiveHour.HasEnoughHistory);
         Assert.Contains("Intensity", light.FiveHour.Explanation);
-        var outside = _planner.Estimate(new ScenarioRequest(3, 2, 4), history, s_evaluationTime);
+        var outside = QuotaPredictionService.Simulate(new ScenarioRequest(3, 2, 4), history, s_evaluationTime);
         Assert.Contains("outside observed support", outside.FiveHour.Explanation);
     }
 
@@ -96,8 +96,8 @@ public sealed class ScenarioPlannerServiceTests
     {
         var history = BuildSyntheticHistory();
 
-        var baseline = _planner.Estimate(new ScenarioRequest(2, 1, 1), history, s_evaluationTime);
-        var unknownModel = _planner.Estimate(
+        var baseline = QuotaPredictionService.Simulate(new ScenarioRequest(2, 1, 1), history, s_evaluationTime);
+        var unknownModel = QuotaPredictionService.Simulate(
             new ScenarioRequest(2, 1, 1, 1, "never-seen-model", "ultra-never-seen"),
             history,
             s_evaluationTime);
@@ -113,7 +113,7 @@ public sealed class ScenarioPlannerServiceTests
     {
         var history = BuildSyntheticHistory();
 
-        var estimate = _planner.Estimate(
+        var estimate = QuotaPredictionService.Simulate(
             new ScenarioRequest(2, 1, 1, 1, "gpt-5.6-luna", "never-seen-reasoning"),
             history,
             s_evaluationTime);
@@ -129,7 +129,7 @@ public sealed class ScenarioPlannerServiceTests
         var history = BuildSyntheticHistory();
         var evaluation = s_evaluationTime.AddDays(40);
 
-        var estimate = _planner.Estimate(new ScenarioRequest(2, 1, 1), history, evaluation);
+        var estimate = QuotaPredictionService.Simulate(new ScenarioRequest(2, 1, 1), history, evaluation);
 
         Assert.False(estimate.FiveHour.HasEnoughHistory);
         Assert.False(estimate.Weekly.HasEnoughHistory);
@@ -142,9 +142,9 @@ public sealed class ScenarioPlannerServiceTests
     {
         var history = BuildSyntheticHistory().Select(x => x with { QuotaDeltaPercent = 0 }).ToArray();
         var request = new ScenarioRequest(1, 1, 1);
-        var before = _planner.Estimate(request, history, s_evaluationTime);
+        var before = QuotaPredictionService.Simulate(request, history, s_evaluationTime);
         var future = history.Select(x => x with { StartUtc = x.StartUtc.AddDays(10), EndUtc = x.EndUtc.AddDays(10), QuotaDeltaPercent = 99 });
-        var after = _planner.Estimate(request, history.Concat(future).ToArray(), s_evaluationTime);
+        var after = QuotaPredictionService.Simulate(request, history.Concat(future).ToArray(), s_evaluationTime);
         Assert.Equal(before, after);
         Assert.Equal(18, before.FiveHour.SampleCount);
         Assert.Equal(0, before.FiveHour.ExpectedQuotaDeltaPercent);

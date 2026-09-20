@@ -26,7 +26,6 @@
                         <NavigationViewItem Content="Chats and agents" Tag="codex" />
                         <NavigationViewItem Content="Workload planner" Tag="forecasts" />
                         <NavigationViewItem Content="Quota history details" Tag="analytics" />
-                        <NavigationViewItem Content="Collector overview" Tag="overview" />
                         <NavigationViewItem Content="Diagnostics" Tag="diagnostics" />
                         <NavigationViewItem Content="Model lab" Tag="model-lab" />
                         <NavigationViewItem Content="Rollout coverage" Tag="coverage" />

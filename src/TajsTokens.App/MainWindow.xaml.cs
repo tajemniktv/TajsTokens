@@ -91,7 +91,7 @@ public sealed partial class MainWindow : Window
             var tag = e.SourcePageType == typeof(CodexIntelligencePage) ? "codex-intelligence" :
                 e.SourcePageType == typeof(ForecastsPage) && Equals(e.Parameter, "model-lab") ? "model-lab" :
                 e.SourcePageType == typeof(ForecastsPage) ? "forecasts" :
-                e.SourcePageType == typeof(OverviewPage) ? "overview" : e.SourcePageType == typeof(CodexPage) ? "codex" :
+                e.SourcePageType == typeof(CodexPage) ? "codex" :
                 e.SourcePageType == typeof(AnalyticsPage) ? "analytics" : e.SourcePageType == typeof(DiagnosticsPage) ? "diagnostics" :
                 e.SourcePageType == typeof(CodexRolloutCoveragePage) ? "coverage" : e.SourcePageType == typeof(CodexSourcesPage) ? "sources" :
                 e.SourcePageType == typeof(CodexDataExplorerPage) ? "codex-data" : e.SourcePageType == typeof(CodexCliHarnessPage) ? "codex-cli" : "settings";
@@ -121,7 +121,6 @@ public sealed partial class MainWindow : Window
         var pageType = page switch
         {
             "codex-intelligence" => typeof(CodexIntelligencePage),
-            "overview" => typeof(OverviewPage),
             "codex-cli" => typeof(CodexCliHarnessPage),
             "codex" => typeof(CodexPage),
             "codex-data" => typeof(CodexDataExplorerPage),
@@ -132,7 +131,7 @@ public sealed partial class MainWindow : Window
             "analytics" => typeof(AnalyticsPage),
             "diagnostics" => typeof(DiagnosticsPage),
             "settings" => typeof(SettingsPage),
-            _ => typeof(OverviewPage)
+            _ => typeof(CodexIntelligencePage)
         };
 
         Navigate(pageType, page == "model-lab" ? "model-lab" : null);
