@@ -1,7 +1,15 @@
+// Taj's Tokens | FileSystemCodexSessionEventProvider.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Runtime.CompilerServices;
 using System.Text;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
+
+#endregion
 
 namespace TajsTokens.Infrastructure.Ingestion;
 
@@ -37,35 +45,35 @@ public sealed class FileSystemCodexSessionEventProvider : ICodexSessionEventProv
         }
 
         stream.Seek(fromOffset, SeekOrigin.Begin);
-        var buffer = new byte[BufferSize];
+        byte[] buffer = new byte[BufferSize];
         using var recordBuffer = new MemoryStream();
-        var recordStart = fromOffset;
-        var absoluteOffset = fromOffset;
+        long recordStart = fromOffset;
+        long absoluteOffset = fromOffset;
 
         while (true)
         {
-            var read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
+            int read = await stream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken);
             if (read == 0)
             {
                 break;
             }
 
-            for (var index = 0; index < read; index++)
+            for (int index = 0; index < read; index++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                var value = buffer[index];
+                byte value = buffer[index];
                 absoluteOffset++;
 
                 if (value == (byte)'\n')
                 {
-                    var bytes = recordBuffer.ToArray();
-                    var length = bytes.Length;
+                    byte[] bytes = recordBuffer.ToArray();
+                    int length = bytes.Length;
                     if (length > 0 && bytes[^1] == (byte)'\r')
                     {
                         length--;
                     }
 
-                    var payload = Encoding.UTF8.GetString(bytes, 0, length);
+                    string payload = Encoding.UTF8.GetString(bytes, 0, length);
                     var completedRecord = new RawSessionRecord(filePath, recordStart, absoluteOffset, payload);
                     recordBuffer.SetLength(0);
                     recordStart = absoluteOffset;

@@ -1,10 +1,18 @@
+// Taj's Tokens | ICodexCliHarness.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using TajsTokens.Core.Models;
+
+#endregion
 
 namespace TajsTokens.Core.Interfaces;
 
 /// <summary>
-/// User-invoked local execution boundary for a custom Codex CLI. It is intentionally separate
-/// from telemetry acquisition and does not imply that command output is durable evidence.
+///     User-invoked local execution boundary for a custom Codex CLI. It is intentionally separate
+///     from telemetry acquisition and does not imply that command output is durable evidence.
 /// </summary>
 public interface ICodexCliHarness
 {

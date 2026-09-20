@@ -1,5 +1,13 @@
+// Taj's Tokens | CodexEvidenceTransport.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Text;
 using System.Text.Json;
+
+#endregion
 
 namespace TajsTokens.Infrastructure.Providers;
 
@@ -22,8 +30,8 @@ public sealed class CodexEvidenceTransport(TextReader reader, TextWriter writer)
                 _position = 0;
                 if (_length == 0) throw new IOException("App-server closed output before a complete message.");
             }
-            var end = Array.IndexOf(_buffer, '\n', _position, _length - _position);
-            var count = (end < 0 ? _length : end) - _position;
+            int end = Array.IndexOf(_buffer, '\n', _position, _length - _position);
+            int count = (end < 0 ? _length : end) - _position;
             if (line.Length + count > MaxLineCharacters) throw new IOException("App-server response exceeds evidence bound.");
             line.Append(_buffer, _position, count);
             _position += count;
@@ -36,12 +44,12 @@ public sealed class CodexEvidenceTransport(TextReader reader, TextWriter writer)
 
     public async Task<bool> RejectServerRequestAsync(JsonElement message, CancellationToken token)
     {
-        if (!message.TryGetProperty("method", out _) || !message.TryGetProperty("id", out var id) ||
+        if (!message.TryGetProperty("method", out _) || !message.TryGetProperty("id", out JsonElement id) ||
             message.TryGetProperty("result", out _) || message.TryGetProperty("error", out _)) return false;
         // IDs are the only echoed data. Do not reflect method/params or accept unbounded identifiers.
         if (id.ValueKind is not (JsonValueKind.String or JsonValueKind.Number) || id.GetRawText().Length > 256)
             throw new IOException("Unsupported server request identity.");
-        var response = JsonSerializer.Serialize(new { id, error = new { code = -32601, message = "Method not supported" } });
+        string response = JsonSerializer.Serialize(new { id, error = new { code = -32601, message = "Method not supported" } });
         await writer.WriteLineAsync(response.AsMemory(), token);
         await writer.FlushAsync(token);
         return true;

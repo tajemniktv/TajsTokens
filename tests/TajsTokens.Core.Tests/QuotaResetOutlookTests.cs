@@ -1,6 +1,14 @@
+// Taj's Tokens | QuotaResetOutlookTests.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 using TajsTokens.Core.Services;
+
+#endregion
 
 namespace TajsTokens.Core.Tests;
 
@@ -10,16 +18,16 @@ public sealed class QuotaResetOutlookTests
     [Fact]
     public void BuildForecast_WhenBurnRateWouldExhaustBeforeReset_MarksAsNotSurviving()
     {
-        var now = DateTimeOffset.UtcNow;
-        var reset = now.AddHours(2);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset reset = now.AddHours(2);
         var snapshots = new List<QuotaSnapshot>
         {
             Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-2), 20, reset),
             Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-1), 45, reset),
-            Snapshot(QuotaWindowKind.FiveHour, now, 70, reset)
+            Snapshot(QuotaWindowKind.FiveHour, now, 70, reset),
         };
 
-        var forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
+        Forecast forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
 
         Assert.False(forecast.SurvivesUntilReset);
         Assert.Equal(ForecastState.ExhaustionLikelyBeforeReset, forecast.State);
@@ -31,16 +39,16 @@ public sealed class QuotaResetOutlookTests
     [Fact]
     public void BuildForecast_WhenBurnRateIsLow_MarksAsSurviving()
     {
-        var now = DateTimeOffset.UtcNow;
-        var reset = now.AddHours(2);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset reset = now.AddHours(2);
         var snapshots = new List<QuotaSnapshot>
         {
             Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-2), 12, reset),
             Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-1), 14, reset),
-            Snapshot(QuotaWindowKind.FiveHour, now, 16, reset)
+            Snapshot(QuotaWindowKind.FiveHour, now, 16, reset),
         };
 
-        var forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
+        Forecast forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
 
         Assert.True(forecast.SurvivesUntilReset);
         Assert.Equal(ForecastState.SafeUntilReset, forecast.State);
@@ -53,10 +61,10 @@ public sealed class QuotaResetOutlookTests
     [Fact]
     public void BuildForecast_WithInsufficientData_PreservesWindowKindAndReturnsUnknown()
     {
-        var now = DateTimeOffset.UtcNow;
-        var snapshots = new[] { Snapshot(QuotaWindowKind.Weekly, now, 15, now.AddDays(4)) };
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        QuotaSnapshot[] snapshots = new[] { Snapshot(QuotaWindowKind.Weekly, now, 15, now.AddDays(4)) };
 
-        var forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
+        Forecast forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
 
         Assert.Equal(QuotaWindowKind.Weekly, forecast.Kind);
         Assert.Equal(ForecastState.Learning, forecast.State);
@@ -69,17 +77,17 @@ public sealed class QuotaResetOutlookTests
     [Fact]
     public void BuildForecast_ResetDecrease_IsNotTreatedAsNegativeBurn()
     {
-        var now = DateTimeOffset.UtcNow;
-        var reset = now.AddHours(2);
-        var snapshots = new[]
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset reset = now.AddHours(2);
+        QuotaSnapshot[] snapshots = new[]
         {
             Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-3), 80, reset),
             Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-2), 5, reset),
             Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-1), 15, reset),
-            Snapshot(QuotaWindowKind.FiveHour, now, 25, reset)
+            Snapshot(QuotaWindowKind.FiveHour, now, 25, reset),
         };
 
-        var forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
+        Forecast forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
 
         Assert.InRange(forecast.BurnRatePercentPerHour!.Value, 9.9, 10.1);
     }
@@ -87,17 +95,17 @@ public sealed class QuotaResetOutlookTests
     [Fact]
     public void BuildForecast_ChangedResetBoundary_WithPositiveDelta_DoesNotCrossWindows()
     {
-        var now = DateTimeOffset.UtcNow;
-        var oldReset = now.AddHours(-2);
-        var currentReset = now.AddHours(3);
-        var snapshots = new[]
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset oldReset = now.AddHours(-2);
+        DateTimeOffset currentReset = now.AddHours(3);
+        QuotaSnapshot[] snapshots = new[]
         {
             Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-3), 20, oldReset),
             Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-2), 80, currentReset),
-            Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-1), 90, currentReset)
+            Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-1), 90, currentReset),
         };
 
-        var forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
+        Forecast forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
 
         Assert.InRange(forecast.BurnRatePercentPerHour!.Value, 9.9, 10.1);
     }
@@ -105,16 +113,16 @@ public sealed class QuotaResetOutlookTests
     [Fact]
     public void BuildForecast_FutureSamples_AreIgnored()
     {
-        var now = DateTimeOffset.UtcNow;
-        var reset = now.AddHours(3);
-        var snapshots = new[]
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset reset = now.AddHours(3);
+        QuotaSnapshot[] snapshots = new[]
         {
             Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-1), 10, reset),
             Snapshot(QuotaWindowKind.FiveHour, now, 20, reset),
-            Snapshot(QuotaWindowKind.FiveHour, now.AddHours(1), 95, reset)
+            Snapshot(QuotaWindowKind.FiveHour, now.AddHours(1), 95, reset),
         };
 
-        var forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
+        Forecast forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
 
         Assert.InRange(forecast.BurnRatePercentPerHour!.Value, 9.9, 10.1);
     }
@@ -122,11 +130,8 @@ public sealed class QuotaResetOutlookTests
     [Fact]
     public void BuildForecast_WhenAllSamplesAreFuture_Throws()
     {
-        var now = DateTimeOffset.UtcNow;
-        var snapshots = new[]
-        {
-            Snapshot(QuotaWindowKind.FiveHour, now.AddMinutes(1), 10, now.AddHours(3))
-        };
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        QuotaSnapshot[] snapshots = new[] { Snapshot(QuotaWindowKind.FiveHour, now.AddMinutes(1), 10, now.AddHours(3)) };
 
         Assert.Throws<ArgumentException>(() => QuotaPredictionService.BuildResetOutlook(snapshots, now));
     }
@@ -134,11 +139,11 @@ public sealed class QuotaResetOutlookTests
     [Fact]
     public void BuildForecast_MixedWindowKinds_Throws()
     {
-        var now = DateTimeOffset.UtcNow;
-        var snapshots = new[]
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        QuotaSnapshot[] snapshots = new[]
         {
             Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-1), 10, now.AddHours(2)),
-            Snapshot(QuotaWindowKind.Weekly, now, 20, now.AddDays(4))
+            Snapshot(QuotaWindowKind.Weekly, now, 20, now.AddDays(4)),
         };
 
         Assert.Throws<ArgumentException>(() => QuotaPredictionService.BuildResetOutlook(snapshots, now));
@@ -147,15 +152,15 @@ public sealed class QuotaResetOutlookTests
     [Fact]
     public void BuildForecast_UnknownQuotaValue_ReturnsUnknown()
     {
-        var now = DateTimeOffset.UtcNow;
-        var reset = now.AddHours(2);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset reset = now.AddHours(2);
         var snapshots = new[]
         {
             new QuotaSnapshot(QuotaWindowKind.FiveHour, now.AddHours(-1), null, 300, reset, "codex", "default", "test"),
-            new QuotaSnapshot(QuotaWindowKind.FiveHour, now, null, 300, reset, "codex", "default", "test")
+            new QuotaSnapshot(QuotaWindowKind.FiveHour, now, null, 300, reset, "codex", "default", "test"),
         };
 
-        var forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
+        Forecast forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
         Assert.Equal(ForecastState.Learning, forecast.State);
         Assert.Null(forecast.BurnRatePercentPerHour);
         Assert.Null(forecast.SurvivesUntilReset);
@@ -164,16 +169,16 @@ public sealed class QuotaResetOutlookTests
     [Fact]
     public void BuildForecast_ExhaustionAfterReset_IsSuppressedAndMarginIsPrimary()
     {
-        var now = DateTimeOffset.UtcNow;
-        var reset = now.AddHours(1);
-        var snapshots = new[]
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset reset = now.AddHours(1);
+        QuotaSnapshot[] snapshots = new[]
         {
             Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-2), 20, reset),
             Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-1), 22, reset),
-            Snapshot(QuotaWindowKind.FiveHour, now, 24, reset)
+            Snapshot(QuotaWindowKind.FiveHour, now, 24, reset),
         };
 
-        var forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
+        Forecast forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
 
         Assert.True(forecast.SurvivesUntilReset);
         Assert.Null(forecast.EstimatedExhaustionAtUtc);
@@ -184,17 +189,17 @@ public sealed class QuotaResetOutlookTests
     [Fact]
     public void BuildForecast_FlatQuantizedMeter_DoesNotClaimExactZeroBurn()
     {
-        var now = DateTimeOffset.UtcNow;
-        var reset = now.AddHours(2);
-        var snapshots = new[]
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset reset = now.AddHours(2);
+        QuotaSnapshot[] snapshots = new[]
         {
             Snapshot(QuotaWindowKind.FiveHour, now.AddMinutes(-30), 41, reset),
             Snapshot(QuotaWindowKind.FiveHour, now.AddMinutes(-20), 41, reset),
             Snapshot(QuotaWindowKind.FiveHour, now.AddMinutes(-10), 41, reset),
-            Snapshot(QuotaWindowKind.FiveHour, now, 41, reset)
+            Snapshot(QuotaWindowKind.FiveHour, now, 41, reset),
         };
 
-        var forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
+        Forecast forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
 
         Assert.Equal(ForecastState.IdleWithinMeterPrecision, forecast.State);
         Assert.Equal("not-estimated", forecast.Evidence!.Model);
@@ -208,16 +213,16 @@ public sealed class QuotaResetOutlookTests
     [Fact]
     public void BuildForecast_MixedFlatAndMovingIntervals_RetainsFlatSamplesInEwma()
     {
-        var now = DateTimeOffset.UtcNow;
-        var reset = now.AddHours(4);
-        var snapshots = new[]
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset reset = now.AddHours(4);
+        QuotaSnapshot[] snapshots = new[]
         {
             Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-2), 10, reset),
             Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-1), 10, reset),
-            Snapshot(QuotaWindowKind.FiveHour, now, 30, reset)
+            Snapshot(QuotaWindowKind.FiveHour, now, 30, reset),
         };
 
-        var forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
+        Forecast forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
 
         Assert.False(forecast.IsQuantizedFlat);
         Assert.InRange(forecast.BurnRatePercentPerHour!.Value, 8.99, 9.01);
@@ -226,15 +231,15 @@ public sealed class QuotaResetOutlookTests
     [Fact]
     public void BuildForecast_ExpiredObservedEpoch_ReturnsLearningUntilNewProviderSample()
     {
-        var now = DateTimeOffset.UtcNow;
-        var expiredReset = now.AddMinutes(-1);
-        var snapshots = new[]
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset expiredReset = now.AddMinutes(-1);
+        QuotaSnapshot[] snapshots = new[]
         {
             Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-2), 30, expiredReset),
-            Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-1), 50, expiredReset)
+            Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-1), 50, expiredReset),
         };
 
-        var forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
+        Forecast forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
 
         Assert.Equal(ForecastState.Learning, forecast.State);
         Assert.Null(forecast.BurnRatePercentPerHour);
@@ -245,22 +250,24 @@ public sealed class QuotaResetOutlookTests
     [Fact]
     public void BuildForecast_RisingRecentRates_ReportsAcceleratingTrend()
     {
-        var now = DateTimeOffset.UtcNow;
-        var reset = now.AddHours(2);
-        var snapshots = new[]
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        DateTimeOffset reset = now.AddHours(2);
+        QuotaSnapshot[] snapshots = new[]
         {
             Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-4), 10, reset),
             Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-3), 12, reset),
             Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-2), 16, reset),
             Snapshot(QuotaWindowKind.FiveHour, now.AddHours(-1), 24, reset),
-            Snapshot(QuotaWindowKind.FiveHour, now, 36, reset)
+            Snapshot(QuotaWindowKind.FiveHour, now, 36, reset),
         };
 
-        var forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
+        Forecast forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
 
         Assert.Equal("accelerating", forecast.Trend);
     }
 
-    private static QuotaSnapshot Snapshot(QuotaWindowKind kind, DateTimeOffset captured, double used, DateTimeOffset reset) =>
-        new(kind, captured, used, kind == QuotaWindowKind.FiveHour ? 300 : 10_080, reset, "codex", "default", "test");
+    private static QuotaSnapshot Snapshot(QuotaWindowKind kind, DateTimeOffset captured, double used, DateTimeOffset reset)
+    {
+        return new QuotaSnapshot(kind, captured, used, kind == QuotaWindowKind.FiveHour ? 300 : 10_080, reset, "codex", "default", "test");
+    }
 }

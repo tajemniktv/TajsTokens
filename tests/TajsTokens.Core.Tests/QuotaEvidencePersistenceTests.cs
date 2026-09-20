@@ -1,3 +1,9 @@
+// Taj's Tokens | QuotaEvidencePersistenceTests.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
@@ -6,13 +12,14 @@ using TajsTokens.Infrastructure.Ingestion;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
+#endregion
+
 namespace TajsTokens.Core.Tests;
 
 public sealed class QuotaEvidencePersistenceTests : IDisposable
 {
     private static readonly DateTimeOffset Start = new(2026, 9, 1, 10, 0, 0, TimeSpan.Zero);
     private readonly string _directory;
-    private string Database => Path.Combine(_directory, "telemetry.db");
 
     public QuotaEvidencePersistenceTests()
     {
@@ -23,6 +30,15 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
         Directory.CreateDirectory(_directory);
     }
 
+    private string Database => Path.Combine(_directory, "telemetry.db");
+
+    public void Dispose()
+    {
+        using var connection = new SqliteConnection($"Data Source={Database}");
+        SqliteConnection.ClearPool(connection);
+        Directory.Delete(_directory, true);
+    }
+
     [Fact]
     public async Task AssociationsPersistSeparatelyAndOnlyWidenMatchingAccountReads()
     {
@@ -31,32 +47,55 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
         using var observatory = new SqliteCodexObservatoryStore(Database);
         await observatory.InitializeAsync(default);
         await observatory.UpsertRolloutFileAsync("generation", Path.Combine(_directory, "rollout.jsonl"), "session", 100, Start, default);
-        var embedded = Point("asserted", 12);
+        QuotaSnapshot embedded = Point("asserted", 12);
         await repository.UpsertQuotaSnapshotAsync(embedded, default);
-        await repository.UpsertQuotaSnapshotAsync(embedded with { Source = "codex-app-server:codex", AccountKey = "known",
-            ObservationId = null, SourceIdentity = null, SessionId = null }, default);
-        var association = new RolloutAccountAssociation("assertion", "codex", "default", "generation", "session", Start, Start, "known", Start);
-        var path = Path.Combine(_directory, "settings.json");
+        await repository.UpsertQuotaSnapshotAsync(
+            embedded with
+            {
+                Source = "codex-app-server:codex",
+                AccountKey = "known",
+                ObservationId = null,
+                SourceIdentity = null,
+                SessionId = null,
+            },
+            default);
+        var association = new RolloutAccountAssociation(
+            "assertion",
+            "codex",
+            "default",
+            "generation",
+            "session",
+            Start,
+            Start,
+            "known",
+            Start);
+        string path = Path.Combine(_directory, "settings.json");
         await File.WriteAllTextAsync(path, "{\"SchemaVersion\":3,\"PollIntervalSeconds\":120}");
         var store = new RuntimeSettingsStore(path);
-        var previous = store.Load();
+        RuntimeSettings previous = store.Load();
         Assert.Empty(previous.RolloutAccountAssociations);
         store.Save(previous with { RolloutAccountAssociations = [association] });
-        var saved = store.Load();
+        RuntimeSettings saved = store.Load();
         Assert.Equal(RuntimeSettings.CurrentSchemaVersion, saved.SchemaVersion);
         Assert.Equal(120, saved.PollIntervalSeconds);
         Assert.Equal(association, Assert.Single(saved.RolloutAccountAssociations));
-        var original = await new SqliteForecastDatasetReader(Database).ReadAsync("codex", "default", Start.AddHours(-1), Start.AddHours(1), default, "known");
+        CodexForecastDataset original = await new SqliteForecastDatasetReader(Database).ReadAsync(
+            "codex",
+            "default",
+            Start.AddHours(-1),
+            Start.AddHours(1),
+            default,
+            "known");
         Assert.Single(original.Quota);
-        var associated = await new SqliteForecastDatasetReader(Database, saved.RolloutAccountAssociations)
+        CodexForecastDataset associated = await new SqliteForecastDatasetReader(Database, saved.RolloutAccountAssociations)
             .ReadAsync("codex", "default", Start.AddHours(-1), Start.AddHours(1), default, "known");
         Assert.Equal(2, associated.Quota.Count);
         Assert.Null(associated.Quota.Single(x => x.ObservationId == "asserted").AccountKey);
-        var unrelated = await new SqliteForecastDatasetReader(Database, saved.RolloutAccountAssociations)
+        CodexForecastDataset unrelated = await new SqliteForecastDatasetReader(Database, saved.RolloutAccountAssociations)
             .ReadAsync("codex", "default", Start.AddHours(-1), Start.AddHours(1), default, "other");
         Assert.Empty(unrelated.Quota);
         store.Save(saved with { RolloutAccountAssociations = [] });
-        var revoked = store.Load();
+        RuntimeSettings revoked = store.Load();
         Assert.Empty(revoked.RolloutAccountAssociations);
         Assert.Equal(120, revoked.PollIntervalSeconds);
         Assert.Equal(2L, await Scalar("SELECT COUNT(*) FROM quota_snapshots;"));
@@ -68,7 +107,8 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
         using var store = new SqliteCodexObservatoryStore(Database);
         await store.InitializeAsync(default);
         await store.UpsertRolloutFileAsync("generation", Path.Combine(_directory, "rollout.jsonl"), "active", 100, Start, default);
-        await Execute("""
+        await Execute(
+            """
             WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<100001)
             INSERT INTO codex_workload_observations(source_record_id,source_identity,source_file,start_byte_offset,end_byte_offset,
                 session_id,event_type,observed_at_utc,captured_at_utc,contract_version)
@@ -78,7 +118,13 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
             VALUES('prefix','generation','fixture',0,1,'active','session_meta','2020-01-01T00:00:00.0000000+00:00','2020-01-01T00:00:00.0000000+00:00','fixture'),
                 ('recent','generation','fixture',1,2,'active','task_started','2026-09-01T10:00:00.0000000+00:00','2026-09-01T10:00:00.0000000+00:00','fixture');
             """);
-        var data = await new SqliteForecastDatasetReader(Database).ReadAsync("codex", "default", Start.AddDays(-30), Start.AddHours(1), default, includeQuota: false);
+        CodexForecastDataset data = await new SqliteForecastDatasetReader(Database).ReadAsync(
+            "codex",
+            "default",
+            Start.AddDays(-30),
+            Start.AddHours(1),
+            default,
+            includeQuota: false);
         Assert.Equal(new[] { "prefix", "recent" }, data.Workload.Select(x => x.SourceRecordId));
     }
 
@@ -87,8 +133,8 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
     {
         var repository = new SqliteTelemetryRepository(Database);
         await repository.InitializeAsync(default);
-        var row = Point("unused", 12) with { ObservationId = null };
-        foreach (var alternative in new[] { row, row with { SourceIdentity = "other" }, row with { SessionId = "other" } })
+        QuotaSnapshot row = Point("unused", 12) with { ObservationId = null };
+        foreach (QuotaSnapshot alternative in new[] { row, row with { SourceIdentity = "other" }, row with { SessionId = "other" } })
         {
             await repository.UpsertQuotaSnapshotAsync(alternative, default);
             await repository.UpsertQuotaSnapshotAsync(alternative, default);
@@ -103,18 +149,39 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
         await repository.InitializeAsync(default);
         using var store = new SqliteCodexObservatoryStore(Database);
         await store.InitializeAsync(default);
-        var row = Point("r1", 12.375);
+        QuotaSnapshot row = Point("r1", 12.375);
         await repository.UpsertQuotaSnapshotAsync(row, default);
         await store.UpsertQuotaSnapshotAsync(row with { CollectedAtUtc = Start.AddDays(2) }, default);
         var writer = new SqliteCodexIngestionBatchWriter(Database, store);
-        var record = new ParsedRolloutRecord("r1", "token_count", 100, Start, "session",
-            null, null, null, null, null, [row, Point("r2", 13)], null);
+        var record = new ParsedRolloutRecord(
+            "r1",
+            "token_count",
+            100,
+            Start,
+            "session",
+            null,
+            null,
+            null,
+            null,
+            null,
+            [row, Point("r2", 13)],
+            null);
         await writer.WriteBatchAsync("generation", Path.Combine(_directory, "rollout.jsonl"), 100, [record], default);
         await writer.WriteBatchAsync("generation", Path.Combine(_directory, "rollout.jsonl"), 100, [record], default);
-        var rows = await repository.GetRecentQuotaSnapshotsAsync(QuotaWindowKind.FiveHour, "codex", "default", 10, default);
+        IReadOnlyList<QuotaSnapshot> rows = await repository.GetRecentQuotaSnapshotsAsync(
+            QuotaWindowKind.FiveHour,
+            "codex",
+            "default",
+            10,
+            default);
         Assert.Equal(2, rows.Count);
         Assert.Equal(row, rows.Single(x => x.ObservationId == "r1"));
-        var data = await new SqliteForecastDatasetReader(Database).ReadAsync("codex", "default", Start.AddHours(-1), Start.AddHours(1), default);
+        CodexForecastDataset data = await new SqliteForecastDatasetReader(Database).ReadAsync(
+            "codex",
+            "default",
+            Start.AddHours(-1),
+            Start.AddHours(1),
+            default);
         Assert.Equal(2, data.Quota.Count);
         Assert.All(QuotaHistoryPolicy.Describe(data.Quota, Start.AddHours(1)), x => Assert.Equal("same-time-conflict", x.Reason));
     }
@@ -124,12 +191,24 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
     {
         var repository = new SqliteTelemetryRepository(Database);
         await repository.InitializeAsync(default);
-        var row = Point("ignored", 12) with { Source = "codex-app-server:codex", ObservationId = null,
-            SourceIdentity = null, SessionId = null, AccountKey = "known" };
+        QuotaSnapshot row = Point("ignored", 12) with
+        {
+            Source = "codex-app-server:codex",
+            ObservationId = null,
+            SourceIdentity = null,
+            SessionId = null,
+            AccountKey = "known",
+        };
         await repository.UpsertQuotaSnapshotAsync(row, default);
         await repository.UpsertQuotaSnapshotAsync(row, default);
         await repository.UpsertQuotaSnapshotAsync(row with { UsedPercent = 14 }, default);
-        var rows = await repository.GetRecentQuotaSnapshotsAsync(row.Kind, "codex", "default", 10, default, accountKey: "known");
+        IReadOnlyList<QuotaSnapshot> rows = await repository.GetRecentQuotaSnapshotsAsync(
+            row.Kind,
+            "codex",
+            "default",
+            10,
+            default,
+            accountKey: "known");
         Assert.Equal(2, rows.Count);
         Assert.Equal(new[] { 12d, 14d }, rows.Select(x => x.UsedPercent!.Value).Order());
     }
@@ -137,7 +216,8 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
     [Fact]
     public async Task MigrationTenIsTransactionalAndDoesNotInventLegacyProvenance()
     {
-        await Execute("""
+        await Execute(
+            """
             CREATE TABLE ingestion_checkpoints(file_path TEXT PRIMARY KEY, last_byte_offset INTEGER,
                 updated_at_utc TEXT, last_session_id TEXT, parser_version TEXT, source_identity TEXT);
             CREATE TABLE quota_snapshots(provider TEXT NOT NULL,profile TEXT NOT NULL,kind TEXT NOT NULL,
@@ -157,15 +237,19 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
         await repository.InitializeAsync(default);
         await repository.InitializeAsync(default);
         Assert.Equal(14L, await Scalar("PRAGMA user_version;"));
-        var row = Assert.Single(await repository.GetRecentQuotaSnapshotsAsync(QuotaWindowKind.FiveHour, "codex", "default", 10, default));
+        QuotaSnapshot row = Assert.Single(
+            await repository.GetRecentQuotaSnapshotsAsync(QuotaWindowKind.FiveHour, "codex", "default", 10, default));
         Assert.Equal(12.375, row.UsedPercent);
-        Assert.Null(row.CollectedAtUtc); Assert.Null(row.ObservationId); Assert.Null(row.LimitId);
+        Assert.Null(row.CollectedAtUtc);
+        Assert.Null(row.ObservationId);
+        Assert.Null(row.LimitId);
         Assert.False(row.HasSourceTimestamp);
         Assert.Equal("missing-event-time", Assert.Single(QuotaHistoryPolicy.Describe([row], Start)).Reason);
         await repository.UpsertQuotaSnapshotAsync(row, default);
         Assert.Equal(1L, await Scalar("SELECT COUNT(*) FROM quota_snapshots;"));
         // Repair the already-shipped v10 default too, not just new v9 upgrades.
-        await Execute("UPDATE quota_snapshots SET has_source_timestamp=1; ALTER TABLE ingestion_checkpoints DROP COLUMN consumed_prefix_sha256; DROP TABLE codex_server_evidence; PRAGMA user_version=10;");
+        await Execute(
+            "UPDATE quota_snapshots SET has_source_timestamp=1; ALTER TABLE ingestion_checkpoints DROP COLUMN consumed_prefix_sha256; DROP TABLE codex_server_evidence; PRAGMA user_version=10;");
         await repository.InitializeAsync(default);
         Assert.Equal(0L, await Scalar("SELECT has_source_timestamp FROM quota_snapshots;"));
     }
@@ -177,7 +261,8 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
         await repository.InitializeAsync(default);
         await repository.UpsertQuotaSnapshotAsync(Point("retained", 12), default);
         await new SqliteCodexStateIndexStore(Database).InitializeAsync(default);
-        await Execute("""
+        await Execute(
+            """
             UPDATE codex_state_index_schema SET version=2;
             UPDATE codex_state_sync SET watermark_updated_at_ms=12345;
             INSERT INTO codex_state_thread_fingerprints VALUES('session',12345,100,NULL,NULL,0,'hash','2026-09-01');
@@ -194,26 +279,40 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
     {
         using var connection = new SqliteConnection($"Data Source={Database}");
         await connection.OpenAsync();
-        using var command = connection.CreateCommand(); command.CommandText = sql;
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql;
         await command.ExecuteNonQueryAsync();
     }
+
     private async Task<object?> Scalar(string sql)
     {
         using var connection = new SqliteConnection($"Data Source={Database}");
         await connection.OpenAsync();
-        using var command = connection.CreateCommand(); command.CommandText = sql;
+        using SqliteCommand command = connection.CreateCommand();
+        command.CommandText = sql;
         return await command.ExecuteScalarAsync();
     }
-    private static QuotaSnapshot Point(string id, double used) => new(QuotaWindowKind.FiveHour, Start,
-        used, 300, Start.AddHours(5), "codex", "default", "codex-rollout:primary")
+
+    private static QuotaSnapshot Point(string id, double used)
     {
-        ObservationId = id, SourceIdentity = "generation", SessionId = "session", LimitId = "codex",
-        PlanType = "pro", Lane = "primary", CollectedAtUtc = Start.AddDays(1), HasSourceTimestamp = true
-    };
-    public void Dispose()
-    {
-        using var connection = new SqliteConnection($"Data Source={Database}");
-        SqliteConnection.ClearPool(connection);
-        Directory.Delete(_directory, recursive: true);
+        return new QuotaSnapshot(
+            QuotaWindowKind.FiveHour,
+            Start,
+            used,
+            300,
+            Start.AddHours(5),
+            "codex",
+            "default",
+            "codex-rollout:primary")
+        {
+            ObservationId = id,
+            SourceIdentity = "generation",
+            SessionId = "session",
+            LimitId = "codex",
+            PlanType = "pro",
+            Lane = "primary",
+            CollectedAtUtc = Start.AddDays(1),
+            HasSourceTimestamp = true,
+        };
     }
 }

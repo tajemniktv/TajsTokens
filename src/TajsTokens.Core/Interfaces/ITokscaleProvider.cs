@@ -1,23 +1,29 @@
+// Taj's Tokens | ITokscaleProvider.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using TajsTokens.Core.Models;
+
+#endregion
 
 namespace TajsTokens.Core.Interfaces;
 
 /// <summary>
-/// Optional Tokscale reference adapter. The two legacy operations remain available for focused
-/// parser/CLI tests, while the inherited accounting-provider contract exposes one atomic generation
-/// to the runtime coordinator without forcing every Tokscale test double to repeat adapter glue.
+///     Optional Tokscale reference adapter. The two legacy operations remain available for focused
+///     parser/CLI tests, while the inherited accounting-provider contract exposes one atomic generation
+///     to the runtime coordinator without forcing every Tokscale test double to repeat adapter glue.
 /// </summary>
 public interface ITokscaleProvider : ICodexTokenAccountingProvider
 {
-    Task<IReadOnlyList<TokenUsage>> GetUsageObservationsAsync(CancellationToken cancellationToken);
-    Task<IReadOnlyList<TokenTimeBucket>> GetHourlyUsageAsync(CancellationToken cancellationToken);
 
     async Task<CodexTokenAccountingSnapshot> ICodexTokenAccountingProvider.GetSnapshotAsync(CancellationToken cancellationToken)
     {
         // Keep the generation atomic: if either command fails, callers retain the previous complete
         // snapshot rather than combining fresh model totals with stale hourly buckets or vice versa.
-        var usage = await GetUsageObservationsAsync(cancellationToken);
-        var hourly = await GetHourlyUsageAsync(cancellationToken);
+        IReadOnlyList<TokenUsage> usage = await GetUsageObservationsAsync(cancellationToken);
+        IReadOnlyList<TokenTimeBucket> hourly = await GetHourlyUsageAsync(cancellationToken);
         return new CodexTokenAccountingSnapshot(
             "Tokscale",
             "Local Codex rollout history discovered by Tokscale; remote/cloud-only sessions may be absent.",
@@ -25,4 +31,7 @@ public interface ITokscaleProvider : ICodexTokenAccountingProvider
             hourly,
             AsOfUtc: DateTimeOffset.UtcNow);
     }
+
+    Task<IReadOnlyList<TokenUsage>> GetUsageObservationsAsync(CancellationToken cancellationToken);
+    Task<IReadOnlyList<TokenTimeBucket>> GetHourlyUsageAsync(CancellationToken cancellationToken);
 }

@@ -1,4 +1,12 @@
+// Taj's Tokens | IntelligenceModels.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using TajsTokens.Core.Enums;
+
+#endregion
 
 namespace TajsTokens.Core.Models;
 
@@ -35,6 +43,7 @@ public sealed record UsageHistoryBucket(
 {
     public long DisjointTokens => checked(
         UncachedInputTokens + CacheReadTokens + CacheWriteTokens + NonReasoningOutputTokens + ReasoningOutputTokens);
+
     public long IntegrityDelta => checked(NativeTokens - DisjointTokens);
     public bool IntegrityExact => IntegrityDelta == 0;
 }
@@ -51,8 +60,10 @@ public sealed record UsageDimensionTotal(
     int Sessions)
 {
     public string? ThreadId { get; init; }
+
     public long DisjointTokens => checked(
         UncachedInputTokens + CacheReadTokens + CacheWriteTokens + NonReasoningOutputTokens + ReasoningOutputTokens);
+
     public long IntegrityDelta => checked(NativeTokens - DisjointTokens);
     public bool IntegrityExact => IntegrityDelta == 0;
 }

@@ -1,13 +1,16 @@
+// Taj's Tokens | CodexCumulativeTokenObservation.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
 namespace TajsTokens.Core.Models;
 
 /// <summary>
-/// Content-free raw counters from one Codex <c>token_count</c> event.
-///
-/// The cumulative and per-turn snapshots are independent provider fields:
-/// Codex may omit either one, so neither is used as a substitute for the other.
-/// The reducer treats a complete cumulative snapshot as a watermark and a
-/// complete <see cref="LastTokenUsage" /> snapshot as the preferred observed
-/// increment.
+///     Content-free raw counters from one Codex <c>token_count</c> event.
+///     The cumulative and per-turn snapshots are independent provider fields:
+///     Codex may omit either one, so neither is used as a substitute for the other.
+///     The reducer treats a complete cumulative snapshot as a watermark and a
+///     complete <see cref="LastTokenUsage" /> snapshot as the preferred observed
+///     increment.
 /// </summary>
 public record CodexTokenCountObservation
 {
@@ -34,8 +37,8 @@ public record CodexTokenCountObservation
     }
 
     /// <summary>
-    /// Compatibility constructor for callers that still provide the six
-    /// cumulative counters directly.
+    ///     Compatibility constructor for callers that still provide the six
+    ///     cumulative counters directly.
     /// </summary>
     public CodexTokenCountObservation(
         string sourceEventId,
@@ -96,8 +99,8 @@ public record CodexTokenCountObservation
 }
 
 /// <summary>
-/// Compatibility name retained for callers compiled against the previous
-/// cumulative-only shape. New code should use <see cref="CodexTokenCountObservation" />.
+///     Compatibility name retained for callers compiled against the previous
+///     cumulative-only shape. New code should use <see cref="CodexTokenCountObservation" />.
 /// </summary>
 public sealed record CodexCumulativeTokenObservation : CodexTokenCountObservation
 {

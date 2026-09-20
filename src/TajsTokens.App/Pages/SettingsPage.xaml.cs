@@ -1,8 +1,17 @@
+// Taj's Tokens | SettingsPage.xaml.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Globalization;
+using System.Reflection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
+
+#endregion
 
 namespace TajsTokens.App.Pages;
 
@@ -13,14 +22,17 @@ public sealed partial class SettingsPage : Page
     public SettingsPage()
     {
         InitializeComponent();
-        BuildVersionText.Text = $"Build {System.Reflection.Assembly.GetExecutingAssembly().GetCustomAttributes(false)
-            .OfType<System.Reflection.AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "unknown"}";
+        BuildVersionText.Text = $"Build {Assembly.GetExecutingAssembly().GetCustomAttributes(false)
+            .OfType<AssemblyInformationalVersionAttribute>().FirstOrDefault()?.InformationalVersion ?? "unknown"}";
         Loaded += OnLoaded;
     }
 
     private App App => (App)Application.Current;
 
-    private void OnLoaded(object sender, RoutedEventArgs e) => RenderSettings();
+    private void OnLoaded(object sender, RoutedEventArgs e)
+    {
+        RenderSettings();
+    }
 
     private void OnReloadClicked(object sender, RoutedEventArgs e)
     {
@@ -48,14 +60,14 @@ public sealed partial class SettingsPage : Page
             return;
         }
 
-        if (!TryParseThresholds(ThresholdsTextBox.Text, out var thresholds, out var thresholdError))
+        if (!TryParseThresholds(ThresholdsTextBox.Text, out int[] thresholds, out string? thresholdError))
         {
             ShowStatus(InfoBarSeverity.Error, "Invalid notification thresholds", thresholdError!);
             return;
         }
 
-        var baseline = _renderedSettings ?? App.Services.Settings;
-        var candidate = baseline with
+        RuntimeSettings baseline = _renderedSettings ?? App.Services.Settings;
+        RuntimeSettings candidate = baseline with
         {
             RunInBackground = RunInBackgroundToggle.IsOn,
             LaunchAtLogin = LaunchAtLoginToggle.IsOn,
@@ -68,13 +80,13 @@ public sealed partial class SettingsPage : Page
             CodexCliArguments = CodexCliArgumentsBox.Text,
             CodexCliWorkingDirectory = CodexCliWorkingDirectoryBox.Text,
             CodexCliPromptMode = ParsePromptMode(),
-            CodexCliTimeoutSeconds = (int)Math.Round(CodexCliTimeoutBox.Value, MidpointRounding.AwayFromZero)
+            CodexCliTimeoutSeconds = (int)Math.Round(CodexCliTimeoutBox.Value, MidpointRounding.AwayFromZero),
         };
 
         SaveButton.IsEnabled = false;
         try
         {
-            var result = await App.TryApplySettingsAsync(baseline, candidate);
+            (bool Success, string? Error) result = await App.TryApplySettingsAsync(baseline, candidate);
             if (!result.Success)
             {
                 RenderSettings();
@@ -83,7 +95,10 @@ public sealed partial class SettingsPage : Page
             }
 
             RenderSettings();
-            ShowStatus(InfoBarSeverity.Success, "Settings saved", "Runtime settings were persisted and live services were updated where applicable.");
+            ShowStatus(
+                InfoBarSeverity.Success,
+                "Settings saved",
+                "Runtime settings were persisted and live services were updated where applicable.");
         }
         finally
         {
@@ -93,7 +108,7 @@ public sealed partial class SettingsPage : Page
 
     private void RenderSettings()
     {
-        var settings = App.Services.Settings;
+        RuntimeSettings settings = App.Services.Settings;
         _renderedSettings = settings;
         RunInBackgroundToggle.IsOn = settings.RunInBackground;
         LaunchAtLoginToggle.IsOn = settings.LaunchAtLogin;
@@ -109,56 +124,90 @@ public sealed partial class SettingsPage : Page
         {
             CodexCliPromptMode.StandardInput => 0,
             CodexCliPromptMode.LastArgument => 1,
-            _ => 2
+            _ => 2,
         };
         CodexCliTimeoutBox.Value = settings.CodexCliTimeoutSeconds;
         DataFolderText.Text = App.Services.DataFolder;
         DatabasePathText.Text = App.Services.DatabasePath;
         SettingsSchemaText.Text = $"Settings schema v{settings.SchemaVersion} · poll range 15–3600 s";
-        RolloutOwnershipText.Text = $"{settings.RolloutAccountAssociations.Length} bounded source/session associations. Attribution remains user-asserted, not provider-verified.";
+        RolloutOwnershipText.Text =
+            $"{settings.RolloutAccountAssociations.Length} bounded source/session associations. Attribution remains user-asserted, not provider-verified.";
         RevokeRolloutsButton.IsEnabled = settings.RolloutAccountAssociations.Length > 0;
     }
 
     private async void OnAssociateRolloutsClicked(object sender, RoutedEventArgs e)
     {
-        var accounts = App.Services.Telemetry.Latest.QuotaLanes.Where(x => x.IsFresh && x.Snapshot?.AccountKey is not null)
+        string[] accounts = App.Services.Telemetry.Latest.QuotaLanes.Where(x => x.IsFresh && x.Snapshot?.AccountKey is not null)
             .Select(x => x.Snapshot!.AccountKey!).Distinct().ToArray();
         if (accounts.Length == 0)
         {
             ShowStatus(InfoBarSeverity.Warning, "No recorded account", "Refresh account quota first; no current login will be guessed.");
             return;
         }
-        var baseline = App.Services.Settings;
-        var choice = new ComboBox { ItemsSource = accounts.Select(QuotaAccountScope.Describe).ToArray(), SelectedIndex = accounts.Length == 1 ? 0 : -1 };
+        RuntimeSettings baseline = App.Services.Settings;
+        var choice = new ComboBox
+        {
+            ItemsSource = accounts.Select(QuotaAccountScope.Describe).ToArray(), SelectedIndex = accounts.Length == 1 ? 0 : -1,
+        };
         var content = new StackPanel { Spacing = 12 };
-        content.Children.Add(new TextBlock { Text = "I confirm all retained rollout histories belong to the account selected below. This adds revocable, bounded user assertions, not native account facts. Existing associations are replaced.", TextWrapping = TextWrapping.Wrap });
+        content.Children.Add(
+            new TextBlock
+            {
+                Text =
+                    "I confirm all retained rollout histories belong to the account selected below. This adds revocable, bounded user assertions, not native account facts. Existing associations are replaced.",
+                TextWrapping = TextWrapping.Wrap,
+            });
         content.Children.Add(choice);
-        var dialog = new ContentDialog { XamlRoot = XamlRoot, Title = "Associate rollout history", Content = content,
-            PrimaryButtonText = "Confirm association", CloseButtonText = "Cancel", DefaultButton = ContentDialogButton.Close };
+        var dialog = new ContentDialog
+        {
+            XamlRoot = XamlRoot,
+            Title = "Associate rollout history",
+            Content = content,
+            PrimaryButtonText = "Confirm association",
+            CloseButtonText = "Cancel",
+            DefaultButton = ContentDialogButton.Close,
+        };
         if (await dialog.ShowAsync() != ContentDialogResult.Primary || choice.SelectedIndex < 0) return;
-        var account = accounts[choice.SelectedIndex];
+        string account = accounts[choice.SelectedIndex];
         AssociateRolloutsButton.IsEnabled = false;
         try
         {
             if (!App.Services.Telemetry.Latest.QuotaLanes.Any(x => x.IsFresh && x.Snapshot?.AccountKey == account))
                 throw new InvalidOperationException("The selected account is no longer current. Refresh and confirm again.");
-            var assertions = await App.Services.PrepareRolloutAccountAssociationsAsync(account, CancellationToken.None);
-            var result = await App.TryApplySettingsAsync(baseline, baseline with { RolloutAccountAssociations = assertions });
+            RolloutAccountAssociation[] assertions =
+                await App.Services.PrepareRolloutAccountAssociationsAsync(account, CancellationToken.None);
+            (bool Success, string? Error) result = await App.TryApplySettingsAsync(
+                baseline,
+                baseline with { RolloutAccountAssociations = assertions });
             RenderSettings();
-            ShowStatus(result.Success ? InfoBarSeverity.Success : InfoBarSeverity.Error, "Historical ownership",
-                result.Success ? $"Saved {assertions.Length} user-asserted associations. Re-run model evaluation; native data is unchanged." : result.Error!);
+            ShowStatus(
+                result.Success ? InfoBarSeverity.Success : InfoBarSeverity.Error,
+                "Historical ownership",
+                result.Success
+                    ? $"Saved {assertions.Length} user-asserted associations. Re-run model evaluation; native data is unchanged."
+                    : result.Error!);
         }
-        catch (Exception exception) { ShowStatus(InfoBarSeverity.Error, "Association not saved", exception.Message); }
-        finally { AssociateRolloutsButton.IsEnabled = true; }
+        catch (Exception exception)
+        {
+            ShowStatus(InfoBarSeverity.Error, "Association not saved", exception.Message);
+        }
+        finally
+        {
+            AssociateRolloutsButton.IsEnabled = true;
+        }
     }
 
     private async void OnRevokeRolloutsClicked(object sender, RoutedEventArgs e)
     {
-        var baseline = App.Services.Settings;
-        var result = await App.TryApplySettingsAsync(baseline, baseline with { RolloutAccountAssociations = [] });
+        RuntimeSettings baseline = App.Services.Settings;
+        (bool Success, string? Error) result = await App.TryApplySettingsAsync(baseline, baseline with { RolloutAccountAssociations = [] });
         RenderSettings();
-        ShowStatus(result.Success ? InfoBarSeverity.Success : InfoBarSeverity.Error, "Historical ownership",
-            result.Success ? "Associations revoked. Future modelling will no longer use them; native observations are unchanged." : result.Error!);
+        ShowStatus(
+            result.Success ? InfoBarSeverity.Success : InfoBarSeverity.Error,
+            "Historical ownership",
+            result.Success
+                ? "Associations revoked. Future modelling will no longer use them; native observations are unchanged."
+                : result.Error!);
     }
 
     private static bool TryParseThresholds(string? text, out int[] thresholds, out string? error)
@@ -171,9 +220,11 @@ public sealed partial class SettingsPage : Page
         }
 
         var values = new List<int>();
-        foreach (var part in text.Split([',', ';', ' ', '\t', '\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        foreach (string part in text.Split(
+                     [',', ';', ' ', '\t', '\r', '\n'],
+                     StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
         {
-            if (!int.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out var value) || value is <= 0 or >= 100)
+            if (!int.TryParse(part, NumberStyles.Integer, CultureInfo.InvariantCulture, out int value) || value is <= 0 or >= 100)
             {
                 thresholds = [];
                 error = $"'{part}' is not a percentage between 1 and 99.";
@@ -196,11 +247,13 @@ public sealed partial class SettingsPage : Page
         StatusInfoBar.IsOpen = true;
     }
 
-    private CodexCliPromptMode ParsePromptMode() =>
-        (CodexCliPromptModeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() switch
+    private CodexCliPromptMode ParsePromptMode()
+    {
+        return (CodexCliPromptModeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() switch
         {
             "LastArgument" => CodexCliPromptMode.LastArgument,
             "None" => CodexCliPromptMode.None,
-            _ => CodexCliPromptMode.StandardInput
+            _ => CodexCliPromptMode.StandardInput,
         };
+    }
 }

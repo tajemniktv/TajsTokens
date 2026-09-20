@@ -1,8 +1,16 @@
+// Taj's Tokens | DiagnosticsPage.xaml.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 using TajsTokens.Core.Services;
+
+#endregion
 
 namespace TajsTokens.App.Pages;
 
@@ -10,7 +18,6 @@ public sealed partial class DiagnosticsPage : Page
 {
     private bool _loaded;
     private CancellationTokenSource? _refreshCancellation;
-    private App App => (App)Application.Current;
 
     public DiagnosticsPage()
     {
@@ -18,6 +25,8 @@ public sealed partial class DiagnosticsPage : Page
         Loaded += OnLoaded;
         Unloaded += OnUnloaded;
     }
+
+    private App App => (App)Application.Current;
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
@@ -34,22 +43,28 @@ public sealed partial class DiagnosticsPage : Page
         _refreshCancellation?.Cancel();
     }
 
-    private void OnSnapshotUpdated(TelemetrySnapshot snapshot) => DispatcherQueue.TryEnqueue(() =>
+    private void OnSnapshotUpdated(TelemetrySnapshot snapshot)
     {
-        // Render the latest published generation, not a queued older event.
-        if (_loaded) Render(App.Services.Telemetry.Latest);
-    });
+        DispatcherQueue.TryEnqueue(() =>
+        {
+            // Render the latest published generation, not a queued older event.
+            if (_loaded) Render(App.Services.Telemetry.Latest);
+        });
+    }
 
     private void Render(TelemetrySnapshot snapshot)
     {
-        var diagnostics = TelemetryDiagnosticsPresenter.Present(snapshot);
+        TelemetryDiagnostics diagnostics = TelemetryDiagnosticsPresenter.Present(snapshot);
         StatusText.Text = diagnostics.Summary;
         SourceItems.ItemsSource = diagnostics.Sources;
         QuotaItems.ItemsSource = diagnostics.QuotaWindows;
         EmptySourcesText.Visibility = diagnostics.Sources.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        EventsText.Text = snapshot.Events.Count == 0 ? "No refresh events in this snapshot." :
-            string.Join("\n\n", snapshot.Events.OrderByDescending(x => x.TimestampUtc).Take(50)
-                .Select(x => $"{x.TimestampUtc.ToLocalTime():g} · {x.Type}\n{x.Description}"));
+        EventsText.Text = snapshot.Events.Count == 0
+            ? "No refresh events in this snapshot."
+            : string.Join(
+                "\n\n",
+                snapshot.Events.OrderByDescending(x => x.TimestampUtc).Take(50)
+                    .Select(x => $"{x.TimestampUtc.ToLocalTime():g} · {x.Type}\n{x.Description}"));
     }
 
     private async void OnRefreshClicked(object sender, RoutedEventArgs e)
@@ -74,7 +89,11 @@ public sealed partial class DiagnosticsPage : Page
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
         {
-            if (_loaded) { RefreshInfo.Title = "Refresh cancelled"; RefreshInfo.Message = "The last published snapshot remains visible."; }
+            if (_loaded)
+            {
+                RefreshInfo.Title = "Refresh cancelled";
+                RefreshInfo.Message = "The last published snapshot remains visible.";
+            }
         }
         catch (Exception exception)
         {
@@ -82,7 +101,7 @@ public sealed partial class DiagnosticsPage : Page
             {
                 RefreshInfo.Severity = InfoBarSeverity.Error;
                 RefreshInfo.Title = "Refresh failed";
-                var message = exception.GetBaseException().Message.ReplaceLineEndings(" ");
+                string message = exception.GetBaseException().Message.ReplaceLineEndings(" ");
                 RefreshInfo.Message = message.Length <= 500 ? message : message[..500] + "…";
             }
         }
@@ -94,9 +113,21 @@ public sealed partial class DiagnosticsPage : Page
         }
     }
 
-    private void OnCancelClicked(object sender, RoutedEventArgs e) => _refreshCancellation?.Cancel();
-    private async void OnServerReadClicked(object sender, RoutedEventArgs e) => await ReadServerEvidenceAsync(false);
-    private async void OnServerCollectClicked(object sender, RoutedEventArgs e) => await ReadServerEvidenceAsync(true);
+    private void OnCancelClicked(object sender, RoutedEventArgs e)
+    {
+        _refreshCancellation?.Cancel();
+    }
+
+    private async void OnServerReadClicked(object sender, RoutedEventArgs e)
+    {
+        await ReadServerEvidenceAsync(false);
+    }
+
+    private async void OnServerCollectClicked(object sender, RoutedEventArgs e)
+    {
+        await ReadServerEvidenceAsync(true);
+    }
+
     private async Task ReadServerEvidenceAsync(bool collect)
     {
         if (!ServerReadButton.IsEnabled) return;
@@ -105,11 +136,11 @@ public sealed partial class DiagnosticsPage : Page
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(120));
         try
         {
-            var report = await Task.Run(async () =>
+            string report = await Task.Run(async () =>
             {
                 if (collect) await App.Services.ServerEvidence.CollectAsync(true, timeout.Token);
-                var comparison = await App.Services.ServerEvidence.CompareAsync(timeout.Token);
-                var metadata = await App.Services.ServerEvidence.ReadNativeMetadataSummaryAsync(timeout.Token);
+                CodexServerComparisonReport comparison = await App.Services.ServerEvidence.CompareAsync(timeout.Token);
+                string metadata = await App.Services.ServerEvidence.ReadNativeMetadataSummaryAsync(timeout.Token);
                 return comparison.ToDisplayText() + "\n\n" + metadata;
             });
             if (_loaded) ServerEvidenceText.Text = App.Services.ServerEvidence.Status + "\n\n" + report;
@@ -118,9 +149,24 @@ public sealed partial class DiagnosticsPage : Page
         {
             if (_loaded) ServerEvidenceText.Text = "Comparison unavailable or timed out. Retained evidence was not replaced.";
         }
-        finally { ServerReadButton.IsEnabled = ServerCollectButton.IsEnabled = true; }
+        finally
+        {
+            ServerReadButton.IsEnabled = ServerCollectButton.IsEnabled = true;
+        }
     }
-    private void OnCoverageClicked(object sender, RoutedEventArgs e) => ((App)Application.Current).Navigate(typeof(CodexRolloutCoveragePage));
-    private void OnSourcesClicked(object sender, RoutedEventArgs e) => ((App)Application.Current).Navigate(typeof(CodexSourcesPage));
-    private void OnSettingsClicked(object sender, RoutedEventArgs e) => ((App)Application.Current).Navigate(typeof(SettingsPage));
+
+    private void OnCoverageClicked(object sender, RoutedEventArgs e)
+    {
+        ((App)Application.Current).Navigate(typeof(CodexRolloutCoveragePage));
+    }
+
+    private void OnSourcesClicked(object sender, RoutedEventArgs e)
+    {
+        ((App)Application.Current).Navigate(typeof(CodexSourcesPage));
+    }
+
+    private void OnSettingsClicked(object sender, RoutedEventArgs e)
+    {
+        ((App)Application.Current).Navigate(typeof(SettingsPage));
+    }
 }

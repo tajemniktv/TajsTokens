@@ -21,9 +21,10 @@
                     <TextBlock Text="Codex CLI Harness"
                                FontSize="28"
                                FontWeight="SemiBold" />
-                    <TextBlock Text="Run a custom Codex CLI locally while keeping TajsTokens' observability, quota, analytics, and source-explorer features alongside it."
-                               Opacity="0.72"
-                               TextWrapping="Wrap" />
+                    <TextBlock
+                        Text="Run a custom Codex CLI locally while keeping TajsTokens' observability, quota, analytics, and source-explorer features alongside it."
+                        Opacity="0.72"
+                        TextWrapping="Wrap" />
                     <TextBlock x:Name="StatusText"
                                Text="Ready"
                                Opacity="0.72"

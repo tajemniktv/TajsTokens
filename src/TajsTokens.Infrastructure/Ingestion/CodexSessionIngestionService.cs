@@ -1,5 +1,12 @@
+// Taj's Tokens | CodexSessionIngestionService.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Runtime.InteropServices.ComTypes;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -8,6 +15,8 @@ using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
 using TajsTokens.Infrastructure.Persistence;
 
+#endregion
+
 namespace TajsTokens.Infrastructure.Ingestion;
 
 public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
@@ -15,12 +24,14 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
     private const string BoundaryParserVersion = "boundary-v2";
     private const string TypedParserVersion = "typed-v7-response-evidence";
     private const int DurableBatchSize = 128;
-    private readonly ICodexSessionEventProvider _sessionEventProvider;
     private readonly ISessionIngestionCheckpointStore _checkpointStore;
-    private readonly ICodexObservatoryStore? _observatoryStore;
     private readonly ICodexIngestionBatchWriter? _ingestionBatchWriter;
+    private readonly ICodexObservatoryStore? _observatoryStore;
     private readonly CodexRolloutParser _parser = new();
-    private readonly Dictionary<string, (string Identity, long Offset, string Hash, long Length, DateTime Written)> _verifiedPrefixes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ICodexSessionEventProvider _sessionEventProvider;
+
+    private readonly Dictionary<string, (string Identity, long Offset, string Hash, long Length, DateTime Written)> _verifiedPrefixes =
+        new(StringComparer.OrdinalIgnoreCase);
 
     public CodexSessionIngestionService(
         ICodexSessionEventProvider sessionEventProvider,
@@ -61,18 +72,24 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             await _observatoryStore.InitializeAsync(cancellationToken);
         }
 
-        var parserVersion = _observatoryStore is null ? BoundaryParserVersion : TypedParserVersion;
+        string parserVersion = _observatoryStore is null ? BoundaryParserVersion : TypedParserVersion;
         if (_observatoryStore is not null && CodexRolloutParser.HasDesktopFilenameSuffix(filePath))
             parserVersion += "/desktop-owner-v1";
-        var existing = await _checkpointStore.GetCheckpointAsync(filePath, cancellationToken);
-        var sourceIdentity = GetSourceIdentity(filePath);
+        FileIngestionCheckpoint? existing = await _checkpointStore.GetCheckpointAsync(filePath, cancellationToken);
+        string sourceIdentity = GetSourceIdentity(filePath);
         var initialInfo = new FileInfo(filePath);
-        var initialLength = initialInfo.Length;
-        var initialWritten = initialInfo.LastWriteTimeUtc;
+        long initialLength = initialInfo.Length;
+        DateTime initialWritten = initialInfo.LastWriteTimeUtc;
         using var prefixHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        await using var prefixStream = new FileStream(filePath, FileMode.Open, FileAccess.Read,
-            FileShare.ReadWrite | FileShare.Delete, 65536, FileOptions.Asynchronous | FileOptions.SequentialScan);
-        var hashBuffer = new byte[65536];
+        await using var prefixStream = new FileStream(
+            filePath,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete,
+            65536,
+            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        byte[] hashBuffer = new byte[65536];
+
         async Task<string> HashThroughAsync(long offset)
         {
             if (prefixStream.Position > offset)
@@ -82,28 +99,40 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             }
             while (prefixStream.Position < offset)
             {
-                var read = await prefixStream.ReadAsync(hashBuffer.AsMemory(0,
-                    (int)Math.Min(hashBuffer.Length, offset - prefixStream.Position)), cancellationToken);
+                int read = await prefixStream.ReadAsync(
+                    hashBuffer.AsMemory(
+                        0,
+                        (int)Math.Min(hashBuffer.Length, offset - prefixStream.Position)),
+                    cancellationToken);
                 if (read == 0) throw new IOException("Rollout changed while verifying its byte checkpoint; retry required.");
                 prefixHash.AppendData(hashBuffer, 0, read);
             }
             return Convert.ToHexString(prefixHash.GetCurrentHash());
         }
-        var sameFile = existing?.SourceIdentity is { } previousIdentity &&
-            (previousIdentity == sourceIdentity || previousIdentity.StartsWith(sourceIdentity + ":generation:", StringComparison.Ordinal));
-        var cachedPrefix = existing?.ConsumedPrefixSha256 is { } knownHash &&
-            _verifiedPrefixes.TryGetValue(filePath, out var verified) &&
-            verified == (existing.SourceIdentity, existing.LastByteOffset, knownHash, initialLength, initialWritten);
-        var existingPrefix = existing is null ? null : cachedPrefix ? existing.ConsumedPrefixSha256 :
+
+        bool sameFile = existing?.SourceIdentity is { } previousIdentity &&
+                        (previousIdentity == sourceIdentity || previousIdentity.StartsWith(
+                            sourceIdentity + ":generation:",
+                            StringComparison.Ordinal));
+        bool cachedPrefix = existing?.ConsumedPrefixSha256 is { } knownHash &&
+                            _verifiedPrefixes.TryGetValue(
+                                filePath,
+                                out (string Identity, long Offset, string Hash, long Length, DateTime Written) verified) &&
+                            verified == (existing.SourceIdentity, existing.LastByteOffset, knownHash, initialLength, initialWritten);
+        string? existingPrefix = existing is null ? null :
+            cachedPrefix ? existing.ConsumedPrefixSha256 :
             await HashThroughAsync(Math.Min(existing.LastByteOffset, prefixStream.Length));
-        var verifiedContent = existing is not null && sameFile && existing.LastByteOffset <= prefixStream.Length &&
-                        existing.ConsumedPrefixSha256 is not null &&
-                        existing.ConsumedPrefixSha256 == existingPrefix;
-        var canResume = verifiedContent && string.Equals(existing!.ParserVersion, parserVersion, StringComparison.Ordinal);
+        bool verifiedContent = existing is not null && sameFile && existing.LastByteOffset <= prefixStream.Length &&
+                               existing.ConsumedPrefixSha256 is not null &&
+                               existing.ConsumedPrefixSha256 == existingPrefix;
+        bool canResume = verifiedContent && string.Equals(existing!.ParserVersion, parserVersion, StringComparison.Ordinal);
         // This upgrade only adds supplemental response evidence. Keep verified occurrence identity
         // and prior capture times; ownership/reducer upgrades still require their generation replay.
-        var metadataOnlyReplay = verifiedContent && _observatoryStore is not null &&
-            existing!.ParserVersion == parserVersion.Replace(TypedParserVersion, "typed-v6-service-tier-evidence", StringComparison.Ordinal);
+        bool metadataOnlyReplay = verifiedContent && _observatoryStore is not null &&
+                                  existing!.ParserVersion == parserVersion.Replace(
+                                      TypedParserVersion,
+                                      "typed-v6-service-tier-evidence",
+                                      StringComparison.Ordinal);
 
         if (canResume || metadataOnlyReplay) sourceIdentity = existing!.SourceIdentity!;
         else if (sameFile)
@@ -111,7 +140,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             // survived an in-place rewrite. Legacy unverified checkpoints take this path once.
             sourceIdentity += ":generation:" + existingPrefix;
 
-        var fromOffset = canResume ? existing!.LastByteOffset : 0;
+        long fromOffset = canResume ? existing!.LastByteOffset : 0;
         if (new FileInfo(filePath).Length < fromOffset)
         {
             fromOffset = 0;
@@ -124,8 +153,8 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             resumeState = await _observatoryStore.GetParserResumeStateAsync(sourceIdentity, cancellationToken);
             if (resumeState is null ||
                 resumeState.ByteOffset != fromOffset ||
-                (existing?.LastSessionId is not null &&
-                 !string.Equals(existing.LastSessionId, resumeState.SessionId, StringComparison.OrdinalIgnoreCase)))
+                existing?.LastSessionId is not null &&
+                !string.Equals(existing.LastSessionId, resumeState.SessionId, StringComparison.OrdinalIgnoreCase))
             {
                 // A byte checkpoint without parser metadata cannot safely resume semantic parsing. A
                 // one-time replay from zero is cheaper than overwriting established agent/model state.
@@ -135,14 +164,14 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         }
 
         var state = new RolloutParseState(filePath, sourceIdentity, resumeState);
-        var recordsScanned = 0;
-        var normalizedRecords = 0;
-        var lastCompleteRecordOffset = fromOffset;
-        var pendingRecords = _ingestionBatchWriter is null
+        int recordsScanned = 0;
+        int normalizedRecords = 0;
+        long lastCompleteRecordOffset = fromOffset;
+        List<ParsedRolloutRecord>? pendingRecords = _ingestionBatchWriter is null
             ? null
             : new List<ParsedRolloutRecord>(DurableBatchSize);
 
-        await foreach (var record in _sessionEventProvider.ReadNewJsonLinesAsync(filePath, fromOffset, cancellationToken))
+        await foreach (RawSessionRecord record in _sessionEventProvider.ReadNewJsonLinesAsync(filePath, fromOffset, cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
             recordsScanned++;
@@ -206,7 +235,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             sourceIdentity,
             filePath,
             cancellationToken);
-        var finalPrefix = canResume && recordsScanned == 0 ? existingPrefix! : await HashThroughAsync(lastCompleteRecordOffset);
+        string finalPrefix = canResume && recordsScanned == 0 ? existingPrefix! : await HashThroughAsync(lastCompleteRecordOffset);
         await SaveCheckpointAsync(
             filePath,
             lastCompleteRecordOffset,
@@ -222,12 +251,12 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             _verifiedPrefixes[filePath] = (sourceIdentity, lastCompleteRecordOffset, finalPrefix, initialLength, initialWritten);
         else _verifiedPrefixes.Remove(filePath);
 
-        var normalized = _observatoryStore is null ? recordsScanned : normalizedRecords;
+        int normalized = _observatoryStore is null ? recordsScanned : normalizedRecords;
         return new CodexIngestionResult(recordsScanned, normalized, state.OwnSessionId ?? existing?.LastSessionId)
         {
             SourceIdentity = sourceIdentity,
             LastCompleteRecordOffset = lastCompleteRecordOffset,
-            SourceLength = TryGetFileSize(filePath)
+            SourceLength = TryGetFileSize(filePath),
         };
     }
 
@@ -282,7 +311,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         {
             await _observatoryStore.ApplyCumulativeTokenObservationAsync(parsed.TokenObservation, cancellationToken);
         }
-        foreach (var quota in parsed.QuotaSnapshots)
+        foreach (QuotaSnapshot quota in parsed.QuotaSnapshots)
         {
             await _observatoryStore.UpsertQuotaSnapshotAsync(quota, cancellationToken);
         }
@@ -323,7 +352,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
     {
         if (_observatoryStore is not null)
         {
-            var resumeState = state.BuildResumeState(offset);
+            CodexParserResumeState? resumeState = state.BuildResumeState(offset);
             if (resumeState is not null)
             {
                 // Save semantic state first. If the following byte-checkpoint write fails, the offsets
@@ -369,19 +398,19 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                 FileAccess.Read,
                 FileShare.ReadWrite | FileShare.Delete);
 
-            if (GetFileInformationByHandle(handle, out var info))
+            if (GetFileInformationByHandle(handle, out ByHandleFileInformation info))
             {
                 return $"win:{info.VolumeSerialNumber:X8}:{info.FileIndexHigh:X8}{info.FileIndexLow:X8}";
             }
         }
 
-        var creationTicks = File.GetCreationTimeUtc(filePath).Ticks;
+        long creationTicks = File.GetCreationTimeUtc(filePath).Ticks;
         return $"fallback:{creationTicks.ToString("X16", CultureInfo.InvariantCulture)}";
     }
 
     private static string BuildSourceRecordId(string sourceIdentity, long start, long end)
     {
-        var bytes = Encoding.UTF8.GetBytes($"{sourceIdentity}:{start}:{end}");
+        byte[] bytes = Encoding.UTF8.GetBytes($"{sourceIdentity}:{start}:{end}");
         return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
     }
 
@@ -395,9 +424,9 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
     private struct ByHandleFileInformation
     {
         public uint FileAttributes;
-        public System.Runtime.InteropServices.ComTypes.FILETIME CreationTime;
-        public System.Runtime.InteropServices.ComTypes.FILETIME LastAccessTime;
-        public System.Runtime.InteropServices.ComTypes.FILETIME LastWriteTime;
+        public FILETIME CreationTime;
+        public FILETIME LastAccessTime;
+        public FILETIME LastWriteTime;
         public uint VolumeSerialNumber;
         public uint FileSizeHigh;
         public uint FileSizeLow;

@@ -1,3 +1,9 @@
+// Taj's Tokens | SqliteCodexObservatoryStore.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -6,11 +12,13 @@ using TajsTokens.Core.Enums;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
 
+#endregion
+
 namespace TajsTokens.Infrastructure.Persistence;
 
 /// <summary>
-/// Privacy-safe Phase 3 persistence layered into the existing telemetry database. The base telemetry
-/// repository owns PRAGMA user_version; observatory tables use an independent component version.
+///     Privacy-safe Phase 3 persistence layered into the existing telemetry database. The base telemetry
+///     repository owns PRAGMA user_version; observatory tables use an independent component version.
 /// </summary>
 public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObservatoryStore, IDisposable
 {
@@ -18,8 +26,6 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _initializeGate = new(1, 1);
     private volatile bool _initialized;
-
-    public void Dispose() => _initializeGate.Dispose();
 
     public async Task InitializeAsync(CancellationToken cancellationToken)
     {
@@ -42,30 +48,33 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
 
-            var bootstrap = connection.CreateCommand();
+            SqliteCommand bootstrap = connection.CreateCommand();
             bootstrap.CommandText = """
-                CREATE TABLE IF NOT EXISTS observatory_schema (
-                    component TEXT PRIMARY KEY,
-                    version INTEGER NOT NULL
-                );
-                """;
+                                    CREATE TABLE IF NOT EXISTS observatory_schema (
+                                        component TEXT PRIMARY KEY,
+                                        version INTEGER NOT NULL
+                                    );
+                                    """;
             await bootstrap.ExecuteNonQueryAsync(cancellationToken);
 
-            var versionCommand = connection.CreateCommand();
+            SqliteCommand versionCommand = connection.CreateCommand();
             versionCommand.CommandText = "SELECT version FROM observatory_schema WHERE component = 'codex-observatory';";
-            var rawVersion = await versionCommand.ExecuteScalarAsync(cancellationToken);
-            var version = rawVersion is null || rawVersion is DBNull
+            object? rawVersion = await versionCommand.ExecuteScalarAsync(cancellationToken);
+            int version = rawVersion is null || rawVersion is DBNull
                 ? 0
                 : Convert.ToInt32(rawVersion, CultureInfo.InvariantCulture);
 
             if (version > ObservatorySchemaVersion)
             {
-                throw new InvalidOperationException($"Codex observatory schema {version} is newer than supported version {ObservatorySchemaVersion}.");
+                throw new InvalidOperationException(
+                    $"Codex observatory schema {version} is newer than supported version {ObservatorySchemaVersion}.");
             }
 
             if (version == 0)
             {
-                await ExecuteMigrationAsync(connection, """
+                await ExecuteMigrationAsync(
+                    connection,
+                    """
                     CREATE TABLE IF NOT EXISTS codex_native_token_events (
                         source_event_id TEXT PRIMARY KEY,
                         source_file TEXT NOT NULL,
@@ -158,13 +167,16 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                     INSERT INTO observatory_schema(component, version)
                     VALUES('codex-observatory', 4)
                     ON CONFLICT(component) DO UPDATE SET version = excluded.version;
-                    """, cancellationToken);
+                    """,
+                    cancellationToken);
                 version = 4;
             }
 
             if (version == 1)
             {
-                await ExecuteMigrationAsync(connection, """
+                await ExecuteMigrationAsync(
+                    connection,
+                    """
                     CREATE TABLE codex_counter_state_v2 (
                         session_id TEXT PRIMARY KEY,
                         source_file TEXT NOT NULL,
@@ -254,29 +266,33 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                     UPDATE observatory_schema
                     SET version = 2
                     WHERE component = 'codex-observatory';
-                    """, cancellationToken);
+                    """,
+                    cancellationToken);
                 version = 2;
             }
 
             if (version == 2)
             {
-                await ExecuteMigrationAsync(connection, """
+                await ExecuteMigrationAsync(
+                    connection,
+                    """
                     CREATE INDEX IF NOT EXISTS idx_native_tokens_observed_time
                         ON codex_native_token_events(observed_at_utc DESC);
 
                     UPDATE observatory_schema
                     SET version = 3
                     WHERE component = 'codex-observatory';
-                    """, cancellationToken);
+                    """,
+                    cancellationToken);
                 version = 3;
             }
 
             if (version == 3)
             {
-                var hasBaselineColumn = false;
-                var columnCheck = connection.CreateCommand();
+                bool hasBaselineColumn = false;
+                SqliteCommand columnCheck = connection.CreateCommand();
                 columnCheck.CommandText = "PRAGMA table_info(codex_counter_state);";
-                await using (var columns = await columnCheck.ExecuteReaderAsync(cancellationToken))
+                await using (SqliteDataReader columns = await columnCheck.ExecuteReaderAsync(cancellationToken))
                 {
                     while (await columns.ReadAsync(cancellationToken))
                     {
@@ -290,74 +306,92 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
 
                 if (!hasBaselineColumn)
                 {
-                    await ExecuteMigrationAsync(connection, """
+                    await ExecuteMigrationAsync(
+                        connection,
+                        """
                         ALTER TABLE codex_counter_state
                         ADD COLUMN has_cumulative_baseline INTEGER NOT NULL DEFAULT 1;
-                        """, cancellationToken);
+                        """,
+                        cancellationToken);
                 }
 
-                await ExecuteMigrationAsync(connection, """
+                await ExecuteMigrationAsync(
+                    connection,
+                    """
                     UPDATE observatory_schema
                     SET version = 4
                     WHERE component = 'codex-observatory';
-                    """, cancellationToken);
+                    """,
+                    cancellationToken);
                 version = 4;
             }
 
             if (version == 4)
             {
-                await ExecuteMigrationAsync(connection, SqliteCodexWorkloadEvidence.Schema + """
-                    UPDATE observatory_schema SET version = 5 WHERE component = 'codex-observatory';
-                    """, cancellationToken);
+                await ExecuteMigrationAsync(
+                    connection,
+                    SqliteCodexWorkloadEvidence.Schema + """
+                                                         UPDATE observatory_schema SET version = 5 WHERE component = 'codex-observatory';
+                                                         """,
+                    cancellationToken);
                 version = 5;
             }
 
             if (version == 5)
             {
-                await ExecuteMigrationAsync(connection, """
+                await ExecuteMigrationAsync(
+                    connection,
+                    """
                     ALTER TABLE codex_native_token_events ADD COLUMN captured_at_utc TEXT;
                     ALTER TABLE context_observations ADD COLUMN captured_at_utc TEXT;
                     UPDATE observatory_schema SET version = 6 WHERE component = 'codex-observatory';
-                    """, cancellationToken);
+                    """,
+                    cancellationToken);
                 version = 6;
             }
 
             if (version == 6)
             {
-                await ExecuteMigrationAsync(connection, """
+                await ExecuteMigrationAsync(
+                    connection,
+                    """
                     ALTER TABLE codex_workload_observations ADD COLUMN service_tier TEXT;
                     UPDATE observatory_schema SET version = 7 WHERE component = 'codex-observatory';
-                    """, cancellationToken);
+                    """,
+                    cancellationToken);
                 version = 7;
             }
 
             if (version == 7)
             {
-                await ExecuteMigrationAsync(connection, SqliteCodexResponseEvidence.Schema +
-                    "UPDATE observatory_schema SET version = 8 WHERE component = 'codex-observatory';", cancellationToken);
+                await ExecuteMigrationAsync(
+                    connection,
+                    SqliteCodexResponseEvidence.Schema +
+                    "UPDATE observatory_schema SET version = 8 WHERE component = 'codex-observatory';",
+                    cancellationToken);
                 version = 8;
             }
 
             // Scrub rows written by pre-hardening Phase 3 builds. typed-v3 forces one safe replay so
             // current sources regain basename+hash labels and repository names without retaining paths.
-            var privacyScrub = connection.CreateCommand();
+            SqliteCommand privacyScrub = connection.CreateCommand();
             privacyScrub.CommandText = """
-                UPDATE rollout_records
-                SET file_path = '[redacted]'
-                WHERE instr(file_path, '/') > 0 OR instr(file_path, char(92)) > 0;
+                                       UPDATE rollout_records
+                                       SET file_path = '[redacted]'
+                                       WHERE instr(file_path, '/') > 0 OR instr(file_path, char(92)) > 0;
 
-                UPDATE rollout_files
-                SET file_path = '[redacted]'
-                WHERE instr(file_path, '/') > 0 OR instr(file_path, char(92)) > 0;
+                                       UPDATE rollout_files
+                                       SET file_path = '[redacted]'
+                                       WHERE instr(file_path, '/') > 0 OR instr(file_path, char(92)) > 0;
 
-                UPDATE codex_parser_state
-                SET repository = '(unknown)'
-                WHERE instr(repository, '/') > 0 OR instr(repository, char(92)) > 0;
+                                       UPDATE codex_parser_state
+                                       SET repository = '(unknown)'
+                                       WHERE instr(repository, '/') > 0 OR instr(repository, char(92)) > 0;
 
-                UPDATE sessions
-                SET repository = '(unknown)'
-                WHERE instr(repository, '/') > 0 OR instr(repository, char(92)) > 0;
-                """;
+                                       UPDATE sessions
+                                       SET repository = '(unknown)'
+                                       WHERE instr(repository, '/') > 0 OR instr(repository, char(92)) > 0;
+                                       """;
             await privacyScrub.ExecuteNonQueryAsync(cancellationToken);
 
             _initialized = true;
@@ -373,8 +407,12 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         await EnsureInitializedAsync(cancellationToken);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        await SqliteCodexResponseEvidence.WriteAsync(connection, null, observation,
-            BuildSafeFileLabel(observation.SourceFile), cancellationToken);
+        await SqliteCodexResponseEvidence.WriteAsync(
+            connection,
+            null,
+            observation,
+            BuildSafeFileLabel(observation.SourceFile),
+            cancellationToken);
     }
 
     public async Task<CodexResponseEvidencePage> GetResponseEvidenceAsync(string threadId, int take, CancellationToken cancellationToken)
@@ -390,14 +428,18 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         await EnsureInitializedAsync(cancellationToken);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        await SqliteCodexWorkloadEvidence.WriteAsync(connection, null, observation,
-            BuildSafeFileLabel(observation.SourceFile), cancellationToken);
+        await SqliteCodexWorkloadEvidence.WriteAsync(
+            connection,
+            null,
+            observation,
+            BuildSafeFileLabel(observation.SourceFile),
+            cancellationToken);
     }
 
     public async Task UpsertSessionAsync(CodexSession session, CancellationToken cancellationToken)
     {
         await EnsureInitializedAsync(cancellationToken);
-        var safeRepository = SafeRepositoryLabel(session.Repository);
+        string safeRepository = SafeRepositoryLabel(session.Repository);
         await ExecuteAsync(
             """
             INSERT INTO sessions(session_id, thread_id, repository, started_at_utc, last_activity_at_utc, status)
@@ -419,7 +461,9 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                 command.Parameters.AddWithValue("$thread", DbValue(session.ThreadId));
                 command.Parameters.AddWithValue("$repo", safeRepository);
                 command.Parameters.AddWithValue("$start", SerializeUtc(session.StartedAtUtc));
-                command.Parameters.AddWithValue("$last", session.LastActivityAtUtc is null ? DBNull.Value : SerializeUtc(session.LastActivityAtUtc.Value));
+                command.Parameters.AddWithValue(
+                    "$last",
+                    session.LastActivityAtUtc is null ? DBNull.Value : SerializeUtc(session.LastActivityAtUtc.Value));
                 command.Parameters.AddWithValue("$status", session.Status);
             },
             cancellationToken);
@@ -499,8 +543,10 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
     public async Task UpsertQuotaSnapshotAsync(QuotaSnapshot snapshot, CancellationToken cancellationToken)
     {
         await EnsureInitializedAsync(cancellationToken);
-        await ExecuteAsync(SqliteQuotaEvidence.InsertSql,
-            command => SqliteQuotaEvidence.Bind(command, snapshot), cancellationToken);
+        await ExecuteAsync(
+            SqliteQuotaEvidence.InsertSql,
+            command => SqliteQuotaEvidence.Bind(command, snapshot),
+            cancellationToken);
     }
 
     public async Task ApplyCumulativeTokenObservationAsync(CodexTokenCountObservation observation, CancellationToken cancellationToken)
@@ -508,27 +554,27 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         await EnsureInitializedAsync(cancellationToken);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        using var transaction = connection.BeginTransaction();
+        using SqliteTransaction transaction = connection.BeginTransaction();
 
-        var duplicate = connection.CreateCommand();
+        SqliteCommand duplicate = connection.CreateCommand();
         duplicate.Transaction = transaction;
         duplicate.CommandText = "SELECT 1 FROM codex_native_token_events WHERE source_event_id = $event LIMIT 1;";
         duplicate.Parameters.AddWithValue("$event", observation.SourceEventId);
-        var sourceEventAlreadyPersisted = await duplicate.ExecuteScalarAsync(cancellationToken) is not null;
+        bool sourceEventAlreadyPersisted = await duplicate.ExecuteScalarAsync(cancellationToken) is not null;
 
-        var read = connection.CreateCommand();
+        SqliteCommand read = connection.CreateCommand();
         read.Transaction = transaction;
         read.CommandText = """
-            SELECT source_file, counter_epoch, input_tokens, cached_input_tokens, cache_write_input_tokens,
-                   output_tokens, reasoning_output_tokens, total_tokens, last_source_event_id, last_observed_at_utc,
-                   has_cumulative_baseline
-            FROM codex_counter_state
-            WHERE session_id = $session;
-            """;
+                           SELECT source_file, counter_epoch, input_tokens, cached_input_tokens, cache_write_input_tokens,
+                                  output_tokens, reasoning_output_tokens, total_tokens, last_source_event_id, last_observed_at_utc,
+                                  has_cumulative_baseline
+                           FROM codex_counter_state
+                           WHERE session_id = $session;
+                           """;
         read.Parameters.AddWithValue("$session", observation.SessionId);
 
         CodexTokenCounterState? previous = null;
-        await using (var reader = await read.ExecuteReaderAsync(cancellationToken))
+        await using (SqliteDataReader reader = await read.ExecuteReaderAsync(cancellationToken))
         {
             if (await reader.ReadAsync(cancellationToken))
             {
@@ -547,16 +593,17 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             }
         }
 
-        var decision = CodexTokenCounterReducer.Reduce(observation, previous, sourceEventAlreadyPersisted);
+        CodexTokenAccountingDecision decision = CodexTokenCounterReducer.Reduce(observation, previous, sourceEventAlreadyPersisted);
         if (decision.Kind is CodexTokenAccountingDecisionKind.Duplicate or CodexTokenAccountingDecisionKind.NoObservation)
         {
             if (sourceEventAlreadyPersisted && observation.ReasoningEffort is not null)
             {
                 // Parser-version replay repairs absent context metadata, never counters or
                 // existing conflicting values. Source-record identity makes this idempotent.
-                using var repair = connection.CreateCommand();
+                using SqliteCommand repair = connection.CreateCommand();
                 repair.Transaction = transaction;
-                repair.CommandText = "UPDATE codex_native_token_events SET reasoning_effort = $effort WHERE source_event_id = $id AND reasoning_effort IS NULL;";
+                repair.CommandText =
+                    "UPDATE codex_native_token_events SET reasoning_effort = $effort WHERE source_event_id = $id AND reasoning_effort IS NULL;";
                 repair.Parameters.AddWithValue("$effort", observation.ReasoningEffort);
                 repair.Parameters.AddWithValue("$id", observation.SourceEventId);
                 await repair.ExecuteNonQueryAsync(cancellationToken);
@@ -564,9 +611,9 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             transaction.Commit();
             return;
         }
-        var epoch = decision.NextState?.Epoch ?? previous?.Epoch ?? 0;
+        int epoch = decision.NextState?.Epoch ?? previous?.Epoch ?? 0;
 
-        var inserted = await InsertNativeTokenEventAsync(
+        int inserted = await InsertNativeTokenEventAsync(
             connection,
             transaction,
             observation,
@@ -591,28 +638,28 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             return;
         }
 
-        var nextState = decision.NextState;
-        var upsertState = connection.CreateCommand();
+        CodexTokenCounterState nextState = decision.NextState;
+        SqliteCommand upsertState = connection.CreateCommand();
         upsertState.Transaction = transaction;
         upsertState.CommandText = """
-            INSERT INTO codex_counter_state(
-                session_id, source_file, counter_epoch, input_tokens, cached_input_tokens,
-                cache_write_input_tokens, output_tokens, reasoning_output_tokens, total_tokens,
-                last_source_event_id, last_observed_at_utc, has_cumulative_baseline)
-            VALUES($session, $file, $epoch, $input, $cached, $cacheWrite, $output, $reasoning, $total, $event, $observed, $hasBaseline)
-            ON CONFLICT(session_id) DO UPDATE SET
-              source_file = excluded.source_file,
-              counter_epoch = excluded.counter_epoch,
-              input_tokens = excluded.input_tokens,
-              cached_input_tokens = excluded.cached_input_tokens,
-              cache_write_input_tokens = excluded.cache_write_input_tokens,
-              output_tokens = excluded.output_tokens,
-              reasoning_output_tokens = excluded.reasoning_output_tokens,
-              total_tokens = excluded.total_tokens,
-              last_source_event_id = excluded.last_source_event_id,
-              last_observed_at_utc = excluded.last_observed_at_utc,
-              has_cumulative_baseline = excluded.has_cumulative_baseline;
-            """;
+                                  INSERT INTO codex_counter_state(
+                                      session_id, source_file, counter_epoch, input_tokens, cached_input_tokens,
+                                      cache_write_input_tokens, output_tokens, reasoning_output_tokens, total_tokens,
+                                      last_source_event_id, last_observed_at_utc, has_cumulative_baseline)
+                                  VALUES($session, $file, $epoch, $input, $cached, $cacheWrite, $output, $reasoning, $total, $event, $observed, $hasBaseline)
+                                  ON CONFLICT(session_id) DO UPDATE SET
+                                    source_file = excluded.source_file,
+                                    counter_epoch = excluded.counter_epoch,
+                                    input_tokens = excluded.input_tokens,
+                                    cached_input_tokens = excluded.cached_input_tokens,
+                                    cache_write_input_tokens = excluded.cache_write_input_tokens,
+                                    output_tokens = excluded.output_tokens,
+                                    reasoning_output_tokens = excluded.reasoning_output_tokens,
+                                    total_tokens = excluded.total_tokens,
+                                    last_source_event_id = excluded.last_source_event_id,
+                                    last_observed_at_utc = excluded.last_observed_at_utc,
+                                    has_cumulative_baseline = excluded.has_cumulative_baseline;
+                                  """;
         upsertState.Parameters.AddWithValue("$session", observation.SessionId);
         upsertState.Parameters.AddWithValue("$file", BuildSafeFileLabel(nextState.SourceFile));
         upsertState.Parameters.AddWithValue("$epoch", nextState.Epoch);
@@ -662,16 +709,16 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         await EnsureInitializedAsync(cancellationToken);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            SELECT source_identity, byte_offset, session_id, parent_session_id, agent_name, repository,
-                   started_at_utc, current_model, reasoning_effort, context_window_tokens, updated_at_utc
-            FROM codex_parser_state
-            WHERE source_identity = $identity;
-            """;
+                              SELECT source_identity, byte_offset, session_id, parent_session_id, agent_name, repository,
+                                     started_at_utc, current_model, reasoning_effort, context_window_tokens, updated_at_utc
+                              FROM codex_parser_state
+                              WHERE source_identity = $identity;
+                              """;
         command.Parameters.AddWithValue("$identity", sourceIdentity);
 
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))
         {
             return null;
@@ -694,7 +741,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
     public async Task UpsertParserResumeStateAsync(CodexParserResumeState state, CancellationToken cancellationToken)
     {
         await EnsureInitializedAsync(cancellationToken);
-        var safeRepository = SafeRepositoryLabel(state.Repository);
+        string safeRepository = SafeRepositoryLabel(state.Repository);
         await ExecuteAsync(
             """
             INSERT INTO codex_parser_state(
@@ -739,29 +786,29 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         CancellationToken cancellationToken)
     {
         await EnsureInitializedAsync(cancellationToken);
-        var safeFileLabel = BuildSafeFileLabel(filePath);
+        string safeFileLabel = BuildSafeFileLabel(filePath);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        using var transaction = connection.BeginTransaction();
+        using SqliteTransaction transaction = connection.BeginTransaction();
 
-        var removePathAlias = connection.CreateCommand();
+        SqliteCommand removePathAlias = connection.CreateCommand();
         removePathAlias.Transaction = transaction;
         removePathAlias.CommandText = "DELETE FROM rollout_files WHERE file_path = $file AND source_identity <> $identity;";
         removePathAlias.Parameters.AddWithValue("$file", safeFileLabel);
         removePathAlias.Parameters.AddWithValue("$identity", sourceIdentity);
         await removePathAlias.ExecuteNonQueryAsync(cancellationToken);
 
-        var upsert = connection.CreateCommand();
+        SqliteCommand upsert = connection.CreateCommand();
         upsert.Transaction = transaction;
         upsert.CommandText = """
-            INSERT INTO rollout_files(source_identity, file_path, session_id, size_bytes, last_seen_at_utc)
-            VALUES($identity, $file, $session, $size, $seen)
-            ON CONFLICT(source_identity) DO UPDATE SET
-              file_path = excluded.file_path,
-              session_id = COALESCE(excluded.session_id, rollout_files.session_id),
-              size_bytes = excluded.size_bytes,
-              last_seen_at_utc = MAX(rollout_files.last_seen_at_utc, excluded.last_seen_at_utc);
-            """;
+                             INSERT INTO rollout_files(source_identity, file_path, session_id, size_bytes, last_seen_at_utc)
+                             VALUES($identity, $file, $session, $size, $seen)
+                             ON CONFLICT(source_identity) DO UPDATE SET
+                               file_path = excluded.file_path,
+                               session_id = COALESCE(excluded.session_id, rollout_files.session_id),
+                               size_bytes = excluded.size_bytes,
+                               last_seen_at_utc = MAX(rollout_files.last_seen_at_utc, excluded.last_seen_at_utc);
+                             """;
         upsert.Parameters.AddWithValue("$identity", sourceIdentity);
         upsert.Parameters.AddWithValue("$file", safeFileLabel);
         upsert.Parameters.AddWithValue("$session", DbValue(sessionId));
@@ -784,18 +831,18 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         CancellationToken cancellationToken)
     {
         await EnsureInitializedAsync(cancellationToken);
-        var safeFileLabel = BuildSafeFileLabel(filePath);
+        string safeFileLabel = BuildSafeFileLabel(filePath);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        using var transaction = connection.BeginTransaction();
+        using SqliteTransaction transaction = connection.BeginTransaction();
 
-        var record = connection.CreateCommand();
+        SqliteCommand record = connection.CreateCommand();
         record.Transaction = transaction;
         record.CommandText = """
-            INSERT INTO rollout_records(source_record_id, source_identity, file_path, session_id, event_class, record_bytes, observed_at_utc)
-            VALUES($id, $identity, $file, $session, $class, $bytes, $observed)
-            ON CONFLICT(source_record_id) DO NOTHING;
-            """;
+                             INSERT INTO rollout_records(source_record_id, source_identity, file_path, session_id, event_class, record_bytes, observed_at_utc)
+                             VALUES($id, $identity, $file, $session, $class, $bytes, $observed)
+                             ON CONFLICT(source_record_id) DO NOTHING;
+                             """;
         record.Parameters.AddWithValue("$id", sourceRecordId);
         record.Parameters.AddWithValue("$identity", sourceIdentity);
         record.Parameters.AddWithValue("$file", safeFileLabel);
@@ -805,24 +852,24 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         record.Parameters.AddWithValue("$observed", SerializeUtc(observedAtUtc));
         await record.ExecuteNonQueryAsync(cancellationToken);
 
-        var removePathAlias = connection.CreateCommand();
+        SqliteCommand removePathAlias = connection.CreateCommand();
         removePathAlias.Transaction = transaction;
         removePathAlias.CommandText = "DELETE FROM rollout_files WHERE file_path = $file AND source_identity <> $identity;";
         removePathAlias.Parameters.AddWithValue("$file", safeFileLabel);
         removePathAlias.Parameters.AddWithValue("$identity", sourceIdentity);
         await removePathAlias.ExecuteNonQueryAsync(cancellationToken);
 
-        var file = connection.CreateCommand();
+        SqliteCommand file = connection.CreateCommand();
         file.Transaction = transaction;
         file.CommandText = """
-            INSERT INTO rollout_files(source_identity, file_path, session_id, size_bytes, last_seen_at_utc)
-            VALUES($identity, $file, $session, $size, $seen)
-            ON CONFLICT(source_identity) DO UPDATE SET
-              file_path = excluded.file_path,
-              session_id = COALESCE(excluded.session_id, rollout_files.session_id),
-              size_bytes = excluded.size_bytes,
-              last_seen_at_utc = MAX(rollout_files.last_seen_at_utc, excluded.last_seen_at_utc);
-            """;
+                           INSERT INTO rollout_files(source_identity, file_path, session_id, size_bytes, last_seen_at_utc)
+                           VALUES($identity, $file, $session, $size, $seen)
+                           ON CONFLICT(source_identity) DO UPDATE SET
+                             file_path = excluded.file_path,
+                             session_id = COALESCE(excluded.session_id, rollout_files.session_id),
+                             size_bytes = excluded.size_bytes,
+                             last_seen_at_utc = MAX(rollout_files.last_seen_at_utc, excluded.last_seen_at_utc);
+                           """;
         file.Parameters.AddWithValue("$identity", sourceIdentity);
         file.Parameters.AddWithValue("$file", safeFileLabel);
         file.Parameters.AddWithValue("$session", DbValue(sessionId));
@@ -838,26 +885,30 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         await EnsureInitializedAsync(cancellationToken);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            SELECT
-                (SELECT COUNT(*) FROM sessions s WHERE EXISTS(SELECT 1 FROM rollout_files f WHERE f.session_id = s.session_id)),
-                COALESCE((SELECT SUM(t.uncached_input_tokens) FROM codex_native_token_events t), 0),
-                COALESCE((SELECT SUM(t.cache_read_tokens) FROM codex_native_token_events t), 0),
-                COALESCE((SELECT SUM(t.cache_write_tokens) FROM codex_native_token_events t), 0),
-                COALESCE((SELECT SUM(t.non_reasoning_output_tokens) FROM codex_native_token_events t), 0),
-                COALESCE((SELECT SUM(t.reasoning_output_tokens) FROM codex_native_token_events t), 0),
-                COALESCE((SELECT SUM(t.reported_total_tokens) FROM codex_native_token_events t), 0),
-                COALESCE((SELECT SUM(f.size_bytes) FROM rollout_files f), 0);
-            """;
+                              SELECT
+                                  (SELECT COUNT(*) FROM sessions s WHERE EXISTS(SELECT 1 FROM rollout_files f WHERE f.session_id = s.session_id)),
+                                  COALESCE((SELECT SUM(t.uncached_input_tokens) FROM codex_native_token_events t), 0),
+                                  COALESCE((SELECT SUM(t.cache_read_tokens) FROM codex_native_token_events t), 0),
+                                  COALESCE((SELECT SUM(t.cache_write_tokens) FROM codex_native_token_events t), 0),
+                                  COALESCE((SELECT SUM(t.non_reasoning_output_tokens) FROM codex_native_token_events t), 0),
+                                  COALESCE((SELECT SUM(t.reasoning_output_tokens) FROM codex_native_token_events t), 0),
+                                  COALESCE((SELECT SUM(t.reported_total_tokens) FROM codex_native_token_events t), 0),
+                                  COALESCE((SELECT SUM(f.size_bytes) FROM rollout_files f), 0);
+                              """;
 
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         await reader.ReadAsync(cancellationToken);
         return new CodexObservatorySummary(
             reader.GetInt64(0),
             new CodexNativeTokenTotals(
-                reader.GetInt64(1), reader.GetInt64(2), reader.GetInt64(3),
-                reader.GetInt64(4), reader.GetInt64(5), reader.GetInt64(6)),
+                reader.GetInt64(1),
+                reader.GetInt64(2),
+                reader.GetInt64(3),
+                reader.GetInt64(4),
+                reader.GetInt64(5),
+                reader.GetInt64(6)),
             reader.GetInt64(7));
     }
 
@@ -866,53 +917,60 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         await EnsureInitializedAsync(cancellationToken);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            SELECT s.session_id,
-                   (SELECT ar.parent_agent_id FROM agent_relationships ar WHERE ar.child_agent_id = s.session_id LIMIT 1),
-                   COALESCE((SELECT a.name FROM agents a WHERE a.agent_id = s.session_id LIMIT 1), s.session_id),
-                   s.repository, s.started_at_utc, s.last_activity_at_utc, s.status,
-                   (SELECT a.model FROM agents a WHERE a.agent_id = s.session_id LIMIT 1),
-                   COALESCE((SELECT SUM(t.uncached_input_tokens) FROM codex_native_token_events t WHERE t.session_id = s.session_id), 0),
-                   COALESCE((SELECT SUM(t.cache_read_tokens) FROM codex_native_token_events t WHERE t.session_id = s.session_id), 0),
-                   COALESCE((SELECT SUM(t.cache_write_tokens) FROM codex_native_token_events t WHERE t.session_id = s.session_id), 0),
-                   COALESCE((SELECT SUM(t.non_reasoning_output_tokens) FROM codex_native_token_events t WHERE t.session_id = s.session_id), 0),
-                   COALESCE((SELECT SUM(t.reasoning_output_tokens) FROM codex_native_token_events t WHERE t.session_id = s.session_id), 0),
-                   COALESCE((SELECT SUM(t.reported_total_tokens) FROM codex_native_token_events t WHERE t.session_id = s.session_id), 0),
-                   COALESCE((SELECT COUNT(*) FROM context_observations c WHERE c.session_id = s.session_id AND c.is_compaction = 1), 0),
-                   (SELECT MAX(CASE WHEN c.context_window_tokens > 0 AND c.input_tokens IS NOT NULL
-                                    THEN c.input_tokens * 100.0 / c.context_window_tokens END)
-                    FROM context_observations c WHERE c.session_id = s.session_id),
-                   COALESCE((SELECT SUM(r.record_bytes)
-                             FROM rollout_records r
-                             WHERE r.session_id = s.session_id
-                               AND EXISTS(SELECT 1 FROM rollout_files f WHERE f.source_identity = r.source_identity)), 0),
-                   COALESCE((SELECT COUNT(*) FROM usage_events e WHERE e.session_id = s.session_id), 0)
-            FROM sessions s
-            WHERE EXISTS(SELECT 1 FROM rollout_files f WHERE f.session_id = s.session_id)
-            ORDER BY COALESCE(s.last_activity_at_utc, s.started_at_utc) DESC
-            LIMIT $take;
-            """;
+                              SELECT s.session_id,
+                                     (SELECT ar.parent_agent_id FROM agent_relationships ar WHERE ar.child_agent_id = s.session_id LIMIT 1),
+                                     COALESCE((SELECT a.name FROM agents a WHERE a.agent_id = s.session_id LIMIT 1), s.session_id),
+                                     s.repository, s.started_at_utc, s.last_activity_at_utc, s.status,
+                                     (SELECT a.model FROM agents a WHERE a.agent_id = s.session_id LIMIT 1),
+                                     COALESCE((SELECT SUM(t.uncached_input_tokens) FROM codex_native_token_events t WHERE t.session_id = s.session_id), 0),
+                                     COALESCE((SELECT SUM(t.cache_read_tokens) FROM codex_native_token_events t WHERE t.session_id = s.session_id), 0),
+                                     COALESCE((SELECT SUM(t.cache_write_tokens) FROM codex_native_token_events t WHERE t.session_id = s.session_id), 0),
+                                     COALESCE((SELECT SUM(t.non_reasoning_output_tokens) FROM codex_native_token_events t WHERE t.session_id = s.session_id), 0),
+                                     COALESCE((SELECT SUM(t.reasoning_output_tokens) FROM codex_native_token_events t WHERE t.session_id = s.session_id), 0),
+                                     COALESCE((SELECT SUM(t.reported_total_tokens) FROM codex_native_token_events t WHERE t.session_id = s.session_id), 0),
+                                     COALESCE((SELECT COUNT(*) FROM context_observations c WHERE c.session_id = s.session_id AND c.is_compaction = 1), 0),
+                                     (SELECT MAX(CASE WHEN c.context_window_tokens > 0 AND c.input_tokens IS NOT NULL
+                                                      THEN c.input_tokens * 100.0 / c.context_window_tokens END)
+                                      FROM context_observations c WHERE c.session_id = s.session_id),
+                                     COALESCE((SELECT SUM(r.record_bytes)
+                                               FROM rollout_records r
+                                               WHERE r.session_id = s.session_id
+                                                 AND EXISTS(SELECT 1 FROM rollout_files f WHERE f.source_identity = r.source_identity)), 0),
+                                     COALESCE((SELECT COUNT(*) FROM usage_events e WHERE e.session_id = s.session_id), 0)
+                              FROM sessions s
+                              WHERE EXISTS(SELECT 1 FROM rollout_files f WHERE f.session_id = s.session_id)
+                              ORDER BY COALESCE(s.last_activity_at_utc, s.started_at_utc) DESC
+                              LIMIT $take;
+                              """;
         command.Parameters.AddWithValue("$take", Math.Max(0, take));
 
         var results = new List<CodexSessionOverview>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            results.Add(new CodexSessionOverview(
-                reader.GetString(0),
-                reader.IsDBNull(1) ? null : reader.GetString(1),
-                reader.GetString(2),
-                reader.GetString(3),
-                ParseUtc(reader.GetString(4)),
-                reader.IsDBNull(5) ? null : ParseUtc(reader.GetString(5)),
-                reader.GetString(6),
-                reader.IsDBNull(7) ? null : reader.GetString(7),
-                new CodexNativeTokenTotals(reader.GetInt64(8), reader.GetInt64(9), reader.GetInt64(10), reader.GetInt64(11), reader.GetInt64(12), reader.GetInt64(13)),
-                reader.GetInt32(14),
-                reader.IsDBNull(15) ? null : reader.GetDouble(15),
-                reader.GetInt64(16),
-                reader.GetInt32(17)));
+            results.Add(
+                new CodexSessionOverview(
+                    reader.GetString(0),
+                    reader.IsDBNull(1) ? null : reader.GetString(1),
+                    reader.GetString(2),
+                    reader.GetString(3),
+                    ParseUtc(reader.GetString(4)),
+                    reader.IsDBNull(5) ? null : ParseUtc(reader.GetString(5)),
+                    reader.GetString(6),
+                    reader.IsDBNull(7) ? null : reader.GetString(7),
+                    new CodexNativeTokenTotals(
+                        reader.GetInt64(8),
+                        reader.GetInt64(9),
+                        reader.GetInt64(10),
+                        reader.GetInt64(11),
+                        reader.GetInt64(12),
+                        reader.GetInt64(13)),
+                    reader.GetInt32(14),
+                    reader.IsDBNull(15) ? null : reader.GetDouble(15),
+                    reader.GetInt64(16),
+                    reader.GetInt32(17)));
         }
 
         return results;
@@ -923,7 +981,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         await EnsureInitializedAsync(cancellationToken);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = sessionId is null
             ? "SELECT agent_id, session_id, name, state, last_seen_utc, model FROM agents ORDER BY last_seen_utc DESC;"
             : "SELECT agent_id, session_id, name, state, last_seen_utc, model FROM agents WHERE session_id = $session OR agent_id = $session ORDER BY last_seen_utc DESC;";
@@ -933,13 +991,17 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         }
 
         var results = new List<Agent>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            results.Add(new Agent(
-                reader.GetString(0), reader.GetString(1), reader.GetString(2),
-                Enum.TryParse<AgentRuntimeState>(reader.GetString(3), out var state) ? state : AgentRuntimeState.Unknown,
-                ParseUtc(reader.GetString(4)), reader.IsDBNull(5) ? null : reader.GetString(5)));
+            results.Add(
+                new Agent(
+                    reader.GetString(0),
+                    reader.GetString(1),
+                    reader.GetString(2),
+                    Enum.TryParse<AgentRuntimeState>(reader.GetString(3), out AgentRuntimeState state) ? state : AgentRuntimeState.Unknown,
+                    ParseUtc(reader.GetString(4)),
+                    reader.IsDBNull(5) ? null : reader.GetString(5)));
         }
 
         return results;
@@ -950,10 +1012,10 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         await EnsureInitializedAsync(cancellationToken);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = "SELECT parent_agent_id, child_agent_id, linked_at_utc FROM agent_relationships ORDER BY linked_at_utc;";
         var results = new List<AgentRelationship>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
             results.Add(new AgentRelationship(reader.GetString(0), reader.GetString(1), ParseUtc(reader.GetString(2))));
@@ -967,46 +1029,62 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         await EnsureInitializedAsync(cancellationToken);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            SELECT event_id, session_id, timestamp_utc, event_type, summary, token_delta
-            FROM usage_events WHERE session_id = $session
-            ORDER BY timestamp_utc DESC LIMIT $take;
-            """;
+                              SELECT event_id, session_id, timestamp_utc, event_type, summary, token_delta
+                              FROM usage_events WHERE session_id = $session
+                              ORDER BY timestamp_utc DESC LIMIT $take;
+                              """;
         command.Parameters.AddWithValue("$session", sessionId);
         command.Parameters.AddWithValue("$take", Math.Max(0, take));
         var results = new List<UsageEvent>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            results.Add(new UsageEvent(reader.GetString(0), reader.GetString(1), ParseUtc(reader.GetString(2)), reader.GetString(3), reader.GetString(4), reader.IsDBNull(5) ? null : reader.GetDouble(5)));
+            results.Add(
+                new UsageEvent(
+                    reader.GetString(0),
+                    reader.GetString(1),
+                    ParseUtc(reader.GetString(2)),
+                    reader.GetString(3),
+                    reader.GetString(4),
+                    reader.IsDBNull(5) ? null : reader.GetDouble(5)));
         }
         return results;
     }
 
-    public async Task<IReadOnlyList<CodexContextObservation>> GetContextObservationsAsync(string sessionId, int take, CancellationToken cancellationToken)
+    public async Task<IReadOnlyList<CodexContextObservation>> GetContextObservationsAsync(
+        string sessionId,
+        int take,
+        CancellationToken cancellationToken)
     {
         await EnsureInitializedAsync(cancellationToken);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            SELECT event_id, session_id, agent_id, observed_at_utc, model, input_tokens,
-                   context_window_tokens, is_compaction, record_bytes
-            FROM context_observations WHERE session_id = $session
-            ORDER BY observed_at_utc DESC LIMIT $take;
-            """;
+                              SELECT event_id, session_id, agent_id, observed_at_utc, model, input_tokens,
+                                     context_window_tokens, is_compaction, record_bytes
+                              FROM context_observations WHERE session_id = $session
+                              ORDER BY observed_at_utc DESC LIMIT $take;
+                              """;
         command.Parameters.AddWithValue("$session", sessionId);
         command.Parameters.AddWithValue("$take", Math.Max(0, take));
         var results = new List<CodexContextObservation>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            results.Add(new CodexContextObservation(
-                reader.GetString(0), reader.GetString(1), reader.IsDBNull(2) ? null : reader.GetString(2),
-                ParseUtc(reader.GetString(3)), reader.IsDBNull(4) ? null : reader.GetString(4),
-                reader.IsDBNull(5) ? null : reader.GetInt64(5), reader.IsDBNull(6) ? null : reader.GetInt64(6),
-                reader.GetInt32(7) != 0, reader.IsDBNull(8) ? null : reader.GetInt64(8)));
+            results.Add(
+                new CodexContextObservation(
+                    reader.GetString(0),
+                    reader.GetString(1),
+                    reader.IsDBNull(2) ? null : reader.GetString(2),
+                    ParseUtc(reader.GetString(3)),
+                    reader.IsDBNull(4) ? null : reader.GetString(4),
+                    reader.IsDBNull(5) ? null : reader.GetInt64(5),
+                    reader.IsDBNull(6) ? null : reader.GetInt64(6),
+                    reader.GetInt32(7) != 0,
+                    reader.IsDBNull(8) ? null : reader.GetInt64(8)));
         }
         return results;
     }
@@ -1016,24 +1094,34 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         await EnsureInitializedAsync(cancellationToken);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            SELECT f.file_path, f.session_id, f.size_bytes,
-                   COALESCE((SELECT COUNT(*) FROM rollout_records r WHERE r.source_identity = f.source_identity), 0),
-                   COALESCE((SELECT MAX(r.record_bytes) FROM rollout_records r WHERE r.source_identity = f.source_identity), 0),
-                   f.last_seen_at_utc
-            FROM rollout_files f ORDER BY f.size_bytes DESC LIMIT $take;
-            """;
+                              SELECT f.file_path, f.session_id, f.size_bytes,
+                                     COALESCE((SELECT COUNT(*) FROM rollout_records r WHERE r.source_identity = f.source_identity), 0),
+                                     COALESCE((SELECT MAX(r.record_bytes) FROM rollout_records r WHERE r.source_identity = f.source_identity), 0),
+                                     f.last_seen_at_utc
+                              FROM rollout_files f ORDER BY f.size_bytes DESC LIMIT $take;
+                              """;
         command.Parameters.AddWithValue("$take", Math.Max(0, take));
         var results = new List<CodexRolloutStorageSummary>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            results.Add(new CodexRolloutStorageSummary(
-                reader.GetString(0), reader.IsDBNull(1) ? null : reader.GetString(1), reader.GetInt64(2),
-                reader.GetInt64(3), reader.GetInt64(4), ParseUtc(reader.GetString(5))));
+            results.Add(
+                new CodexRolloutStorageSummary(
+                    reader.GetString(0),
+                    reader.IsDBNull(1) ? null : reader.GetString(1),
+                    reader.GetInt64(2),
+                    reader.GetInt64(3),
+                    reader.GetInt64(4),
+                    ParseUtc(reader.GetString(5))));
         }
         return results;
+    }
+
+    public void Dispose()
+    {
+        _initializeGate.Dispose();
     }
 
     private static async Task<int> InsertNativeTokenEventAsync(
@@ -1049,17 +1137,17 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         long reportedTotal,
         CancellationToken cancellationToken)
     {
-        var insert = connection.CreateCommand();
+        SqliteCommand insert = connection.CreateCommand();
         insert.Transaction = transaction;
         insert.CommandText = """
-            INSERT INTO codex_native_token_events(
-                source_event_id, source_file, session_id, agent_id, observed_at_utc, model, reasoning_effort,
-                counter_epoch, uncached_input_tokens, cache_read_tokens, cache_write_tokens,
-                non_reasoning_output_tokens, reasoning_output_tokens, reported_total_tokens, captured_at_utc)
-            VALUES($event, $file, $session, $agent, $observed, $model, $reasoning, $epoch,
-                   $uncached, $cached, $cacheWrite, $output, $reasoningOutput, $total, $captured)
-            ON CONFLICT(source_event_id) DO NOTHING;
-            """;
+                             INSERT INTO codex_native_token_events(
+                                 source_event_id, source_file, session_id, agent_id, observed_at_utc, model, reasoning_effort,
+                                 counter_epoch, uncached_input_tokens, cache_read_tokens, cache_write_tokens,
+                                 non_reasoning_output_tokens, reasoning_output_tokens, reported_total_tokens, captured_at_utc)
+                             VALUES($event, $file, $session, $agent, $observed, $model, $reasoning, $epoch,
+                                    $uncached, $cached, $cacheWrite, $output, $reasoningOutput, $total, $captured)
+                             ON CONFLICT(source_event_id) DO NOTHING;
+                             """;
         insert.Parameters.AddWithValue("$event", observation.SourceEventId);
         insert.Parameters.AddWithValue("$file", BuildSafeFileLabel(observation.SourceFile));
         insert.Parameters.AddWithValue("$session", observation.SessionId);
@@ -1088,10 +1176,10 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
 
     private static async Task ExecuteMigrationAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken)
     {
-        using var transaction = connection.BeginTransaction();
+        using SqliteTransaction transaction = connection.BeginTransaction();
         try
         {
-            var command = connection.CreateCommand();
+            SqliteCommand command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = sql; // nosemgrep: migration SQL is compile-time-only.
             await command.ExecuteNonQueryAsync(cancellationToken);
@@ -1108,7 +1196,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
     {
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = sql; // nosemgrep: private callers provide compile-time SQL and bind every runtime value.
         configure(command);
         await command.ExecuteNonQueryAsync(cancellationToken);
@@ -1116,7 +1204,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
 
     private static string BuildSafeFileLabel(string filePath)
     {
-        var fileName = Path.GetFileName(filePath);
+        string fileName = Path.GetFileName(filePath);
         if (string.IsNullOrWhiteSpace(fileName))
         {
             fileName = "rollout.jsonl";
@@ -1136,7 +1224,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             normalized = normalized.ToUpperInvariant();
         }
 
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized))).ToLowerInvariant()[..12];
+        string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized))).ToLowerInvariant()[..12];
         return $"{fileName} [{hash}]";
     }
 
@@ -1147,9 +1235,9 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             return "(unknown)";
         }
 
-        var normalized = value.Replace('\\', '/').Trim().TrimEnd('/');
-        var separator = normalized.LastIndexOf('/');
-        var label = separator >= 0 ? normalized[(separator + 1)..] : normalized;
+        string normalized = value.Replace('\\', '/').Trim().TrimEnd('/');
+        int separator = normalized.LastIndexOf('/');
+        string label = separator >= 0 ? normalized[(separator + 1)..] : normalized;
         if (label.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
         {
             label = label[..^4];
@@ -1162,8 +1250,18 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         return label.Length <= 160 ? label : label[..160];
     }
 
-    private static object DbValue(object? value) => value ?? DBNull.Value;
-    private static string SerializeUtc(DateTimeOffset value) => value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
-    private static DateTimeOffset ParseUtc(string value) => DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
+    private static object DbValue(object? value)
+    {
+        return value ?? DBNull.Value;
+    }
 
+    private static string SerializeUtc(DateTimeOffset value)
+    {
+        return value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+    }
+
+    private static DateTimeOffset ParseUtc(string value)
+    {
+        return DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
+    }
 }

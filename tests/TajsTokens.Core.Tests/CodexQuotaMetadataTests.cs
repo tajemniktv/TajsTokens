@@ -1,6 +1,14 @@
+// Taj's Tokens | CodexQuotaMetadataTests.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Text.Json;
-using TajsTokens.Infrastructure.Providers;
 using TajsTokens.Core.Models;
+using TajsTokens.Infrastructure.Providers;
+
+#endregion
 
 namespace TajsTokens.Core.Tests;
 
@@ -9,7 +17,8 @@ public sealed class CodexQuotaMetadataTests
     [Fact]
     public void MetadataSurvivesNoWindowsAndKeepsNamedAndLegacyViewsSeparate()
     {
-        var response = CodexAppServerQuotaProvider.ParseQuotaResponse("""
+        CodexQuotaResponse response = CodexAppServerQuotaProvider.ParseQuotaResponse(
+            """
             {"result":{"accountId":"secret-account","rateLimitsByLimitId":{
               "codex":{"limitId":"codex","limitName":"Codex","planType":"prolite","normalModelSlug":"gpt-test",
                 "rateLimitReachedType":"future-reason","spendControlReached":false,
@@ -17,14 +26,15 @@ public sealed class CodexQuotaMetadataTests
                 "individualLimit":{"limit":"12.50","used":"0","remainingPercent":100,"resetsAt":1800000000}},
               "reviews":{"limitName":"Reviews","primary":{"usedPercent":130,"windowDurationMins":42,"resetsAt":1800000000}}},
               "rateLimits":{"credits":{"hasCredits":true,"unlimited":true,"balance":null}},"email":"do-not-retain"}}
-            """, DateTimeOffset.UtcNow);
+            """,
+            DateTimeOffset.UtcNow);
         Assert.Empty(response.Snapshots);
-        var evidence = response.MetadataObservation!;
+        CodexServerObservation evidence = response.MetadataObservation!;
         Assert.Equal(AccountEvidenceClass.ProviderVerified, evidence.AccountEvidence);
         Assert.Equal(response.AccountKey, evidence.CorrelatedAccountKey);
-        var limits = evidence.QuotaMetadata!.Limits;
+        IReadOnlyList<CodexQuotaLimitMetadata> limits = evidence.QuotaMetadata!.Limits;
         Assert.Equal(3, limits.Count);
-        var codex = limits.Single(l => l.ResponseKey == "named:codex");
+        CodexQuotaLimitMetadata codex = limits.Single(l => l.ResponseKey == "named:codex");
         Assert.Equal("future-reason", codex.RateLimitReachedType);
         Assert.False(codex.SpendControlReached);
         Assert.Equal("0", codex.Credits!.Balance);
@@ -39,12 +49,16 @@ public sealed class CodexQuotaMetadataTests
     [Fact]
     public void MissingStateIsNotFalseAndMalformedMetadataDoesNotHideCurrentQuota()
     {
-        var missing = CodexAppServerQuotaProvider.ParseQuotaResponse("""{"result":{"rateLimits":{}}}""", DateTimeOffset.UtcNow);
+        CodexQuotaResponse missing = CodexAppServerQuotaProvider.ParseQuotaResponse(
+            """{"result":{"rateLimits":{}}}""",
+            DateTimeOffset.UtcNow);
         Assert.Null(Assert.Single(missing.MetadataObservation!.QuotaMetadata!.Limits).SpendControlReached);
         Assert.Equal(AccountEvidenceClass.Unattributed, missing.MetadataObservation.AccountEvidence);
-        var malformed = CodexAppServerQuotaProvider.ParseQuotaResponse("""
+        CodexQuotaResponse malformed = CodexAppServerQuotaProvider.ParseQuotaResponse(
+            """
             {"result":{"rateLimits":{"primary":{"usedPercent":25,"windowDurationMins":300},"credits":{"balance":false}}}}
-            """, DateTimeOffset.UtcNow);
+            """,
+            DateTimeOffset.UtcNow);
         Assert.Equal(25, Assert.Single(malformed.Snapshots).UsedPercent);
         Assert.Equal(ServerEvidenceState.Invalid, malformed.MetadataObservation!.State);
         Assert.Null(malformed.MetadataObservation.QuotaMetadata);

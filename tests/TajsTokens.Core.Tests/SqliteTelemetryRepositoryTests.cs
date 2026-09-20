@@ -1,7 +1,15 @@
+// Taj's Tokens | SqliteTelemetryRepositoryTests.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 using TajsTokens.Infrastructure.Persistence;
+
+#endregion
 
 namespace TajsTokens.Core.Tests;
 
@@ -20,14 +28,14 @@ public sealed class SqliteTelemetryRepositoryTests
         "ingestion_checkpoints",
         "repositories",
         "workspaces",
-        "forecast_snapshots"
+        "forecast_snapshots",
     ];
 
     [Fact]
     public async Task InitializeAsync_CreatesCompleteCurrentFoundationSchema()
     {
-        var directory = CreateTempDirectory();
-        var path = Path.Combine(directory, "telemetry.db");
+        string directory = CreateTempDirectory();
+        string path = Path.Combine(directory, "telemetry.db");
 
         try
         {
@@ -39,8 +47,8 @@ public sealed class SqliteTelemetryRepositoryTests
                 await connection.OpenAsync();
 
                 Assert.Equal(14, await ReadSchemaVersionAsync(connection));
-                var tables = await ReadTableNamesAsync(connection);
-                foreach (var expected in s_foundationTables)
+                HashSet<string> tables = await ReadTableNamesAsync(connection);
+                foreach (string expected in s_foundationTables)
                 {
                     Assert.Contains(expected, tables);
                 }
@@ -55,33 +63,33 @@ public sealed class SqliteTelemetryRepositoryTests
     [Fact]
     public async Task InitializeAsync_MigratesVersion2WithoutDestroyingExistingTelemetry()
     {
-        var directory = CreateTempDirectory();
-        var path = Path.Combine(directory, "telemetry.db");
+        string directory = CreateTempDirectory();
+        string path = Path.Combine(directory, "telemetry.db");
 
         try
         {
             await using (var connection = new SqliteConnection($"Data Source={path}"))
             {
                 await connection.OpenAsync();
-                var command = connection.CreateCommand();
+                SqliteCommand command = connection.CreateCommand();
                 command.CommandText = """
-                    CREATE TABLE quota_snapshots (
-                        provider TEXT NOT NULL,
-                        profile TEXT NOT NULL,
-                        kind TEXT NOT NULL,
-                        captured_at_utc TEXT NOT NULL,
-                        used_percent REAL,
-                        window_minutes INTEGER,
-                        resets_at_utc TEXT,
-                        source TEXT NOT NULL,
-                        PRIMARY KEY(provider, profile, kind, captured_at_utc)
-                    );
-                    INSERT INTO quota_snapshots(provider, profile, kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, source)
-                    VALUES('codex', 'default', 'FiveHour', '2026-08-31T20:00:00.0000000+00:00', 42, 300, NULL, 'fixture');
-                    CREATE TABLE ingestion_checkpoints(file_path TEXT PRIMARY KEY, last_byte_offset INTEGER,
-                        updated_at_utc TEXT, last_session_id TEXT, parser_version TEXT, source_identity TEXT);
-                    PRAGMA user_version = 2;
-                    """;
+                                      CREATE TABLE quota_snapshots (
+                                          provider TEXT NOT NULL,
+                                          profile TEXT NOT NULL,
+                                          kind TEXT NOT NULL,
+                                          captured_at_utc TEXT NOT NULL,
+                                          used_percent REAL,
+                                          window_minutes INTEGER,
+                                          resets_at_utc TEXT,
+                                          source TEXT NOT NULL,
+                                          PRIMARY KEY(provider, profile, kind, captured_at_utc)
+                                      );
+                                      INSERT INTO quota_snapshots(provider, profile, kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, source)
+                                      VALUES('codex', 'default', 'FiveHour', '2026-08-31T20:00:00.0000000+00:00', 42, 300, NULL, 'fixture');
+                                      CREATE TABLE ingestion_checkpoints(file_path TEXT PRIMARY KEY, last_byte_offset INTEGER,
+                                          updated_at_utc TEXT, last_session_id TEXT, parser_version TEXT, source_identity TEXT);
+                                      PRAGMA user_version = 2;
+                                      """;
                 await command.ExecuteNonQueryAsync();
             }
 
@@ -97,7 +105,7 @@ public sealed class SqliteTelemetryRepositoryTests
                 Assert.Contains("forecast_snapshots", await ReadTableNamesAsync(migrated));
                 Assert.Contains("agent_relationships", await ReadTableNamesAsync(migrated));
 
-                var countCommand = migrated.CreateCommand();
+                SqliteCommand countCommand = migrated.CreateCommand();
                 countCommand.CommandText = "SELECT COUNT(*) FROM quota_snapshots;";
                 Assert.Equal(1L, (long)(await countCommand.ExecuteScalarAsync())!);
             }
@@ -111,54 +119,54 @@ public sealed class SqliteTelemetryRepositoryTests
     [Fact]
     public async Task InitializeAsync_MigratesVersion6QuotaIdentityWithoutDroppingRows()
     {
-        var directory = CreateTempDirectory();
-        var path = Path.Combine(directory, "telemetry.db");
-        var captured = DateTimeOffset.Parse("2026-08-31T20:00:00Z");
+        string directory = CreateTempDirectory();
+        string path = Path.Combine(directory, "telemetry.db");
+        DateTimeOffset captured = DateTimeOffset.Parse("2026-08-31T20:00:00Z");
 
         try
         {
             await using (var connection = new SqliteConnection($"Data Source={path}"))
             {
                 await connection.OpenAsync();
-                var command = connection.CreateCommand();
+                SqliteCommand command = connection.CreateCommand();
                 command.CommandText = """
-                    CREATE TABLE quota_snapshots (
-                        provider TEXT NOT NULL,
-                        profile TEXT NOT NULL,
-                        kind TEXT NOT NULL,
-                        captured_at_utc TEXT NOT NULL,
-                        used_percent REAL,
-                        window_minutes INTEGER,
-                        resets_at_utc TEXT,
-                        source TEXT NOT NULL,
-                        PRIMARY KEY(provider, profile, kind, captured_at_utc)
-                    );
-                    INSERT INTO quota_snapshots(provider, profile, kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, source)
-                    VALUES('codex', 'default', 'FiveHour', '2026-08-31T20:00:00.0000000+00:00', 42, 300, '2026-09-01T01:00:00.0000000+00:00', 'codex-app-server:codex');
-                    CREATE TABLE forecast_snapshots (
-                        provider TEXT NOT NULL,
-                        profile TEXT NOT NULL,
-                        kind TEXT NOT NULL,
-                        generated_at_utc TEXT NOT NULL,
-                        burn_rate_percent_per_hour REAL,
-                        estimated_exhaustion_at_utc TEXT,
-                        survives_until_reset INTEGER,
-                        sustainable_percent_per_hour REAL,
-                        confidence REAL NOT NULL,
-                        state TEXT NOT NULL DEFAULT 'Learning',
-                        burn_pressure REAL,
-                        projected_remaining_at_reset_percent REAL,
-                        trend TEXT,
-                        is_quantized_flat INTEGER NOT NULL DEFAULT 0,
-                        quota_source TEXT,
-                        quota_authority TEXT NOT NULL DEFAULT 'Unknown',
-                        quota_captured_at_utc TEXT,
-                        PRIMARY KEY(provider, profile, kind, generated_at_utc)
-                    );
-                    CREATE TABLE ingestion_checkpoints(file_path TEXT PRIMARY KEY, last_byte_offset INTEGER,
-                        updated_at_utc TEXT, last_session_id TEXT, parser_version TEXT, source_identity TEXT);
-                    PRAGMA user_version = 6;
-                    """;
+                                      CREATE TABLE quota_snapshots (
+                                          provider TEXT NOT NULL,
+                                          profile TEXT NOT NULL,
+                                          kind TEXT NOT NULL,
+                                          captured_at_utc TEXT NOT NULL,
+                                          used_percent REAL,
+                                          window_minutes INTEGER,
+                                          resets_at_utc TEXT,
+                                          source TEXT NOT NULL,
+                                          PRIMARY KEY(provider, profile, kind, captured_at_utc)
+                                      );
+                                      INSERT INTO quota_snapshots(provider, profile, kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, source)
+                                      VALUES('codex', 'default', 'FiveHour', '2026-08-31T20:00:00.0000000+00:00', 42, 300, '2026-09-01T01:00:00.0000000+00:00', 'codex-app-server:codex');
+                                      CREATE TABLE forecast_snapshots (
+                                          provider TEXT NOT NULL,
+                                          profile TEXT NOT NULL,
+                                          kind TEXT NOT NULL,
+                                          generated_at_utc TEXT NOT NULL,
+                                          burn_rate_percent_per_hour REAL,
+                                          estimated_exhaustion_at_utc TEXT,
+                                          survives_until_reset INTEGER,
+                                          sustainable_percent_per_hour REAL,
+                                          confidence REAL NOT NULL,
+                                          state TEXT NOT NULL DEFAULT 'Learning',
+                                          burn_pressure REAL,
+                                          projected_remaining_at_reset_percent REAL,
+                                          trend TEXT,
+                                          is_quantized_flat INTEGER NOT NULL DEFAULT 0,
+                                          quota_source TEXT,
+                                          quota_authority TEXT NOT NULL DEFAULT 'Unknown',
+                                          quota_captured_at_utc TEXT,
+                                          PRIMARY KEY(provider, profile, kind, generated_at_utc)
+                                      );
+                                      CREATE TABLE ingestion_checkpoints(file_path TEXT PRIMARY KEY, last_byte_offset INTEGER,
+                                          updated_at_utc TEXT, last_session_id TEXT, parser_version TEXT, source_identity TEXT);
+                                      PRAGMA user_version = 6;
+                                      """;
                 await command.ExecuteNonQueryAsync();
             }
 
@@ -179,7 +187,7 @@ public sealed class SqliteTelemetryRepositoryTests
             await using var migrated = new SqliteConnection($"Data Source={path}");
             await migrated.OpenAsync();
             Assert.Equal(14, await ReadSchemaVersionAsync(migrated));
-            var snapshots = await repository.GetRecentQuotaSnapshotsAsync(
+            IReadOnlyList<QuotaSnapshot> snapshots = await repository.GetRecentQuotaSnapshotsAsync(
                 QuotaWindowKind.FiveHour,
                 "codex",
                 "default",
@@ -188,9 +196,14 @@ public sealed class SqliteTelemetryRepositoryTests
             Assert.Equal(2, snapshots.Count);
             Assert.Contains(snapshots, item => item.Source == "codex-app-server:codex" && item.UsedPercent == 42);
             Assert.Contains(snapshots, item => item.Source == "codex-rollout:primary" && item.UsedPercent == 99);
-            var authoritativeOnly = await repository.GetRecentQuotaSnapshotsAsync(
-                QuotaWindowKind.FiveHour, "codex", "default", 1, CancellationToken.None,
-                captured, "codex-app-server:codex");
+            IReadOnlyList<QuotaSnapshot> authoritativeOnly = await repository.GetRecentQuotaSnapshotsAsync(
+                QuotaWindowKind.FiveHour,
+                "codex",
+                "default",
+                1,
+                CancellationToken.None,
+                captured,
+                "codex-app-server:codex");
             Assert.Equal(42, Assert.Single(authoritativeOnly).UsedPercent);
         }
         finally
@@ -202,46 +215,50 @@ public sealed class SqliteTelemetryRepositoryTests
     [Fact]
     public async Task InitializeAsync_MigratesVersion3ForecastRowsWithSafeDefaults()
     {
-        var directory = CreateTempDirectory();
-        var path = Path.Combine(directory, "telemetry.db");
+        string directory = CreateTempDirectory();
+        string path = Path.Combine(directory, "telemetry.db");
 
         try
         {
             await using (var connection = new SqliteConnection($"Data Source={path}"))
             {
                 await connection.OpenAsync();
-                var command = connection.CreateCommand();
+                SqliteCommand command = connection.CreateCommand();
                 command.CommandText = """
-                    CREATE TABLE forecast_snapshots (
-                        provider TEXT NOT NULL,
-                        profile TEXT NOT NULL,
-                        kind TEXT NOT NULL,
-                        generated_at_utc TEXT NOT NULL,
-                        burn_rate_percent_per_hour REAL,
-                        estimated_exhaustion_at_utc TEXT,
-                        survives_until_reset INTEGER,
-                        sustainable_percent_per_hour REAL,
-                        confidence REAL NOT NULL,
-                        PRIMARY KEY(provider, profile, kind, generated_at_utc)
-                    );
-                    INSERT INTO forecast_snapshots(
-                        provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
-                        estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence)
-                    VALUES('codex', 'default', 'FiveHour', '2026-08-31T20:00:00.0000000+00:00', 12, NULL, 1, 20, 0.5);
-                    CREATE TABLE ingestion_checkpoints(file_path TEXT PRIMARY KEY, last_byte_offset INTEGER,
-                        updated_at_utc TEXT, last_session_id TEXT, parser_version TEXT, source_identity TEXT);
-                    PRAGMA user_version = 3;
-                    """;
+                                      CREATE TABLE forecast_snapshots (
+                                          provider TEXT NOT NULL,
+                                          profile TEXT NOT NULL,
+                                          kind TEXT NOT NULL,
+                                          generated_at_utc TEXT NOT NULL,
+                                          burn_rate_percent_per_hour REAL,
+                                          estimated_exhaustion_at_utc TEXT,
+                                          survives_until_reset INTEGER,
+                                          sustainable_percent_per_hour REAL,
+                                          confidence REAL NOT NULL,
+                                          PRIMARY KEY(provider, profile, kind, generated_at_utc)
+                                      );
+                                      INSERT INTO forecast_snapshots(
+                                          provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
+                                          estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence)
+                                      VALUES('codex', 'default', 'FiveHour', '2026-08-31T20:00:00.0000000+00:00', 12, NULL, 1, 20, 0.5);
+                                      CREATE TABLE ingestion_checkpoints(file_path TEXT PRIMARY KEY, last_byte_offset INTEGER,
+                                          updated_at_utc TEXT, last_session_id TEXT, parser_version TEXT, source_identity TEXT);
+                                      PRAGMA user_version = 3;
+                                      """;
                 await command.ExecuteNonQueryAsync();
             }
 
             var repository = new SqliteTelemetryRepository(path);
             await repository.InitializeAsync(CancellationToken.None);
-            var forecasts = await repository.GetRecentForecastSnapshotsAsync(
-                QuotaWindowKind.FiveHour, "codex", "default", 10, CancellationToken.None);
+            IReadOnlyList<ForecastSnapshot> forecasts = await repository.GetRecentForecastSnapshotsAsync(
+                QuotaWindowKind.FiveHour,
+                "codex",
+                "default",
+                10,
+                CancellationToken.None);
 
-            var persisted = Assert.Single(forecasts);
-            var forecast = persisted.Forecast;
+            ForecastSnapshot persisted = Assert.Single(forecasts);
+            Forecast forecast = persisted.Forecast;
             Assert.Equal(ForecastState.Learning, forecast.State);
             Assert.Null(forecast.BurnPressure);
             Assert.Null(forecast.ProjectedRemainingAtResetPercent);
@@ -262,8 +279,8 @@ public sealed class SqliteTelemetryRepositoryTests
     [Fact]
     public async Task FoundationIdentityAndForecastRecords_PreserveKnownMetadataAndStripRemoteCredentials()
     {
-        var directory = CreateTempDirectory();
-        var path = Path.Combine(directory, "telemetry.db");
+        string directory = CreateTempDirectory();
+        string path = Path.Combine(directory, "telemetry.db");
         var now = new DateTimeOffset(2026, 8, 31, 21, 0, 0, TimeSpan.Zero);
 
         try
@@ -321,8 +338,18 @@ public sealed class SqliteTelemetryRepositoryTests
                     22.5,
                     "accelerating",
                     true,
-                    new ForecastEvidence("fixture/v1", "epoch", "codex-app-server:codex", 12, 2,
-                        8, 3, 19, 26, 0.8, "Held-out empirical band, not an exhaustion probability.")),
+                    new ForecastEvidence(
+                        "fixture/v1",
+                        "epoch",
+                        "codex-app-server:codex",
+                        12,
+                        2,
+                        8,
+                        3,
+                        19,
+                        26,
+                        0.8,
+                        "Held-out empirical band, not an exhaustion probability.")),
                 "codex-app-server:codex",
                 QuotaObservationAuthority.ProviderAuthoritative,
                 now.AddMinutes(-1),
@@ -330,7 +357,7 @@ public sealed class SqliteTelemetryRepositoryTests
                 now.AddHours(5));
             await repository.UpsertForecastSnapshotAsync(snapshot, CancellationToken.None);
 
-            var forecasts = await repository.GetRecentForecastSnapshotsAsync(
+            IReadOnlyList<ForecastSnapshot> forecasts = await repository.GetRecentForecastSnapshotsAsync(
                 QuotaWindowKind.FiveHour,
                 "codex",
                 "default",
@@ -344,13 +371,13 @@ public sealed class SqliteTelemetryRepositoryTests
                 Assert.Equal(1L, await CountAsync(connection, "repositories"));
                 Assert.Equal(1L, await CountAsync(connection, "workspaces"));
 
-                var repositoryCommand = connection.CreateCommand();
+                SqliteCommand repositoryCommand = connection.CreateCommand();
                 repositoryCommand.CommandText = "SELECT root_path, remote_url FROM repositories WHERE repository_id = 'repo-1';";
-                await using (var reader = await repositoryCommand.ExecuteReaderAsync())
+                await using (SqliteDataReader reader = await repositoryCommand.ExecuteReaderAsync())
                 {
                     Assert.True(await reader.ReadAsync());
                     Assert.Equal(@"C:\src\TajsTokens", reader.GetString(0));
-                    var persistedRemote = reader.GetString(1);
+                    string persistedRemote = reader.GetString(1);
                     Assert.Contains("example.invalid/tajemniktv/TajsTokens.git", persistedRemote, StringComparison.Ordinal);
                     Assert.DoesNotContain("tajem:", persistedRemote, StringComparison.Ordinal);
                     Assert.DoesNotContain("secret", persistedRemote, StringComparison.OrdinalIgnoreCase);
@@ -358,9 +385,9 @@ public sealed class SqliteTelemetryRepositoryTests
                     Assert.DoesNotContain("private-fragment", persistedRemote, StringComparison.Ordinal);
                 }
 
-                var workspaceCommand = connection.CreateCommand();
+                SqliteCommand workspaceCommand = connection.CreateCommand();
                 workspaceCommand.CommandText = "SELECT path, repository_id FROM workspaces WHERE workspace_id = 'workspace-1';";
-                await using var workspaceReader = await workspaceCommand.ExecuteReaderAsync();
+                await using SqliteDataReader workspaceReader = await workspaceCommand.ExecuteReaderAsync();
                 Assert.True(await workspaceReader.ReadAsync());
                 Assert.Equal(@"C:\src\TajsTokens-renamed", workspaceReader.GetString(0));
                 Assert.Equal("repo-1", workspaceReader.GetString(1));
@@ -374,7 +401,7 @@ public sealed class SqliteTelemetryRepositoryTests
 
     private static string CreateTempDirectory()
     {
-        var directory = Path.Combine(Path.GetTempPath(), "TajsTokens.Tests", Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(Path.GetTempPath(), "TajsTokens.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         return directory;
     }
@@ -387,23 +414,23 @@ public sealed class SqliteTelemetryRepositoryTests
         SqliteConnection.ClearAllPools();
         if (Directory.Exists(directory))
         {
-            Directory.Delete(directory, recursive: true);
+            Directory.Delete(directory, true);
         }
     }
 
     private static async Task<int> ReadSchemaVersionAsync(SqliteConnection connection)
     {
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = "PRAGMA user_version;";
         return Convert.ToInt32(await command.ExecuteScalarAsync());
     }
 
     private static async Task<HashSet<string>> ReadTableNamesAsync(SqliteConnection connection)
     {
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = "SELECT name FROM sqlite_master WHERE type = 'table';";
         var results = new HashSet<string>(StringComparer.Ordinal);
-        await using var reader = await command.ExecuteReaderAsync();
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync();
         while (await reader.ReadAsync())
         {
             results.Add(reader.GetString(0));
@@ -414,12 +441,12 @@ public sealed class SqliteTelemetryRepositoryTests
 
     private static async Task<long> CountAsync(SqliteConnection connection, string table)
     {
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = table switch
         {
             "repositories" => "SELECT COUNT(*) FROM repositories;",
             "workspaces" => "SELECT COUNT(*) FROM workspaces;",
-            _ => throw new ArgumentOutOfRangeException(nameof(table))
+            _ => throw new ArgumentOutOfRangeException(nameof(table)),
         };
         return (long)(await command.ExecuteScalarAsync())!;
     }

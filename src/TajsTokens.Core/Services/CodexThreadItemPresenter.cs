@@ -1,13 +1,21 @@
+// Taj's Tokens | CodexThreadItemPresenter.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Text;
 using System.Text.Json;
 using TajsTokens.Core.Models;
 
+#endregion
+
 namespace TajsTokens.Core.Services;
 
 /// <summary>
-/// Converts observed Codex thread-item JSON into a readable, local-only presentation. This is
-/// deliberately tolerant: the native item and JSON are always retained when a newer or malformed
-/// shape cannot be understood.
+///     Converts observed Codex thread-item JSON into a readable, local-only presentation. This is
+///     deliberately tolerant: the native item and JSON are always retained when a newer or malformed
+///     shape cannot be understood.
 /// </summary>
 public static class CodexThreadItemPresenter
 {
@@ -22,13 +30,13 @@ public static class CodexThreadItemPresenter
 
         try
         {
-            using var document = JsonDocument.Parse(item.ItemJson);
-            var root = document.RootElement;
-            var type = StringProperty(root, "type") ?? item.ItemType;
+            using JsonDocument document = JsonDocument.Parse(item.ItemJson);
+            JsonElement root = document.RootElement;
+            string type = StringProperty(root, "type") ?? item.ItemType;
             return NormalizeType(type) switch
             {
-                "usermessage" => Message(item, root, isUser: true),
-                "agentmessage" => Message(item, root, isUser: false),
+                "usermessage" => Message(item, root, true),
+                "agentmessage" => Message(item, root, false),
                 "reasoning" => Reasoning(item, root),
                 "commandexecution" => Command(item, root),
                 "filechange" => FileChange(item, root),
@@ -38,7 +46,7 @@ public static class CodexThreadItemPresenter
                 "contextcompaction" or "websearch" or "imageview" or "imagegeneration" or
                     "sleep" or "enteredreviewmode" or "exitedreviewmode" or "hookprompt" =>
                     SystemEvent(item, root, type),
-                _ => Unknown(item, $"Unsupported native item type: {type}")
+                _ => Unknown(item, $"Unsupported native item type: {type}"),
             };
         }
         catch (JsonException)
@@ -52,18 +60,20 @@ public static class CodexThreadItemPresenter
     }
 
     public static IReadOnlyList<CodexThreadItemPresentation> PresentMany(
-        IEnumerable<CodexThreadItem> items) =>
-        items.Select(Present).ToArray();
+        IEnumerable<CodexThreadItem> items)
+    {
+        return items.Select(Present).ToArray();
+    }
 
     private static CodexThreadItemPresentation Message(
         CodexThreadItem item,
         JsonElement root,
         bool isUser)
     {
-        var body = isUser
+        string? body = isUser
             ? UserContent(root)
             : StringProperty(root, "text");
-        var heading = isUser ? "You" : "Codex";
+        string heading = isUser ? "You" : "Codex";
         var facts = new List<CodexThreadItemFact>();
         AddStringFact(facts, "Phase", root, "phase");
         AddStringFact(facts, "Delivery", root, "delivery");
@@ -73,26 +83,26 @@ public static class CodexThreadItemPresenter
             heading,
             Trim(body),
             facts,
-            IsExpandedByDefault: true,
-            IsContentBearing: !string.IsNullOrWhiteSpace(body));
+            true,
+            !string.IsNullOrWhiteSpace(body));
     }
 
     private static CodexThreadItemPresentation Reasoning(CodexThreadItem item, JsonElement root)
     {
-        var summary = StringArray(root, "summary");
-        var content = StringArray(root, "content");
-        var body = summary.Count > 0 ? string.Join(Environment.NewLine, summary) : string.Join(Environment.NewLine, content);
+        List<string> summary = StringArray(root, "summary");
+        List<string> content = StringArray(root, "content");
+        string body = summary.Count > 0 ? string.Join(Environment.NewLine, summary) : string.Join(Environment.NewLine, content);
         var facts = new List<CodexThreadItemFact>();
-        if (summary.Count > 0) facts.Add(new("Summary sections", summary.Count.ToString()));
-        if (content.Count > 0) facts.Add(new("Raw content sections", content.Count.ToString()));
+        if (summary.Count > 0) facts.Add(new CodexThreadItemFact("Summary sections", summary.Count.ToString()));
+        if (content.Count > 0) facts.Add(new CodexThreadItemFact("Raw content sections", content.Count.ToString()));
         return new CodexThreadItemPresentation(
             item,
             CodexThreadItemPresentationKind.Reasoning,
             "Reasoning",
             Trim(body),
             facts,
-            IsExpandedByDefault: false,
-            IsContentBearing: body.Length > 0);
+            false,
+            body.Length > 0);
     }
 
     private static CodexThreadItemPresentation Command(CodexThreadItem item, JsonElement root)
@@ -101,39 +111,41 @@ public static class CodexThreadItemPresenter
         AddStringFact(facts, "Status", root, "status");
         AddStringFact(facts, "Working directory", root, "cwd");
         AddStringFact(facts, "Exit code", root, "exitCode");
-        AddStringFact(facts, "Duration", root, "durationMs", suffix: " ms");
+        AddStringFact(facts, "Duration", root, "durationMs", " ms");
         AddStringFact(facts, "Source", root, "source");
         AddStringFact(facts, "Process", root, "processId");
-        var command = StringProperty(root, "command");
-        var output = StringProperty(root, "aggregatedOutput");
-        var body = string.IsNullOrWhiteSpace(output)
+        string? command = StringProperty(root, "command");
+        string? output = StringProperty(root, "aggregatedOutput");
+        string? body = string.IsNullOrWhiteSpace(output)
             ? command
-            : string.IsNullOrWhiteSpace(command) ? output : command + Environment.NewLine + Environment.NewLine + output;
+            : string.IsNullOrWhiteSpace(command)
+                ? output
+                : command + Environment.NewLine + Environment.NewLine + output;
         return new CodexThreadItemPresentation(
             item,
             CodexThreadItemPresentationKind.CommandExecution,
             "Command",
             Trim(body),
             facts,
-            IsExpandedByDefault: false,
-            IsContentBearing: !string.IsNullOrWhiteSpace(body));
+            false,
+            !string.IsNullOrWhiteSpace(body));
     }
 
     private static CodexThreadItemPresentation FileChange(CodexThreadItem item, JsonElement root)
     {
         var facts = new List<CodexThreadItemFact>();
         AddStringFact(facts, "Status", root, "status");
-        if (root.TryGetProperty("changes", out var changes) && changes.ValueKind == JsonValueKind.Array)
+        if (root.TryGetProperty("changes", out JsonElement changes) && changes.ValueKind == JsonValueKind.Array)
         {
-            facts.Add(new("Files", changes.GetArrayLength().ToString()));
-            var paths = changes.EnumerateArray()
+            facts.Add(new CodexThreadItemFact("Files", changes.GetArrayLength().ToString()));
+            string?[] paths = changes.EnumerateArray()
                 .Select(change => StringProperty(change, "path") ?? StringProperty(change, "filePath"))
                 .Where(path => !string.IsNullOrWhiteSpace(path))
                 .Take(30)
                 .ToArray();
             if (paths.Length > 0)
             {
-                facts.Add(new("Paths", string.Join(", ", paths)));
+                facts.Add(new CodexThreadItemFact("Paths", string.Join(", ", paths)));
             }
         }
 
@@ -143,8 +155,8 @@ public static class CodexThreadItemPresenter
             "File changes",
             null,
             facts,
-            IsExpandedByDefault: false,
-            IsContentBearing: true);
+            false,
+            true);
     }
 
     private static CodexThreadItemPresentation Tool(CodexThreadItem item, JsonElement root, string type)
@@ -155,19 +167,19 @@ public static class CodexThreadItemPresenter
         AddStringFact(facts, "Server", root, "server");
         AddStringFact(facts, "Namespace", root, "namespace");
         AddStringFact(facts, "Name", root, "name");
-        AddStringFact(facts, "Duration", root, "durationMs", suffix: " ms");
+        AddStringFact(facts, "Duration", root, "durationMs", " ms");
         AddJsonFact(facts, "Arguments", root, "arguments");
         AddJsonFact(facts, "Result", root, "result");
         AddJsonFact(facts, "Error", root, "error");
-        var body = StringProperty(root, "output") ?? StringProperty(root, "result") ?? StringProperty(root, "error");
+        string? body = StringProperty(root, "output") ?? StringProperty(root, "result") ?? StringProperty(root, "error");
         return new CodexThreadItemPresentation(
             item,
             CodexThreadItemPresentationKind.ToolCall,
             type,
             Trim(body),
             facts,
-            IsExpandedByDefault: false,
-            IsContentBearing: true);
+            false,
+            true);
     }
 
     private static CodexThreadItemPresentation Collaboration(CodexThreadItem item, JsonElement root, string type)
@@ -177,14 +189,14 @@ public static class CodexThreadItemPresenter
         AddStringFact(facts, "Status", root, "status");
         AddStringFact(facts, "Sender", root, "senderThreadId");
         AddStringFact(facts, "Agent path", root, "agentPath");
-        var linked = StringProperty(root, "agentThreadId");
-        if (root.TryGetProperty("receiverThreadIds", out var receivers) && receivers.ValueKind == JsonValueKind.Array)
+        string? linked = StringProperty(root, "agentThreadId");
+        if (root.TryGetProperty("receiverThreadIds", out JsonElement receivers) && receivers.ValueKind == JsonValueKind.Array)
         {
-            var ids = receivers.EnumerateArray().Select(value => value.GetString()).Where(value => value is not null).ToArray();
+            string?[] ids = receivers.EnumerateArray().Select(value => value.GetString()).Where(value => value is not null).ToArray();
             if (ids.Length > 0)
             {
                 linked ??= ids[0];
-                facts.Add(new("Receivers", string.Join(", ", ids)));
+                facts.Add(new CodexThreadItemFact("Receivers", string.Join(", ", ids)));
             }
         }
         return new CodexThreadItemPresentation(
@@ -193,35 +205,59 @@ public static class CodexThreadItemPresenter
             type,
             StringProperty(root, "prompt"),
             facts,
-            IsExpandedByDefault: false,
-            IsContentBearing: true,
-            LinkedThreadId: linked);
+            false,
+            true,
+            linked);
     }
 
-    private static CodexThreadItemPresentation Plan(CodexThreadItem item, JsonElement root) =>
-        new(item, CodexThreadItemPresentationKind.Plan, "Plan", Trim(StringProperty(root, "text")),
-            Array.Empty<CodexThreadItemFact>(), true, true);
+    private static CodexThreadItemPresentation Plan(CodexThreadItem item, JsonElement root)
+    {
+        return new CodexThreadItemPresentation(
+            item,
+            CodexThreadItemPresentationKind.Plan,
+            "Plan",
+            Trim(StringProperty(root, "text")),
+            Array.Empty<CodexThreadItemFact>(),
+            true,
+            true);
+    }
 
-    private static CodexThreadItemPresentation SystemEvent(CodexThreadItem item, JsonElement root, string type) =>
-        new(item, CodexThreadItemPresentationKind.SystemEvent, type, null,
-            Array.Empty<CodexThreadItemFact>(), false, false);
+    private static CodexThreadItemPresentation SystemEvent(CodexThreadItem item, JsonElement root, string type)
+    {
+        return new CodexThreadItemPresentation(
+            item,
+            CodexThreadItemPresentationKind.SystemEvent,
+            type,
+            null,
+            Array.Empty<CodexThreadItemFact>(),
+            false,
+            false);
+    }
 
-    private static CodexThreadItemPresentation Unknown(CodexThreadItem item, string message) =>
-        new(item, CodexThreadItemPresentationKind.Unknown, "Unknown Codex item", message,
-            new[] { new CodexThreadItemFact("Native type", item.ItemType) }, false, true);
+    private static CodexThreadItemPresentation Unknown(CodexThreadItem item, string message)
+    {
+        return new CodexThreadItemPresentation(
+            item,
+            CodexThreadItemPresentationKind.Unknown,
+            "Unknown Codex item",
+            message,
+            new[] { new CodexThreadItemFact("Native type", item.ItemType) },
+            false,
+            true);
+    }
 
     private static string UserContent(JsonElement root)
     {
-        if (!root.TryGetProperty("content", out var content) || content.ValueKind != JsonValueKind.Array)
+        if (!root.TryGetProperty("content", out JsonElement content) || content.ValueKind != JsonValueKind.Array)
         {
             return StringProperty(root, "text") ?? string.Empty;
         }
 
         var builder = new StringBuilder();
-        foreach (var part in content.EnumerateArray())
+        foreach (JsonElement part in content.EnumerateArray())
         {
-            var type = StringProperty(part, "type");
-            var text = StringProperty(part, "text");
+            string? type = StringProperty(part, "type");
+            string? text = StringProperty(part, "text");
             if (string.Equals(type, "text", StringComparison.OrdinalIgnoreCase) && text is not null)
             {
                 if (builder.Length > 0) builder.AppendLine();
@@ -236,18 +272,24 @@ public static class CodexThreadItemPresenter
         return builder.ToString();
     }
 
-    private static List<string> StringArray(JsonElement root, string name) =>
-        root.TryGetProperty(name, out var value) && value.ValueKind == JsonValueKind.Array
+    private static List<string> StringArray(JsonElement root, string name)
+    {
+        return root.TryGetProperty(name, out JsonElement value) && value.ValueKind == JsonValueKind.Array
             ? value.EnumerateArray().Select(item => item.ValueKind == JsonValueKind.String ? item.GetString() : item.ToString())
                 .Where(item => item is not null).Cast<string>().ToList()
             : [];
+    }
 
-    private static string? StringProperty(JsonElement element, string name) =>
-        element.TryGetProperty(name, out var value)
+    private static string? StringProperty(JsonElement element, string name)
+    {
+        return element.TryGetProperty(name, out JsonElement value)
             ? value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined
                 ? null
-                : value.ValueKind == JsonValueKind.String ? value.GetString() : value.ToString()
+                : value.ValueKind == JsonValueKind.String
+                    ? value.GetString()
+                    : value.ToString()
             : null;
+    }
 
     private static void AddStringFact(
         ICollection<CodexThreadItemFact> facts,
@@ -256,8 +298,8 @@ public static class CodexThreadItemPresenter
         string property,
         string suffix = "")
     {
-        var value = StringProperty(root, property);
-        if (!string.IsNullOrWhiteSpace(value)) facts.Add(new(label, value + suffix));
+        string? value = StringProperty(root, property);
+        if (!string.IsNullOrWhiteSpace(value)) facts.Add(new CodexThreadItemFact(label, value + suffix));
     }
 
     private static void AddJsonFact(
@@ -266,15 +308,17 @@ public static class CodexThreadItemPresenter
         JsonElement root,
         string property)
     {
-        if (root.TryGetProperty(property, out var value) && value.ValueKind is not JsonValueKind.Null)
+        if (root.TryGetProperty(property, out JsonElement value) && value.ValueKind is not JsonValueKind.Null)
         {
-            var text = Trim(value.ToString());
-            if (!string.IsNullOrWhiteSpace(text)) facts.Add(new(label, text));
+            string? text = Trim(value.ToString());
+            if (!string.IsNullOrWhiteSpace(text)) facts.Add(new CodexThreadItemFact(label, text));
         }
     }
 
-    private static string NormalizeType(string type) =>
-        new string(type.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+    private static string NormalizeType(string type)
+    {
+        return new string(type.Where(char.IsLetterOrDigit).ToArray()).ToLowerInvariant();
+    }
 
     private static string? Trim(string? value)
     {

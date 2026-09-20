@@ -1,10 +1,14 @@
+// Taj's Tokens | CodexTokenAccountingSnapshot.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
 namespace TajsTokens.Core.Models;
 
 /// <summary>
-/// One coherent Codex token-accounting generation. Model totals and hourly buckets must come from
-/// the same provider generation so a partial provider failure cannot mix incompatible snapshots.
-/// Coverage describes what the source can actually observe; native rollout accounting is local-only
-/// until remote/cloud-only collection exists.
+///     One coherent Codex token-accounting generation. Model totals and hourly buckets must come from
+///     the same provider generation so a partial provider failure cannot mix incompatible snapshots.
+///     Coverage describes what the source can actually observe; native rollout accounting is local-only
+///     until remote/cloud-only collection exists.
 /// </summary>
 public sealed record CodexTokenAccountingSnapshot(
     string Source,
@@ -18,8 +22,8 @@ public sealed record CodexTokenAccountingSnapshot(
     long? Revision = null);
 
 /// <summary>
-/// Content-free comparison between the native projection and the optional Tokscale reference.
-/// Differences are evidence for parser/attribution work, not a reason to silently replace native data.
+///     Content-free comparison between the native projection and the optional Tokscale reference.
+///     Differences are evidence for parser/attribution work, not a reason to silently replace native data.
 /// </summary>
 public sealed record CodexAccountingReconciliation(
     TokenBreakdown NativeTotals,

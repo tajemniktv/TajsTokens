@@ -1,20 +1,30 @@
+// Taj's Tokens | ObservatoryPage.xaml.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using TajsTokens.Core.Enums;
+using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
+using TajsTokens.Infrastructure.Persistence;
+
+#endregion
 
 namespace TajsTokens.App.Pages;
 
 public sealed partial class ObservatoryPage : Page
 {
     private readonly Dictionary<string, CodexSessionOverview> _sessionsById = new(StringComparer.OrdinalIgnoreCase);
-    private CancellationTokenSource? _pageCancellation;
+    private long _detailGeneration;
     private bool _isLoaded;
     private bool _loading;
+    private CancellationTokenSource? _pageCancellation;
     private bool _reloadRequested;
-    private long _selectionGeneration;
-    private long _detailGeneration;
     private long _searchGeneration;
+    private long _selectionGeneration;
 
     public ObservatoryPage()
     {
@@ -28,7 +38,7 @@ public sealed partial class ObservatoryPage : Page
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         _isLoaded = true;
-        var previous = Interlocked.Exchange(ref _pageCancellation, new CancellationTokenSource());
+        CancellationTokenSource? previous = Interlocked.Exchange(ref _pageCancellation, new CancellationTokenSource());
         previous?.Cancel();
         previous?.Dispose();
 
@@ -53,7 +63,7 @@ public sealed partial class ObservatoryPage : Page
         Interlocked.Increment(ref _detailGeneration);
         Interlocked.Increment(ref _searchGeneration);
 
-        var cancellation = Interlocked.Exchange(ref _pageCancellation, null);
+        CancellationTokenSource? cancellation = Interlocked.Exchange(ref _pageCancellation, null);
         cancellation?.Cancel();
         cancellation?.Dispose();
     }
@@ -66,7 +76,7 @@ public sealed partial class ObservatoryPage : Page
             return;
         }
 
-        var cancellation = _pageCancellation;
+        CancellationTokenSource? cancellation = _pageCancellation;
         if (cancellation is null || cancellation.IsCancellationRequested)
         {
             return;
@@ -101,7 +111,7 @@ public sealed partial class ObservatoryPage : Page
 
     private async void OnRefreshClicked(object sender, RoutedEventArgs e)
     {
-        var cancellation = _pageCancellation;
+        CancellationTokenSource? cancellation = _pageCancellation;
         if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested)
         {
             return;
@@ -163,27 +173,32 @@ public sealed partial class ObservatoryPage : Page
             _loading = true;
             try
             {
-                var store = App.Services.ObservatoryStore;
-                var repository = App.Services.Repository;
-                var readModel = App.Services.ObservatoryReadModel;
-                var search = SessionSearch.Text.Trim();
+                ICodexObservatoryStore store = App.Services.ObservatoryStore;
+                SqliteTelemetryRepository repository = App.Services.Repository;
+                SqliteCodexObservatoryReadModel readModel = App.Services.ObservatoryReadModel;
+                string search = SessionSearch.Text.Trim();
 
                 // Microsoft.Data.Sqlite still performs synchronous native work behind async-shaped
                 // calls. Keep aggregate/session reads away from the dispatcher and push filtering into
                 // SQLite before LIMIT so older matching sessions remain discoverable.
-                var data = await Task.Run(async () =>
-                {
-                    await repository.InitializeAsync(cancellationToken);
-                    await store.InitializeAsync(cancellationToken);
+                (CodexObservatorySummary Summary, IReadOnlyList<CodexSessionOverview> Sessions) data = await Task.Run(
+                    async () =>
+                    {
+                        await repository.InitializeAsync(cancellationToken);
+                        await store.InitializeAsync(cancellationToken);
 
-                    var summaryTask = store.GetSummaryAsync(cancellationToken);
-                    var sessionsTask = readModel.SearchSessionsAsync(search, search.Length == 0 ? 750 : 250, cancellationToken);
-                    await Task.WhenAll(summaryTask, sessionsTask);
+                        Task<CodexObservatorySummary> summaryTask = store.GetSummaryAsync(cancellationToken);
+                        Task<IReadOnlyList<CodexSessionOverview>> sessionsTask = readModel.SearchSessionsAsync(
+                            search,
+                            search.Length == 0 ? 750 : 250,
+                            cancellationToken);
+                        await Task.WhenAll(summaryTask, sessionsTask);
 
-                    return (
-                        Summary: await summaryTask,
-                        Sessions: await sessionsTask);
-                }, cancellationToken);
+                        return (
+                            Summary: await summaryTask,
+                            Sessions: await sessionsTask);
+                    },
+                    cancellationToken);
 
                 cancellationToken.ThrowIfCancellationRequested();
                 if (!_isLoaded)
@@ -191,16 +206,17 @@ public sealed partial class ObservatoryPage : Page
                     return;
                 }
 
-                var selectedId = (SessionList.SelectedItem as SessionRow)?.SessionId;
+                string? selectedId = (SessionList.SelectedItem as SessionRow)?.SessionId;
                 ApplySessionRows(data.Sessions, selectedId, search);
 
                 SessionCountText.Text = data.Summary.SessionCount.ToString("N0");
                 NativeTokensText.Text = FormatCount(data.Summary.NativeTokens.ReportedTotal);
                 StorageText.Text = FormatBytes(data.Summary.RolloutBytes);
 
-                var rolloutSource = App.Services.Telemetry.Latest.Sources.FirstOrDefault(source =>
+                ProviderHealthSnapshot? rolloutSource = App.Services.Telemetry.Latest.Sources.FirstOrDefault(source =>
                     string.Equals(source.Provider, "Codex rollouts", StringComparison.OrdinalIgnoreCase));
-                var scanning = rolloutSource?.Detail.Contains("Scanning local Codex rollout history", StringComparison.OrdinalIgnoreCase) == true;
+                bool scanning =
+                    rolloutSource?.Detail.Contains("Scanning local Codex rollout history", StringComparison.OrdinalIgnoreCase) == true;
                 StatusText.Text = scanning
                     ? data.Summary.SessionCount == 0
                         ? "Importing local Codex history in the background. Sessions will appear as batches commit."
@@ -230,15 +246,15 @@ public sealed partial class ObservatoryPage : Page
 
     private async void OnSessionSearchChanged(object sender, TextChangedEventArgs e)
     {
-        var cancellation = _pageCancellation;
+        CancellationTokenSource? cancellation = _pageCancellation;
         if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested)
         {
             return;
         }
 
-        var generation = Interlocked.Increment(ref _searchGeneration);
-        var search = SessionSearch.Text.Trim();
-        var selectedId = (SessionList.SelectedItem as SessionRow)?.SessionId;
+        long generation = Interlocked.Increment(ref _searchGeneration);
+        string search = SessionSearch.Text.Trim();
+        string? selectedId = (SessionList.SelectedItem as SessionRow)?.SessionId;
 
         try
         {
@@ -251,7 +267,7 @@ public sealed partial class ObservatoryPage : Page
                 return;
             }
 
-            var sessions = await Task.Run(
+            IReadOnlyList<CodexSessionOverview> sessions = await Task.Run(
                 () => App.Services.ObservatoryReadModel.SearchSessionsAsync(
                     search,
                     search.Length == 0 ? 750 : 250,
@@ -287,12 +303,12 @@ public sealed partial class ObservatoryPage : Page
         string search)
     {
         _sessionsById.Clear();
-        foreach (var session in sessions)
+        foreach (CodexSessionOverview session in sessions)
         {
             _sessionsById[session.SessionId] = session;
         }
 
-        var rows = sessions.Select(ToSessionRow).ToArray();
+        SessionRow[] rows = sessions.Select(ToSessionRow).ToArray();
         SessionList.ItemsSource = rows;
 
         if (preferredSelectionId is not null)
@@ -318,11 +334,11 @@ public sealed partial class ObservatoryPage : Page
 
     private async void OnSessionSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        var generation = Interlocked.Increment(ref _selectionGeneration);
+        long generation = Interlocked.Increment(ref _selectionGeneration);
         Interlocked.Increment(ref _detailGeneration);
-        var cancellation = _pageCancellation;
+        CancellationTokenSource? cancellation = _pageCancellation;
         if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested ||
-            SessionList.SelectedItem is not SessionRow row || !_sessionsById.TryGetValue(row.SessionId, out var session))
+            SessionList.SelectedItem is not SessionRow row || !_sessionsById.TryGetValue(row.SessionId, out CodexSessionOverview? session))
         {
             return;
         }
@@ -342,14 +358,14 @@ public sealed partial class ObservatoryPage : Page
 
     private async void OnDetailTabSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        var cancellation = _pageCancellation;
+        CancellationTokenSource? cancellation = _pageCancellation;
         if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested ||
-            SessionList.SelectedItem is not SessionRow row || !_sessionsById.TryGetValue(row.SessionId, out var session))
+            SessionList.SelectedItem is not SessionRow row || !_sessionsById.TryGetValue(row.SessionId, out CodexSessionOverview? session))
         {
             return;
         }
 
-        var generation = Volatile.Read(ref _selectionGeneration);
+        long generation = Volatile.Read(ref _selectionGeneration);
         try
         {
             await LoadSelectedTabAsync(session, generation, cancellation);
@@ -365,8 +381,8 @@ public sealed partial class ObservatoryPage : Page
         long selectionGeneration,
         CancellationTokenSource cancellation)
     {
-        var detailGeneration = Interlocked.Increment(ref _detailGeneration);
-        var selectedTab = DetailTabs.SelectedIndex;
+        long detailGeneration = Interlocked.Increment(ref _detailGeneration);
+        int selectedTab = DetailTabs.SelectedIndex;
 
         if (selectedTab == 0)
         {
@@ -387,14 +403,14 @@ public sealed partial class ObservatoryPage : Page
 
         try
         {
-            var store = App.Services.ObservatoryStore;
-            var readModel = App.Services.ObservatoryReadModel;
+            ICodexObservatoryStore store = App.Services.ObservatoryStore;
+            SqliteCodexObservatoryReadModel readModel = App.Services.ObservatoryReadModel;
             switch (selectedTab)
             {
                 case 1:
                 {
                     AgentTreeList.ItemsSource = new[] { new AgentTreeRow("Loading agent topology…") };
-                    var topology = await Task.Run(
+                    CodexAgentTopology topology = await Task.Run(
                         () => readModel.GetAgentTopologyAsync(session.SessionId, cancellation.Token),
                         cancellation.Token);
 
@@ -408,7 +424,7 @@ public sealed partial class ObservatoryPage : Page
                 case 2:
                 {
                     TimelineList.ItemsSource = new[] { new TimelineRow("Loading…", "Recent normalized events are being queried.") };
-                    var timeline = await Task.Run(
+                    IReadOnlyList<UsageEvent> timeline = await Task.Run(
                         () => store.GetTimelineAsync(session.SessionId, 200, cancellation.Token),
                         cancellation.Token);
                     if (!CanApplyDetail(session.SessionId, selectionGeneration, detailGeneration, cancellation))
@@ -416,7 +432,10 @@ public sealed partial class ObservatoryPage : Page
                         return;
                     }
                     TimelineList.ItemsSource = timeline.Count == 0
-                        ? new[] { new TimelineRow("No timeline events", "No normalized content-free events are available for this session.") }
+                        ? new[]
+                        {
+                            new TimelineRow("No timeline events", "No normalized content-free events are available for this session."),
+                        }
                         : timeline.Select(item => new TimelineRow(
                             $"{item.TimestampUtc.ToLocalTime():g} · {item.EventType}",
                             item.Summary)).ToArray();
@@ -425,7 +444,7 @@ public sealed partial class ObservatoryPage : Page
                 case 3:
                 {
                     ContextList.ItemsSource = new[] { new ContextRow("Loading…", "Context observations are being queried.") };
-                    var context = await Task.Run(
+                    IReadOnlyList<CodexContextObservation> context = await Task.Run(
                         () => store.GetContextObservationsAsync(session.SessionId, 240, cancellation.Token),
                         cancellation.Token);
                     if (!CanApplyDetail(session.SessionId, selectionGeneration, detailGeneration, cancellation))
@@ -433,30 +452,36 @@ public sealed partial class ObservatoryPage : Page
                         return;
                     }
                     ContextList.ItemsSource = context.Count == 0
-                        ? new[] { new ContextRow("No context observations", "No content-free context/compaction telemetry is available for this session.") }
+                        ? new[]
+                        {
+                            new ContextRow(
+                                "No context observations",
+                                "No content-free context/compaction telemetry is available for this session."),
+                        }
                         : context.Select(ToContextRow).ToArray();
                     break;
                 }
                 case 5:
                 {
                     StorageList.ItemsSource = new[] { new StorageRow("Loading…", "Querying rollout storage metadata") };
-                    var storage = await Task.Run(
+                    IReadOnlyList<CodexRolloutStorageSummary> storage = await Task.Run(
                         () => readModel.GetSessionStorageAsync(session.SessionId, 500, cancellation.Token),
                         cancellation.Token);
-                    var responses = await Task.Run(
+                    CodexResponseEvidencePage responses = await Task.Run(
                         () => store.GetResponseEvidenceAsync(session.SessionId, 500, cancellation.Token),
                         cancellation.Token);
                     if (!CanApplyDetail(session.SessionId, selectionGeneration, detailGeneration, cancellation))
                     {
                         return;
                     }
-                    var rows = storage
+                    StorageRow[] rows = storage
                         .Select(item => new StorageRow(
                             Path.GetFileName(item.FilePath),
                             $"{FormatBytes(item.SizeBytes)} · {item.RecordsSeen:N0} records · max {FormatBytes(item.LargestRecordBytes)}"))
                         .ToArray();
-                    var candidates = responses.CompareActiveCandidates();
-                    var evidence = new StorageRow("Supplemental response evidence",
+                    (int Repeated, int Conflicting) candidates = responses.CompareActiveCandidates();
+                    var evidence = new StorageRow(
+                        "Supplemental response evidence",
                         responses.Rows.Count == 0 && responses.CorruptRows == 0
                             ? "No retained response records in this thread. Coverage unavailable, not zero usage."
                             : $"{responses.Active:N0} active / {responses.Retired:N0} retired occurrences · " +
@@ -465,12 +490,13 @@ public sealed partial class ObservatoryPage : Page
                               (responses.Truncated ? "Bounded to 500 rows; incomplete coverage. " : "") +
                               "Separate evidence only; not additional tokens or proven cross-file identity. " +
                               $"Showing {Math.Min(10, responses.Rows.Count)} most recently collected details from this bounded read, active first.");
-                    StorageList.ItemsSource = rows.Prepend(evidence).Concat(responses.Rows.Take(10).Select(ToResponseEvidenceRow)).ToArray();
+                    StorageList.ItemsSource =
+                        rows.Prepend(evidence).Concat(responses.Rows.Take(10).Select(ToResponseEvidenceRow)).ToArray();
                     break;
                 }
                 case 6:
                 {
-                    var thread = await Task.Run(
+                    CodexThreadReadResult thread = await Task.Run(
                         () => App.Services.CodexThreadReadModel.ReadThreadAsync(session.SessionId, cancellation.Token),
                         cancellation.Token);
                     if (!CanApplyDetail(session.SessionId, selectionGeneration, detailGeneration, cancellation))
@@ -500,20 +526,22 @@ public sealed partial class ObservatoryPage : Page
         string sessionId,
         long selectionGeneration,
         long detailGeneration,
-        CancellationTokenSource cancellation) =>
-        _isLoaded &&
-        !cancellation.IsCancellationRequested &&
-        ReferenceEquals(_pageCancellation, cancellation) &&
-        selectionGeneration == Volatile.Read(ref _selectionGeneration) &&
-        detailGeneration == Volatile.Read(ref _detailGeneration) &&
-        SessionList.SelectedItem is SessionRow current &&
-        string.Equals(current.SessionId, sessionId, StringComparison.OrdinalIgnoreCase);
+        CancellationTokenSource cancellation)
+    {
+        return _isLoaded &&
+               !cancellation.IsCancellationRequested &&
+               ReferenceEquals(_pageCancellation, cancellation) &&
+               selectionGeneration == Volatile.Read(ref _selectionGeneration) &&
+               detailGeneration == Volatile.Read(ref _detailGeneration) &&
+               SessionList.SelectedItem is SessionRow current &&
+               string.Equals(current.SessionId, sessionId, StringComparison.OrdinalIgnoreCase);
+    }
 
     private void RenderSelectedSessionSummary(CodexSessionOverview session)
     {
         SelectedSessionTitle.Text = session.DisplayName;
-        var role = session.ParentSessionId is null ? "root" : "subagent";
-        var peak = session.PeakContextPercent is double peakValue ? $" · peak ctx {peakValue:0.0}%" : string.Empty;
+        string role = session.ParentSessionId is null ? "root" : "subagent";
+        string peak = session.PeakContextPercent is double peakValue ? $" · peak ctx {peakValue:0.0}%" : string.Empty;
         SelectedSessionSummary.Text =
             $"{role} · {session.Status} · {session.Repository} · {FormatCount(session.NativeTokens.ReportedTotal)} native tokens · " +
             $"{session.CompactionCount:N0} compaction(s){peak} · {FormatBytes(session.RolloutBytes)} normalized rollout records";
@@ -521,9 +549,9 @@ public sealed partial class ObservatoryPage : Page
 
     private void RenderOverviewDetail(CodexSessionOverview session)
     {
-        var lastActivity = session.LastActivityAtUtc?.ToLocalTime().ToString("g") ?? "unknown";
-        var model = string.IsNullOrWhiteSpace(session.Model) ? "unknown" : session.Model;
-        var context = session.PeakContextPercent is double peak ? $"{peak:0.0}% peak" : "unavailable";
+        string lastActivity = session.LastActivityAtUtc?.ToLocalTime().ToString("g") ?? "unknown";
+        string model = string.IsNullOrWhiteSpace(session.Model) ? "unknown" : session.Model;
+        string context = session.PeakContextPercent is double peak ? $"{peak:0.0}% peak" : "unavailable";
         OverviewDetailText.Text =
             $"Role: {(session.ParentSessionId is null ? "root" : "subagent")}\n" +
             $"State: {session.Status}\n" +
@@ -539,7 +567,7 @@ public sealed partial class ObservatoryPage : Page
 
     private void RenderTokenDetail(CodexSessionOverview session)
     {
-        var tokens = session.NativeTokens;
+        CodexNativeTokenTotals tokens = session.NativeTokens;
         TokenDetailText.Text =
             "Native Codex accounting is the active local-history source. Tokscale, when enabled, is used only for optional reconciliation or fallback. Remote/cloud-only sessions are outside this local total.\n\n" +
             $"Uncached input: {FormatCount(tokens.UncachedInput)}\n" +
@@ -565,9 +593,9 @@ public sealed partial class ObservatoryPage : Page
 
     private static SessionRow ToSessionRow(CodexSessionOverview session)
     {
-        var role = session.ParentSessionId is null ? "root" : "subagent";
-        var model = string.IsNullOrWhiteSpace(session.Model) ? "model unknown" : session.Model;
-        var context = session.PeakContextPercent is double value ? $" · ctx {value:0}%" : string.Empty;
+        string role = session.ParentSessionId is null ? "root" : "subagent";
+        string model = string.IsNullOrWhiteSpace(session.Model) ? "model unknown" : session.Model;
+        string context = session.PeakContextPercent is double value ? $" · ctx {value:0}%" : string.Empty;
         return new SessionRow(
             session.SessionId,
             session.DisplayName,
@@ -577,36 +605,45 @@ public sealed partial class ObservatoryPage : Page
 
     private static StorageRow ToResponseEvidenceRow(CodexResponseEvidenceRow row)
     {
-        var item = row.Observation;
-        string Count(long? value) => value?.ToString("N0") ?? "unknown";
+        CodexResponseObservation item = row.Observation;
+
+        string Count(long? value)
+        {
+            return value?.ToString("N0") ?? "unknown";
+        }
+
         string Snapshot(string name, CodexResponseSnapshot? snapshot)
         {
             if (snapshot is null) return $"{name}: unavailable";
-            var c = snapshot.Counters;
+            CodexTokenUsageSnapshot c = snapshot.Counters;
             return $"{name}: reported total {Count(c.TotalTokens)} · input {Count(c.InputTokens)} " +
                    $"(cached {Count(c.CachedInputTokens)}, cache-write {Count(c.CacheWriteInputTokens)}) · " +
                    $"output {Count(c.OutputTokens)} (reasoning subset {Count(c.ReasoningOutputTokens)})" +
                    (snapshot.CacheWriteDefaulted ? " · cache-write absent, native zero default" : "");
         }
-        return new($"Response evidence · {(row.IsActive ? "active" : "retired")} · " +
-                   (item.ObservedAtUtc is { } at ? at.ToLocalTime().ToString("g") : "event time unknown"),
+
+        return new StorageRow(
+            $"Response evidence · {(row.IsActive ? "active" : "retired")} · " +
+            (item.ObservedAtUtc is { } at ? at.ToLocalTime().ToString("g") : "event time unknown"),
             $"Collected {item.CapturedAtUtc.ToLocalTime():g} · {item.SourceFile} · bytes {item.StartByteOffset}–{item.EndByteOffset}\n" +
             Snapshot("Response", item.Usage) + "\n" + Snapshot("Turn cumulative", item.TurnUsage) + "\n" +
             Snapshot("Thread cumulative", item.ThreadUsage) + "\n" +
-            (item.Diagnostics.Length == 0 ? "No parser field diagnostics; not proof of complete request coverage." : "Field diagnostics: " + item.Diagnostics) +
+            (item.Diagnostics.Length == 0
+                ? "No parser field diagnostics; not proof of complete request coverage."
+                : "Field diagnostics: " + item.Diagnostics) +
             " Three distinct snapshots; do not add them together.");
     }
 
     private static ContextRow ToContextRow(CodexContextObservation item)
     {
-        var label = item.IsCompaction
+        string label = item.IsCompaction
             ? "compaction"
             : item.UtilizationPercent is double utilization
                 ? $"context {utilization:0.0}%"
                 : "context observation";
-        var input = item.InputTokens is long inputTokens ? FormatCount(inputTokens) : "?";
-        var window = item.ContextWindowTokens is long windowTokens ? FormatCount(windowTokens) : "?";
-        var model = string.IsNullOrWhiteSpace(item.Model) ? "model unknown" : item.Model;
+        string input = item.InputTokens is long inputTokens ? FormatCount(inputTokens) : "?";
+        string window = item.ContextWindowTokens is long windowTokens ? FormatCount(windowTokens) : "?";
+        string model = string.IsNullOrWhiteSpace(item.Model) ? "model unknown" : item.Model;
         return new ContextRow(
             $"{item.ObservedAtUtc.ToLocalTime():g} · {label}",
             $"{model} · input {input} / window {window}" +
@@ -618,20 +655,20 @@ public sealed partial class ObservatoryPage : Page
         IReadOnlyList<Agent> agents,
         IReadOnlyList<AgentRelationship> relationships)
     {
-        var byId = agents.ToDictionary(agent => agent.AgentId, StringComparer.OrdinalIgnoreCase);
-        var children = relationships
+        Dictionary<string, Agent> byId = agents.ToDictionary(agent => agent.AgentId, StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, string[]> children = relationships
             .GroupBy(relation => relation.ParentAgentId, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 group => group.Key,
                 group => group.Select(item => item.ChildAgentId).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
                 StringComparer.OrdinalIgnoreCase);
-        var parentByChild = relationships
+        Dictionary<string, string> parentByChild = relationships
             .GroupBy(relation => relation.ChildAgentId, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First().ParentAgentId, StringComparer.OrdinalIgnoreCase);
 
-        var root = selectedSessionId;
+        string root = selectedSessionId;
         var ancestorVisited = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        while (ancestorVisited.Add(root) && parentByChild.TryGetValue(root, out var parentId))
+        while (ancestorVisited.Add(root) && parentByChild.TryGetValue(root, out string? parentId))
         {
             root = parentId;
         }
@@ -652,20 +689,24 @@ public sealed partial class ObservatoryPage : Page
                 return;
             }
 
-            if (byId.TryGetValue(id, out var agent))
+            if (byId.TryGetValue(id, out Agent? agent))
             {
-                var marker = string.Equals(id, selectedSessionId, StringComparison.OrdinalIgnoreCase) ? "  ← selected" : string.Empty;
-                var model = string.IsNullOrWhiteSpace(agent.Model) ? string.Empty : $" · {agent.Model}";
-                rows.Add(new AgentTreeRow($"{new string(' ', depth * 3)}{(depth == 0 ? "●" : "↳")} {agent.Name} · {agent.State}{model}{marker}"));
+                string marker = string.Equals(id, selectedSessionId, StringComparison.OrdinalIgnoreCase) ? "  ← selected" : string.Empty;
+                string model = string.IsNullOrWhiteSpace(agent.Model) ? string.Empty : $" · {agent.Model}";
+                rows.Add(
+                    new AgentTreeRow(
+                        $"{new string(' ', depth * 3)}{(depth == 0 ? "●" : "↳")} {agent.Name} · {agent.State}{model}{marker}"));
             }
             else
             {
-                rows.Add(new AgentTreeRow($"{new string(' ', depth * 3)}{(depth == 0 ? "●" : "↳")} {id[..Math.Min(8, id.Length)]} · metadata pending"));
+                rows.Add(
+                    new AgentTreeRow(
+                        $"{new string(' ', depth * 3)}{(depth == 0 ? "●" : "↳")} {id[..Math.Min(8, id.Length)]} · metadata pending"));
             }
 
-            if (children.TryGetValue(id, out var childIds))
+            if (children.TryGetValue(id, out string[]? childIds))
             {
-                foreach (var childId in childIds)
+                foreach (string childId in childIds)
                 {
                     Append(childId, depth + 1);
                 }
@@ -675,23 +716,26 @@ public sealed partial class ObservatoryPage : Page
 
     private static string FormatCount(long value)
     {
-        var absolute = Math.Abs((double)value);
+        double absolute = Math.Abs((double)value);
         return absolute switch
         {
             >= 1_000_000_000 => $"{value / 1_000_000_000d:0.00}B",
             >= 1_000_000 => $"{value / 1_000_000d:0.0}M",
             >= 1_000 => $"{value / 1_000d:0.0}K",
-            _ => value.ToString("N0")
+            _ => value.ToString("N0"),
         };
     }
 
-    private static string FormatBytes(long value) => value switch
+    private static string FormatBytes(long value)
     {
-        >= 1_073_741_824 => $"{value / 1_073_741_824d:0.00} GiB",
-        >= 1_048_576 => $"{value / 1_048_576d:0.0} MiB",
-        >= 1_024 => $"{value / 1_024d:0.0} KiB",
-        _ => $"{value:N0} B"
-    };
+        return value switch
+        {
+            >= 1_073_741_824 => $"{value / 1_073_741_824d:0.00} GiB",
+            >= 1_048_576 => $"{value / 1_048_576d:0.0} MiB",
+            >= 1_024 => $"{value / 1_024d:0.0} KiB",
+            _ => $"{value:N0} B",
+        };
+    }
 
     private static string Summarize(string value)
     {
@@ -699,21 +743,17 @@ public sealed partial class ObservatoryPage : Page
         return value.Length <= 260 ? value : value[..260] + "…";
     }
 
-    private sealed record SessionRow(string SessionId, string Title, string Subtitle, string Metrics);
-    private sealed record TimelineRow(string Header, string Detail);
-    private sealed record ContextRow(string Header, string Detail);
-    private sealed record AgentTreeRow(string Text);
-    private sealed record StorageRow(string FileName, string Detail);
-
     private static string RenderThreadSourceDetail(CodexThreadReadResult result)
     {
         if (!result.HasThread && result.Turns.Count == 0 && result.Items.Count == 0 && result.RealtimeItems.Count == 0)
         {
-            return string.Join("\n", result.Warnings.DefaultIfEmpty(
-                "No source-native state/history row is available for this session."));
+            return string.Join(
+                "\n",
+                result.Warnings.DefaultIfEmpty(
+                    "No source-native state/history row is available for this session."));
         }
 
-        var thread = result.Thread;
+        CodexThreadCatalogEntry? thread = result.Thread;
         var lines = new List<string>
         {
             "Source-native Codex thread data (on-demand local inspection)",
@@ -730,17 +770,19 @@ public sealed partial class ObservatoryPage : Page
             $"CWD: {thread?.Cwd ?? "unavailable"}",
             $"Git: {thread?.GitBranch ?? "unavailable"} · {thread?.GitSha ?? "unavailable"} · {thread?.GitOriginUrl ?? "unavailable"}",
             $"Sandbox: {thread?.SandboxPolicy ?? "unavailable"} · approval: {thread?.ApprovalMode ?? "unavailable"} · memory: {thread?.MemoryMode ?? "unavailable"}",
-            $"History mode (source field): {thread?.HistoryMode ?? "unavailable"} · archived: {FormatBool(thread?.Archived)} · pinned: {FormatBool(thread?.IsPinned)}"
+            $"History mode (source field): {thread?.HistoryMode ?? "unavailable"} · archived: {FormatBool(thread?.Archived)} · pinned: {FormatBool(thread?.IsPinned)}",
         };
 
         if (result.Project is { } project)
         {
-            lines.Add($"Project: {project.Name} ({project.ProjectId}) · ordered roots: {project.OrderedRoots.Count:N0} · capability={FormatCapability(result.ProjectCapabilityAvailable)}");
+            lines.Add(
+                $"Project: {project.Name} ({project.ProjectId}) · ordered roots: {project.OrderedRoots.Count:N0} · capability={FormatCapability(result.ProjectCapabilityAvailable)}");
             lines.AddRange(project.OrderedRoots.Select((root, index) => $"  root[{index}]: {root}"));
         }
         else
         {
-            lines.Add($"Project: unavailable (missing project_id or project row) · capability={FormatCapability(result.ProjectCapabilityAvailable)}");
+            lines.Add(
+                $"Project: unavailable (missing project_id or project row) · capability={FormatCapability(result.ProjectCapabilityAvailable)}");
         }
 
         if (!string.IsNullOrWhiteSpace(result.StateSourceSelectionRationale))
@@ -754,32 +796,44 @@ public sealed partial class ObservatoryPage : Page
         }
 
         lines.Add($"History source observations: {result.HistorySources.Count:N0}");
-        lines.AddRange(result.HistorySources.Select(source =>
-            $"  {source.SourcePath} · turns={source.Turns.Count:N0} ({FormatTruncation(source.TurnsTruncated)}) · items={source.Items.Count:N0} ({FormatTruncation(source.ItemsTruncated)}) · realtime={source.RealtimeItems.Count:N0} ({FormatTruncation(source.RealtimeItemsTruncated)})"));
+        lines.AddRange(
+            result.HistorySources.Select(source =>
+                $"  {source.SourcePath} · turns={source.Turns.Count:N0} ({FormatTruncation(source.TurnsTruncated)}) · items={source.Items.Count:N0} ({FormatTruncation(source.ItemsTruncated)}) · realtime={source.RealtimeItems.Count:N0} ({FormatTruncation(source.RealtimeItemsTruncated)})"));
         if (!string.IsNullOrWhiteSpace(result.HistorySourceSelectionRationale))
         {
             lines.Add($"History presentation source rationale: {result.HistorySourceSelectionRationale}");
         }
 
-        lines.Add($"Spawn edges (directional source rows): {result.SpawnEdges.Count:N0} · capability={FormatCapability(result.SpawnEdgesCapabilityAvailable)} · truncated={FormatTruncation(result.SpawnEdgesTruncated)}");
-        lines.AddRange(result.SpawnEdges.Take(80).Select(edge =>
-            $"  {edge.ParentThreadId} → {edge.ChildThreadId} · status={edge.Status}"));
-        lines.Add($"Dynamic tools: {result.DynamicTools.Count:N0} · capability={FormatCapability(result.DynamicToolsCapabilityAvailable)} · truncated={FormatTruncation(result.DynamicToolsTruncated)}");
-        lines.AddRange(result.DynamicTools.Take(80).Select(tool =>
-            $"  [{tool.Position}] {tool.Name} · namespace={tool.Namespace ?? "unavailable"} · defer_loading={tool.DeferLoading}"));
-        lines.Add($"Turns (rollout order): {result.Turns.Count:N0} · capability={FormatCapability(result.TurnsCapabilityAvailable)} · truncated={FormatTruncation(result.TurnsTruncated)}");
-        lines.AddRange(result.Turns.Take(120).Select(turn =>
-            $"  [{FormatOrdinal(turn.RolloutOrdinal, turn.RolloutOrdinalAvailable)}] {turn.TurnId} · status={turn.Status} · duration={FormatDuration(turn.DurationMs)}"));
-        lines.Add($"Normal history items (rollout order): {result.Items.Count:N0} · capability={FormatCapability(result.ItemsCapabilityAvailable)} · truncated={FormatTruncation(result.ItemsTruncated)}");
-        lines.AddRange(result.Items.Take(160).Select(item =>
-            $"  [{FormatOrdinal(item.RolloutOrdinal, item.RolloutOrdinalAvailable)}] {item.DisplaySummary}"));
-        lines.Add($"Realtime timeline items (separate source lane): {result.RealtimeItems.Count:N0} · capability={FormatCapability(result.RealtimeCapabilityAvailable)} · truncated={FormatTruncation(result.RealtimeItemsTruncated)}");
-        lines.AddRange(result.RealtimeItems.Take(160).Select(item =>
-            $"  [{FormatOrdinal(item.RolloutOrdinal, item.RolloutOrdinalAvailable)}] {item.ItemType} · {item.ItemId}"));
+        lines.Add(
+            $"Spawn edges (directional source rows): {result.SpawnEdges.Count:N0} · capability={FormatCapability(result.SpawnEdgesCapabilityAvailable)} · truncated={FormatTruncation(result.SpawnEdgesTruncated)}");
+        lines.AddRange(
+            result.SpawnEdges.Take(80).Select(edge =>
+                $"  {edge.ParentThreadId} → {edge.ChildThreadId} · status={edge.Status}"));
+        lines.Add(
+            $"Dynamic tools: {result.DynamicTools.Count:N0} · capability={FormatCapability(result.DynamicToolsCapabilityAvailable)} · truncated={FormatTruncation(result.DynamicToolsTruncated)}");
+        lines.AddRange(
+            result.DynamicTools.Take(80).Select(tool =>
+                $"  [{tool.Position}] {tool.Name} · namespace={tool.Namespace ?? "unavailable"} · defer_loading={tool.DeferLoading}"));
+        lines.Add(
+            $"Turns (rollout order): {result.Turns.Count:N0} · capability={FormatCapability(result.TurnsCapabilityAvailable)} · truncated={FormatTruncation(result.TurnsTruncated)}");
+        lines.AddRange(
+            result.Turns.Take(120).Select(turn =>
+                $"  [{FormatOrdinal(turn.RolloutOrdinal, turn.RolloutOrdinalAvailable)}] {turn.TurnId} · status={turn.Status} · duration={FormatDuration(turn.DurationMs)}"));
+        lines.Add(
+            $"Normal history items (rollout order): {result.Items.Count:N0} · capability={FormatCapability(result.ItemsCapabilityAvailable)} · truncated={FormatTruncation(result.ItemsTruncated)}");
+        lines.AddRange(
+            result.Items.Take(160).Select(item =>
+                $"  [{FormatOrdinal(item.RolloutOrdinal, item.RolloutOrdinalAvailable)}] {item.DisplaySummary}"));
+        lines.Add(
+            $"Realtime timeline items (separate source lane): {result.RealtimeItems.Count:N0} · capability={FormatCapability(result.RealtimeCapabilityAvailable)} · truncated={FormatTruncation(result.RealtimeItemsTruncated)}");
+        lines.AddRange(
+            result.RealtimeItems.Take(160).Select(item =>
+                $"  [{FormatOrdinal(item.RolloutOrdinal, item.RolloutOrdinalAvailable)}] {item.ItemType} · {item.ItemId}"));
 
         if (result.Items.Count > 160 || result.RealtimeItems.Count > 160 || result.Turns.Count > 120)
         {
-            lines.Add("UI summary abbreviation: some history rows are omitted from this view; source rows remain available through the State DB Explorer.");
+            lines.Add(
+                "UI summary abbreviation: some history rows are omitted from this view; source rows remain available through the State DB Explorer.");
         }
 
         if (result.CoverageWarnings.Count > 0)
@@ -796,11 +850,44 @@ public sealed partial class ObservatoryPage : Page
 
         return string.Join("\n", lines);
 
-        static string FormatDate(DateTimeOffset? value) => value?.ToLocalTime().ToString("g") ?? "unavailable";
-        static string FormatBool(bool? value) => value is null ? "unavailable" : value.Value ? "yes" : "no";
-        static string FormatCapability(bool? value) => value is null ? "unknown" : value.Value ? "present" : "absent";
-        static string FormatTruncation(bool? value) => value is null ? "unknown" : value.Value ? "truncated" : "complete";
-        static string FormatOrdinal(long value, bool available) => available ? value.ToString() : "unknown";
-        static string FormatDuration(long? value) => value is long milliseconds ? $"{milliseconds:N0} ms" : "unavailable";
+        static string FormatDate(DateTimeOffset? value)
+        {
+            return value?.ToLocalTime().ToString("g") ?? "unavailable";
+        }
+
+        static string FormatBool(bool? value)
+        {
+            return value is null ? "unavailable" : value.Value ? "yes" : "no";
+        }
+
+        static string FormatCapability(bool? value)
+        {
+            return value is null ? "unknown" : value.Value ? "present" : "absent";
+        }
+
+        static string FormatTruncation(bool? value)
+        {
+            return value is null ? "unknown" : value.Value ? "truncated" : "complete";
+        }
+
+        static string FormatOrdinal(long value, bool available)
+        {
+            return available ? value.ToString() : "unknown";
+        }
+
+        static string FormatDuration(long? value)
+        {
+            return value is long milliseconds ? $"{milliseconds:N0} ms" : "unavailable";
+        }
     }
+
+    private sealed record SessionRow(string SessionId, string Title, string Subtitle, string Metrics);
+
+    private sealed record TimelineRow(string Header, string Detail);
+
+    private sealed record ContextRow(string Header, string Detail);
+
+    private sealed record AgentTreeRow(string Text);
+
+    private sealed record StorageRow(string FileName, string Detail);
 }

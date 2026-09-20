@@ -1,8 +1,12 @@
+// Taj's Tokens | TokenBreakdown.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
 namespace TajsTokens.Core.Models;
 
 /// <summary>
-/// Disjoint token buckets. Provider adapters are responsible for converting provider-specific
-/// counters (for example Codex cached-input-as-a-subset-of-input) into these non-overlapping values.
+///     Disjoint token buckets. Provider adapters are responsible for converting provider-specific
+///     counters (for example Codex cached-input-as-a-subset-of-input) into these non-overlapping values.
 /// </summary>
 public sealed record TokenBreakdown(
     long UncachedInput,
@@ -16,9 +20,10 @@ public sealed record TokenBreakdown(
     public long Total => ReportedTotal ?? ComputedTotal;
 
     /// <summary>
-    /// Difference between the provider/native reported-total counter and the independently normalized
-    /// disjoint classes. Null means no independent reported total was available for comparison.
+    ///     Difference between the provider/native reported-total counter and the independently normalized
+    ///     disjoint classes. Null means no independent reported total was available for comparison.
     /// </summary>
     public long? IntegrityDelta => ReportedTotal is long reported ? checked(reported - ComputedTotal) : null;
+
     public bool? IntegrityExact => IntegrityDelta is long delta ? delta == 0 : null;
 }

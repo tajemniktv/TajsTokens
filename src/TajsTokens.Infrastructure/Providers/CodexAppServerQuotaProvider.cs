@@ -1,3 +1,9 @@
+// Taj's Tokens | CodexAppServerQuotaProvider.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -6,25 +12,29 @@ using TajsTokens.Core.Enums;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
 
+#endregion
+
 namespace TajsTokens.Infrastructure.Providers;
 
 /// <summary>
-/// Reads provider-authoritative Codex subscription windows from the local Codex app-server. This is
-/// a read-only integration: no model turn is created and no undocumented web endpoint is called.
+///     Reads provider-authoritative Codex subscription windows from the local Codex app-server. This is
+///     a read-only integration: no model turn is created and no undocumented web endpoint is called.
 /// </summary>
 public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
 {
     private static readonly TimeSpan s_requestTimeout = TimeSpan.FromSeconds(20);
 
-    public async Task<IReadOnlyList<QuotaSnapshot>> GetQuotaSnapshotsAsync(CancellationToken cancellationToken) =>
-        (await GetQuotaResponseAsync(cancellationToken)).Snapshots;
+    public async Task<IReadOnlyList<QuotaSnapshot>> GetQuotaSnapshotsAsync(CancellationToken cancellationToken)
+    {
+        return (await GetQuotaResponseAsync(cancellationToken)).Snapshots;
+    }
 
     public async Task<CodexQuotaResponse> GetQuotaResponseAsync(CancellationToken cancellationToken)
     {
         using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutSource.CancelAfter(s_requestTimeout);
-        var token = timeoutSource.Token;
-        var codexCommand = ResolveCodexCommand();
+        CancellationToken token = timeoutSource.Token;
+        string codexCommand = ResolveCodexCommand();
 
         using var process = new Process();
         // ExternalProcess launches fully-qualified executable paths directly on Windows. Only a
@@ -42,25 +52,24 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
             // Drain stderr continuously so a noisy app-server cannot block. Unlike the original
             // bootstrap implementation, keep the task so an early process exit can surface the real
             // startup error (for example a missing CLI) instead of collapsing into a generic EOF.
-            var stderrTask = process.StandardError.ReadToEndAsync(token);
+            Task<string> stderrTask = process.StandardError.ReadToEndAsync(token);
 
-            await WriteJsonLineAsync(process, new
-            {
-                method = "initialize",
-                id = 0,
-                @params = new
+            await WriteJsonLineAsync(
+                process,
+                new
                 {
-                    clientInfo = new { name = "tajs-tokens", title = "TajsTokens", version = "0.1" }
-                }
-            });
-            var initializeResponse = await ReadResponseAsync(process, 0, codexCommand, stderrTask, token);
+                    method = "initialize",
+                    id = 0,
+                    @params = new { clientInfo = new { name = "tajs-tokens", title = "TajsTokens", version = "0.1" } },
+                });
+            string initializeResponse = await ReadResponseAsync(process, 0, codexCommand, stderrTask, token);
             EnsureSuccessfulJsonRpcResponse(initializeResponse, "initialize");
 
             // Match the stable app-server protocol exactly: neither notification nor rate-limit read
             // takes params. In particular, do not send an empty object for account/rateLimits/read.
             await WriteJsonLineAsync(process, new { method = "initialized" });
             await WriteJsonLineAsync(process, new { method = "account/rateLimits/read", id = 1 });
-            var response = await ReadResponseAsync(process, 1, codexCommand, stderrTask, token);
+            string response = await ReadResponseAsync(process, 1, codexCommand, stderrTask, token);
             return ParseQuotaResponse(response, DateTimeOffset.UtcNow);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -75,14 +84,14 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
 
     internal static void EnsureSuccessfulJsonRpcResponse(string json, string operation)
     {
-        using var document = JsonDocument.Parse(json);
-        var root = document.RootElement;
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement root = document.RootElement;
         if (root.ValueKind != JsonValueKind.Object)
         {
             throw new InvalidOperationException($"Codex app-server {operation} response was not a JSON object.");
         }
 
-        if (root.TryGetProperty("error", out var error))
+        if (root.TryGetProperty("error", out JsonElement error))
         {
             throw new InvalidOperationException($"Codex app-server {operation} failed: {error.GetRawText()}");
         }
@@ -93,32 +102,34 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
         }
     }
 
-    internal static IReadOnlyList<QuotaSnapshot> ParseRateLimitsResponse(string json, DateTimeOffset capturedAtUtc) =>
-        ParseQuotaResponse(json, capturedAtUtc).Snapshots;
+    internal static IReadOnlyList<QuotaSnapshot> ParseRateLimitsResponse(string json, DateTimeOffset capturedAtUtc)
+    {
+        return ParseQuotaResponse(json, capturedAtUtc).Snapshots;
+    }
 
     internal static CodexQuotaResponse ParseQuotaResponse(string json, DateTimeOffset capturedAtUtc)
     {
-        using var document = JsonDocument.Parse(json);
-        var root = document.RootElement;
-        if (root.TryGetProperty("error", out var error))
+        using JsonDocument document = JsonDocument.Parse(json);
+        JsonElement root = document.RootElement;
+        if (root.TryGetProperty("error", out JsonElement error))
         {
             throw new InvalidOperationException($"Codex app-server returned an error: {error.GetRawText()}");
         }
 
-        if (!root.TryGetProperty("result", out var result) || result.ValueKind != JsonValueKind.Object)
+        if (!root.TryGetProperty("result", out JsonElement result) || result.ValueKind != JsonValueKind.Object)
         {
             throw new InvalidOperationException("Codex app-server response did not contain a result object.");
         }
 
         JsonElement limits = default;
-        var source = "codex-app-server";
+        string source = "codex-app-server";
 
         // Newer app-server versions may expose several independent metered products. Only an
         // explicitly named Codex bucket is safe to treat as Codex quota. Never guess from object
         // enumeration order; when that bucket is absent, fall back only to the legacy Codex view.
-        if (result.TryGetProperty("rateLimitsByLimitId", out var byLimit) && byLimit.ValueKind == JsonValueKind.Object)
+        if (result.TryGetProperty("rateLimitsByLimitId", out JsonElement byLimit) && byLimit.ValueKind == JsonValueKind.Object)
         {
-            if (byLimit.TryGetProperty("codex", out var codexLimits))
+            if (byLimit.TryGetProperty("codex", out JsonElement codexLimits))
             {
                 if (codexLimits.ValueKind != JsonValueKind.Object)
                 {
@@ -128,13 +139,13 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
                 limits = codexLimits;
                 source += ":codex";
             }
-            else if (result.TryGetProperty("rateLimits", out var legacyLimits) && legacyLimits.ValueKind == JsonValueKind.Object)
+            else if (result.TryGetProperty("rateLimits", out JsonElement legacyLimits) && legacyLimits.ValueKind == JsonValueKind.Object)
             {
                 limits = legacyLimits;
                 source += ":legacy";
             }
         }
-        else if (result.TryGetProperty("rateLimits", out var legacyLimits) && legacyLimits.ValueKind == JsonValueKind.Object)
+        else if (result.TryGetProperty("rateLimits", out JsonElement legacyLimits) && legacyLimits.ValueKind == JsonValueKind.Object)
         {
             limits = legacyLimits;
             source += ":legacy";
@@ -153,24 +164,24 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
         // Keep only a versioned pseudonym; do not retain raw identifiers or inspect auth files.
         string? accountKey = null;
         if (result.EnumerateObject().Count(property => property.NameEquals("accountId")) == 1 &&
-            result.TryGetProperty("accountId", out var account) && account.ValueKind == JsonValueKind.String &&
+            result.TryGetProperty("accountId", out JsonElement account) && account.ValueKind == JsonValueKind.String &&
             account.GetString() is { Length: > 0 and <= 1024 } accountId && !string.IsNullOrWhiteSpace(accountId))
-            accountKey = "codex-account-sha256/v1:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(accountId))).ToLowerInvariant();
+            accountKey = "codex-account-sha256/v1:" +
+                         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(accountId))).ToLowerInvariant();
 
         // Some app-server versions have moved weekly into primary and omitted secondary. Window
         // duration, not primary/secondary position, is the semantic identity we trust.
-        return new(snapshots
-            .GroupBy(snapshot => snapshot.Kind)
-            .Select(group => group.First() with { AccountKey = accountKey })
-            .ToArray(), accountKey)
-        {
-            MetadataObservation = CodexQuotaMetadataParser.Parse(result, accountKey, capturedAtUtc)
-        };
+        return new CodexQuotaResponse(
+            snapshots
+                .GroupBy(snapshot => snapshot.Kind)
+                .Select(group => group.First() with { AccountKey = accountKey })
+                .ToArray(),
+            accountKey) { MetadataObservation = CodexQuotaMetadataParser.Parse(result, accountKey, capturedAtUtc) };
     }
 
     internal static string ResolveCodexCommand()
     {
-        var configured = Environment.GetEnvironmentVariable("CODEX_CLI_PATH");
+        string? configured = Environment.GetEnvironmentVariable("CODEX_CLI_PATH");
         if (!string.IsNullOrWhiteSpace(configured))
         {
             if (!File.Exists(configured))
@@ -185,19 +196,19 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
 
         if (OperatingSystem.IsWindows())
         {
-            var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
             if (!string.IsNullOrWhiteSpace(localAppData))
             {
                 // The standalone Windows installer and some Desktop builds place an executable copy
                 // in one of these user-local locations. Prefer those over protected WindowsApps
                 // package resources, which may exist but cannot be launched by another desktop app.
-                var candidates = new[]
+                string[] candidates = new[]
                 {
                     Path.Combine(localAppData, "Programs", "OpenAI", "Codex", "bin", "codex.exe"),
-                    Path.Combine(localAppData, "OpenAI", "Codex", "bin", "codex.exe")
+                    Path.Combine(localAppData, "OpenAI", "Codex", "bin", "codex.exe"),
                 };
 
-                var candidate = candidates.FirstOrDefault(File.Exists);
+                string? candidate = candidates.FirstOrDefault(File.Exists);
                 if (candidate is not null)
                 {
                     return candidate;
@@ -215,75 +226,79 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
         DateTimeOffset capturedAtUtc,
         string source)
     {
-        if (!limits.TryGetProperty(propertyName, out var window) || window.ValueKind != JsonValueKind.Object)
+        if (!limits.TryGetProperty(propertyName, out JsonElement window) || window.ValueKind != JsonValueKind.Object)
         {
             return;
         }
 
-        var usedPercent = ReadDouble(window, "usedPercent");
-        var minutes = ReadInt(window, "windowDurationMins") ?? ReadInt(window, "windowMinutes");
-        var resetsAtSeconds = ReadLong(window, "resetsAt");
+        double? usedPercent = ReadDouble(window, "usedPercent");
+        int? minutes = ReadInt(window, "windowDurationMins") ?? ReadInt(window, "windowMinutes");
+        long? resetsAtSeconds = ReadLong(window, "resetsAt");
         DateTimeOffset? resetsAt = resetsAtSeconds is long seconds
             ? DateTimeOffset.FromUnixTimeSeconds(seconds)
             : null;
 
-        var kind = minutes switch
+        QuotaWindowKind kind = minutes switch
         {
             300 => QuotaWindowKind.FiveHour,
             10_080 => QuotaWindowKind.Weekly,
-            _ => QuotaWindowKind.Unknown
+            _ => QuotaWindowKind.Unknown,
         };
 
-        snapshots.Add(new QuotaSnapshot(
-            kind,
-            capturedAtUtc,
-            usedPercent,
-            minutes,
-            resetsAt,
-            "codex",
-            "default",
-            source)
-        {
-            LimitId = ReadString(limits, "limitId"),
-            PlanType = ReadString(limits, "planType"),
-            Lane = propertyName,
-            CollectedAtUtc = capturedAtUtc,
-            HasSourceTimestamp = true // This live response was observed at capturedAtUtc, unlike legacy/backfilled rows.
-        });
+        snapshots.Add(
+            new QuotaSnapshot(
+                kind,
+                capturedAtUtc,
+                usedPercent,
+                minutes,
+                resetsAt,
+                "codex",
+                "default",
+                source)
+            {
+                LimitId = ReadString(limits, "limitId"),
+                PlanType = ReadString(limits, "planType"),
+                Lane = propertyName,
+                CollectedAtUtc = capturedAtUtc,
+                HasSourceTimestamp = true, // This live response was observed at capturedAtUtc, unlike legacy/backfilled rows.
+            });
     }
 
-    private static string? ReadString(JsonElement element, string propertyName) =>
-        element.TryGetProperty(propertyName, out var value) && value.ValueKind == JsonValueKind.String
-            ? value.GetString() : null;
+    private static string? ReadString(JsonElement element, string propertyName)
+    {
+        return element.TryGetProperty(propertyName, out JsonElement value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString()
+            : null;
+    }
 
     private static double? ReadDouble(JsonElement element, string propertyName)
     {
-        if (!element.TryGetProperty(propertyName, out var property))
+        if (!element.TryGetProperty(propertyName, out JsonElement property))
         {
             return null;
         }
 
-        return property.ValueKind == JsonValueKind.Number && property.TryGetDouble(out var value) ? value : null;
+        return property.ValueKind == JsonValueKind.Number && property.TryGetDouble(out double value) ? value : null;
     }
 
     private static int? ReadInt(JsonElement element, string propertyName)
     {
-        if (!element.TryGetProperty(propertyName, out var property))
+        if (!element.TryGetProperty(propertyName, out JsonElement property))
         {
             return null;
         }
 
-        return property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out var value) ? value : null;
+        return property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out int value) ? value : null;
     }
 
     private static long? ReadLong(JsonElement element, string propertyName)
     {
-        if (!element.TryGetProperty(propertyName, out var property))
+        if (!element.TryGetProperty(propertyName, out JsonElement property))
         {
             return null;
         }
 
-        return property.ValueKind == JsonValueKind.Number && property.TryGetInt64(out var value) ? value : null;
+        return property.ValueKind == JsonValueKind.Number && property.TryGetInt64(out long value) ? value : null;
     }
 
     private static async Task WriteJsonLineAsync(Process process, object message)
@@ -301,11 +316,11 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
     {
         while (true)
         {
-            var line = await process.StandardOutput.ReadLineAsync(cancellationToken);
+            string? line = await process.StandardOutput.ReadLineAsync(cancellationToken);
             if (line is null)
             {
                 await process.WaitForExitAsync(cancellationToken);
-                var stderr = (await stderrTask).ReplaceLineEndings(" ").Trim();
+                string stderr = (await stderrTask).ReplaceLineEndings(" ").Trim();
                 if (stderr.Length > 500)
                 {
                     stderr = stderr[..500] + "…";
@@ -317,17 +332,17 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
                         "Codex CLI is not available to TajsTokens. Codex Desktop can run with a bundled/private CLI that is not exposed to normal desktop processes. Install the standalone Codex CLI, put it on PATH, or set CODEX_CLI_PATH to an executable user-local codex.exe.");
                 }
 
-                var detail = string.IsNullOrWhiteSpace(stderr) ? "No stderr was produced." : stderr;
+                string detail = string.IsNullOrWhiteSpace(stderr) ? "No stderr was produced." : stderr;
                 throw new InvalidOperationException(
                     $"Codex app-server exited with code {process.ExitCode} before returning response {id}: {detail}");
             }
 
             try
             {
-                using var document = JsonDocument.Parse(line);
-                if (document.RootElement.TryGetProperty("id", out var responseId) &&
+                using JsonDocument document = JsonDocument.Parse(line);
+                if (document.RootElement.TryGetProperty("id", out JsonElement responseId) &&
                     responseId.ValueKind == JsonValueKind.Number &&
-                    responseId.TryGetInt32(out var parsedId) &&
+                    responseId.TryGetInt32(out int parsedId) &&
                     parsedId == id)
                 {
                     return line;
@@ -343,7 +358,7 @@ public sealed class CodexAppServerQuotaProvider : ICodexQuotaProvider
 
     private static bool LooksLikeMissingCodexCommand(string stderr, string codexCommand)
     {
-        var commandName = Path.GetFileNameWithoutExtension(codexCommand);
+        string commandName = Path.GetFileNameWithoutExtension(codexCommand);
         return stderr.Contains($"'{commandName}' is not recognized", StringComparison.OrdinalIgnoreCase) ||
                stderr.Contains($"{commandName}: command not found", StringComparison.OrdinalIgnoreCase) ||
                stderr.Contains($"{commandName}: not found", StringComparison.OrdinalIgnoreCase);

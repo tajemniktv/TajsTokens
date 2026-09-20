@@ -1,4 +1,12 @@
+// Taj's Tokens | ICodexObservatoryStore.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using TajsTokens.Core.Models;
+
+#endregion
 
 namespace TajsTokens.Core.Interfaces;
 
@@ -17,6 +25,7 @@ public interface ICodexObservatoryStore
     Task<CodexResponseEvidencePage> GetResponseEvidenceAsync(string threadId, int take, CancellationToken cancellationToken);
     Task<CodexParserResumeState?> GetParserResumeStateAsync(string sourceIdentity, CancellationToken cancellationToken);
     Task UpsertParserResumeStateAsync(CodexParserResumeState state, CancellationToken cancellationToken);
+
     Task UpsertRolloutFileAsync(
         string sourceIdentity,
         string filePath,
@@ -24,6 +33,7 @@ public interface ICodexObservatoryStore
         long fileSizeBytes,
         DateTimeOffset observedAtUtc,
         CancellationToken cancellationToken);
+
     Task RecordRolloutRecordAsync(
         string sourceRecordId,
         string sourceIdentity,
@@ -40,6 +50,11 @@ public interface ICodexObservatoryStore
     Task<IReadOnlyList<Agent>> GetAgentsAsync(string? sessionId, CancellationToken cancellationToken);
     Task<IReadOnlyList<AgentRelationship>> GetAgentRelationshipsAsync(CancellationToken cancellationToken);
     Task<IReadOnlyList<UsageEvent>> GetTimelineAsync(string sessionId, int take, CancellationToken cancellationToken);
-    Task<IReadOnlyList<CodexContextObservation>> GetContextObservationsAsync(string sessionId, int take, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<CodexContextObservation>> GetContextObservationsAsync(
+        string sessionId,
+        int take,
+        CancellationToken cancellationToken);
+
     Task<IReadOnlyList<CodexRolloutStorageSummary>> GetRolloutStorageAsync(int take, CancellationToken cancellationToken);
 }

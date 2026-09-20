@@ -1,4 +1,9 @@
-using TajsTokens.Core.Research;
+// Taj's Tokens | SqliteIntelligenceService.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
@@ -7,26 +12,39 @@ using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
+using TajsTokens.Core.Research;
 using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
+
+#endregion
 
 namespace TajsTokens.Infrastructure.Services;
 
 /// <summary>
-/// Phase 4 intelligence boundary. Heavy historical aggregation stays in SQLite/background code and
-/// the App receives bounded normalized models rather than raw SQL/result sets.
+///     Phase 4 intelligence boundary. Heavy historical aggregation stays in SQLite/background code and
+///     the App receives bounded normalized models rather than raw SQL/result sets.
 /// </summary>
 public sealed class SqliteIntelligenceService : IIntelligenceService
 {
     private const int MaxBurnIntervals = 80;
+
+    private const string UsageFilterSql = """
+                                          AND ($model IS NULL OR COALESCE(NULLIF(e.model, ''), '(unknown)') = $model)
+                                          AND ($session IS NULL OR e.session_id = $session)
+                                          AND ($thread IS NULL OR EXISTS(SELECT 1 FROM sessions s WHERE s.session_id=e.session_id AND s.thread_id=$thread))
+                                          AND ($repository IS NULL OR COALESCE((SELECT NULLIF(s.repository, '') FROM sessions s WHERE s.session_id = e.session_id), '(unknown)') = $repository)
+                                          """;
+
+    private readonly Func<IReadOnlyList<RolloutAccountAssociation>> _accountAssociations = () => [];
     private readonly string _connectionString;
     private readonly string _databasePath;
-    private readonly SqliteTelemetryRepository _telemetryRepository;
 
     private readonly Func<string, CancellationToken, Task>? _queryStageObserver;
-    private readonly Func<IReadOnlyList<RolloutAccountAssociation>> _accountAssociations = () => [];
+    private readonly SqliteTelemetryRepository _telemetryRepository;
 
-    public SqliteIntelligenceService(string databasePath, SqliteTelemetryRepository telemetryRepository,
+    public SqliteIntelligenceService(
+        string databasePath,
+        SqliteTelemetryRepository telemetryRepository,
         Func<IReadOnlyList<RolloutAccountAssociation>>? accountAssociations = null)
         : this(databasePath, telemetryRepository, queryStageObserver: null)
     {
@@ -39,11 +57,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         Func<string, CancellationToken, Task>? queryStageObserver)
     {
         _databasePath = databasePath;
-        _connectionString = new SqliteConnectionStringBuilder
-        {
-            DataSource = databasePath,
-            Mode = SqliteOpenMode.ReadOnly
-        }.ToString();
+        _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath, Mode = SqliteOpenMode.ReadOnly }.ToString();
         _telemetryRepository = telemetryRepository;
         _queryStageObserver = queryStageObserver;
     }
@@ -52,7 +66,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
     {
         await EnsureInitializedAsync(cancellationToken);
 
-        var resetEventsDetected = await _telemetryRepository.RefreshQuotaResetEventsAsync(cancellationToken);
+        int resetEventsDetected = await _telemetryRepository.RefreshQuotaResetEventsAsync(cancellationToken);
 
         // Current forecasts are owned by BuildAndPersistCurrentForecastsAsync and anchored to the
         // coordinator's provider-authoritative current lanes. Historical refresh must not recompute
@@ -68,48 +82,59 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         await EnsureInitializedAsync(cancellationToken);
         var results = new List<CurrentQuotaForecast>();
         var datasets = new Dictionary<(string Provider, string Profile, string Account, DateTimeOffset At), CodexForecastDataset>();
-        foreach (var lane in quotaLanes.Where(lane => lane.Snapshot is not null))
+        foreach (QuotaLaneState lane in quotaLanes.Where(lane => lane.Snapshot is not null))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var current = lane.Snapshot!;
+            QuotaSnapshot current = lane.Snapshot!;
             if (!lane.IsFresh)
             {
-                results.Add(new CurrentQuotaForecast(
-                    current, TelemetryHealthState.Stale, null,
-                    "Forecasting is paused until this quota lane is provider-fresh.",
-                    "Last-known-good quota is displayed without borrowing a forecast from another generation."));
+                results.Add(
+                    new CurrentQuotaForecast(
+                        current,
+                        TelemetryHealthState.Stale,
+                        null,
+                        "Forecasting is paused until this quota lane is provider-fresh.",
+                        "Last-known-good quota is displayed without borrowing a forecast from another generation."));
                 continue;
             }
 
             if (current.Authority != QuotaObservationAuthority.ProviderAuthoritative)
             {
-                results.Add(new CurrentQuotaForecast(
-                    current, TelemetryHealthState.Unavailable, null,
-                    "Current forecasts require a provider-authoritative quota anchor.",
-                    $"Current source '{current.Source}' is not classified as provider-authoritative."));
+                results.Add(
+                    new CurrentQuotaForecast(
+                        current,
+                        TelemetryHealthState.Unavailable,
+                        null,
+                        "Current forecasts require a provider-authoritative quota anchor.",
+                        $"Current source '{current.Source}' is not classified as provider-authoritative."));
                 continue;
             }
 
             if (current.CapturedAtUtc > nowUtc)
             {
-                results.Add(new CurrentQuotaForecast(
-                    current,
-                    TelemetryHealthState.Live,
-                    null,
-                    "Forecasting is paused for a future-dated quota anchor.",
-                    "The provider-authoritative anchor is newer than the forecast evaluation time."));
+                results.Add(
+                    new CurrentQuotaForecast(
+                        current,
+                        TelemetryHealthState.Live,
+                        null,
+                        "Forecasting is paused for a future-dated quota anchor.",
+                        "The provider-authoritative anchor is newer than the forecast evaluation time."));
                 continue;
             }
 
             if (string.IsNullOrWhiteSpace(current.AccountKey))
             {
-                results.Add(new CurrentQuotaForecast(current, TelemetryHealthState.Live, null,
-                    "Current forecast is learning: the provider did not report backend-account scope.",
-                    "Unknown historical account scope is never assigned to the currently signed-in account."));
+                results.Add(
+                    new CurrentQuotaForecast(
+                        current,
+                        TelemetryHealthState.Live,
+                        null,
+                        "Current forecast is learning: the provider did not report backend-account scope.",
+                        "Unknown historical account scope is never assigned to the currently signed-in account."));
                 continue;
             }
 
-            var history = await _telemetryRepository.GetRecentQuotaSnapshotsAsync(
+            IReadOnlyList<QuotaSnapshot> history = await _telemetryRepository.GetRecentQuotaSnapshotsAsync(
                 current.Kind,
                 current.Provider,
                 current.Profile,
@@ -118,29 +143,34 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 current.CapturedAtUtc,
                 current.Source,
                 current.AccountKey);
-            var compatible = history
+            IEnumerable<QuotaSnapshot> compatible = history
                 .Where(item => QuotaHistoryPolicy.Cohort(item) == QuotaHistoryPolicy.Cohort(current))
                 .Where(item => item.CapturedAtUtc <= current.CapturedAtUtc)
                 .Where(item => item.CapturedAtUtc != current.CapturedAtUtc)
                 .Append(current);
             // Invalid/conflicting observations remain boundaries, never deleted gaps bridged by a slope.
-            var anchored = QuotaHistoryPolicy.ReplayRows(QuotaHistoryPolicy.Describe(compatible, nowUtc));
+            QuotaSnapshot[] anchored = QuotaHistoryPolicy.ReplayRows(QuotaHistoryPolicy.Describe(compatible, nowUtc));
 
             try
             {
-                var forecast = QuotaPredictionService.BuildResetOutlook(anchored, nowUtc);
+                Forecast forecast = QuotaPredictionService.BuildResetOutlook(anchored, nowUtc);
                 if (forecast.Evidence is { } evidence)
                 {
                     IReadOnlyList<QuotaHorizonPrediction> predictions = [];
                     string workloadStatus;
                     try
                     {
-                        var key = (current.Provider, current.Profile, current.AccountKey, current.CapturedAtUtc);
-                        if (!datasets.TryGetValue(key, out var dataset))
+                        (string Provider, string Profile, string AccountKey, DateTimeOffset CapturedAtUtc) key = (current.Provider,
+                            current.Profile, current.AccountKey, current.CapturedAtUtc);
+                        if (!datasets.TryGetValue(key, out CodexForecastDataset? dataset))
                         {
                             dataset = await new SqliteForecastDatasetReader(_databasePath, _accountAssociations()).ReadAsync(
-                                current.Provider, current.Profile, current.CapturedAtUtc.AddDays(-120),
-                                current.CapturedAtUtc, cancellationToken, current.AccountKey);
+                                current.Provider,
+                                current.Profile,
+                                current.CapturedAtUtc.AddDays(-120),
+                                current.CapturedAtUtc,
+                                cancellationToken,
+                                current.AccountKey);
                             datasets.Add(key, dataset);
                         }
                         predictions = QuotaPredictionService.Predict(dataset, current, nowUtc, cancellationToken);
@@ -153,24 +183,41 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                         // Missing/bounded feature evidence must not erase a usable quota-only outlook.
                         predictions = QuotaPredictionService.Predict(
                             new CodexForecastDataset(anchored, [], [], [], nowUtc, "Quota-only fallback"),
-                            current, nowUtc, cancellationToken);
-                        workloadStatus = "Workload evidence is unavailable or exceeds the supported read bound; quota-only outlook retained.";
+                            current,
+                            nowUtc,
+                            cancellationToken);
+                        workloadStatus =
+                            "Workload evidence is unavailable or exceeds the supported read bound; quota-only outlook retained.";
                     }
-                    forecast = forecast with { Evidence = evidence with
+                    forecast = forecast with
                     {
-                        HorizonPredictions = predictions.Count > 0 ? predictions : null,
-                        WorkloadStatus = workloadStatus,
-                        PolicyVersion = $"{evidence.PolicyVersion};{QuotaPredictionService.PolicyVersion}"
-                    } };
+                        Evidence = evidence with
+                        {
+                            HorizonPredictions = predictions.Count > 0 ? predictions : null,
+                            WorkloadStatus = workloadStatus,
+                            PolicyVersion = $"{evidence.PolicyVersion};{QuotaPredictionService.PolicyVersion}",
+                        },
+                    };
                 }
                 if (forecast.Evidence is { } capturedEvidence)
                 {
-                    var fingerprint = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { current, forecast }))));
-                    forecast = forecast with { Evidence = capturedEvidence with { InferenceManifest =
-                        CodexIntelligenceProjection.Manifest(new(current.CapturedAtUtc, current.ResetsAtUtc ?? nowUtc, current.AccountKey), fingerprint) } };
+                    string fingerprint = Convert.ToHexStringLower(
+                        SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { current, forecast }))));
+                    forecast = forecast with
+                    {
+                        Evidence = capturedEvidence with
+                        {
+                            InferenceManifest =
+                            CodexIntelligenceProjection.Manifest(
+                                new CodexSelection(current.CapturedAtUtc, current.ResetsAtUtc ?? nowUtc, current.AccountKey),
+                                fingerprint),
+                        },
+                    };
                 }
                 var persisted = new ForecastSnapshot(
-                    current.Provider, current.Profile, forecast,
+                    current.Provider,
+                    current.Profile,
+                    forecast,
                     current.Source,
                     current.Authority,
                     current.CapturedAtUtc,
@@ -178,16 +225,22 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                     current.ResetsAtUtc,
                     current.AccountKey);
                 await _telemetryRepository.UpsertForecastSnapshotAsync(persisted, cancellationToken);
-                results.Add(new CurrentQuotaForecast(
-                    current, TelemetryHealthState.Live, forecast,
-                    "Provider-authoritative current quota plus same-source persisted history no newer than the current anchor. Model selection uses only previously observed outcomes."));
+                results.Add(
+                    new CurrentQuotaForecast(
+                        current,
+                        TelemetryHealthState.Live,
+                        forecast,
+                        "Provider-authoritative current quota plus same-source persisted history no newer than the current anchor. Model selection uses only previously observed outcomes."));
             }
             catch (ArgumentException exception)
             {
-                results.Add(new CurrentQuotaForecast(
-                    current, TelemetryHealthState.Live, null,
-                    "Provider-authoritative current quota; more compatible history is required.",
-                    exception.Message));
+                results.Add(
+                    new CurrentQuotaForecast(
+                        current,
+                        TelemetryHealthState.Live,
+                        null,
+                        "Provider-authoritative current quota; more compatible history is required.",
+                        exception.Message));
             }
         }
 
@@ -199,7 +252,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         CancellationToken cancellationToken)
     {
         await EnsureInitializedAsync(cancellationToken);
-        var effective = NormalizeQuery(query);
+        IntelligenceQuery effective = NormalizeQuery(query);
 
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
@@ -209,19 +262,19 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         await BeginReadSnapshotAsync(connection, cancellationToken);
         try
         {
-            var hasNativeEvents = await TableExistsAsync(connection, "codex_native_token_events", cancellationToken);
-            var hasContext = await TableExistsAsync(connection, "context_observations", cancellationToken);
-            var usage = hasNativeEvents
+            bool hasNativeEvents = await TableExistsAsync(connection, "codex_native_token_events", cancellationToken);
+            bool hasContext = await TableExistsAsync(connection, "context_observations", cancellationToken);
+            IReadOnlyList<UsageHistoryBucket> usage = hasNativeEvents
                 ? await LoadUsageHistoryAsync(connection, effective, hasContext, cancellationToken)
                 : [];
             if (_queryStageObserver is not null)
             {
                 await _queryStageObserver("usage-loaded", cancellationToken);
             }
-            var dimensions = hasNativeEvents
+            IReadOnlyList<UsageDimensionTotal> dimensions = hasNativeEvents
                 ? await LoadDimensionsAsync(connection, effective, cancellationToken)
                 : [];
-            var heatmap = hasNativeEvents
+            IReadOnlyList<UsageHeatmapCell> heatmap = hasNativeEvents
                 ? await LoadHeatmapAsync(connection, effective, cancellationToken)
                 : [];
             if (effective.UsageOnly)
@@ -229,9 +282,14 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 await CommitReadSnapshotAsync(connection, cancellationToken);
                 return new IntelligenceDashboard(effective, usage, dimensions, heatmap, [], [], [], []);
             }
-            var quotaHistory = await LoadQuotaSnapshotsAsync(connection, effective.FromUtc.AddDays(-7),
-                effective.ToUtc, cancellationToken, preserveSources: true, authority: effective.BurnAuthority);
-            var burnIntervals = await LoadQuotaBurnIntervalsAsync(
+            IReadOnlyList<QuotaSnapshot> quotaHistory = await LoadQuotaSnapshotsAsync(
+                connection,
+                effective.FromUtc.AddDays(-7),
+                effective.ToUtc,
+                cancellationToken,
+                true,
+                effective.BurnAuthority);
+            IReadOnlyList<QuotaBurnInterval> burnIntervals = await LoadQuotaBurnIntervalsAsync(
                 connection,
                 effective.FromUtc,
                 effective.ToUtc,
@@ -242,15 +300,20 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 effective.BurnKind,
                 effective.BurnAuthority,
                 quotaHistory);
-            var resets = await LoadResetEventsAsync(connection, effective.FromUtc, effective.ToUtc, 200, cancellationToken);
-            var fiveHourForecasts = await LoadForecastHistoryAsync(
+            IReadOnlyList<QuotaResetEvent> resets = await LoadResetEventsAsync(
+                connection,
+                effective.FromUtc,
+                effective.ToUtc,
+                200,
+                cancellationToken);
+            IReadOnlyList<ForecastSnapshot> fiveHourForecasts = await LoadForecastHistoryAsync(
                 connection,
                 QuotaWindowKind.FiveHour,
                 effective.FromUtc,
                 effective.ToUtc,
                 500,
                 cancellationToken);
-            var weeklyForecasts = await LoadForecastHistoryAsync(
+            IReadOnlyList<ForecastSnapshot> weeklyForecasts = await LoadForecastHistoryAsync(
                 connection,
                 QuotaWindowKind.Weekly,
                 effective.FromUtc,
@@ -268,9 +331,11 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 fiveHourForecasts,
                 weeklyForecasts)
             {
-                QuotaHistorySummary = QuotaHistoryPolicy.Summarize(QuotaHistoryPolicy.Describe(
-                    quotaHistory.Where(x => x.CapturedAtUtc >= effective.FromUtc), effective.ToUtc)) +
-                    " History view is capped at 50,000 observations, including up to seven days of lookback."
+                QuotaHistorySummary = QuotaHistoryPolicy.Summarize(
+                                          QuotaHistoryPolicy.Describe(
+                                              quotaHistory.Where(x => x.CapturedAtUtc >= effective.FromUtc),
+                                              effective.ToUtc)) +
+                                      " History view is capped at 50,000 observations, including up to seven days of lookback.",
             };
             await CommitReadSnapshotAsync(connection, cancellationToken);
             return dashboard;
@@ -294,7 +359,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
 
-        var currentIntervals = await LoadQuotaBurnIntervalsAsync(
+        IReadOnlyList<QuotaBurnInterval> currentIntervals = await LoadQuotaBurnIntervalsAsync(
             connection,
             interval.StartUtc.AddSeconds(-1),
             interval.EndUtc.AddSeconds(1),
@@ -303,7 +368,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             false,
             cancellationToken,
             interval.Kind);
-        var currentInterval = currentIntervals.FirstOrDefault(candidate =>
+        QuotaBurnInterval? currentInterval = currentIntervals.FirstOrDefault(candidate =>
             string.Equals(candidate.IntervalId, interval.IntervalId, StringComparison.Ordinal) &&
             string.Equals(candidate.Provider, interval.Provider, StringComparison.Ordinal) &&
             string.Equals(candidate.Profile, interval.Profile, StringComparison.Ordinal) &&
@@ -322,65 +387,68 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             return new QuotaBurnDetail(currentInterval, [], "No native Codex token events are available for this interval yet.");
         }
 
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            SELECT e.session_id,
-                   COALESCE(MAX(a.name), e.session_id),
-                   COALESCE(MAX(s.repository), 'unknown'),
-                   MAX(COALESCE(a.model, e.model)),
-                   MAX(e.reasoning_effort),
-                   CASE WHEN EXISTS(SELECT 1 FROM agent_relationships ar WHERE ar.child_agent_id = e.session_id) THEN 1 ELSE 0 END,
-                   COALESCE(SUM(e.reported_total_tokens), 0),
-                   COALESCE(SUM(e.uncached_input_tokens), 0),
-                   COALESCE(SUM(e.cache_read_tokens), 0),
-                   COALESCE((SELECT COUNT(*)
-                             FROM context_observations c
-                             WHERE c.session_id = e.session_id
-                               AND c.is_compaction = 1
-                               AND c.observed_at_utc > $from
-                               AND c.observed_at_utc <= $to), 0)
-            FROM codex_native_token_events e
-            LEFT JOIN sessions s ON s.session_id = e.session_id
-            LEFT JOIN agents a ON a.agent_id = e.session_id
-            WHERE e.observed_at_utc > $from AND e.observed_at_utc <= $to
-            GROUP BY e.session_id
-            ORDER BY SUM(e.reported_total_tokens) DESC
-            LIMIT $take;
-            """;
+                              SELECT e.session_id,
+                                     COALESCE(MAX(a.name), e.session_id),
+                                     COALESCE(MAX(s.repository), 'unknown'),
+                                     MAX(COALESCE(a.model, e.model)),
+                                     MAX(e.reasoning_effort),
+                                     CASE WHEN EXISTS(SELECT 1 FROM agent_relationships ar WHERE ar.child_agent_id = e.session_id) THEN 1 ELSE 0 END,
+                                     COALESCE(SUM(e.reported_total_tokens), 0),
+                                     COALESCE(SUM(e.uncached_input_tokens), 0),
+                                     COALESCE(SUM(e.cache_read_tokens), 0),
+                                     COALESCE((SELECT COUNT(*)
+                                               FROM context_observations c
+                                               WHERE c.session_id = e.session_id
+                                                 AND c.is_compaction = 1
+                                                 AND c.observed_at_utc > $from
+                                                 AND c.observed_at_utc <= $to), 0)
+                              FROM codex_native_token_events e
+                              LEFT JOIN sessions s ON s.session_id = e.session_id
+                              LEFT JOIN agents a ON a.agent_id = e.session_id
+                              WHERE e.observed_at_utc > $from AND e.observed_at_utc <= $to
+                              GROUP BY e.session_id
+                              ORDER BY SUM(e.reported_total_tokens) DESC
+                              LIMIT $take;
+                              """;
         command.Parameters.AddWithValue("$from", SerializeUtc(currentInterval.StartUtc));
         command.Parameters.AddWithValue("$to", SerializeUtc(currentInterval.EndUtc));
         command.Parameters.AddWithValue("$take", take);
 
-        var raw = new List<(string SessionId, string Name, string Repository, string? Model, string? Reasoning, bool IsSubagent, long Tokens, long Uncached, long CacheRead, int Compactions)>();
-        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        var raw =
+            new List<(string SessionId, string Name, string Repository, string? Model, string? Reasoning, bool IsSubagent, long Tokens, long
+                Uncached, long CacheRead, int Compactions)>();
+        await using (SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken))
         {
             while (await reader.ReadAsync(cancellationToken))
             {
-                raw.Add((
-                    reader.GetString(0),
-                    reader.GetString(1),
-                    reader.GetString(2),
-                    reader.IsDBNull(3) ? null : reader.GetString(3),
-                    reader.IsDBNull(4) ? null : reader.GetString(4),
-                    reader.GetInt32(5) != 0,
-                    reader.GetInt64(6),
-                    reader.GetInt64(7),
-                    reader.GetInt64(8),
-                    reader.GetInt32(9)));
+                raw.Add(
+                    (
+                        reader.GetString(0),
+                        reader.GetString(1),
+                        reader.GetString(2),
+                        reader.IsDBNull(3) ? null : reader.GetString(3),
+                        reader.IsDBNull(4) ? null : reader.GetString(4),
+                        reader.GetInt32(5) != 0,
+                        reader.GetInt64(6),
+                        reader.GetInt64(7),
+                        reader.GetInt64(8),
+                        reader.GetInt32(9)));
             }
         }
 
-        var totalTokens = Math.Max(1L, raw.Sum(row => row.Tokens));
-        var totalUncached = Math.Max(1L, raw.Sum(row => row.Uncached));
-        var totalCacheRead = Math.Max(1L, raw.Sum(row => row.CacheRead));
-        var totalCompactions = Math.Max(1, raw.Sum(row => row.Compactions));
-        var contributors = raw.Select(row =>
+        long totalTokens = Math.Max(1L, raw.Sum(row => row.Tokens));
+        long totalUncached = Math.Max(1L, raw.Sum(row => row.Uncached));
+        long totalCacheRead = Math.Max(1L, raw.Sum(row => row.CacheRead));
+        int totalCompactions = Math.Max(1, raw.Sum(row => row.Compactions));
+        QuotaContributor[] contributors = raw.Select(row =>
         {
-            var tokenShare = row.Tokens / (double)totalTokens;
-            var score = (0.55 * tokenShare) +
-                        (0.25 * row.Uncached / totalUncached) +
-                        (0.15 * row.CacheRead / totalCacheRead) +
-                        (0.05 * row.Compactions / totalCompactions);
+            double tokenShare = row.Tokens / (double)totalTokens;
+            double score = 0.55 * tokenShare +
+                           0.25 * row.Uncached / totalUncached +
+                           0.15 * row.CacheRead / totalCacheRead +
+                           0.05 * row.Compactions / totalCompactions;
             return new QuotaContributor(
                 row.SessionId,
                 row.Name,
@@ -409,7 +477,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         CancellationToken cancellationToken)
     {
         await EnsureInitializedAsync(cancellationToken);
-        var now = DateTimeOffset.UtcNow;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
         if (historyFromUtc >= now)
         {
             historyFromUtc = now.AddDays(-30);
@@ -417,15 +485,26 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
 
         using var observatory = new SqliteCodexObservatoryStore(_databasePath);
         await observatory.InitializeAsync(cancellationToken);
-        var data = await new SqliteForecastDatasetReader(_databasePath).ReadAsync(
-            "codex", "default", historyFromUtc, now, cancellationToken);
-        var latest = data.Quota.Where(item => item.CapturedAtUtc <= now && item.AccountKey == request.AccountKey).MaxBy(item => item.CapturedAtUtc);
-        var samples = request.AccountKey is not null && latest is not null && now - latest.CapturedAtUtc <= TimeSpan.FromHours(6)
-            ? CodexScenarioHistoryBuilder.Build(data with { Quota = data.Quota.Where(item => item.AccountKey == latest.AccountKey).ToArray() })
-            : [];
-        var estimate = QuotaPredictionService.Simulate(request, samples, now);
-        return estimate with { Methodology = $"{QuotaAccountScope.Describe(request.AccountKey)}. " +
-            "Quota targets stay within this reported backend account; local workload features are co-observed installation signals, not verified account membership. " + estimate.Methodology };
+        CodexForecastDataset data = await new SqliteForecastDatasetReader(_databasePath).ReadAsync(
+            "codex",
+            "default",
+            historyFromUtc,
+            now,
+            cancellationToken);
+        QuotaSnapshot? latest = data.Quota.Where(item => item.CapturedAtUtc <= now && item.AccountKey == request.AccountKey)
+            .MaxBy(item => item.CapturedAtUtc);
+        IReadOnlyList<ScenarioHistorySample> samples =
+            request.AccountKey is not null && latest is not null && now - latest.CapturedAtUtc <= TimeSpan.FromHours(6)
+                ? CodexScenarioHistoryBuilder.Build(
+                    data with { Quota = data.Quota.Where(item => item.AccountKey == latest.AccountKey).ToArray() })
+                : [];
+        ScenarioEstimate estimate = QuotaPredictionService.Simulate(request, samples, now);
+        return estimate with
+        {
+            Methodology = $"{QuotaAccountScope.Describe(request.AccountKey)}. " +
+                          "Quota targets stay within this reported backend account; local workload features are co-observed installation signals, not verified account membership. " +
+                          estimate.Methodology,
+        };
     }
 
     public async Task<RecentScenarioPattern> GetRecentScenarioPatternAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken)
@@ -433,8 +512,13 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         await EnsureInitializedAsync(cancellationToken);
         using var observatory = new SqliteCodexObservatoryStore(_databasePath);
         await observatory.InitializeAsync(cancellationToken);
-        var data = await new SqliteForecastDatasetReader(_databasePath).ReadAsync(
-            "codex", "default", nowUtc.AddHours(-2), nowUtc, cancellationToken, includeQuota: false);
+        CodexForecastDataset data = await new SqliteForecastDatasetReader(_databasePath).ReadAsync(
+            "codex",
+            "default",
+            nowUtc.AddHours(-2),
+            nowUtc,
+            cancellationToken,
+            includeQuota: false);
         return RecentScenarioPatternBuilder.Build(data, nowUtc);
     }
 
@@ -443,47 +527,79 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         await EnsureInitializedAsync(cancellationToken);
         using var observatory = new SqliteCodexObservatoryStore(_databasePath);
         await observatory.InitializeAsync(cancellationToken);
-        var data = await new SqliteForecastDatasetReader(_databasePath).ReadAsync(
-            "codex", "default", nowUtc.AddDays(-30), nowUtc, cancellationToken, includeQuota: false);
+        CodexForecastDataset data = await new SqliteForecastDatasetReader(_databasePath).ReadAsync(
+            "codex",
+            "default",
+            nowUtc.AddDays(-30),
+            nowUtc,
+            cancellationToken,
+            includeQuota: false);
         return TokenWorkloadPredictionService.Predict(data, nowUtc, cancellationToken);
     }
 
-    public async Task<ForecastEvaluationReport> EvaluateForecastsAsync(string provider, string profile,
-        DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken cancellationToken)
+    public async Task<ForecastEvaluationReport> EvaluateForecastsAsync(
+        string provider,
+        string profile,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken)
     {
         await EnsureInitializedAsync(cancellationToken);
         using var observatory = new SqliteCodexObservatoryStore(_databasePath);
         await observatory.InitializeAsync(cancellationToken);
-        var data = await new SqliteForecastDatasetReader(_databasePath, _accountAssociations()).ReadAsync(provider, profile, fromUtc, toUtc, cancellationToken);
-        var report = await Task.Run(() => QuotaForecastEvaluation.Evaluate(data, cancellationToken), cancellationToken);
+        CodexForecastDataset data =
+            await new SqliteForecastDatasetReader(_databasePath, _accountAssociations()).ReadAsync(
+                provider,
+                profile,
+                fromUtc,
+                toUtc,
+                cancellationToken);
+        ForecastEvaluationReport report = await Task.Run(
+            () => QuotaForecastEvaluation.Evaluate(data, cancellationToken),
+            cancellationToken);
         if (report.Tt is { Scores.Count: > 0 } tt)
         {
-            var snapshot = new TtEvaluationSnapshot(Guid.NewGuid().ToString("N"), DateTimeOffset.UtcNow,
-                data.CapturedAtUtc, provider, profile, fromUtc, toUtc, tt);
+            var snapshot = new TtEvaluationSnapshot(
+                Guid.NewGuid().ToString("N"),
+                DateTimeOffset.UtcNow,
+                data.CapturedAtUtc,
+                provider,
+                profile,
+                fromUtc,
+                toUtc,
+                tt);
             await _telemetryRepository.SaveTtEvaluationAsync(snapshot, cancellationToken);
             report = report with { SavedTtSnapshotId = snapshot.Id };
         }
         return report;
     }
 
-    public Task<IReadOnlyList<TtEvaluationArchiveEntry>> GetTtEvaluationHistoryAsync(string provider, string profile,
-        int take, CancellationToken cancellationToken) => _telemetryRepository.GetTtEvaluationHistoryAsync(provider, profile, take, cancellationToken);
+    public Task<IReadOnlyList<TtEvaluationArchiveEntry>> GetTtEvaluationHistoryAsync(
+        string provider,
+        string profile,
+        int take,
+        CancellationToken cancellationToken)
+    {
+        return _telemetryRepository.GetTtEvaluationHistoryAsync(provider, profile, take, cancellationToken);
+    }
 
-    private Task EnsureInitializedAsync(CancellationToken cancellationToken) =>
-        _telemetryRepository.InitializeIntelligenceAsync(cancellationToken);
+    private Task EnsureInitializedAsync(CancellationToken cancellationToken)
+    {
+        return _telemetryRepository.InitializeIntelligenceAsync(cancellationToken);
+    }
 
     private static IntelligenceQuery NormalizeQuery(IntelligenceQuery query)
     {
-        var from = query.FromUtc.ToUniversalTime();
-        var to = query.ToUtc.ToUniversalTime();
+        DateTimeOffset from = query.FromUtc.ToUniversalTime();
+        DateTimeOffset to = query.ToUtc.ToUniversalTime();
         if (to <= from)
         {
             throw new ArgumentException("Analytics end time must be after the start time.", nameof(query));
         }
 
-        var maxBuckets = Math.Clamp(query.MaxBuckets, 24, 2000);
-        var size = query.BucketSize;
-        var span = to - from;
+        int maxBuckets = Math.Clamp(query.MaxBuckets, 24, 2000);
+        AnalyticsBucketSize size = query.BucketSize;
+        TimeSpan span = to - from;
         if (size == AnalyticsBucketSize.Minute && span.TotalMinutes > maxBuckets)
         {
             size = AnalyticsBucketSize.Hour;
@@ -507,38 +623,38 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         bool hasContext,
         CancellationToken cancellationToken)
     {
-        var bucketExpression = BucketSql(query.BucketSize, "e.observed_at_utc");
-        var command = connection.CreateCommand();
+        string bucketExpression = BucketSql(query.BucketSize, "e.observed_at_utc");
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT {bucketExpression} AS bucket,
-                   COALESCE(SUM(e.reported_total_tokens), 0),
-                   COALESCE(SUM(e.uncached_input_tokens), 0),
-                   COALESCE(SUM(e.cache_read_tokens), 0),
-                   COALESCE(SUM(e.cache_write_tokens), 0),
-                   COALESCE(SUM(e.non_reasoning_output_tokens), 0),
-                   COALESCE(SUM(e.reasoning_output_tokens), 0),
-                   COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM agent_relationships ar WHERE ar.child_agent_id = e.session_id)
-                                     THEN 0 ELSE e.reported_total_tokens END), 0),
-                   COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM agent_relationships ar WHERE ar.child_agent_id = e.session_id)
-                                     THEN e.reported_total_tokens ELSE 0 END), 0),
-                   COUNT(DISTINCT e.session_id)
-            FROM codex_native_token_events e
-            WHERE e.observed_at_utc >= $from AND e.observed_at_utc < $to {UsageFilterSql}
-            GROUP BY bucket
-            ORDER BY bucket DESC
-            LIMIT $take;
-            """;
+                               SELECT {bucketExpression} AS bucket,
+                                      COALESCE(SUM(e.reported_total_tokens), 0),
+                                      COALESCE(SUM(e.uncached_input_tokens), 0),
+                                      COALESCE(SUM(e.cache_read_tokens), 0),
+                                      COALESCE(SUM(e.cache_write_tokens), 0),
+                                      COALESCE(SUM(e.non_reasoning_output_tokens), 0),
+                                      COALESCE(SUM(e.reasoning_output_tokens), 0),
+                                      COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM agent_relationships ar WHERE ar.child_agent_id = e.session_id)
+                                                        THEN 0 ELSE e.reported_total_tokens END), 0),
+                                      COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM agent_relationships ar WHERE ar.child_agent_id = e.session_id)
+                                                        THEN e.reported_total_tokens ELSE 0 END), 0),
+                                      COUNT(DISTINCT e.session_id)
+                               FROM codex_native_token_events e
+                               WHERE e.observed_at_utc >= $from AND e.observed_at_utc < $to {UsageFilterSql}
+                               GROUP BY bucket
+                               ORDER BY bucket DESC
+                               LIMIT $take;
+                               """;
         command.Parameters.AddWithValue("$from", SerializeUtc(query.FromUtc));
         command.Parameters.AddWithValue("$to", SerializeUtc(query.ToUtc));
         command.Parameters.AddWithValue("$take", query.MaxBuckets);
         BindUsageFilters(command, query);
 
         var buckets = new Dictionary<DateTimeOffset, MutableBucket>();
-        await using (var reader = await command.ExecuteReaderAsync(cancellationToken))
+        await using (SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken))
         {
             while (await reader.ReadAsync(cancellationToken))
             {
-                var start = ParseUtc(reader.GetString(0));
+                DateTimeOffset start = ParseUtc(reader.GetString(0));
                 buckets[start] = new MutableBucket
                 {
                     NativeTokens = reader.GetInt64(1),
@@ -549,27 +665,27 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                     ReasoningOutput = reader.GetInt64(6),
                     RootTokens = reader.GetInt64(7),
                     SubagentTokens = reader.GetInt64(8),
-                    ActiveSessions = reader.GetInt32(9)
+                    ActiveSessions = reader.GetInt32(9),
                 };
             }
         }
 
         if (hasContext && !query.UsageOnly)
         {
-            var compactions = connection.CreateCommand();
+            SqliteCommand compactions = connection.CreateCommand();
             compactions.CommandText = $"""
-                SELECT {BucketSql(query.BucketSize, "c.observed_at_utc")} AS bucket, COUNT(*)
-                FROM context_observations c
-                WHERE c.is_compaction = 1 AND c.observed_at_utc >= $from AND c.observed_at_utc < $to
-                GROUP BY bucket;
-                """;
+                                       SELECT {BucketSql(query.BucketSize, "c.observed_at_utc")} AS bucket, COUNT(*)
+                                       FROM context_observations c
+                                       WHERE c.is_compaction = 1 AND c.observed_at_utc >= $from AND c.observed_at_utc < $to
+                                       GROUP BY bucket;
+                                       """;
             compactions.Parameters.AddWithValue("$from", SerializeUtc(query.FromUtc));
             compactions.Parameters.AddWithValue("$to", SerializeUtc(query.ToUtc));
-            await using var reader = await compactions.ExecuteReaderAsync(cancellationToken);
+            await using SqliteDataReader reader = await compactions.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                var start = ParseUtc(reader.GetString(0));
-                if (!buckets.TryGetValue(start, out var bucket))
+                DateTimeOffset start = ParseUtc(reader.GetString(0));
+                if (!buckets.TryGetValue(start, out MutableBucket? bucket))
                 {
                     bucket = new MutableBucket();
                     buckets[start] = bucket;
@@ -578,17 +694,21 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             }
         }
 
-        var quota = query.UsageOnly ? [] : await LoadQuotaSnapshotsAsync(connection, query.FromUtc.AddDays(-7), query.ToUtc, cancellationToken, preserveSources: true);
-        var streams = quota.GroupBy(snapshot => (snapshot.Provider, snapshot.Profile, snapshot.Kind, snapshot.Source, snapshot.AccountKey)).ToArray();
+        IReadOnlyList<QuotaSnapshot> quota = query.UsageOnly
+            ? []
+            : await LoadQuotaSnapshotsAsync(connection, query.FromUtc.AddDays(-7), query.ToUtc, cancellationToken, true);
+        IGrouping<(string Provider, string Profile, QuotaWindowKind Kind, string Source, string? AccountKey), QuotaSnapshot>[] streams =
+            quota.GroupBy(snapshot => (snapshot.Provider, snapshot.Profile, snapshot.Kind, snapshot.Source, snapshot.AccountKey)).ToArray();
         // A shared local-activity chart cannot sum independent account/source meters. Detailed
         // burn history remains available per stream; the broad overlay is unknown when ambiguous.
-        foreach (var group in streams.Where(group => streams.Count(other => other.Key.Kind == group.Key.Kind) == 1))
+        foreach (IGrouping<(string Provider, string Profile, QuotaWindowKind Kind, string Source, string? AccountKey), QuotaSnapshot> group
+                 in streams.Where(group => streams.Count(other => other.Key.Kind == group.Key.Kind) == 1))
         {
-            var ordered = group.OrderBy(snapshot => snapshot.CapturedAtUtc).ToArray();
-            for (var index = 1; index < ordered.Length; index++)
+            QuotaSnapshot[] ordered = group.OrderBy(snapshot => snapshot.CapturedAtUtc).ToArray();
+            for (int index = 1; index < ordered.Length; index++)
             {
-                var previous = ordered[index - 1];
-                var current = ordered[index];
+                QuotaSnapshot previous = ordered[index - 1];
+                QuotaSnapshot current = ordered[index];
                 if (current.CapturedAtUtc < query.FromUtc || current.CapturedAtUtc >= query.ToUtc ||
                     previous.UsedPercent is null || current.UsedPercent is null ||
                     previous.WindowMinutes != current.WindowMinutes ||
@@ -598,14 +718,14 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                     continue;
                 }
 
-                var delta = current.UsedPercent.Value - previous.UsedPercent.Value;
+                double delta = current.UsedPercent.Value - previous.UsedPercent.Value;
                 if (delta <= 0)
                 {
                     continue;
                 }
 
-                var start = BucketStart(current.CapturedAtUtc, query.BucketSize);
-                if (!buckets.TryGetValue(start, out var bucket))
+                DateTimeOffset start = BucketStart(current.CapturedAtUtc, query.BucketSize);
+                if (!buckets.TryGetValue(start, out MutableBucket? bucket))
                 {
                     bucket = new MutableBucket();
                     buckets[start] = bucket;
@@ -674,40 +794,41 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         IntelligenceQuery query,
         CancellationToken cancellationToken)
     {
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT {keyExpression} AS dimension_key,
-                   COALESCE(SUM(e.reported_total_tokens), 0),
-                   COALESCE(SUM(e.uncached_input_tokens), 0),
-                   COALESCE(SUM(e.cache_read_tokens), 0),
-                   COALESCE(SUM(e.cache_write_tokens), 0),
-                   COALESCE(SUM(e.non_reasoning_output_tokens), 0),
-                   COALESCE(SUM(e.reasoning_output_tokens), 0),
-                   COUNT(DISTINCT e.session_id),
-                   {(dimension == "Session" ? "(SELECT NULLIF(s.thread_id, '') FROM sessions s WHERE s.session_id = e.session_id)" : "NULL")}
-            FROM codex_native_token_events e
-            {join}
-            WHERE e.observed_at_utc >= $from AND e.observed_at_utc < $to {UsageFilterSql}
-            GROUP BY dimension_key
-            ORDER BY SUM(e.reported_total_tokens) DESC
-            LIMIT {(query.UsageOnly ? -1 : 20)};
-            """;
+                               SELECT {keyExpression} AS dimension_key,
+                                      COALESCE(SUM(e.reported_total_tokens), 0),
+                                      COALESCE(SUM(e.uncached_input_tokens), 0),
+                                      COALESCE(SUM(e.cache_read_tokens), 0),
+                                      COALESCE(SUM(e.cache_write_tokens), 0),
+                                      COALESCE(SUM(e.non_reasoning_output_tokens), 0),
+                                      COALESCE(SUM(e.reasoning_output_tokens), 0),
+                                      COUNT(DISTINCT e.session_id),
+                                      {(dimension == "Session" ? "(SELECT NULLIF(s.thread_id, '') FROM sessions s WHERE s.session_id = e.session_id)" : "NULL")}
+                               FROM codex_native_token_events e
+                               {join}
+                               WHERE e.observed_at_utc >= $from AND e.observed_at_utc < $to {UsageFilterSql}
+                               GROUP BY dimension_key
+                               ORDER BY SUM(e.reported_total_tokens) DESC
+                               LIMIT {(query.UsageOnly ? -1 : 20)};
+                               """;
         command.Parameters.AddWithValue("$from", SerializeUtc(query.FromUtc));
         command.Parameters.AddWithValue("$to", SerializeUtc(query.ToUtc));
         BindUsageFilters(command, query);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            results.Add(new UsageDimensionTotal(
-                dimension,
-                reader.GetString(0),
-                reader.GetInt64(1),
-                reader.GetInt64(2),
-                reader.GetInt64(3),
-                reader.GetInt64(4),
-                reader.GetInt64(5),
-                reader.GetInt64(6),
-                reader.GetInt32(7)) { ThreadId = reader.IsDBNull(8) ? null : reader.GetString(8) });
+            results.Add(
+                new UsageDimensionTotal(
+                    dimension,
+                    reader.GetString(0),
+                    reader.GetInt64(1),
+                    reader.GetInt64(2),
+                    reader.GetInt64(3),
+                    reader.GetInt64(4),
+                    reader.GetInt64(5),
+                    reader.GetInt64(6),
+                    reader.GetInt32(7)) { ThreadId = reader.IsDBNull(8) ? null : reader.GetString(8) });
         }
     }
 
@@ -716,31 +837,32 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         IntelligenceQuery query,
         CancellationToken cancellationToken)
     {
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = $"""
-            SELECT CAST(strftime('%w', e.observed_at_utc) AS INTEGER),
-                   CAST(strftime('%H', e.observed_at_utc) AS INTEGER),
-                   COALESCE(SUM(e.reported_total_tokens), 0),
-                   COUNT(DISTINCT strftime('%Y-%m-%dT%H', e.observed_at_utc))
-            FROM codex_native_token_events e
-            WHERE e.observed_at_utc >= $from AND e.observed_at_utc < $to
-            {UsageFilterSql}
-            GROUP BY 1, 2
-            ORDER BY 1, 2;
-            """;
+                               SELECT CAST(strftime('%w', e.observed_at_utc) AS INTEGER),
+                                      CAST(strftime('%H', e.observed_at_utc) AS INTEGER),
+                                      COALESCE(SUM(e.reported_total_tokens), 0),
+                                      COUNT(DISTINCT strftime('%Y-%m-%dT%H', e.observed_at_utc))
+                               FROM codex_native_token_events e
+                               WHERE e.observed_at_utc >= $from AND e.observed_at_utc < $to
+                               {UsageFilterSql}
+                               GROUP BY 1, 2
+                               ORDER BY 1, 2;
+                               """;
         command.Parameters.AddWithValue("$from", SerializeUtc(query.FromUtc));
         command.Parameters.AddWithValue("$to", SerializeUtc(query.ToUtc));
 
         var results = new List<UsageHeatmapCell>();
         BindUsageFilters(command, query);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            results.Add(new UsageHeatmapCell(
-                (DayOfWeek)reader.GetInt32(0),
-                reader.GetInt32(1),
-                reader.GetInt64(2),
-                reader.GetInt32(3)));
+            results.Add(
+                new UsageHeatmapCell(
+                    (DayOfWeek)reader.GetInt32(0),
+                    reader.GetInt32(1),
+                    reader.GetInt64(2),
+                    reader.GetInt32(3)));
         }
         return results;
     }
@@ -757,21 +879,27 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         QuotaObservationAuthority? authority = null,
         IReadOnlyList<QuotaSnapshot>? history = null)
     {
-        var snapshots = history ?? await LoadQuotaSnapshotsAsync(connection, fromUtc.AddDays(-7), toUtc, cancellationToken,
-            preserveSources: true, authority: authority);
+        IReadOnlyList<QuotaSnapshot> snapshots = history ?? await LoadQuotaSnapshotsAsync(
+            connection,
+            fromUtc.AddDays(-7),
+            toUtc,
+            cancellationToken,
+            true,
+            authority);
         var candidates = new List<QuotaBurnIntervalSeed>();
-        foreach (var group in QuotaHistoryPolicy.Streams(QuotaHistoryPolicy.Describe(snapshots, toUtc)))
+        foreach (IGrouping<QuotaHistoryCohort, QuotaHistoryDecision> group in QuotaHistoryPolicy.Streams(
+                     QuotaHistoryPolicy.Describe(snapshots, toUtc)))
         {
             if (kindFilter is QuotaWindowKind requestedKind && group.Key.Kind != requestedKind)
             {
                 continue;
             }
 
-            var ordered = QuotaHistoryPolicy.ReplayRows(group);
-            for (var index = 1; index < ordered.Length; index++)
+            QuotaSnapshot[] ordered = QuotaHistoryPolicy.ReplayRows(group);
+            for (int index = 1; index < ordered.Length; index++)
             {
-                var previous = ordered[index - 1];
-                var current = ordered[index];
+                QuotaSnapshot previous = ordered[index - 1];
+                QuotaSnapshot current = ordered[index];
                 if (current.CapturedAtUtc <= previous.CapturedAtUtc || current.CapturedAtUtc < fromUtc || current.CapturedAtUtc > toUtc ||
                     previous.UsedPercent is null || current.UsedPercent is null ||
                     previous.WindowMinutes != current.WindowMinutes ||
@@ -781,7 +909,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                     continue;
                 }
 
-                var delta = current.UsedPercent.Value - previous.UsedPercent.Value;
+                double delta = current.UsedPercent.Value - previous.UsedPercent.Value;
                 if (delta <= 0)
                 {
                     continue;
@@ -791,47 +919,53 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             }
         }
 
-        var selected = candidates
+        QuotaBurnIntervalSeed[] selected = candidates
             .OrderByDescending(seed => seed.Current.CapturedAtUtc)
             .Take(Math.Clamp(take, 1, 400))
             .ToArray();
         var results = new List<QuotaBurnInterval>(selected.Length);
-        foreach (var seed in selected)
+        foreach (QuotaBurnIntervalSeed seed in selected)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var aggregate = hasNativeEvents
-                ? await LoadIntervalAggregateAsync(connection, seed.Previous.CapturedAtUtc, seed.Current.CapturedAtUtc, hasContext, cancellationToken)
+            IntervalAggregate aggregate = hasNativeEvents
+                ? await LoadIntervalAggregateAsync(
+                    connection,
+                    seed.Previous.CapturedAtUtc,
+                    seed.Current.CapturedAtUtc,
+                    hasContext,
+                    cancellationToken)
                 : IntervalAggregate.Empty;
-            var intervalMinutes = Math.Max(0.01, (seed.Current.CapturedAtUtc - seed.Previous.CapturedAtUtc).TotalMinutes);
-            var sameSource = string.Equals(seed.Previous.Source, seed.Current.Source, StringComparison.OrdinalIgnoreCase);
-            var confidence = 0.55 +
-                             (sameSource ? 0.12 : 0) +
-                             (intervalMinutes <= 30 ? 0.13 : intervalMinutes <= 90 ? 0.07 : 0) +
-                             (aggregate.NativeTokens > 0 ? 0.1 : 0);
+            double intervalMinutes = Math.Max(0.01, (seed.Current.CapturedAtUtc - seed.Previous.CapturedAtUtc).TotalMinutes);
+            bool sameSource = string.Equals(seed.Previous.Source, seed.Current.Source, StringComparison.OrdinalIgnoreCase);
+            double confidence = 0.55 +
+                                (sameSource ? 0.12 : 0) +
+                                (intervalMinutes <= 30 ? 0.13 : intervalMinutes <= 90 ? 0.07 : 0) +
+                                (aggregate.NativeTokens > 0 ? 0.1 : 0);
 
-            results.Add(new QuotaBurnInterval(
-                BuildIntervalId(seed.Previous, seed.Current),
-                seed.Current.Kind,
-                seed.Current.Provider,
-                seed.Current.Profile,
-                seed.Previous.CapturedAtUtc,
-                seed.Current.CapturedAtUtc,
-                seed.Previous.UsedPercent!.Value,
-                seed.Current.UsedPercent!.Value,
-                seed.Delta,
-                seed.Current.ResetsAtUtc,
-                seed.Previous.Source,
-                seed.Current.Source,
-                aggregate.NativeTokens,
-                aggregate.RootTokens,
-                aggregate.SubagentTokens,
-                aggregate.RootSessions,
-                aggregate.SubagentSessions,
-                aggregate.Compactions,
-                aggregate.DominantModel,
-                aggregate.DominantReasoning,
-                Math.Clamp(confidence, 0.35, 0.95),
-                seed.Current.AccountKey));
+            results.Add(
+                new QuotaBurnInterval(
+                    BuildIntervalId(seed.Previous, seed.Current),
+                    seed.Current.Kind,
+                    seed.Current.Provider,
+                    seed.Current.Profile,
+                    seed.Previous.CapturedAtUtc,
+                    seed.Current.CapturedAtUtc,
+                    seed.Previous.UsedPercent!.Value,
+                    seed.Current.UsedPercent!.Value,
+                    seed.Delta,
+                    seed.Current.ResetsAtUtc,
+                    seed.Previous.Source,
+                    seed.Current.Source,
+                    aggregate.NativeTokens,
+                    aggregate.RootTokens,
+                    aggregate.SubagentTokens,
+                    aggregate.RootSessions,
+                    aggregate.SubagentSessions,
+                    aggregate.Compactions,
+                    aggregate.DominantModel,
+                    aggregate.DominantReasoning,
+                    Math.Clamp(confidence, 0.35, 0.95),
+                    seed.Current.AccountKey));
         }
 
         return results;
@@ -844,39 +978,39 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         bool hasContext,
         CancellationToken cancellationToken)
     {
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            SELECT COALESCE(SUM(e.reported_total_tokens), 0),
-                   COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM agent_relationships ar WHERE ar.child_agent_id = e.session_id)
-                                     THEN 0 ELSE e.reported_total_tokens END), 0),
-                   COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM agent_relationships ar WHERE ar.child_agent_id = e.session_id)
-                                     THEN e.reported_total_tokens ELSE 0 END), 0),
-                   COUNT(DISTINCT CASE WHEN NOT EXISTS(SELECT 1 FROM agent_relationships ar WHERE ar.child_agent_id = e.session_id)
-                                       THEN e.session_id END),
-                   COUNT(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM agent_relationships ar WHERE ar.child_agent_id = e.session_id)
-                                       THEN e.session_id END)
-            FROM codex_native_token_events e
-            WHERE e.observed_at_utc > $from AND e.observed_at_utc <= $to;
-            """;
+                              SELECT COALESCE(SUM(e.reported_total_tokens), 0),
+                                     COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM agent_relationships ar WHERE ar.child_agent_id = e.session_id)
+                                                       THEN 0 ELSE e.reported_total_tokens END), 0),
+                                     COALESCE(SUM(CASE WHEN EXISTS(SELECT 1 FROM agent_relationships ar WHERE ar.child_agent_id = e.session_id)
+                                                       THEN e.reported_total_tokens ELSE 0 END), 0),
+                                     COUNT(DISTINCT CASE WHEN NOT EXISTS(SELECT 1 FROM agent_relationships ar WHERE ar.child_agent_id = e.session_id)
+                                                         THEN e.session_id END),
+                                     COUNT(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM agent_relationships ar WHERE ar.child_agent_id = e.session_id)
+                                                         THEN e.session_id END)
+                              FROM codex_native_token_events e
+                              WHERE e.observed_at_utc > $from AND e.observed_at_utc <= $to;
+                              """;
         command.Parameters.AddWithValue("$from", SerializeUtc(fromUtc));
         command.Parameters.AddWithValue("$to", SerializeUtc(toUtc));
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         await reader.ReadAsync(cancellationToken);
-        var nativeTokens = reader.GetInt64(0);
-        var rootTokens = reader.GetInt64(1);
-        var subagentTokens = reader.GetInt64(2);
-        var rootSessions = reader.GetInt32(3);
-        var subagentSessions = reader.GetInt32(4);
+        long nativeTokens = reader.GetInt64(0);
+        long rootTokens = reader.GetInt64(1);
+        long subagentTokens = reader.GetInt64(2);
+        int rootSessions = reader.GetInt32(3);
+        int subagentSessions = reader.GetInt32(4);
         await reader.DisposeAsync();
 
-        var compactions = 0;
+        int compactions = 0;
         if (hasContext)
         {
-            var compactionCommand = connection.CreateCommand();
+            SqliteCommand compactionCommand = connection.CreateCommand();
             compactionCommand.CommandText = """
-                SELECT COUNT(*) FROM context_observations
-                WHERE is_compaction = 1 AND observed_at_utc > $from AND observed_at_utc <= $to;
-                """;
+                                            SELECT COUNT(*) FROM context_observations
+                                            WHERE is_compaction = 1 AND observed_at_utc > $from AND observed_at_utc <= $to;
+                                            """;
             compactionCommand.Parameters.AddWithValue("$from", SerializeUtc(fromUtc));
             compactionCommand.Parameters.AddWithValue("$to", SerializeUtc(toUtc));
             compactions = Convert.ToInt32(await compactionCommand.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
@@ -886,18 +1020,18 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         string? reasoning = null;
         if (nativeTokens > 0)
         {
-            var dominant = connection.CreateCommand();
+            SqliteCommand dominant = connection.CreateCommand();
             dominant.CommandText = """
-                SELECT e.model, e.reasoning_effort, SUM(e.reported_total_tokens) AS tokens
-                FROM codex_native_token_events e
-                WHERE e.observed_at_utc > $from AND e.observed_at_utc <= $to
-                GROUP BY e.model, e.reasoning_effort
-                ORDER BY tokens DESC
-                LIMIT 1;
-                """;
+                                   SELECT e.model, e.reasoning_effort, SUM(e.reported_total_tokens) AS tokens
+                                   FROM codex_native_token_events e
+                                   WHERE e.observed_at_utc > $from AND e.observed_at_utc <= $to
+                                   GROUP BY e.model, e.reasoning_effort
+                                   ORDER BY tokens DESC
+                                   LIMIT 1;
+                                   """;
             dominant.Parameters.AddWithValue("$from", SerializeUtc(fromUtc));
             dominant.Parameters.AddWithValue("$to", SerializeUtc(toUtc));
-            await using var dominantReader = await dominant.ExecuteReaderAsync(cancellationToken);
+            await using SqliteDataReader dominantReader = await dominant.ExecuteReaderAsync(cancellationToken);
             if (await dominantReader.ReadAsync(cancellationToken))
             {
                 model = dominantReader.IsDBNull(0) ? null : dominantReader.GetString(0);
@@ -905,7 +1039,15 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             }
         }
 
-        return new IntervalAggregate(nativeTokens, rootTokens, subagentTokens, rootSessions, subagentSessions, compactions, model, reasoning);
+        return new IntervalAggregate(
+            nativeTokens,
+            rootTokens,
+            subagentTokens,
+            rootSessions,
+            subagentSessions,
+            compactions,
+            model,
+            reasoning);
     }
 
     private static async Task<IReadOnlyList<QuotaResetEvent>> LoadResetEventsAsync(
@@ -915,39 +1057,40 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         int take,
         CancellationToken cancellationToken)
     {
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            SELECT event_id, kind, provider, profile, detected_at_utc, effective_at_utc,
-                   before_used_percent, after_used_percent, previous_reset_at_utc, current_reset_at_utc,
-                   classification, confidence, source, explanation, account_key
-            FROM quota_reset_events
-            WHERE detected_at_utc >= $from AND detected_at_utc <= $to
-            ORDER BY detected_at_utc DESC
-            LIMIT $take;
-            """;
+                              SELECT event_id, kind, provider, profile, detected_at_utc, effective_at_utc,
+                                     before_used_percent, after_used_percent, previous_reset_at_utc, current_reset_at_utc,
+                                     classification, confidence, source, explanation, account_key
+                              FROM quota_reset_events
+                              WHERE detected_at_utc >= $from AND detected_at_utc <= $to
+                              ORDER BY detected_at_utc DESC
+                              LIMIT $take;
+                              """;
         command.Parameters.AddWithValue("$from", SerializeUtc(fromUtc));
         command.Parameters.AddWithValue("$to", SerializeUtc(toUtc));
         command.Parameters.AddWithValue("$take", Math.Clamp(take, 1, 1000));
         var results = new List<QuotaResetEvent>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            results.Add(new QuotaResetEvent(
-                reader.GetString(0),
-                Enum.Parse<QuotaWindowKind>(reader.GetString(1)),
-                reader.GetString(2),
-                reader.GetString(3),
-                ParseUtc(reader.GetString(4)),
-                ParseUtc(reader.GetString(5)),
-                reader.IsDBNull(6) ? null : reader.GetDouble(6),
-                reader.IsDBNull(7) ? null : reader.GetDouble(7),
-                reader.IsDBNull(8) ? null : ParseUtc(reader.GetString(8)),
-                reader.IsDBNull(9) ? null : ParseUtc(reader.GetString(9)),
-                Enum.Parse<QuotaResetClassification>(reader.GetString(10)),
-                reader.GetDouble(11),
-                reader.GetString(12),
-                reader.GetString(13),
-                reader.GetString(14) is { Length: > 0 } account ? account : null));
+            results.Add(
+                new QuotaResetEvent(
+                    reader.GetString(0),
+                    Enum.Parse<QuotaWindowKind>(reader.GetString(1)),
+                    reader.GetString(2),
+                    reader.GetString(3),
+                    ParseUtc(reader.GetString(4)),
+                    ParseUtc(reader.GetString(5)),
+                    reader.IsDBNull(6) ? null : reader.GetDouble(6),
+                    reader.IsDBNull(7) ? null : reader.GetDouble(7),
+                    reader.IsDBNull(8) ? null : ParseUtc(reader.GetString(8)),
+                    reader.IsDBNull(9) ? null : ParseUtc(reader.GetString(9)),
+                    Enum.Parse<QuotaResetClassification>(reader.GetString(10)),
+                    reader.GetDouble(11),
+                    reader.GetString(12),
+                    reader.GetString(13),
+                    reader.GetString(14) is { Length: > 0 } account ? account : null));
         }
         return results;
     }
@@ -960,51 +1103,56 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         int take,
         CancellationToken cancellationToken)
     {
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            SELECT provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
-                   estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence,
-                   state, burn_pressure, projected_remaining_at_reset_percent, trend, is_quantized_flat,
-                   quota_source, quota_authority, quota_captured_at_utc, quota_window_minutes, quota_resets_at_utc, evaluation_json, account_key
-            FROM forecast_snapshots
-            WHERE kind = $kind AND generated_at_utc >= $from AND generated_at_utc <= $to
-            ORDER BY generated_at_utc DESC
-            LIMIT $take;
-            """;
+                              SELECT provider, profile, kind, generated_at_utc, burn_rate_percent_per_hour,
+                                     estimated_exhaustion_at_utc, survives_until_reset, sustainable_percent_per_hour, confidence,
+                                     state, burn_pressure, projected_remaining_at_reset_percent, trend, is_quantized_flat,
+                                     quota_source, quota_authority, quota_captured_at_utc, quota_window_minutes, quota_resets_at_utc, evaluation_json, account_key
+                              FROM forecast_snapshots
+                              WHERE kind = $kind AND generated_at_utc >= $from AND generated_at_utc <= $to
+                              ORDER BY generated_at_utc DESC
+                              LIMIT $take;
+                              """;
         command.Parameters.AddWithValue("$kind", kind.ToString());
         command.Parameters.AddWithValue("$from", SerializeUtc(fromUtc));
         command.Parameters.AddWithValue("$to", SerializeUtc(toUtc));
         command.Parameters.AddWithValue("$take", Math.Clamp(take, 1, 2000));
         var results = new List<ForecastSnapshot>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            var state = Enum.TryParse<ForecastState>(reader.GetString(9), out var parsedState)
+            ForecastState state = Enum.TryParse<ForecastState>(reader.GetString(9), out ForecastState parsedState)
                 ? parsedState
                 : ForecastState.Learning;
-            results.Add(new ForecastSnapshot(
-                reader.GetString(0),
-                reader.GetString(1),
-                new Forecast(
-                    Enum.Parse<QuotaWindowKind>(reader.GetString(2)),
-                    ParseUtc(reader.GetString(3)),
-                    reader.IsDBNull(4) ? null : reader.GetDouble(4),
-                    reader.IsDBNull(5) ? null : ParseUtc(reader.GetString(5)),
-                    reader.IsDBNull(6) ? null : reader.GetInt32(6) != 0,
-                    reader.IsDBNull(7) ? null : reader.GetDouble(7),
-                    reader.GetDouble(8),
-                    state,
-                    reader.IsDBNull(10) ? null : reader.GetDouble(10),
-                    reader.IsDBNull(11) ? null : reader.GetDouble(11),
-                    reader.IsDBNull(12) ? null : reader.GetString(12),
-                    !reader.IsDBNull(13) && reader.GetInt32(13) != 0,
-                    ForecastEvidenceJson.Deserialize(reader.IsDBNull(19) ? null : reader.GetString(19))),
-                reader.IsDBNull(14) ? null : reader.GetString(14),
-                reader.IsDBNull(15) || !Enum.TryParse<QuotaObservationAuthority>(reader.GetString(15), out var authority) ? QuotaObservationAuthority.Unknown : authority,
-                reader.IsDBNull(16) ? null : ParseUtc(reader.GetString(16)),
-                reader.IsDBNull(17) ? null : reader.GetInt32(17),
-                reader.IsDBNull(18) ? null : ParseUtc(reader.GetString(18)),
-                reader.GetString(20) is { Length: > 0 } account ? account : null));
+            results.Add(
+                new ForecastSnapshot(
+                    reader.GetString(0),
+                    reader.GetString(1),
+                    new Forecast(
+                        Enum.Parse<QuotaWindowKind>(reader.GetString(2)),
+                        ParseUtc(reader.GetString(3)),
+                        reader.IsDBNull(4) ? null : reader.GetDouble(4),
+                        reader.IsDBNull(5) ? null : ParseUtc(reader.GetString(5)),
+                        reader.IsDBNull(6) ? null : reader.GetInt32(6) != 0,
+                        reader.IsDBNull(7) ? null : reader.GetDouble(7),
+                        reader.GetDouble(8),
+                        state,
+                        reader.IsDBNull(10) ? null : reader.GetDouble(10),
+                        reader.IsDBNull(11) ? null : reader.GetDouble(11),
+                        reader.IsDBNull(12) ? null : reader.GetString(12),
+                        !reader.IsDBNull(13) && reader.GetInt32(13) != 0,
+                        ForecastEvidenceJson.Deserialize(reader.IsDBNull(19) ? null : reader.GetString(19))),
+                    reader.IsDBNull(14) ? null : reader.GetString(14),
+                    reader.IsDBNull(15) || !Enum.TryParse<QuotaObservationAuthority>(
+                        reader.GetString(15),
+                        out QuotaObservationAuthority authority)
+                        ? QuotaObservationAuthority.Unknown
+                        : authority,
+                    reader.IsDBNull(16) ? null : ParseUtc(reader.GetString(16)),
+                    reader.IsDBNull(17) ? null : reader.GetInt32(17),
+                    reader.IsDBNull(18) ? null : ParseUtc(reader.GetString(18)),
+                    reader.GetString(20) is { Length: > 0 } account ? account : null));
         }
         return results;
     }
@@ -1017,23 +1165,23 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         bool preserveSources = false,
         QuotaObservationAuthority? authority = null)
     {
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            SELECT kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, provider, profile, source, account_key,
-                   observation_id,source_identity,session_id,limit_id,plan_type,lane,collected_at_utc,has_source_timestamp
-            FROM quota_snapshots
-            WHERE captured_at_utc >= $from AND captured_at_utc <= $to
-                AND ($authority IS NULL
-                   OR ($authority = 'ProviderAuthoritative' AND instr(lower(source), 'app-server') > 0)
-                   OR ($authority = 'EmbeddedObservation' AND instr(lower(source), 'rollout') > 0))
-            ORDER BY captured_at_utc DESC
-            LIMIT 50000;
-            """;
+                              SELECT kind, captured_at_utc, used_percent, window_minutes, resets_at_utc, provider, profile, source, account_key,
+                                     observation_id,source_identity,session_id,limit_id,plan_type,lane,collected_at_utc,has_source_timestamp
+                              FROM quota_snapshots
+                              WHERE captured_at_utc >= $from AND captured_at_utc <= $to
+                                  AND ($authority IS NULL
+                                     OR ($authority = 'ProviderAuthoritative' AND instr(lower(source), 'app-server') > 0)
+                                     OR ($authority = 'EmbeddedObservation' AND instr(lower(source), 'rollout') > 0))
+                              ORDER BY captured_at_utc DESC
+                              LIMIT 50000;
+                              """;
         command.Parameters.AddWithValue("$from", SerializeUtc(fromUtc));
         command.Parameters.AddWithValue("$to", SerializeUtc(toUtc));
         command.Parameters.AddWithValue("$authority", authority is null ? DBNull.Value : authority.ToString());
         var results = new List<QuotaSnapshot>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
             results.Add(ReadQuotaSnapshot(reader));
@@ -1042,39 +1190,40 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
     }
 
     private static IReadOnlyList<QuotaSnapshot> CanonicalizeQuotaSnapshots(
-        IEnumerable<QuotaSnapshot> snapshots) =>
-        QuotaHistoryPolicy.ReplayRows(QuotaHistoryPolicy.Streams(
-            QuotaHistoryPolicy.Describe(snapshots, DateTimeOffset.UtcNow)).SelectMany(x => x));
+        IEnumerable<QuotaSnapshot> snapshots)
+    {
+        return QuotaHistoryPolicy.ReplayRows(
+            QuotaHistoryPolicy.Streams(
+                QuotaHistoryPolicy.Describe(snapshots, DateTimeOffset.UtcNow)).SelectMany(x => x));
+    }
 
-    private static QuotaSnapshot ReadQuotaSnapshot(SqliteDataReader reader) =>
-        SqliteQuotaEvidence.Read(new(
-            Enum.Parse<QuotaWindowKind>(reader.GetString(0)),
-            ParseUtc(reader.GetString(1)),
-            reader.IsDBNull(2) ? null : reader.GetDouble(2),
-            reader.IsDBNull(3) ? null : reader.GetInt32(3),
-            reader.IsDBNull(4) ? null : ParseUtc(reader.GetString(4)),
-            reader.GetString(5),
-            reader.GetString(6),
-            reader.GetString(7),
-            reader.GetString(8) is { Length: > 0 } account ? account : null), reader, 9);
+    private static QuotaSnapshot ReadQuotaSnapshot(SqliteDataReader reader)
+    {
+        return SqliteQuotaEvidence.Read(
+            new QuotaSnapshot(
+                Enum.Parse<QuotaWindowKind>(reader.GetString(0)),
+                ParseUtc(reader.GetString(1)),
+                reader.IsDBNull(2) ? null : reader.GetDouble(2),
+                reader.IsDBNull(3) ? null : reader.GetInt32(3),
+                reader.IsDBNull(4) ? null : ParseUtc(reader.GetString(4)),
+                reader.GetString(5),
+                reader.GetString(6),
+                reader.GetString(7),
+                reader.GetString(8) is { Length: > 0 } account ? account : null),
+            reader,
+            9);
+    }
 
     private static async Task<bool> TableExistsAsync(
         SqliteConnection connection,
         string table,
         CancellationToken cancellationToken)
     {
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = $name LIMIT 1;";
         command.Parameters.AddWithValue("$name", table);
         return await command.ExecuteScalarAsync(cancellationToken) is not null;
     }
-
-    private const string UsageFilterSql = """
-        AND ($model IS NULL OR COALESCE(NULLIF(e.model, ''), '(unknown)') = $model)
-        AND ($session IS NULL OR e.session_id = $session)
-        AND ($thread IS NULL OR EXISTS(SELECT 1 FROM sessions s WHERE s.session_id=e.session_id AND s.thread_id=$thread))
-        AND ($repository IS NULL OR COALESCE((SELECT NULLIF(s.repository, '') FROM sessions s WHERE s.session_id = e.session_id), '(unknown)') = $repository)
-        """;
 
     private static void BindUsageFilters(SqliteCommand command, IntelligenceQuery query)
     {
@@ -1084,13 +1233,16 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         command.Parameters.AddWithValue("$repository", (object?)query.Repository ?? DBNull.Value);
     }
 
-    private static string BucketSql(AnalyticsBucketSize size, string column) => size switch
+    private static string BucketSql(AnalyticsBucketSize size, string column)
     {
-        AnalyticsBucketSize.Month => $"strftime('%Y-%m-01T00:00:00Z', {column})",
-        AnalyticsBucketSize.Minute => $"strftime('%Y-%m-%dT%H:%M:00Z', {column})",
-        AnalyticsBucketSize.Hour => $"strftime('%Y-%m-%dT%H:00:00Z', {column})",
-        _ => $"strftime('%Y-%m-%dT00:00:00Z', {column})"
-    };
+        return size switch
+        {
+            AnalyticsBucketSize.Month => $"strftime('%Y-%m-01T00:00:00Z', {column})",
+            AnalyticsBucketSize.Minute => $"strftime('%Y-%m-%dT%H:%M:00Z', {column})",
+            AnalyticsBucketSize.Hour => $"strftime('%Y-%m-%dT%H:00:00Z', {column})",
+            _ => $"strftime('%Y-%m-%dT00:00:00Z', {column})",
+        };
+    }
 
     private static DateTimeOffset BucketStart(DateTimeOffset value, AnalyticsBucketSize size)
     {
@@ -1098,23 +1250,34 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         return size switch
         {
             AnalyticsBucketSize.Month => new DateTimeOffset(value.Year, value.Month, 1, 0, 0, 0, TimeSpan.Zero),
-            AnalyticsBucketSize.Minute => new DateTimeOffset(value.Year, value.Month, value.Day, value.Hour, value.Minute, 0, TimeSpan.Zero),
+            AnalyticsBucketSize.Minute => new DateTimeOffset(
+                value.Year,
+                value.Month,
+                value.Day,
+                value.Hour,
+                value.Minute,
+                0,
+                TimeSpan.Zero),
             AnalyticsBucketSize.Hour => new DateTimeOffset(value.Year, value.Month, value.Day, value.Hour, 0, 0, TimeSpan.Zero),
-            _ => new DateTimeOffset(value.Year, value.Month, value.Day, 0, 0, 0, TimeSpan.Zero)
+            _ => new DateTimeOffset(value.Year, value.Month, value.Day, 0, 0, 0, TimeSpan.Zero),
         };
     }
 
-    private static DateTimeOffset BucketEnd(DateTimeOffset value, AnalyticsBucketSize size) => size switch
+    private static DateTimeOffset BucketEnd(DateTimeOffset value, AnalyticsBucketSize size)
     {
-        AnalyticsBucketSize.Month => value.AddMonths(1),
-        AnalyticsBucketSize.Minute => value.AddMinutes(1),
-        AnalyticsBucketSize.Hour => value.AddHours(1),
-        _ => value.AddDays(1)
-    };
+        return size switch
+        {
+            AnalyticsBucketSize.Month => value.AddMonths(1),
+            AnalyticsBucketSize.Minute => value.AddMinutes(1),
+            AnalyticsBucketSize.Hour => value.AddHours(1),
+            _ => value.AddDays(1),
+        };
+    }
 
     private static string BuildIntervalId(QuotaSnapshot previous, QuotaSnapshot current)
     {
-        var material = string.Join('|',
+        string material = string.Join(
+            '|',
             current.Provider,
             current.Profile,
             current.Kind,
@@ -1125,20 +1288,20 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             current.ResetsAtUtc?.ToUniversalTime().ToString("O") ?? "none");
         if (current.AccountKey is not null) material += "|" + current.AccountKey;
         material += "|" + current.LimitId + "|" + current.PlanType + "|" + current.SessionId + "|" + current.WindowMinutes;
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material))).ToLowerInvariant();
+        string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material))).ToLowerInvariant();
         return $"quota-burn-{hash[..24]}";
     }
 
     private static async Task BeginReadSnapshotAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = "BEGIN DEFERRED;";
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static async Task CommitReadSnapshotAsync(SqliteConnection connection, CancellationToken cancellationToken)
     {
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = "COMMIT;";
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -1147,7 +1310,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
     {
         try
         {
-            var rollback = connection.CreateCommand();
+            SqliteCommand rollback = connection.CreateCommand();
             rollback.CommandText = "ROLLBACK;";
             await rollback.ExecuteNonQueryAsync(CancellationToken.None);
         }
@@ -1157,11 +1320,15 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         }
     }
 
-    private static string SerializeUtc(DateTimeOffset value) =>
-        value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+    private static string SerializeUtc(DateTimeOffset value)
+    {
+        return value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+    }
 
-    private static DateTimeOffset ParseUtc(string value) =>
-        DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
+    private static DateTimeOffset ParseUtc(string value)
+    {
+        return DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
+    }
 
     private sealed class MutableBucket
     {
@@ -1178,8 +1345,9 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         public double? FiveHourQuotaDelta { get; set; }
         public double? WeeklyQuotaDelta { get; set; }
 
-        public UsageHistoryBucket ToModel(DateTimeOffset start, DateTimeOffset end) =>
-            new(
+        public UsageHistoryBucket ToModel(DateTimeOffset start, DateTimeOffset end)
+        {
+            return new UsageHistoryBucket(
                 start,
                 end,
                 NativeTokens,
@@ -1194,6 +1362,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 Compactions,
                 FiveHourQuotaDelta,
                 WeeklyQuotaDelta);
+        }
     }
 
     private sealed record QuotaBurnIntervalSeed(QuotaSnapshot Previous, QuotaSnapshot Current, double Delta);

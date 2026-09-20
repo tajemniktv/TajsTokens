@@ -1,8 +1,16 @@
+// Taj's Tokens | CodexStateIndexedIngestionTests.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
+
+#endregion
 
 namespace TajsTokens.Core.Tests;
 
@@ -13,24 +21,40 @@ public sealed class CodexStateIndexedIngestionTests
     [InlineData(true)]
     public async Task RefreshAsync_BoundsUpgradeBatchesPrioritizesRecentAndRetainsDeferredWork(bool failingOldFiles)
     {
-        var directory = Directory.CreateTempSubdirectory("tajstokens-batched-replay-");
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-batched-replay-");
         try
         {
-            var sessions = Directory.CreateDirectory(Path.Combine(directory.FullName, "sessions"));
-            var threads = Enumerable.Range(0, 40).Select(i => new StateThread($"t{i:D2}",
-                Path.Combine(sessions.FullName, $"t{i:D2}.jsonl"), 0, (i + 1) * 100_000, 0)).ToArray();
-            foreach (var thread in threads) await File.WriteAllTextAsync(thread.RolloutPath, "{}\n");
+            DirectoryInfo sessions = Directory.CreateDirectory(Path.Combine(directory.FullName, "sessions"));
+            StateThread[] threads = Enumerable.Range(0, 40).Select(i => new StateThread(
+                $"t{i:D2}",
+                Path.Combine(sessions.FullName, $"t{i:D2}.jsonl"),
+                0,
+                (i + 1) * 100_000,
+                0)).ToArray();
+            foreach (StateThread thread in threads) await File.WriteAllTextAsync(thread.RolloutPath, "{}\n");
             await CreateStateDatabaseAsync(Path.Combine(directory.FullName, "state_5.sqlite"), threads);
-            var telemetryPath = Path.Combine(directory.FullName, "telemetry.db");
+            string telemetryPath = Path.Combine(directory.FullName, "telemetry.db");
             await new SqliteTelemetryRepository(telemetryPath).InitializeAsync(CancellationToken.None);
             var store = new SqliteCodexObservatoryStore(telemetryPath);
             var index = new SqliteCodexStateIndexStore(telemetryPath);
             var ingestion = new RecordingIngestionService("fixture");
-            if (failingOldFiles) foreach (var thread in threads.Take(8)) ingestion.FailingPaths.Add(thread.RolloutPath);
-            CodexObservatoryService Service() => new(ingestion, store, new CodexStateCatalog(directory.FullName),
-                index, [sessions.FullName], new ReconciliationClock());
-            var service = Service();
-            var first = await service.RefreshAsync(CancellationToken.None);
+            if (failingOldFiles)
+                foreach (StateThread thread in threads.Take(8))
+                    ingestion.FailingPaths.Add(thread.RolloutPath);
+
+            CodexObservatoryService Service()
+            {
+                return new CodexObservatoryService(
+                    ingestion,
+                    store,
+                    new CodexStateCatalog(directory.FullName),
+                    index,
+                    [sessions.FullName],
+                    new ReconciliationClock());
+            }
+
+            CodexObservatoryService service = Service();
+            CodexObservatoryRefreshResult first = await service.RefreshAsync(CancellationToken.None);
             Assert.Equal(16, first.FilesScanned);
             Assert.Equal(24, first.DeferredFiles);
             Assert.Equal(threads.Reverse().Take(8).Select(x => x.RolloutPath), ingestion.Paths.Take(8));
@@ -38,14 +62,15 @@ public sealed class CodexStateIndexedIngestionTests
             // A restart must not turn the batch's newest timestamp into a skip over its deferred middle.
             if (!failingOldFiles) service = Service();
             CodexObservatoryRefreshResult last = first;
-            for (var pass = 0; pass < 5; pass++)
+            for (int pass = 0; pass < 5; pass++)
             {
                 last = await service.RefreshAsync(CancellationToken.None);
                 Assert.InRange(last.FilesScanned, 0, 16);
             }
-            var fingerprints = await index.GetFingerprintsAsync(CancellationToken.None);
+            IReadOnlyDictionary<string, CodexStateThreadFingerprint>
+                fingerprints = await index.GetFingerprintsAsync(CancellationToken.None);
             Assert.Equal(failingOldFiles ? 32 : 40, fingerprints.Count);
-            foreach (var thread in threads.Skip(failingOldFiles ? 8 : 0))
+            foreach (StateThread thread in threads.Skip(failingOldFiles ? 8 : 0))
                 Assert.Single(ingestion.Paths, path => path == thread.RolloutPath);
             Assert.Equal(0, last.DeferredFiles);
             Assert.Equal(failingOldFiles ? 8 : 0, last.Errors);
@@ -54,36 +79,43 @@ public sealed class CodexStateIndexedIngestionTests
         finally
         {
             SqliteConnection.ClearAllPools();
-            directory.Delete(recursive: true);
+            directory.Delete(true);
         }
     }
 
     [Fact]
     public async Task RefreshAsync_NewStateGenerationDoesNotReuseOldWatermark()
     {
-        var directory = Directory.CreateTempSubdirectory("tajstokens-generation-reconcile-");
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-generation-reconcile-");
         try
         {
-            var sessions = Directory.CreateDirectory(Path.Combine(directory.FullName, "sessions"));
-            var oldPath = Path.Combine(sessions.FullName, "old.jsonl");
-            var newPath = Path.Combine(sessions.FullName, "new.jsonl");
+            DirectoryInfo sessions = Directory.CreateDirectory(Path.Combine(directory.FullName, "sessions"));
+            string oldPath = Path.Combine(sessions.FullName, "old.jsonl");
+            string newPath = Path.Combine(sessions.FullName, "new.jsonl");
             await File.WriteAllTextAsync(oldPath, "{}\n");
             await File.WriteAllTextAsync(newPath, "{}\n");
-            await CreateStateDatabaseAsync(Path.Combine(directory.FullName, "state_5.sqlite"),
-                [new("old", oldPath, 400_000, 500_000, 0)]);
-            var telemetryPath = Path.Combine(directory.FullName, "telemetry.db");
+            await CreateStateDatabaseAsync(
+                Path.Combine(directory.FullName, "state_5.sqlite"),
+                [new StateThread("old", oldPath, 400_000, 500_000, 0)]);
+            string telemetryPath = Path.Combine(directory.FullName, "telemetry.db");
             await new SqliteTelemetryRepository(telemetryPath).InitializeAsync(CancellationToken.None);
             var store = new SqliteCodexObservatoryStore(telemetryPath);
             var index = new SqliteCodexStateIndexStore(telemetryPath);
             var ingestion = new RecordingIngestionService("old");
-            var service = new CodexObservatoryService(ingestion, store,
-                new CodexStateCatalog(directory.FullName), index, [sessions.FullName], new ReconciliationClock());
+            var service = new CodexObservatoryService(
+                ingestion,
+                store,
+                new CodexStateCatalog(directory.FullName),
+                index,
+                [sessions.FullName],
+                new ReconciliationClock());
             await service.RefreshAsync(CancellationToken.None);
             Assert.Equal(500_000, await index.GetWatermarkAsync(CancellationToken.None));
 
-            await CreateStateDatabaseAsync(Path.Combine(directory.FullName, "state_6.sqlite"),
-                [new("new", newPath, 1_000, 2_000, 0)]);
-            var result = await service.RefreshAsync(CancellationToken.None);
+            await CreateStateDatabaseAsync(
+                Path.Combine(directory.FullName, "state_6.sqlite"),
+                [new StateThread("new", newPath, 1_000, 2_000, 0)]);
+            CodexObservatoryRefreshResult result = await service.RefreshAsync(CancellationToken.None);
             Assert.Equal(2, ingestion.Paths.Count);
             Assert.Equal(newPath, ingestion.Paths.Last());
             Assert.Equal(2_000, await index.GetWatermarkAsync(CancellationToken.None));
@@ -95,53 +127,60 @@ public sealed class CodexStateIndexedIngestionTests
         finally
         {
             SqliteConnection.ClearAllPools();
-            directory.Delete(recursive: true);
+            directory.Delete(true);
         }
     }
 
     [Fact]
     public async Task RefreshAsync_ReportsUnindexedAndOutsideRootPathsWithoutImportingAlternatives()
     {
-        var directory = Directory.CreateTempSubdirectory("tajstokens-coverage-");
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-coverage-");
         try
         {
-            var sessions = Directory.CreateDirectory(Path.Combine(directory.FullName, "sessions"));
-            var indexedPath = Path.Combine(sessions.FullName, "indexed.jsonl");
-            var alternatePath = Path.Combine(sessions.FullName, "alternate.jsonl");
-            var outsidePath = Path.Combine(directory.FullName, "outside.jsonl");
-            foreach (var path in new[] { indexedPath, alternatePath, outsidePath })
+            DirectoryInfo sessions = Directory.CreateDirectory(Path.Combine(directory.FullName, "sessions"));
+            string indexedPath = Path.Combine(sessions.FullName, "indexed.jsonl");
+            string alternatePath = Path.Combine(sessions.FullName, "alternate.jsonl");
+            string outsidePath = Path.Combine(directory.FullName, "outside.jsonl");
+            foreach (string path in new[] { indexedPath, alternatePath, outsidePath })
                 await File.WriteAllTextAsync(path, "{}\n");
-            await CreateStateDatabaseAsync(Path.Combine(directory.FullName, "state_5.sqlite"),
-                [new("indexed", indexedPath, 100_000, 200_000, 0),
-                 new("outside", outsidePath, 100_000, 200_000, 0)]);
-            var telemetryPath = Path.Combine(directory.FullName, "telemetry.db");
+            await CreateStateDatabaseAsync(
+                Path.Combine(directory.FullName, "state_5.sqlite"),
+                [
+                    new StateThread("indexed", indexedPath, 100_000, 200_000, 0),
+                    new StateThread("outside", outsidePath, 100_000, 200_000, 0),
+                ]);
+            string telemetryPath = Path.Combine(directory.FullName, "telemetry.db");
             await new SqliteTelemetryRepository(telemetryPath).InitializeAsync(CancellationToken.None);
             var store = new SqliteCodexObservatoryStore(telemetryPath);
             var ingestion = new RecordingIngestionService("indexed");
             var time = new ReconciliationClock();
-            var service = new CodexObservatoryService(ingestion, store,
-                new CodexStateCatalog(directory.FullName), new SqliteCodexStateIndexStore(telemetryPath),
-                [sessions.FullName], time);
-            var first = await service.RefreshAsync(CancellationToken.None);
+            var service = new CodexObservatoryService(
+                ingestion,
+                store,
+                new CodexStateCatalog(directory.FullName),
+                new SqliteCodexStateIndexStore(telemetryPath),
+                [sessions.FullName],
+                time);
+            CodexObservatoryRefreshResult first = await service.RefreshAsync(CancellationToken.None);
             Assert.Equal(2, first.Coverage!.IndexedPaths);
             Assert.Equal(2, first.Coverage.AccessibleIndexedPaths);
             Assert.Equal(2, first.Coverage.DiscoveredPaths);
             Assert.Equal(1, first.Coverage.UnindexedPaths);
             Assert.Equal(1, first.Coverage.IndexedOutsideDiscovery);
             Assert.DoesNotContain(alternatePath, ingestion.Paths);
-            var warm = await service.RefreshAsync(CancellationToken.None);
+            CodexObservatoryRefreshResult warm = await service.RefreshAsync(CancellationToken.None);
             // Warm refresh deliberately reuses the last coverage scan until reconciliation.
             Assert.Same(first.Coverage, warm.Coverage);
             await File.WriteAllTextAsync(Path.Combine(sessions.FullName, "another.jsonl"), "{}\n");
             time.Advance(TimeSpan.FromMinutes(5));
-            var later = await service.RefreshAsync(CancellationToken.None);
+            CodexObservatoryRefreshResult later = await service.RefreshAsync(CancellationToken.None);
             Assert.Equal(2, later.Coverage!.UnindexedPaths);
             Assert.Equal(2, ingestion.Paths.Count);
         }
         finally
         {
             SqliteConnection.ClearAllPools();
-            directory.Delete(recursive: true);
+            directory.Delete(true);
         }
     }
 
@@ -150,27 +189,34 @@ public sealed class CodexStateIndexedIngestionTests
     [InlineData(true)]
     public async Task RefreshAsync_PeriodicallyReconcilesOldPathWithoutTimestampAdvance(bool initiallyMissing)
     {
-        var directory = Directory.CreateTempSubdirectory("tajstokens-warm-reconcile-");
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-warm-reconcile-");
         try
         {
-            var sessions = Directory.CreateDirectory(Path.Combine(directory.FullName, "sessions"));
-            var activePath = Path.Combine(sessions.FullName, "active.jsonl");
-            var replacementPath = Path.Combine(sessions.FullName, "replacement.jsonl");
-            var recentPath = Path.Combine(sessions.FullName, "recent.jsonl");
+            DirectoryInfo sessions = Directory.CreateDirectory(Path.Combine(directory.FullName, "sessions"));
+            string activePath = Path.Combine(sessions.FullName, "active.jsonl");
+            string replacementPath = Path.Combine(sessions.FullName, "replacement.jsonl");
+            string recentPath = Path.Combine(sessions.FullName, "recent.jsonl");
             await File.WriteAllTextAsync(activePath, "{}\n");
             await File.WriteAllTextAsync(recentPath, "{}\n");
-            var statePath = Path.Combine(directory.FullName, "state_5.sqlite");
-            await CreateStateDatabaseAsync(statePath,
-                [new("old", activePath, 10_000, 20_000, 0),
-                 new("recent", recentPath, 200_000, 300_000, 0)]);
-            var telemetryPath = Path.Combine(directory.FullName, "telemetry.db");
+            string statePath = Path.Combine(directory.FullName, "state_5.sqlite");
+            await CreateStateDatabaseAsync(
+                statePath,
+                [
+                    new StateThread("old", activePath, 10_000, 20_000, 0),
+                    new StateThread("recent", recentPath, 200_000, 300_000, 0),
+                ]);
+            string telemetryPath = Path.Combine(directory.FullName, "telemetry.db");
             await new SqliteTelemetryRepository(telemetryPath).InitializeAsync(CancellationToken.None);
             var store = new SqliteCodexObservatoryStore(telemetryPath);
             var ingestion = new RecordingIngestionService("old");
             var time = new ReconciliationClock();
-            var service = new CodexObservatoryService(ingestion, store,
-                new CodexStateCatalog(directory.FullName), new SqliteCodexStateIndexStore(telemetryPath),
-                [sessions.FullName], time);
+            var service = new CodexObservatoryService(
+                ingestion,
+                store,
+                new CodexStateCatalog(directory.FullName),
+                new SqliteCodexStateIndexStore(telemetryPath),
+                [sessions.FullName],
+                time);
             await service.RefreshAsync(CancellationToken.None);
             Assert.Equal(2, ingestion.Paths.Count);
             await UpdateRolloutPathOnlyAsync(statePath, "old", replacementPath);
@@ -180,7 +226,7 @@ public sealed class CodexStateIndexedIngestionTests
             await service.RefreshAsync(CancellationToken.None);
             Assert.Equal(2, ingestion.Paths.Count);
             time.Advance(TimeSpan.FromMinutes(1));
-            var reconciliation = await service.RefreshAsync(CancellationToken.None);
+            CodexObservatoryRefreshResult reconciliation = await service.RefreshAsync(CancellationToken.None);
             if (initiallyMissing)
             {
                 Assert.Equal(1, reconciliation.Errors);
@@ -197,28 +243,20 @@ public sealed class CodexStateIndexedIngestionTests
         finally
         {
             SqliteConnection.ClearAllPools();
-            directory.Delete(recursive: true);
+            directory.Delete(true);
         }
-    }
-
-    private sealed class ReconciliationClock : TimeProvider
-    {
-        private long _timestamp;
-        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
-        public override long GetTimestamp() => _timestamp;
-        public void Advance(TimeSpan duration) => _timestamp += duration.Ticks;
     }
 
     [Fact]
     public async Task RefreshAsync_StateCatalogSkipsUnchangedRolloutAndReopensChangedThread()
     {
-        var directory = Directory.CreateTempSubdirectory("tajstokens-state-index-");
-        var codexHome = Directory.CreateDirectory(Path.Combine(directory.FullName, ".codex"));
-        var sessions = Directory.CreateDirectory(Path.Combine(codexHome.FullName, "sessions"));
-        var telemetryPath = Path.Combine(directory.FullName, "telemetry.db");
-        var statePath = Path.Combine(codexHome.FullName, "state_5.sqlite");
-        var threadId = "01a05c52-16e8-7152-a439-18bf1c3b1b7a";
-        var rolloutPath = Path.Combine(sessions.FullName, $"rollout-2026-09-01T11-00-00-{threadId}.jsonl");
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-state-index-");
+        DirectoryInfo codexHome = Directory.CreateDirectory(Path.Combine(directory.FullName, ".codex"));
+        DirectoryInfo sessions = Directory.CreateDirectory(Path.Combine(codexHome.FullName, "sessions"));
+        string telemetryPath = Path.Combine(directory.FullName, "telemetry.db");
+        string statePath = Path.Combine(codexHome.FullName, "state_5.sqlite");
+        string threadId = "01a05c52-16e8-7152-a439-18bf1c3b1b7a";
+        string rolloutPath = Path.Combine(sessions.FullName, $"rollout-2026-09-01T11-00-00-{threadId}.jsonl");
         await File.WriteAllTextAsync(rolloutPath, "{}\n");
 
         try
@@ -239,12 +277,12 @@ public sealed class CodexStateIndexedIngestionTests
                 new SqliteCodexStateIndexStore(telemetryPath),
                 [sessions.FullName]);
 
-            var first = await service.RefreshAsync(CancellationToken.None);
+            CodexObservatoryRefreshResult first = await service.RefreshAsync(CancellationToken.None);
             Assert.Single(ingestion.Paths);
             Assert.Equal(1, first.FilesDiscovered);
             Assert.Equal(1, first.FilesScanned);
 
-            var second = await service.RefreshAsync(CancellationToken.None);
+            CodexObservatoryRefreshResult second = await service.RefreshAsync(CancellationToken.None);
             Assert.Single(ingestion.Paths);
             Assert.Equal(1, second.FilesDiscovered);
             Assert.Equal(0, second.FilesScanned);
@@ -252,17 +290,17 @@ public sealed class CodexStateIndexedIngestionTests
 
             await UpdateThreadAsync(statePath, threadId, 1_700_000_002_000, 250);
 
-            var third = await service.RefreshAsync(CancellationToken.None);
+            CodexObservatoryRefreshResult third = await service.RefreshAsync(CancellationToken.None);
             Assert.Equal(2, ingestion.Paths.Count);
             Assert.Equal(1, third.FilesScanned);
             Assert.Equal(1, third.RecordsScanned);
 
             await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = telemetryPath }.ToString());
             await connection.OpenAsync();
-            var command = connection.CreateCommand();
+            SqliteCommand command = connection.CreateCommand();
             command.CommandText = "SELECT rollout_path_hash FROM codex_state_thread_fingerprints WHERE thread_id = $id;";
             command.Parameters.AddWithValue("$id", threadId);
-            var stored = Assert.IsType<string>(await command.ExecuteScalarAsync());
+            string stored = Assert.IsType<string>(await command.ExecuteScalarAsync());
             Assert.NotEmpty(stored);
             Assert.DoesNotContain(directory.FullName, stored, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("rollout-", stored, StringComparison.OrdinalIgnoreCase);
@@ -270,22 +308,22 @@ public sealed class CodexStateIndexedIngestionTests
         finally
         {
             SqliteConnection.ClearAllPools();
-            directory.Delete(recursive: true);
+            directory.Delete(true);
         }
     }
 
     [Fact]
     public async Task RefreshAsync_NewProcessReconcilesPathChangeWithoutTimestampAdvance()
     {
-        var directory = Directory.CreateTempSubdirectory("tajstokens-state-reconcile-");
-        var codexHome = Directory.CreateDirectory(Path.Combine(directory.FullName, ".codex"));
-        var sessions = Directory.CreateDirectory(Path.Combine(codexHome.FullName, "sessions"));
-        var archive = Directory.CreateDirectory(Path.Combine(codexHome.FullName, "archived_sessions"));
-        var telemetryPath = Path.Combine(directory.FullName, "telemetry.db");
-        var statePath = Path.Combine(codexHome.FullName, "state_5.sqlite");
-        var threadId = "thread-reconcile";
-        var activePath = Path.Combine(sessions.FullName, "active.jsonl");
-        var archivedPath = Path.Combine(archive.FullName, "archived.jsonl");
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-state-reconcile-");
+        DirectoryInfo codexHome = Directory.CreateDirectory(Path.Combine(directory.FullName, ".codex"));
+        DirectoryInfo sessions = Directory.CreateDirectory(Path.Combine(codexHome.FullName, "sessions"));
+        DirectoryInfo archive = Directory.CreateDirectory(Path.Combine(codexHome.FullName, "archived_sessions"));
+        string telemetryPath = Path.Combine(directory.FullName, "telemetry.db");
+        string statePath = Path.Combine(codexHome.FullName, "state_5.sqlite");
+        string threadId = "thread-reconcile";
+        string activePath = Path.Combine(sessions.FullName, "active.jsonl");
+        string archivedPath = Path.Combine(archive.FullName, "archived.jsonl");
         await File.WriteAllTextAsync(activePath, "{}\n");
         await File.WriteAllTextAsync(archivedPath, "{}\n");
 
@@ -322,28 +360,28 @@ public sealed class CodexStateIndexedIngestionTests
                 new CodexStateCatalog(codexHome.FullName),
                 indexStore,
                 [sessions.FullName, archive.FullName]);
-            var result = await secondProcess.RefreshAsync(CancellationToken.None);
+            CodexObservatoryRefreshResult result = await secondProcess.RefreshAsync(CancellationToken.None);
 
-            var reopened = Assert.Single(secondIngestion.Paths);
+            string reopened = Assert.Single(secondIngestion.Paths);
             Assert.Equal(Path.GetFullPath(archivedPath), reopened);
             Assert.Equal(1, result.FilesScanned);
         }
         finally
         {
             SqliteConnection.ClearAllPools();
-            directory.Delete(recursive: true);
+            directory.Delete(true);
         }
     }
 
     [Fact]
     public async Task RefreshAsync_UnknownStateSchemaFallsBackToFilesystemDiscovery()
     {
-        var directory = Directory.CreateTempSubdirectory("tajstokens-state-fallback-");
-        var codexHome = Directory.CreateDirectory(Path.Combine(directory.FullName, ".codex"));
-        var sessions = Directory.CreateDirectory(Path.Combine(codexHome.FullName, "sessions"));
-        var telemetryPath = Path.Combine(directory.FullName, "telemetry.db");
-        var statePath = Path.Combine(codexHome.FullName, "state_99.sqlite");
-        var rolloutPath = Path.Combine(sessions.FullName, "rollout-fallback.jsonl");
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-state-fallback-");
+        DirectoryInfo codexHome = Directory.CreateDirectory(Path.Combine(directory.FullName, ".codex"));
+        DirectoryInfo sessions = Directory.CreateDirectory(Path.Combine(codexHome.FullName, "sessions"));
+        string telemetryPath = Path.Combine(directory.FullName, "telemetry.db");
+        string statePath = Path.Combine(codexHome.FullName, "state_99.sqlite");
+        string rolloutPath = Path.Combine(sessions.FullName, "rollout-fallback.jsonl");
         await File.WriteAllTextAsync(rolloutPath, "{}\n");
 
         try
@@ -351,7 +389,7 @@ public sealed class CodexStateIndexedIngestionTests
             await using (var state = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = statePath }.ToString()))
             {
                 await state.OpenAsync();
-                var incompatible = state.CreateCommand();
+                SqliteCommand incompatible = state.CreateCommand();
                 incompatible.CommandText = "CREATE TABLE threads(id TEXT PRIMARY KEY, rollout_path TEXT NOT NULL);";
                 await incompatible.ExecuteNonQueryAsync();
             }
@@ -368,7 +406,7 @@ public sealed class CodexStateIndexedIngestionTests
                 new SqliteCodexStateIndexStore(telemetryPath),
                 [sessions.FullName]);
 
-            var result = await service.RefreshAsync(CancellationToken.None);
+            CodexObservatoryRefreshResult result = await service.RefreshAsync(CancellationToken.None);
 
             Assert.Single(ingestion.Paths);
             Assert.Equal(Path.GetFullPath(rolloutPath), ingestion.Paths[0]);
@@ -378,21 +416,21 @@ public sealed class CodexStateIndexedIngestionTests
         finally
         {
             SqliteConnection.ClearAllPools();
-            directory.Delete(recursive: true);
+            directory.Delete(true);
         }
     }
 
     [Fact]
     public async Task Catalog_ReadsValidatedSpawnEdgesAndRespectsUpdatedWatermark()
     {
-        var directory = Directory.CreateTempSubdirectory("tajstokens-state-catalog-");
-        var codexHome = Directory.CreateDirectory(Path.Combine(directory.FullName, ".codex"));
-        var sessions = Directory.CreateDirectory(Path.Combine(codexHome.FullName, "sessions"));
-        var statePath = Path.Combine(codexHome.FullName, "state_5.sqlite");
-        var parentId = "parent";
-        var childId = "child";
-        var parentPath = Path.Combine(sessions.FullName, "parent.jsonl");
-        var childPath = Path.Combine(sessions.FullName, "child.jsonl");
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-state-catalog-");
+        DirectoryInfo codexHome = Directory.CreateDirectory(Path.Combine(directory.FullName, ".codex"));
+        DirectoryInfo sessions = Directory.CreateDirectory(Path.Combine(codexHome.FullName, "sessions"));
+        string statePath = Path.Combine(codexHome.FullName, "state_5.sqlite");
+        string parentId = "parent";
+        string childId = "child";
+        string parentPath = Path.Combine(sessions.FullName, "parent.jsonl");
+        string childPath = Path.Combine(sessions.FullName, "child.jsonl");
         await File.WriteAllTextAsync(parentPath, "{}\n");
         await File.WriteAllTextAsync(childPath, "{}\n");
 
@@ -402,25 +440,25 @@ public sealed class CodexStateIndexedIngestionTests
                 statePath,
                 [
                     new StateThread(parentId, parentPath, 1_000, 2_000, 100),
-                    new StateThread(childId, childPath, 1_500, 3_000, 200)
+                    new StateThread(childId, childPath, 1_500, 3_000, 200),
                 ],
                 [(parentId, childId, "open")]);
 
             var catalog = new CodexStateCatalog(codexHome.FullName);
-            var result = await catalog.TryReadSinceAsync(2_500, CancellationToken.None);
+            CodexStateCatalogBatch? result = await catalog.TryReadSinceAsync(2_500, CancellationToken.None);
             Assert.NotNull(result);
 
             Assert.Equal(2, result!.TotalThreadCount);
-            var changed = Assert.Single(result.Threads);
+            CodexStateThread changed = Assert.Single(result.Threads);
             Assert.Equal(childId, changed.ThreadId);
-            var edge = Assert.Single(result.Edges);
+            CodexStateEdge edge = Assert.Single(result.Edges);
             Assert.Equal(parentId, edge.ParentThreadId);
             Assert.Equal(childId, edge.ChildThreadId);
         }
         finally
         {
             SqliteConnection.ClearAllPools();
-            directory.Delete(recursive: true);
+            directory.Delete(true);
         }
     }
 
@@ -431,39 +469,39 @@ public sealed class CodexStateIndexedIngestionTests
     {
         await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = path }.ToString());
         await connection.OpenAsync();
-        var schema = connection.CreateCommand();
+        SqliteCommand schema = connection.CreateCommand();
         schema.CommandText = """
-            CREATE TABLE threads (
-                id TEXT PRIMARY KEY,
-                rollout_path TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL,
-                tokens_used INTEGER NOT NULL DEFAULT 0,
-                model TEXT,
-                reasoning_effort TEXT,
-                archived INTEGER NOT NULL DEFAULT 0,
-                created_at_ms INTEGER,
-                updated_at_ms INTEGER
-            );
-            CREATE INDEX idx_threads_updated_at_ms ON threads(updated_at_ms DESC, id DESC);
-            CREATE TABLE thread_spawn_edges (
-                parent_thread_id TEXT NOT NULL,
-                child_thread_id TEXT NOT NULL PRIMARY KEY,
-                status TEXT NOT NULL
-            );
-            """;
+                             CREATE TABLE threads (
+                                 id TEXT PRIMARY KEY,
+                                 rollout_path TEXT NOT NULL,
+                                 created_at INTEGER NOT NULL,
+                                 updated_at INTEGER NOT NULL,
+                                 tokens_used INTEGER NOT NULL DEFAULT 0,
+                                 model TEXT,
+                                 reasoning_effort TEXT,
+                                 archived INTEGER NOT NULL DEFAULT 0,
+                                 created_at_ms INTEGER,
+                                 updated_at_ms INTEGER
+                             );
+                             CREATE INDEX idx_threads_updated_at_ms ON threads(updated_at_ms DESC, id DESC);
+                             CREATE TABLE thread_spawn_edges (
+                                 parent_thread_id TEXT NOT NULL,
+                                 child_thread_id TEXT NOT NULL PRIMARY KEY,
+                                 status TEXT NOT NULL
+                             );
+                             """;
         await schema.ExecuteNonQueryAsync();
 
-        foreach (var thread in threads)
+        foreach (StateThread thread in threads)
         {
-            var insert = connection.CreateCommand();
+            SqliteCommand insert = connection.CreateCommand();
             insert.CommandText = """
-                INSERT INTO threads(
-                    id, rollout_path, created_at, updated_at, tokens_used, model,
-                    reasoning_effort, archived, created_at_ms, updated_at_ms)
-                VALUES($id, $path, $createdSeconds, $updatedSeconds, $tokens, $model,
-                       $reasoning, 0, $createdMs, $updatedMs);
-                """;
+                                 INSERT INTO threads(
+                                     id, rollout_path, created_at, updated_at, tokens_used, model,
+                                     reasoning_effort, archived, created_at_ms, updated_at_ms)
+                                 VALUES($id, $path, $createdSeconds, $updatedSeconds, $tokens, $model,
+                                        $reasoning, 0, $createdMs, $updatedMs);
+                                 """;
             insert.Parameters.AddWithValue("$id", thread.Id);
             insert.Parameters.AddWithValue("$path", thread.RolloutPath);
             insert.Parameters.AddWithValue("$createdSeconds", thread.CreatedAtMs / 1000);
@@ -476,10 +514,11 @@ public sealed class CodexStateIndexedIngestionTests
             await insert.ExecuteNonQueryAsync();
         }
 
-        foreach (var edge in edges ?? [])
+        foreach ((string Parent, string Child, string Status) edge in edges ?? [])
         {
-            var insert = connection.CreateCommand();
-            insert.CommandText = "INSERT INTO thread_spawn_edges(parent_thread_id, child_thread_id, status) VALUES($parent, $child, $status);";
+            SqliteCommand insert = connection.CreateCommand();
+            insert.CommandText =
+                "INSERT INTO thread_spawn_edges(parent_thread_id, child_thread_id, status) VALUES($parent, $child, $status);";
             insert.Parameters.AddWithValue("$parent", edge.Parent);
             insert.Parameters.AddWithValue("$child", edge.Child);
             insert.Parameters.AddWithValue("$status", edge.Status);
@@ -491,14 +530,14 @@ public sealed class CodexStateIndexedIngestionTests
     {
         await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = statePath }.ToString());
         await connection.OpenAsync();
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            UPDATE threads
-            SET updated_at = $seconds,
-                updated_at_ms = $milliseconds,
-                tokens_used = $tokens
-            WHERE id = $id;
-            """;
+                              UPDATE threads
+                              SET updated_at = $seconds,
+                                  updated_at_ms = $milliseconds,
+                                  tokens_used = $tokens
+                              WHERE id = $id;
+                              """;
         command.Parameters.AddWithValue("$seconds", updatedAtMs / 1000);
         command.Parameters.AddWithValue("$milliseconds", updatedAtMs);
         command.Parameters.AddWithValue("$tokens", tokensUsed);
@@ -510,11 +549,27 @@ public sealed class CodexStateIndexedIngestionTests
     {
         await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = statePath }.ToString());
         await connection.OpenAsync();
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = "UPDATE threads SET rollout_path = $path WHERE id = $id;";
         command.Parameters.AddWithValue("$path", rolloutPath);
         command.Parameters.AddWithValue("$id", threadId);
         await command.ExecuteNonQueryAsync();
+    }
+
+    private sealed class ReconciliationClock : TimeProvider
+    {
+        private long _timestamp;
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override long GetTimestamp()
+        {
+            return _timestamp;
+        }
+
+        public void Advance(TimeSpan duration)
+        {
+            _timestamp += duration.Ticks;
+        }
     }
 
     private sealed record StateThread(
@@ -534,12 +589,8 @@ public sealed class CodexStateIndexedIngestionTests
             cancellationToken.ThrowIfCancellationRequested();
             Paths.Add(Path.GetFullPath(filePath));
             if (FailingPaths.Contains(filePath)) throw new IOException("Synthetic unreadable rollout.");
-            var length = new FileInfo(filePath).Length;
-            return Task.FromResult(new CodexIngestionResult(1, 1, sessionId)
-            {
-                LastCompleteRecordOffset = length,
-                SourceLength = length
-            });
+            long length = new FileInfo(filePath).Length;
+            return Task.FromResult(new CodexIngestionResult(1, 1, sessionId) { LastCompleteRecordOffset = length, SourceLength = length });
         }
     }
 }

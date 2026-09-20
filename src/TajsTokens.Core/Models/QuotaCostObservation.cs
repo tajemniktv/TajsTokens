@@ -1,16 +1,31 @@
+// Taj's Tokens | QuotaCostObservation.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
 namespace TajsTokens.Core.Models;
 
 /// <summary>Rebuildable retrospective cost evidence, never a live forecast input.</summary>
 public sealed record QuotaCostObservation(
-    QuotaHistoryCohort Cohort, DateTimeOffset GenerationStartUtc, DateTimeOffset ResetUtc,
-    DateTimeOffset StartUtc, DateTimeOffset EndUtc, double HorizonHours,
-    double StartUsed, double EndUsed, double LowerDelta, double UpperDelta,
-    string PrecisionPolicy, double PaceDelta,
-    IReadOnlyList<double> TokenCategories, CodexForecastFeatures Features,
-    double? MeanTtftMilliseconds, int RuntimeSamples,
+    QuotaHistoryCohort Cohort,
+    DateTimeOffset GenerationStartUtc,
+    DateTimeOffset ResetUtc,
+    DateTimeOffset StartUtc,
+    DateTimeOffset EndUtc,
+    double HorizonHours,
+    double StartUsed,
+    double EndUsed,
+    double LowerDelta,
+    double UpperDelta,
+    string PrecisionPolicy,
+    double PaceDelta,
+    IReadOnlyList<double> TokenCategories,
+    CodexForecastFeatures Features,
+    double? MeanTtftMilliseconds,
+    int RuntimeSamples,
     IReadOnlyList<string> QualityFlags)
 {
     public DateTimeOffset? EvidenceAvailableAtUtc { get; init; }
+
     // Availability of quota labels, token amounts/model/effort and any ownership assertion.
     // Unlike the full-feature timestamp, this excludes unused context/activity/tier metadata.
     public DateTimeOffset? TokenCostEvidenceAvailableAtUtc { get; init; }
@@ -22,8 +37,14 @@ public sealed record QuotaCostObservation(
     public QuotaAccountAttribution Attribution { get; init; }
     public string? AccountAssociationId { get; init; }
     public double ObservedDelta => EndUsed - StartUsed;
+
     public bool HasCompleteTokenCategories => !QualityFlags.Contains("incomplete-token-categories") &&
-        Features.Tokens >= 0 && TokenCategories.Count == 5 && TokenCategories.All(x => double.IsFinite(x) && x >= 0) &&
-        Math.Abs(TokenCategories.Sum() - Features.Tokens) < .001;
-    public double IntervalLoss(double prediction) => Math.Max(0, Math.Max(LowerDelta - prediction, prediction - UpperDelta));
+                                              Features.Tokens >= 0 && TokenCategories.Count == 5 &&
+                                              TokenCategories.All(x => double.IsFinite(x) && x >= 0) &&
+                                              Math.Abs(TokenCategories.Sum() - Features.Tokens) < .001;
+
+    public double IntervalLoss(double prediction)
+    {
+        return Math.Max(0, Math.Max(LowerDelta - prediction, prediction - UpperDelta));
+    }
 }

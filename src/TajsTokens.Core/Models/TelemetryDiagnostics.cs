@@ -1,3 +1,7 @@
+// Taj's Tokens | TelemetryDiagnostics.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
 namespace TajsTokens.Core.Models;
 
 /// <summary>Ephemeral presentation of the shared collector snapshot; not new source evidence.</summary>

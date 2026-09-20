@@ -1,5 +1,13 @@
+// Taj's Tokens | ExternalProcess.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Diagnostics;
 using System.Text;
+
+#endregion
 
 namespace TajsTokens.Infrastructure.Providers;
 
@@ -24,7 +32,7 @@ internal static class ExternalProcess
         else
         {
             startInfo = new ProcessStartInfo(command);
-            foreach (var argument in arguments)
+            foreach (string argument in arguments)
             {
                 startInfo.ArgumentList.Add(argument);
             }
@@ -63,8 +71,8 @@ internal static class ExternalProcess
             // clients (such as Codex app-server) use CreateStartInfo directly and keep stdin open.
             process.StandardInput.Close();
 
-            var outputTask = process.StandardOutput.ReadToEndAsync(timeoutSource.Token);
-            var errorTask = process.StandardError.ReadToEndAsync(timeoutSource.Token);
+            Task<string> outputTask = process.StandardOutput.ReadToEndAsync(timeoutSource.Token);
+            Task<string> errorTask = process.StandardError.ReadToEndAsync(timeoutSource.Token);
             await process.WaitForExitAsync(timeoutSource.Token);
             return new ExternalCommandResult(process.ExitCode, await outputTask, await errorTask);
         }
@@ -86,7 +94,7 @@ internal static class ExternalProcess
         {
             if (!process.HasExited)
             {
-                process.Kill(entireProcessTree: true);
+                process.Kill(true);
             }
         }
         catch
@@ -108,7 +116,8 @@ internal static class ExternalProcess
         // such as Tokscale's client,model group-by value and tokscale@latest. Quoting those values is
         // unnecessary and, through nested cmd -> npm .cmd shims, can preserve the quote characters as
         // part of argv. Keep shell metacharacters (&|<>^%!()) on the quoted path instead.
-        if (value.Length > 0 && value.All(ch => char.IsLetterOrDigit(ch) || ch is '-' or '_' or '.' or ':' or '/' or '\\' or ',' or '@' or '+' or '='))
+        if (value.Length > 0 && value.All(ch =>
+                char.IsLetterOrDigit(ch) || ch is '-' or '_' or '.' or ':' or '/' or '\\' or ',' or '@' or '+' or '='))
         {
             return value;
         }

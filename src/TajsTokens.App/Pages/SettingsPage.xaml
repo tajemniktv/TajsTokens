@@ -15,10 +15,12 @@
                 <TextBlock Text="Settings"
                            FontSize="28"
                            FontWeight="SemiBold" />
-                <TextBlock Text="Runtime behavior, collection cadence, notifications, and local data settings. Changes are persisted under LocalAppData."
-                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                           TextWrapping="Wrap" />
-                <TextBlock x:Name="BuildVersionText" TextWrapping="Wrap" IsTextSelectionEnabled="True" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock
+                    Text="Runtime behavior, collection cadence, notifications, and local data settings. Changes are persisted under LocalAppData."
+                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                    TextWrapping="Wrap" />
+                <TextBlock x:Name="BuildVersionText" TextWrapping="Wrap" IsTextSelectionEnabled="True"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </StackPanel>
 
             <InfoBar x:Name="StatusInfoBar"
@@ -103,22 +105,26 @@
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     <TextBlock Text="Native Codex state + rollouts"
                                FontWeight="SemiBold" />
-                    <TextBlock Text="Default token/session source. TajsTokens incrementally normalizes local Codex state and rollouts; remote/cloud-only sessions are explicitly outside this coverage until that source exists."
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                               TextWrapping="Wrap" />
-                    <Expander Header="Advanced integrations" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"><StackPanel Spacing="12">
-                    <ToggleSwitch x:Name="TokscaleReconciliationToggle"
-                                  Header="Reconcile native accounting with Tokscale"
-                                  OffContent="Disabled · no Tokscale process"
-                                  OnContent="Run Tokscale as an optional comparison oracle" />
-                    <ToggleSwitch x:Name="TokscaleFallbackToggle"
-                                  Header="Allow Tokscale fallback"
-                                  OffContent="Native failure stays visible as unavailable/stale"
-                                  OnContent="Use Tokscale only if native accounting fails" />
-                    <TextBlock Text="Both Tokscale options are disabled by default. Enabling either can launch the Tokscale CLI (or its npx fallback); normal collection no longer requires Node.js, npm, or Tokscale."
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                               TextWrapping="Wrap" />
-                    </StackPanel></Expander>
+                    <TextBlock
+                        Text="Default token/session source. TajsTokens incrementally normalizes local Codex state and rollouts; remote/cloud-only sessions are explicitly outside this coverage until that source exists."
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap" />
+                    <Expander Header="Advanced integrations" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                        <StackPanel Spacing="12">
+                            <ToggleSwitch x:Name="TokscaleReconciliationToggle"
+                                          Header="Reconcile native accounting with Tokscale"
+                                          OffContent="Disabled · no Tokscale process"
+                                          OnContent="Run Tokscale as an optional comparison oracle" />
+                            <ToggleSwitch x:Name="TokscaleFallbackToggle"
+                                          Header="Allow Tokscale fallback"
+                                          OffContent="Native failure stays visible as unavailable/stale"
+                                          OnContent="Use Tokscale only if native accounting fails" />
+                            <TextBlock
+                                Text="Both Tokscale options are disabled by default. Enabling either can launch the Tokscale CLI (or its npx fallback); normal collection no longer requires Node.js, npm, or Tokscale."
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Expander>
                 </StackPanel>
             </Border>
 
@@ -128,36 +134,39 @@
                     CornerRadius="14"
                     Padding="20">
                 <StackPanel Spacing="10">
-                    <Expander Header="Advanced · CLI harness defaults" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"><StackPanel Spacing="10">
-                    <TextBox x:Name="CodexCliCommandBox"
-                             Header="Executable or PATH command"
-                             PlaceholderText="codex or C:\Tools\custom-codex.exe" />
-                    <TextBox x:Name="CodexCliArgumentsBox"
-                             Header="Arguments (one per line)"
-                             AcceptsReturn="True"
-                             TextWrapping="Wrap"
-                             MinHeight="90"
-                             PlaceholderText="exec&#xA;--json" />
-                    <TextBox x:Name="CodexCliWorkingDirectoryBox"
-                             Header="Working directory (optional)"
-                             PlaceholderText="Leave empty to inherit TajsTokens' working directory" />
-                    <ComboBox x:Name="CodexCliPromptModeCombo"
-                              Header="Prompt transport"
-                              SelectedIndex="0">
-                        <ComboBoxItem Content="Standard input" Tag="StandardInput" />
-                        <ComboBoxItem Content="Final argument" Tag="LastArgument" />
-                        <ComboBoxItem Content="Do not send a prompt" Tag="None" />
-                    </ComboBox>
-                    <NumberBox x:Name="CodexCliTimeoutBox"
-                               Header="Harness timeout (seconds)"
-                               Minimum="5"
-                               Maximum="3600"
-                               SmallChange="15"
-                               SpinButtonPlacementMode="Compact" />
-                    <TextBlock Text="The harness runs only when you press Run. Prompt text, stdout, and stderr remain in the current app session and are not written to the telemetry database. Keep credentials out of persisted arguments; use the CLI's normal secure authentication flow."
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                               TextWrapping="Wrap" />
-                    </StackPanel></Expander>
+                    <Expander Header="Advanced · CLI harness defaults" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                        <StackPanel Spacing="10">
+                            <TextBox x:Name="CodexCliCommandBox"
+                                     Header="Executable or PATH command"
+                                     PlaceholderText="codex or C:\Tools\custom-codex.exe" />
+                            <TextBox x:Name="CodexCliArgumentsBox"
+                                     Header="Arguments (one per line)"
+                                     AcceptsReturn="True"
+                                     TextWrapping="Wrap"
+                                     MinHeight="90"
+                                     PlaceholderText="exec&#xA;--json" />
+                            <TextBox x:Name="CodexCliWorkingDirectoryBox"
+                                     Header="Working directory (optional)"
+                                     PlaceholderText="Leave empty to inherit TajsTokens' working directory" />
+                            <ComboBox x:Name="CodexCliPromptModeCombo"
+                                      Header="Prompt transport"
+                                      SelectedIndex="0">
+                                <ComboBoxItem Content="Standard input" Tag="StandardInput" />
+                                <ComboBoxItem Content="Final argument" Tag="LastArgument" />
+                                <ComboBoxItem Content="Do not send a prompt" Tag="None" />
+                            </ComboBox>
+                            <NumberBox x:Name="CodexCliTimeoutBox"
+                                       Header="Harness timeout (seconds)"
+                                       Minimum="5"
+                                       Maximum="3600"
+                                       SmallChange="15"
+                                       SpinButtonPlacementMode="Compact" />
+                            <TextBlock
+                                Text="The harness runs only when you press Run. Prompt text, stdout, and stderr remain in the current app session and are not written to the telemetry database. Keep credentials out of persisted arguments; use the CLI's normal secure authentication flow."
+                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Expander>
                 </StackPanel>
             </Border>
 
@@ -184,16 +193,19 @@
                     <TextBlock x:Name="SettingsSchemaText"
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                Margin="0,6,0,0" />
-                    <TextBlock Text="TajsTokens retains selected content-free observations and local source paths, not prompt, reasoning, or tool bodies. There is no automatic age-based cleanup. Replaced rollout generations can rebuild accounting projections; preserve backups for recovery. Native source data remains read-only."
-                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                               TextWrapping="Wrap" />
+                    <TextBlock
+                        Text="TajsTokens retains selected content-free observations and local source paths, not prompt, reasoning, or tool bodies. There is no automatic age-based cleanup. Replaced rollout generations can rebuild accounting projections; preserve backups for recovery. Native source data remains read-only."
+                        Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                        TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
 
             <StackPanel Spacing="8">
                 <TextBlock Text="Historical rollout ownership" FontSize="18" FontWeight="SemiBold" />
                 <TextBlock x:Name="RolloutOwnershipText" TextWrapping="Wrap" />
-                <TextBlock Text="Associate retained rollout history with a recorded account as your assertion, without changing native account IDs. This is bounded to existing source/session histories; new activity is not automatically included. Live-collected validation is still required for model promotion." TextWrapping="Wrap" />
+                <TextBlock
+                    Text="Associate retained rollout history with a recorded account as your assertion, without changing native account IDs. This is bounded to existing source/session histories; new activity is not automatically included. Live-collected validation is still required for model promotion."
+                    TextWrapping="Wrap" />
                 <StackPanel Orientation="Horizontal" Spacing="10">
                     <Button x:Name="AssociateRolloutsButton" Content="Associate retained histories…" Click="OnAssociateRolloutsClicked" />
                     <Button x:Name="RevokeRolloutsButton" Content="Revoke associations" Click="OnRevokeRolloutsClicked" />

@@ -1,17 +1,25 @@
+// Taj's Tokens | CodexCliHarnessPage.xaml.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 
+#endregion
+
 namespace TajsTokens.App.Pages;
 
 public sealed partial class CodexCliHarnessPage : Page
 {
-    private readonly StringBuilder _stdout = new();
     private readonly StringBuilder _stderr = new();
-    private CancellationTokenSource? _runCancellation;
+    private readonly StringBuilder _stdout = new();
     private bool _loaded;
+    private CancellationTokenSource? _runCancellation;
     private bool _running;
 
     public CodexCliHarnessPage()
@@ -42,7 +50,7 @@ public sealed partial class CodexCliHarnessPage : Page
             return;
         }
 
-        if (!TryBuildRequest(out var request, out var error))
+        if (!TryBuildRequest(out CodexCliHarnessRequest request, out string error))
         {
             StatusText.Text = error;
             return;
@@ -60,7 +68,7 @@ public sealed partial class CodexCliHarnessPage : Page
         var progress = new Progress<CodexCliOutputLine>(AppendOutput);
         try
         {
-            var result = await Task.Run(
+            CodexCliRunResult result = await Task.Run(
                 () => App.Services.CodexCliHarness.RunAsync(request, progress, _runCancellation.Token),
                 _runCancellation.Token);
             StatusText.Text = result.Succeeded
@@ -89,11 +97,14 @@ public sealed partial class CodexCliHarnessPage : Page
         }
     }
 
-    private void OnCancelClicked(object sender, RoutedEventArgs e) => _runCancellation?.Cancel();
+    private void OnCancelClicked(object sender, RoutedEventArgs e)
+    {
+        _runCancellation?.Cancel();
+    }
 
     private async void OnSaveClicked(object sender, RoutedEventArgs e)
     {
-        if (!TryBuildSettings(out var candidate, out var error))
+        if (!TryBuildSettings(out RuntimeSettings candidate, out string error))
         {
             StatusText.Text = error;
             return;
@@ -102,7 +113,7 @@ public sealed partial class CodexCliHarnessPage : Page
         SaveButton.IsEnabled = false;
         try
         {
-            var result = await App.TryApplySettingsAsync(App.Services.Settings, candidate);
+            (bool Success, string? Error) result = await App.TryApplySettingsAsync(App.Services.Settings, candidate);
             StatusText.Text = result.Success
                 ? "Harness configuration saved."
                 : $"Configuration was not saved: {result.Error ?? "Unknown settings error."}";
@@ -115,7 +126,7 @@ public sealed partial class CodexCliHarnessPage : Page
 
     private bool TryBuildRequest(out CodexCliHarnessRequest request, out string error)
     {
-        if (!TryBuildSettings(out var settings, out error))
+        if (!TryBuildSettings(out RuntimeSettings settings, out error))
         {
             request = null!;
             return false;
@@ -147,7 +158,7 @@ public sealed partial class CodexCliHarnessPage : Page
             CodexCliArguments = ArgumentsBox.Text ?? string.Empty,
             CodexCliWorkingDirectory = WorkingDirectoryBox.Text ?? string.Empty,
             CodexCliPromptMode = ParsePromptMode(),
-            CodexCliTimeoutSeconds = (int)Math.Round(TimeoutBox.Value, MidpointRounding.AwayFromZero)
+            CodexCliTimeoutSeconds = (int)Math.Round(TimeoutBox.Value, MidpointRounding.AwayFromZero),
         };
         error = string.Empty;
         return true;
@@ -155,7 +166,7 @@ public sealed partial class CodexCliHarnessPage : Page
 
     private void RenderSettings()
     {
-        var settings = App.Services.Settings;
+        RuntimeSettings settings = App.Services.Settings;
         CommandBox.Text = settings.CodexCliCommand;
         ArgumentsBox.Text = settings.CodexCliArguments;
         WorkingDirectoryBox.Text = settings.CodexCliWorkingDirectory;
@@ -163,14 +174,14 @@ public sealed partial class CodexCliHarnessPage : Page
         {
             CodexCliPromptMode.StandardInput => 0,
             CodexCliPromptMode.LastArgument => 1,
-            _ => 2
+            _ => 2,
         };
         TimeoutBox.Value = settings.CodexCliTimeoutSeconds;
     }
 
     private void AppendOutput(CodexCliOutputLine line)
     {
-        var buffer = line.Stream == CodexCliOutputStream.StandardOutput ? _stdout : _stderr;
+        StringBuilder buffer = line.Stream == CodexCliOutputStream.StandardOutput ? _stdout : _stderr;
         buffer.AppendLine(line.Text);
         RenderOutput();
     }
@@ -188,13 +199,18 @@ public sealed partial class CodexCliHarnessPage : Page
         SaveButton.IsEnabled = !_running;
     }
 
-    private CodexCliPromptMode ParsePromptMode() =>
-        (PromptModeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() switch
+    private CodexCliPromptMode ParsePromptMode()
+    {
+        return (PromptModeCombo.SelectedItem as ComboBoxItem)?.Tag?.ToString() switch
         {
             "LastArgument" => CodexCliPromptMode.LastArgument,
             "None" => CodexCliPromptMode.None,
-            _ => CodexCliPromptMode.StandardInput
+            _ => CodexCliPromptMode.StandardInput,
         };
+    }
 
-    private static string Summarize(string message) => message.ReplaceLineEndings(" ").Trim();
+    private static string Summarize(string message)
+    {
+        return message.ReplaceLineEndings(" ").Trim();
+    }
 }

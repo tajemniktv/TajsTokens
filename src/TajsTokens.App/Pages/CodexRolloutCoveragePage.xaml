@@ -11,8 +11,9 @@
         </Grid.RowDefinitions>
         <StackPanel Spacing="5">
             <TextBlock Text="Rollout coverage" FontSize="28" FontWeight="SemiBold" />
-            <TextBlock Text="Inspect why discovered files are outside the collector's selected state index. No files are imported, merged, exported or changed. These are file comparisons, not counts of missing work or quota-account attribution."
-                       TextWrapping="Wrap" Opacity="0.75" />
+            <TextBlock
+                Text="Inspect why discovered files are outside the collector's selected state index. No files are imported, merged, exported or changed. These are file comparisons, not counts of missing work or quota-account attribution."
+                TextWrapping="Wrap" Opacity="0.75" />
         </StackPanel>
         <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
             <Button Content="Back" Click="OnBackClicked" />
@@ -21,14 +22,16 @@
             <Button x:Name="NextButton" Content="Next" IsEnabled="False" Click="OnNextClicked" />
             <Button x:Name="CancelButton" Content="Cancel" IsEnabled="False" Click="OnCancelClicked" />
         </StackPanel>
-        <TextBlock Grid.Row="2" x:Name="StatusText" Text="Choose Inspect to compare up to eight paths. Each file is limited to 2 MiB and 20,000 records; larger or ambiguous inputs remain unresolved."
+        <TextBlock Grid.Row="2" x:Name="StatusText"
+                   Text="Choose Inspect to compare up to eight paths. Each file is limited to 2 MiB and 20,000 records; larger or ambiguous inputs remain unresolved."
                    TextWrapping="Wrap" IsTextSelectionEnabled="True" />
         <ListView Grid.Row="3" x:Name="ResultsList" SelectionMode="None" HorizontalContentAlignment="Stretch">
             <ListView.ItemTemplate>
                 <DataTemplate>
                     <StackPanel Padding="8" Spacing="5">
                         <TextBlock Text="{Binding Heading}" FontWeight="SemiBold" TextWrapping="Wrap" />
-                        <TextBlock Text="{Binding Paths}" TextWrapping="Wrap" IsTextSelectionEnabled="True" FontFamily="Consolas" FontSize="12" />
+                        <TextBlock Text="{Binding Paths}" TextWrapping="Wrap" IsTextSelectionEnabled="True" FontFamily="Consolas"
+                                   FontSize="12" />
                         <TextBlock Text="{Binding Evidence}" TextWrapping="Wrap" />
                         <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" Opacity="0.75" />
                     </StackPanel>

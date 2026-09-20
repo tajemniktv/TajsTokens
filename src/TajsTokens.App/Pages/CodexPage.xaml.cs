@@ -1,37 +1,78 @@
-using System.Collections.ObjectModel;
+// Taj's Tokens | CodexPage.xaml.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Globalization;
+using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Navigation;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 using TajsTokens.Core.Services;
+
+#endregion
 
 namespace TajsTokens.App.Pages;
 
 public sealed partial class CodexPage : Page
 {
+
+    public enum NavigationTreeKind
+    {
+        All,
+        Group,
+        Thread,
+    }
+
+    private readonly Dictionary<string, TreeViewNode> _threadNodes = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<TreeViewNode, TreeViewNode?> _treeParents = [];
+    private IReadOnlyList<CodexThreadItemPresentation> _allPresentations = Array.Empty<CodexThreadItemPresentation>();
     private CancellationTokenSource? _cancellation;
+    private ListView? _conversationList;
+    private IntelligenceDashboard? _dashboard;
+    private bool _isNarrow;
+    private long _loadGeneration;
     private bool _loaded;
     private bool _loading;
-    private bool _reloadRequested;
-    private bool _suppressTreeSelection;
-    private long _loadGeneration;
-    private long _selectionGeneration;
     private CodexThreadNavigationResult? _navigation;
+    private bool _reloadRequested;
+    private string? _requestedThread;
+    private string? _selectedGroupKey;
+    private CodexThreadReadResult? _selectedThread;
+    private string? _selectedThreadId;
+    private long _selectionGeneration;
+
     private IReadOnlyDictionary<string, CodexSessionOverview> _sessions =
         new Dictionary<string, CodexSessionOverview>(StringComparer.OrdinalIgnoreCase);
-    private IntelligenceDashboard? _dashboard;
-    private CodexThreadReadResult? _selectedThread;
-    private IReadOnlyList<CodexThreadItemPresentation> _allPresentations = Array.Empty<CodexThreadItemPresentation>();
-    private bool _showExecutionDetails;
-    private bool _isNarrow;
-    private UsagePage? _usagePage;
-    private string? _selectedThreadId;
-    private string? _selectedGroupKey;
 
-    private void OnWorkViewClicked(object sender, RoutedEventArgs e) => ShowUsage(false);
-    private void OnUsageViewClicked(object sender, RoutedEventArgs e) => ShowUsage(true);
+    private bool _showExecutionDetails;
+    private bool _suppressTreeSelection;
+    private UsagePage? _usagePage;
+
+    public CodexPage()
+    {
+        InitializeComponent();
+        NavigationCacheMode = NavigationCacheMode.Enabled;
+        Loaded += OnLoaded;
+        Unloaded += OnUnloaded;
+        SizeChanged += OnSizeChanged;
+    }
+
+    private App App => (App)Application.Current;
+
+    private void OnWorkViewClicked(object sender, RoutedEventArgs e)
+    {
+        ShowUsage(false);
+    }
+
+    private void OnUsageViewClicked(object sender, RoutedEventArgs e)
+    {
+        ShowUsage(true);
+    }
 
     private void ShowUsage(bool show, string? threadId = null)
     {
@@ -53,22 +94,8 @@ public sealed partial class CodexPage : Page
         WorkViewButton.IsChecked = !show;
         UsageViewButton.IsChecked = show;
     }
-    private ListView? _conversationList;
-    private readonly Dictionary<string, TreeViewNode> _threadNodes = new(StringComparer.OrdinalIgnoreCase);
-    private readonly Dictionary<TreeViewNode, TreeViewNode?> _treeParents = [];
 
-    public CodexPage()
-    {
-        InitializeComponent();
-        NavigationCacheMode = Microsoft.UI.Xaml.Navigation.NavigationCacheMode.Enabled;
-        Loaded += OnLoaded;
-        Unloaded += OnUnloaded;
-        SizeChanged += OnSizeChanged;
-    }
-
-    private App App => (App)Application.Current;
-    private string? _requestedThread;
-    protected override void OnNavigatedTo(Microsoft.UI.Xaml.Navigation.NavigationEventArgs e)
+    protected override void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
         _requestedThread = e.Parameter as string;
@@ -92,7 +119,7 @@ public sealed partial class CodexPage : Page
         _reloadRequested = false;
         Interlocked.Increment(ref _selectionGeneration);
         Interlocked.Increment(ref _loadGeneration);
-        ReplaceCancellation(cancelOnly: true);
+        ReplaceCancellation(true);
     }
 
     private async void OnRefreshClicked(object sender, RoutedEventArgs e)
@@ -126,7 +153,7 @@ public sealed partial class CodexPage : Page
 
     private void OnSizeChanged(object sender, SizeChangedEventArgs e)
     {
-        var narrow = e.NewSize.Width < (double)Application.Current.Resources["WideContentBreakpoint"];
+        bool narrow = e.NewSize.Width < (double)Application.Current.Resources["WideContentBreakpoint"];
         if (narrow == _isNarrow && BrowserSplitView.DisplayMode == (narrow ? SplitViewDisplayMode.Overlay : SplitViewDisplayMode.Inline))
         {
             return;
@@ -149,7 +176,7 @@ public sealed partial class CodexPage : Page
             return;
         }
 
-        var generation = Interlocked.Increment(ref _loadGeneration);
+        long generation = Interlocked.Increment(ref _loadGeneration);
         try
         {
             await Task.Delay(180, cancellation.Token);
@@ -181,22 +208,21 @@ public sealed partial class CodexPage : Page
                 generation = Volatile.Read(ref _loadGeneration);
                 var query = new CodexThreadNavigationQuery(
                     SearchTextBox.Text.Trim(),
-                    Take: 5_000,
-                    IncludeArchived: ArchivedCheckBox.IsChecked == true);
+                    5_000,
+                    ArchivedCheckBox.IsChecked == true);
                 StatusText.Text = "Reading Codex workspaces, threads and usage…";
-                var now = DateTimeOffset.UtcNow;
+                DateTimeOffset now = DateTimeOffset.UtcNow;
                 var usageQuery = new IntelligenceQuery(
                     now.AddDays(-ParseRangeDays()),
                     now,
-                    ParseBucket(),
-                    720);
-                var navigationTask = Task.Run(
+                    ParseBucket());
+                Task<CodexThreadNavigationResult> navigationTask = Task.Run(
                     () => App.Services.CodexThreadReadModel.BrowseThreadsAsync(query, cancellationToken),
                     cancellationToken);
-                var sessionsTask = Task.Run(
+                Task<IReadOnlyList<CodexSessionOverview>> sessionsTask = Task.Run(
                     () => App.Services.ObservatoryReadModel.SearchSessionsAsync(string.Empty, 10_000, cancellationToken),
                     cancellationToken);
-                var intelligenceTask = Task.Run(
+                Task<IntelligenceDashboard> intelligenceTask = Task.Run(
                     () => App.Services.Intelligence.QueryAsync(
                         usageQuery,
                         cancellationToken),
@@ -215,11 +241,13 @@ public sealed partial class CodexPage : Page
                     StringComparer.OrdinalIgnoreCase);
                 _dashboard = intelligenceTask.Result;
                 BuildNavigationTree(_navigation);
-                if (_selectedThreadId is { } selectedId && _threadNodes.TryGetValue(selectedId, out var selectedNode))
+                if (_selectedThreadId is { } selectedId && _threadNodes.TryGetValue(selectedId, out TreeViewNode? selectedNode))
                 {
                     _suppressTreeSelection = true;
                     NavigationTree.SelectedNode = selectedNode;
-                    for (var parent = _treeParents.GetValueOrDefault(selectedNode); parent is not null; parent = _treeParents.GetValueOrDefault(parent))
+                    for (TreeViewNode? parent = _treeParents.GetValueOrDefault(selectedNode);
+                         parent is not null;
+                         parent = _treeParents.GetValueOrDefault(parent))
                         parent.IsExpanded = true;
                     _suppressTreeSelection = false;
                     await LoadThreadAsync(selectedId);
@@ -227,12 +255,16 @@ public sealed partial class CodexPage : Page
                 else if (_navigation.Groups.FirstOrDefault(x => x.Key == _selectedGroupKey) is { } selectedGroup)
                 {
                     _suppressTreeSelection = true;
-                    NavigationTree.SelectedNode = _treeParents.Keys.FirstOrDefault(x => x.Content is NavigationTreeItem item && item.Group?.Key == selectedGroup.Key);
+                    NavigationTree.SelectedNode = _treeParents.Keys.FirstOrDefault(x =>
+                        x.Content is NavigationTreeItem item && item.Group?.Key == selectedGroup.Key);
                     _suppressTreeSelection = false;
                     RenderWorkspace(selectedGroup);
                 }
-                else RenderOverview(_dashboard, _navigation);
-                var warningCount = _navigation.Warnings.Count + _navigation.CoverageWarnings.Count;
+                else
+                {
+                    RenderOverview(_dashboard, _navigation);
+                }
+                int warningCount = _navigation.Warnings.Count + _navigation.CoverageWarnings.Count;
                 StatusText.Text =
                     $"{_navigation.TotalThreadCount:N0} visible thread(s) · {_navigation.Groups.Count:N0} workspace/project group(s) · " +
                     $"usage through {now.ToLocalTime():g}" +
@@ -268,19 +300,19 @@ public sealed partial class CodexPage : Page
             var allItem = new NavigationTreeItem("All Codex", "Usage, activity and every readable thread", NavigationTreeKind.All);
             var allNode = new TreeViewNode { Content = allItem, IsExpanded = true };
             _treeParents[allNode] = null;
-            foreach (var group in navigation.Groups)
+            foreach (CodexThreadNavigationGroup group in navigation.Groups)
             {
                 var groupItem = new NavigationTreeItem(
                     group.DisplayName,
                     $"{group.ThreadCount:N0} thread(s) · {FormatDate(group.LatestActivityAtUtc)}",
                     NavigationTreeKind.Group,
-                    Group: group);
+                    group);
                 var groupNode = new TreeViewNode { Content = groupItem, IsExpanded = group == navigation.Groups.FirstOrDefault() };
                 allNode.Children.Add(groupNode);
                 _treeParents[groupNode] = allNode;
-                foreach (var root in group.RootThreads)
+                foreach (CodexThreadNavigationNode root in group.RootThreads)
                 {
-                    AddThreadNode(root, groupNode, isChild: false);
+                    AddThreadNode(root, groupNode, false);
                 }
             }
             NavigationTree.RootNodes.Add(allNode);
@@ -294,17 +326,12 @@ public sealed partial class CodexPage : Page
 
     private void AddThreadNode(CodexThreadNavigationNode thread, TreeViewNode parent, bool isChild)
     {
-        var entry = thread.Thread.Preferred;
-        var role = isChild ? "Subagent" : "Root thread";
-        var subtitle = string.Join(
+        CodexThreadCatalogEntry entry = thread.Thread.Preferred;
+        string role = isChild ? "Subagent" : "Root thread";
+        string subtitle = string.Join(
             " · ",
-            new[]
-            {
-                role,
-                entry.AgentNickname,
-                entry.Model,
-                FormatDate(entry.RecencyAtUtc ?? entry.UpdatedAtUtc ?? entry.CreatedAtUtc)
-            }.Where(value => !string.IsNullOrWhiteSpace(value)));
+            new[] { role, entry.AgentNickname, entry.Model, FormatDate(entry.RecencyAtUtc ?? entry.UpdatedAtUtc ?? entry.CreatedAtUtc) }
+                .Where(value => !string.IsNullOrWhiteSpace(value)));
         if (thread.MissingParent) subtitle += " · parent unavailable";
         if (thread.CycleDetected) subtitle += " · cycle truncated";
         var item = new NavigationTreeItem(entry.DisplayName, subtitle, NavigationTreeKind.Thread, Thread: thread);
@@ -314,9 +341,9 @@ public sealed partial class CodexPage : Page
         // A cycle-safe projection may contain a terminal duplicate of an already-seen ID. Keep
         // the first (real) node as the navigation target for linked-thread actions.
         _threadNodes.TryAdd(entry.ThreadId, node);
-        foreach (var child in thread.Children)
+        foreach (CodexThreadNavigationNode child in thread.Children)
         {
-            AddThreadNode(child, node, isChild: true);
+            AddThreadNode(child, node, true);
         }
     }
 
@@ -348,13 +375,13 @@ public sealed partial class CodexPage : Page
     {
         _selectedThreadId = threadId;
         _selectedGroupKey = null;
-        var cancellation = _cancellation;
+        CancellationTokenSource? cancellation = _cancellation;
         if (!_loaded || cancellation is null || cancellation.IsCancellationRequested) return;
-        var generation = Interlocked.Increment(ref _selectionGeneration);
+        long generation = Interlocked.Increment(ref _selectionGeneration);
         SetDetailMessage("Loading the selected Codex conversation…");
         try
         {
-            var result = await Task.Run(
+            CodexThreadReadResult result = await Task.Run(
                 () => App.Services.CodexThreadReadModel.ReadThreadAsync(threadId, cancellation.Token),
                 cancellation.Token);
             cancellation.Token.ThrowIfCancellationRequested();
@@ -377,65 +404,93 @@ public sealed partial class CodexPage : Page
     private void RenderOverview(IntelligenceDashboard? dashboard, CodexThreadNavigationResult? navigation)
     {
         DetailPanel.Children.Clear();
-        AddHeading(DetailPanel, "All Codex", "Whole readable local Codex history. Select a project, workspace, or thread on the left for scoped detail.");
+        AddHeading(
+            DetailPanel,
+            "All Codex",
+            "Whole readable local Codex history. Select a project, workspace, or thread on the left for scoped detail.");
         if (dashboard is null || navigation is null)
         {
             AddNotice(DetailPanel, "Loading Codex usage and navigation…");
             return;
         }
 
-        var total = dashboard.UsageHistory.Sum(bucket => bucket.NativeTokens);
-        var root = dashboard.UsageHistory.Sum(bucket => bucket.RootTokens);
-        var subagent = dashboard.UsageHistory.Sum(bucket => bucket.SubagentTokens);
+        long total = dashboard.UsageHistory.Sum(bucket => bucket.NativeTokens);
+        long root = dashboard.UsageHistory.Sum(bucket => bucket.RootTokens);
+        long subagent = dashboard.UsageHistory.Sum(bucket => bucket.SubagentTokens);
         var cards = new Grid { ColumnSpacing = 10 };
-        for (var i = 0; i < 4; i++) cards.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var fiveHourDelta = dashboard.UsageHistory.Sum(bucket => bucket.FiveHourQuotaDelta ?? 0);
-        var weeklyDelta = dashboard.UsageHistory.Sum(bucket => bucket.WeeklyQuotaDelta ?? 0);
+        for (int i = 0; i < 4; i++) cards.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        double fiveHourDelta = dashboard.UsageHistory.Sum(bucket => bucket.FiveHourQuotaDelta ?? 0);
+        double weeklyDelta = dashboard.UsageHistory.Sum(bucket => bucket.WeeklyQuotaDelta ?? 0);
         AddMetric(cards, 0, "Native tokens · all Codex", FormatCount(total));
         AddMetric(cards, 1, "Root / subagent · all Codex", $"{FormatCount(root)} / {FormatCount(subagent)}");
         AddMetric(cards, 2, "5h meter movement · all Codex", FormatQuotaDelta(fiveHourDelta));
         AddMetric(cards, 3, "Weekly movement · all Codex", FormatQuotaDelta(weeklyDelta));
         DetailPanel.Children.Add(cards);
         var coverage = new StackPanel { Spacing = 10 };
-        AddNotice(coverage,
+        AddNotice(
+            coverage,
             $"Usage range: {dashboard.Query.FromUtc.ToLocalTime():g} → {dashboard.Query.ToUtc.ToLocalTime():g} · " +
             $"timeline bucket: {dashboard.Query.BucketSize.ToString().ToLowerInvariant()}. " +
             "These totals are intentionally database-wide; the range changes lookback and the bucket changes timeline resolution. " +
             (dashboard.UsageHistory.Sum(bucket => bucket.IntegrityDelta) == 0
                 ? "Reported/disjoint token integrity is exact for this range."
                 : "Reported/disjoint token totals include an observed integrity difference."));
-        AddFields(coverage,
+        AddFields(
+            coverage,
             ("Thread catalog capability", navigation.CatalogCapabilityAvailable ? "present" : "absent or unavailable"),
             ("Spawn topology capability", navigation.SpawnEdgesCapabilityAvailable ? "present" : "absent or unavailable"),
             ("Visible thread coverage", $"{navigation.TotalThreadCount:N0} thread(s) in the bounded navigation result"));
-        DetailPanel.Children.Add(new Expander { Header = "Technical coverage and accounting", Content = coverage,
-            HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch });
+        DetailPanel.Children.Add(
+            new Expander
+            {
+                Header = "Technical coverage and accounting",
+                Content = coverage,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            });
 
-        AddListSection(DetailPanel, "Usage timeline", dashboard.UsageHistory.Count == 0
-            ? ["No native Codex token events are available for this range yet."]
-            : dashboard.UsageHistory.Select(bucket =>
-                $"{FormatBucket(bucket.StartUtc, dashboard.Query.BucketSize)}  ·  {FormatCount(bucket.NativeTokens)} tokens  ·  " +
-                $"root {FormatCount(bucket.RootTokens)} · subagents {FormatCount(bucket.SubagentTokens)} · {bucket.ActiveSessions:N0} active session(s) · compactions {bucket.Compactions:N0}" +
-                (bucket.FiveHourQuotaDelta is double five ? $" · 5h +{five:0.#}pp" : string.Empty) +
-                (bucket.WeeklyQuotaDelta is double week ? $" · weekly +{week:0.#}pp" : string.Empty)).ToArray());
-        AddListSection(DetailPanel, "Breakdowns", dashboard.Dimensions.Count == 0
-            ? ["No breakdowns are available for this range."]
-            : dashboard.Dimensions.Select(item =>
-                $"{item.Dimension}: {item.Value}  ·  {FormatCount(item.NativeTokens)} tokens · {item.Sessions:N0} session(s)").ToArray());
-        AddListSection(DetailPanel, "Active workspaces", navigation.Groups.Select(group =>
-            $"{group.DisplayName}  ·  {group.ThreadCount:N0} thread(s) · latest {FormatDate(group.LatestActivityAtUtc)}").ToArray());
-        AddListSection(DetailPanel, "Hour heatmap", dashboard.Heatmap.Count == 0
-            ? ["No native Codex activity is available for the heatmap range."]
-            : dashboard.Heatmap
-                .OrderBy(cell => ((int)cell.Day + 6) % 7)
-                .ThenBy(cell => cell.Hour)
-                .Select(cell =>
-                    $"{cell.Day} {cell.Hour:00}:00 UTC  ·  {FormatCount(cell.NativeTokens)} tokens · {cell.ActiveBuckets:N0} active bucket(s)")
-                .ToArray());
-        AddListSection(DetailPanel, "Quota movement", dashboard.QuotaBurnIntervals.Count == 0
-            ? ["No quota-burn intervals were observed for this range."]
-            : dashboard.QuotaBurnIntervals.Select(interval =>
-                $"{interval.Kind} · {interval.StartUtc.ToLocalTime():g} → {interval.EndUtc.ToLocalTime():g} · {FormatQuotaDelta(interval.DeltaUsedPercent)} · {FormatCount(interval.NativeTokens)} tokens").ToArray());
+        AddListSection(
+            DetailPanel,
+            "Usage timeline",
+            dashboard.UsageHistory.Count == 0
+                ? ["No native Codex token events are available for this range yet."]
+                : dashboard.UsageHistory.Select(bucket =>
+                    $"{FormatBucket(bucket.StartUtc, dashboard.Query.BucketSize)}  ·  {FormatCount(bucket.NativeTokens)} tokens  ·  " +
+                    $"root {FormatCount(bucket.RootTokens)} · subagents {FormatCount(bucket.SubagentTokens)} · {bucket.ActiveSessions:N0} active session(s) · compactions {bucket.Compactions:N0}" +
+                    (bucket.FiveHourQuotaDelta is double five ? $" · 5h +{five:0.#}pp" : string.Empty) +
+                    (bucket.WeeklyQuotaDelta is double week ? $" · weekly +{week:0.#}pp" : string.Empty)).ToArray());
+        AddListSection(
+            DetailPanel,
+            "Breakdowns",
+            dashboard.Dimensions.Count == 0
+                ? ["No breakdowns are available for this range."]
+                : dashboard.Dimensions.Select(item =>
+                        $"{item.Dimension}: {item.Value}  ·  {FormatCount(item.NativeTokens)} tokens · {item.Sessions:N0} session(s)")
+                    .ToArray());
+        AddListSection(
+            DetailPanel,
+            "Active workspaces",
+            navigation.Groups.Select(group =>
+                $"{group.DisplayName}  ·  {group.ThreadCount:N0} thread(s) · latest {FormatDate(group.LatestActivityAtUtc)}").ToArray());
+        AddListSection(
+            DetailPanel,
+            "Hour heatmap",
+            dashboard.Heatmap.Count == 0
+                ? ["No native Codex activity is available for the heatmap range."]
+                : dashboard.Heatmap
+                    .OrderBy(cell => ((int)cell.Day + 6) % 7)
+                    .ThenBy(cell => cell.Hour)
+                    .Select(cell =>
+                        $"{cell.Day} {cell.Hour:00}:00 UTC  ·  {FormatCount(cell.NativeTokens)} tokens · {cell.ActiveBuckets:N0} active bucket(s)")
+                    .ToArray());
+        AddListSection(
+            DetailPanel,
+            "Quota movement",
+            dashboard.QuotaBurnIntervals.Count == 0
+                ? ["No quota-burn intervals were observed for this range."]
+                : dashboard.QuotaBurnIntervals.Select(interval =>
+                        $"{interval.Kind} · {interval.StartUtc.ToLocalTime():g} → {interval.EndUtc.ToLocalTime():g} · {FormatQuotaDelta(interval.DeltaUsedPercent)} · {FormatCount(interval.NativeTokens)} tokens")
+                    .ToArray());
         AddWarnings(DetailPanel, "Navigation coverage", navigation.CoverageWarnings);
         AddWarnings(DetailPanel, "Source warnings", navigation.Warnings);
     }
@@ -443,33 +498,53 @@ public sealed partial class CodexPage : Page
     private void RenderWorkspace(CodexThreadNavigationGroup group)
     {
         DetailPanel.Children.Clear();
-        AddHeading(DetailPanel, group.DisplayName, "Scoped to this project/workspace. Select a thread to read its conversation and source-native evidence.");
-        var threads = Flatten(group.RootThreads).ToArray();
-        var sessions = threads.Select(node => _sessions.TryGetValue(node.ThreadId, out var session) ? session : null).Where(session => session is not null).Cast<CodexSessionOverview>().ToArray();
+        AddHeading(
+            DetailPanel,
+            group.DisplayName,
+            "Scoped to this project/workspace. Select a thread to read its conversation and source-native evidence.");
+        CodexThreadNavigationNode[] threads = Flatten(group.RootThreads).ToArray();
+        CodexSessionOverview[] sessions = threads
+            .Select(node => _sessions.TryGetValue(node.ThreadId, out CodexSessionOverview? session) ? session : null)
+            .Where(session => session is not null).Cast<CodexSessionOverview>().ToArray();
         var cards = new Grid { ColumnSpacing = 10 };
-        for (var i = 0; i < 4; i++) cards.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+        for (int i = 0; i < 4; i++) cards.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
         AddMetric(cards, 0, "Threads", threads.Length.ToString("N0", CultureInfo.InvariantCulture));
         AddMetric(cards, 1, "Root / subagent", $"{group.RootThreads.Count:N0} / {threads.Length - group.RootThreads.Count:N0}");
         AddMetric(cards, 2, "Observed tokens", FormatCount(sessions.Sum(session => session.NativeTokens.ReportedTotal)));
         AddMetric(cards, 3, "Telemetry available", $"{sessions.Length:N0} of {threads.Length:N0}");
         DetailPanel.Children.Add(cards);
-        AddFields(DetailPanel,
+        AddFields(
+            DetailPanel,
             ("Latest activity", FormatDate(group.LatestActivityAtUtc)),
             ("Workspace path", group.WorkspacePath ?? "not applicable"),
             ("Project ID", group.ProjectId ?? "not applicable"),
-            ("Models observed", string.Join(", ", sessions.Select(session => session.Model).Where(model => !string.IsNullOrWhiteSpace(model)).Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(model => model)))
+            ("Models observed",
+                string.Join(
+                    ", ",
+                    sessions.Select(session => session.Model).Where(model => !string.IsNullOrWhiteSpace(model))
+                        .Distinct(StringComparer.OrdinalIgnoreCase).OrderBy(model => model)))
         );
-        AddListSection(DetailPanel, "Thread families", group.RootThreads.Select(node =>
-            $"{node.Thread.Preferred.DisplayName}  ·  {CountNodes(node):N0} thread(s) · {node.Thread.Preferred.Model ?? "model unavailable"}").ToArray());
+        AddListSection(
+            DetailPanel,
+            "Thread families",
+            group.RootThreads.Select(node =>
+                    $"{node.Thread.Preferred.DisplayName}  ·  {CountNodes(node):N0} thread(s) · {node.Thread.Preferred.Model ?? "model unavailable"}")
+                .ToArray());
     }
 
     private void RenderThread(CodexThreadReadResult result)
     {
         DetailPanel.Children.Clear();
         _showExecutionDetails = false;
-        var thread = result.Thread;
-        var session = thread is not null && _sessions.TryGetValue(thread.ThreadId, out var selectedSession) ? selectedSession : null;
-        AddHeading(DetailPanel, thread?.DisplayName ?? "Codex thread", $"{thread?.Model ?? session?.Model ?? "Model unavailable"} · {FormatDate(thread?.RecencyAtUtc ?? thread?.UpdatedAtUtc ?? session?.LastActivityAtUtc)}");
+        CodexThreadCatalogEntry? thread = result.Thread;
+        CodexSessionOverview? session =
+            thread is not null && _sessions.TryGetValue(thread.ThreadId, out CodexSessionOverview? selectedSession)
+                ? selectedSession
+                : null;
+        AddHeading(
+            DetailPanel,
+            thread?.DisplayName ?? "Codex thread",
+            $"{thread?.Model ?? session?.Model ?? "Model unavailable"} · {FormatDate(thread?.RecencyAtUtc ?? thread?.UpdatedAtUtc ?? session?.LastActivityAtUtc)}");
         var facts = new List<(string Label, string Value)>
         {
             ("Thread ID", thread?.ThreadId ?? "unavailable"),
@@ -482,15 +557,24 @@ public sealed partial class CodexPage : Page
             ("Native tokens", session is null ? "unavailable" : FormatCount(session.NativeTokens.ReportedTotal)),
             ("Peak context", session?.PeakContextPercent is double peak ? $"{peak:0.#}%" : "unavailable"),
             ("History source", result.HistorySourceDescription ?? result.HistorySourcePath ?? "unavailable"),
-            ("Source freshness", FormatDate(thread?.SourceLastWriteTimeUtc ?? result.CapturedAtUtc))
+            ("Source freshness", FormatDate(thread?.SourceLastWriteTimeUtc ?? result.CapturedAtUtc)),
         };
         var technicalFacts = new StackPanel { Spacing = 8 };
         AddFields(technicalFacts, facts.ToArray());
-        DetailPanel.Children.Add(new Expander { Header = "Thread details", Content = technicalFacts,
-            HorizontalAlignment = HorizontalAlignment.Stretch, HorizontalContentAlignment = HorizontalAlignment.Stretch });
+        DetailPanel.Children.Add(
+            new Expander
+            {
+                Header = "Thread details",
+                Content = technicalFacts,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+            });
 
         var toolbar = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        var messagesOnly = new CheckBox { Content = "Show execution details", IsChecked = false, VerticalAlignment = VerticalAlignment.Center };
+        var messagesOnly = new CheckBox
+        {
+            Content = "Show execution details", IsChecked = false, VerticalAlignment = VerticalAlignment.Center,
+        };
         messagesOnly.Checked += OnExecutionDetailsChanged;
         messagesOnly.Unchecked += OnExecutionDetailsChanged;
         toolbar.Children.Add(messagesOnly);
@@ -506,31 +590,37 @@ public sealed partial class CodexPage : Page
         if (thread is not null)
         {
             var usage = new Button { Content = "View token usage" };
-            usage.Click += (_, _) =>
-            {
-                ShowUsage(true, thread.ThreadId);
-            };
+            usage.Click += (_, _) => { ShowUsage(true, thread.ThreadId); };
             toolbar.Children.Add(usage);
         }
         DetailPanel.Children.Add(toolbar);
 
-        var preferredSource = result.HistorySources.FirstOrDefault(source =>
-            string.Equals(source.SourcePath, result.HistorySourcePath, StringComparison.OrdinalIgnoreCase)) ?? result.HistorySources.FirstOrDefault();
-        var items = preferredSource?.Items ?? result.Items;
+        CodexThreadHistorySourceObservation? preferredSource = result.HistorySources.FirstOrDefault(source =>
+                                                                   string.Equals(
+                                                                       source.SourcePath,
+                                                                       result.HistorySourcePath,
+                                                                       StringComparison.OrdinalIgnoreCase)) ??
+                                                               result.HistorySources.FirstOrDefault();
+        IReadOnlyList<CodexThreadItem> items = preferredSource?.Items ?? result.Items;
         _allPresentations = CodexThreadItemPresenter.PresentMany(items.OrderBy(item => item.RolloutOrdinal));
         _conversationList = new ListView
         {
             ItemTemplate = (DataTemplate)Resources["ConversationItemTemplate"],
             SelectionMode = ListViewSelectionMode.None,
             Height = 680,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
         };
-        DetailPanel.Children.Add(new TextBlock { Text = $"Conversation · {_allPresentations.Count:N0} item(s)", FontSize = 18, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        DetailPanel.Children.Add(
+            new TextBlock
+            {
+                Text = $"Conversation · {_allPresentations.Count:N0} item(s)", FontSize = 18, FontWeight = FontWeights.SemiBold,
+            });
         DetailPanel.Children.Add(_conversationList);
-        ApplyConversationItems(scrollToLatest: true);
+        ApplyConversationItems(true);
 
         var evidence = new StackPanel { Spacing = 6 };
-        AddFields(evidence,
+        AddFields(
+            evidence,
             ("State source", result.StateSourcePath ?? "unavailable"),
             ("History sources retained", result.HistorySources.Count.ToString("N0", CultureInfo.InvariantCulture)),
             ("History reconciliation", result.HistoryReconciliationPolicy),
@@ -539,14 +629,16 @@ public sealed partial class CodexPage : Page
             ("Realtime items", result.RealtimeItems.Count.ToString("N0", CultureInfo.InvariantCulture)),
             ("Spawn edges", result.SpawnEdges.Count.ToString("N0", CultureInfo.InvariantCulture)),
             ("Dynamic tools", result.DynamicTools.Count.ToString("N0", CultureInfo.InvariantCulture)));
-        foreach (var source in result.HistorySources)
+        foreach (CodexThreadHistorySourceObservation source in result.HistorySources)
         {
-            evidence.Children.Add(new TextBlock
-            {
-                Text = $"{source.SourceDescription} · turns={source.Turns.Count:N0} · items={source.Items.Count:N0} · realtime={source.RealtimeItems.Count:N0}",
-                TextWrapping = TextWrapping.Wrap,
-                Opacity = 0.72
-            });
+            evidence.Children.Add(
+                new TextBlock
+                {
+                    Text =
+                        $"{source.SourceDescription} · turns={source.Turns.Count:N0} · items={source.Items.Count:N0} · realtime={source.RealtimeItems.Count:N0}",
+                    TextWrapping = TextWrapping.Wrap,
+                    Opacity = 0.72,
+                });
         }
         AddWarnings(evidence, "Coverage warnings", result.CoverageWarnings);
         AddWarnings(evidence, "Source read warnings", result.Warnings);
@@ -563,9 +655,10 @@ public sealed partial class CodexPage : Page
     private void ApplyConversationItems(bool scrollToLatest = false)
     {
         if (_conversationList is null) return;
-        var items = _showExecutionDetails
+        IReadOnlyList<CodexThreadItemPresentation> items = _showExecutionDetails
             ? _allPresentations
-            : _allPresentations.Where(item => item.Kind is CodexThreadItemPresentationKind.Message or CodexThreadItemPresentationKind.Plan).ToArray();
+            : _allPresentations.Where(item => item.Kind is CodexThreadItemPresentationKind.Message or CodexThreadItemPresentationKind.Plan)
+                .ToArray();
         _conversationList.ItemsSource = items;
         if (scrollToLatest && items.Count > 0)
         {
@@ -576,7 +669,7 @@ public sealed partial class CodexPage : Page
     private void OnJumpClicked(object sender, RoutedEventArgs e)
     {
         if (_conversationList?.Items.Count is not > 0 || sender is not Button button) return;
-        var item = string.Equals(button.Tag?.ToString(), "start", StringComparison.Ordinal)
+        object item = string.Equals(button.Tag?.ToString(), "start", StringComparison.Ordinal)
             ? _conversationList.Items[0]
             : _conversationList.Items[^1];
         _conversationList.ScrollIntoView(item);
@@ -584,10 +677,11 @@ public sealed partial class CodexPage : Page
 
     private void OnLinkedThreadClicked(object sender, RoutedEventArgs e)
     {
-        if (sender is not Button { Tag: string threadId } || string.IsNullOrWhiteSpace(threadId) || !_threadNodes.TryGetValue(threadId, out var node)) return;
+        if (sender is not Button { Tag: string threadId } || string.IsNullOrWhiteSpace(threadId) ||
+            !_threadNodes.TryGetValue(threadId, out TreeViewNode? node)) return;
         var parents = new Stack<TreeViewNode>();
         for (TreeViewNode? current = node; current is not null; _treeParents.TryGetValue(current, out current)) parents.Push(current);
-        foreach (var parent in parents) parent.IsExpanded = true;
+        foreach (TreeViewNode parent in parents) parent.IsExpanded = true;
         NavigationTree.SelectedNode = node;
     }
 
@@ -599,12 +693,16 @@ public sealed partial class CodexPage : Page
         }
     }
 
-    private void OnRolloutCoverageClicked(object sender, RoutedEventArgs e) =>
+    private void OnRolloutCoverageClicked(object sender, RoutedEventArgs e)
+    {
         App.Navigate(typeof(CodexRolloutCoveragePage));
+    }
 
-    private bool IsSubagent(string? threadId) =>
-        threadId is not null && _navigation?.PreferredSpawnEdges.Any(edge =>
+    private bool IsSubagent(string? threadId)
+    {
+        return threadId is not null && _navigation?.PreferredSpawnEdges.Any(edge =>
             string.Equals(edge.ChildThreadId, threadId, StringComparison.OrdinalIgnoreCase)) == true;
+    }
 
     private void SetDetailMessage(string message)
     {
@@ -614,7 +712,7 @@ public sealed partial class CodexPage : Page
 
     private void ReplaceCancellation(bool cancelOnly = false)
     {
-        var previous = Interlocked.Exchange(ref _cancellation, cancelOnly ? null : new CancellationTokenSource());
+        CancellationTokenSource? previous = Interlocked.Exchange(ref _cancellation, cancelOnly ? null : new CancellationTokenSource());
         previous?.Cancel();
         previous?.Dispose();
     }
@@ -625,18 +723,21 @@ public sealed partial class CodexPage : Page
         var pending = new Stack<CodexThreadNavigationNode>(roots.Reverse());
         while (pending.Count > 0)
         {
-            var node = pending.Pop();
+            CodexThreadNavigationNode node = pending.Pop();
             if (!seen.Add(node.ThreadId)) continue;
             yield return node;
-            foreach (var child in node.Children.Reverse()) pending.Push(child);
+            foreach (CodexThreadNavigationNode child in node.Children.Reverse()) pending.Push(child);
         }
     }
 
-    private static int CountNodes(CodexThreadNavigationNode node) => Flatten(new[] { node }).Count();
+    private static int CountNodes(CodexThreadNavigationNode node)
+    {
+        return Flatten(new[] { node }).Count();
+    }
 
     private static void AddHeading(Panel parent, string title, string subtitle)
     {
-        parent.Children.Add(new TextBlock { Text = title, FontSize = 26, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
+        parent.Children.Add(new TextBlock { Text = title, FontSize = 26, FontWeight = FontWeights.SemiBold });
         parent.Children.Add(new TextBlock { Text = subtitle, Opacity = 0.7, TextWrapping = TextWrapping.Wrap });
     }
 
@@ -648,8 +749,8 @@ public sealed partial class CodexPage : Page
             Children =
             {
                 new TextBlock { Text = title, Opacity = 0.65, TextWrapping = TextWrapping.Wrap },
-                new TextBlock { Text = value, FontSize = 20, FontWeight = Microsoft.UI.Text.FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap }
-            }
+                new TextBlock { Text = value, FontSize = 20, FontWeight = FontWeights.SemiBold, TextWrapping = TextWrapping.Wrap },
+            },
         };
         Grid.SetColumn(border, column);
         parent.Children.Add(border);
@@ -660,15 +761,23 @@ public sealed partial class CodexPage : Page
         var grid = new Grid { ColumnSpacing = 12, RowSpacing = 5 };
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-        var row = 0;
-        foreach (var field in fields.Where(field => !string.IsNullOrWhiteSpace(field.Label)))
+        int row = 0;
+        foreach ((string Label, string Value) field in fields.Where(field => !string.IsNullOrWhiteSpace(field.Label)))
         {
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var label = new TextBlock { Text = field.Label, Opacity = 0.62, TextWrapping = TextWrapping.Wrap };
-            var value = new TextBlock { Text = string.IsNullOrWhiteSpace(field.Value) ? "unavailable" : field.Value, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true };
-            Grid.SetRow(label, row); Grid.SetColumn(label, 0);
-            Grid.SetRow(value, row); Grid.SetColumn(value, 1);
-            grid.Children.Add(label); grid.Children.Add(value);
+            var value = new TextBlock
+            {
+                Text = string.IsNullOrWhiteSpace(field.Value) ? "unavailable" : field.Value,
+                TextWrapping = TextWrapping.Wrap,
+                IsTextSelectionEnabled = true,
+            };
+            Grid.SetRow(label, row);
+            Grid.SetColumn(label, 0);
+            Grid.SetRow(value, row);
+            Grid.SetColumn(value, 1);
+            grid.Children.Add(label);
+            grid.Children.Add(value);
             row++;
         }
         parent.Children.Add(grid);
@@ -688,30 +797,40 @@ public sealed partial class CodexPage : Page
 
     private static void AddNotice(Panel parent, string message)
     {
-        parent.Children.Add(new Border
-        {
-            Padding = new Thickness(10),
-            CornerRadius = new CornerRadius(8),
-            Background = (Brush?)Application.Current.Resources["SubtleFillColorTransparentBrush"],
-            Child = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, Opacity = 0.76 }
-        });
+        parent.Children.Add(
+            new Border
+            {
+                Padding = new Thickness(10),
+                CornerRadius = new CornerRadius(8),
+                Background = (Brush?)Application.Current.Resources["SubtleFillColorTransparentBrush"],
+                Child = new TextBlock { Text = message, TextWrapping = TextWrapping.Wrap, Opacity = 0.76 },
+            });
     }
 
-    private static Brush? CardBrush() => Application.Current.Resources["CardBackgroundFillColorDefaultBrush"] as Brush;
-
-    private static string FormatDate(DateTimeOffset? value) => value is null ? "unavailable" : value.Value.ToLocalTime().ToString("g", CultureInfo.CurrentCulture);
-
-    private static string FormatBucket(DateTimeOffset value, AnalyticsBucketSize size) => size switch
+    private static Brush? CardBrush()
     {
-        AnalyticsBucketSize.Minute => value.ToLocalTime().ToString("ddd HH:mm", CultureInfo.CurrentCulture),
-        AnalyticsBucketSize.Hour => value.ToLocalTime().ToString("ddd HH:00", CultureInfo.CurrentCulture),
-        _ => value.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.CurrentCulture)
-    };
+        return Application.Current.Resources["CardBackgroundFillColorDefaultBrush"] as Brush;
+    }
+
+    private static string FormatDate(DateTimeOffset? value)
+    {
+        return value is null ? "unavailable" : value.Value.ToLocalTime().ToString("g", CultureInfo.CurrentCulture);
+    }
+
+    private static string FormatBucket(DateTimeOffset value, AnalyticsBucketSize size)
+    {
+        return size switch
+        {
+            AnalyticsBucketSize.Minute => value.ToLocalTime().ToString("ddd HH:mm", CultureInfo.CurrentCulture),
+            AnalyticsBucketSize.Hour => value.ToLocalTime().ToString("ddd HH:00", CultureInfo.CurrentCulture),
+            _ => value.ToLocalTime().ToString("yyyy-MM-dd", CultureInfo.CurrentCulture),
+        };
+    }
 
     private int ParseRangeDays()
     {
         if (RangeCombo.SelectedItem is ComboBoxItem item &&
-            int.TryParse(item.Tag?.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var days))
+            int.TryParse(item.Tag?.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out int days))
         {
             return Math.Clamp(days, 1, 3650);
         }
@@ -722,7 +841,7 @@ public sealed partial class CodexPage : Page
     private AnalyticsBucketSize ParseBucket()
     {
         if (BucketCombo.SelectedItem is ComboBoxItem item &&
-            Enum.TryParse<AnalyticsBucketSize>(item.Tag?.ToString(), out var bucket))
+            Enum.TryParse<AnalyticsBucketSize>(item.Tag?.ToString(), out AnalyticsBucketSize bucket))
         {
             return bucket;
         }
@@ -732,26 +851,26 @@ public sealed partial class CodexPage : Page
 
     private static string FormatCount(long value)
     {
-        var absolute = Math.Abs((double)value);
+        double absolute = Math.Abs((double)value);
         return absolute switch
         {
             >= 1_000_000_000 => $"{value / 1_000_000_000d:0.00}B",
             >= 1_000_000 => $"{value / 1_000_000d:0.0}M",
             >= 1_000 => $"{value / 1_000d:0.0}K",
-            _ => value.ToString("N0", CultureInfo.CurrentCulture)
+            _ => value.ToString("N0", CultureInfo.CurrentCulture),
         };
     }
 
-    private static string FormatQuotaDelta(double value) =>
-        Math.Abs(value) < 0.05 ? "No observed movement" : $"{value:+0.#;-0.#;0.#} pp";
+    private static string FormatQuotaDelta(double value)
+    {
+        return Math.Abs(value) < 0.05 ? "No observed movement" : $"{value:+0.#;-0.#;0.#} pp";
+    }
 
     private static string Summarize(string message)
     {
-        var compact = message.ReplaceLineEndings(" ").Trim();
+        string compact = message.ReplaceLineEndings(" ").Trim();
         return compact.Length <= 260 ? compact : compact[..260] + "…";
     }
-
-    public enum NavigationTreeKind { All, Group, Thread }
 
     public sealed class NavigationTreeItem(
         string displayName,

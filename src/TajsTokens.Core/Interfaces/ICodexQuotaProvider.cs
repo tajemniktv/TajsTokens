@@ -1,4 +1,12 @@
+// Taj's Tokens | ICodexQuotaProvider.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using TajsTokens.Core.Models;
+
+#endregion
 
 namespace TajsTokens.Core.Interfaces;
 
@@ -10,8 +18,8 @@ public interface ICodexQuotaProvider
     // means unknown scope, not an inferred identity. The native adapter preserves response scope.
     async Task<CodexQuotaResponse> GetQuotaResponseAsync(CancellationToken cancellationToken)
     {
-        var snapshots = await GetQuotaSnapshotsAsync(cancellationToken);
-        var accounts = snapshots.Select(snapshot => snapshot.AccountKey).Distinct().Take(2).ToArray();
-        return new(snapshots, accounts.Length == 1 ? accounts[0] : null);
+        IReadOnlyList<QuotaSnapshot> snapshots = await GetQuotaSnapshotsAsync(cancellationToken);
+        string?[] accounts = snapshots.Select(snapshot => snapshot.AccountKey).Distinct().Take(2).ToArray();
+        return new CodexQuotaResponse(snapshots, accounts.Length == 1 ? accounts[0] : null);
     }
 }

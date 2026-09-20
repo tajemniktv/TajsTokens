@@ -1,9 +1,17 @@
+// Taj's Tokens | TelemetryCoordinatorThreadingTests.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
+
+#endregion
 
 namespace TajsTokens.Core.Tests;
 
@@ -12,8 +20,8 @@ public sealed class TelemetryCoordinatorThreadingTests
     [Fact]
     public async Task RefreshAsync_DoesNotRunProviderCoreOnCallerSynchronizationContext()
     {
-        var directory = CreateTempDirectory();
-        var previousContext = SynchronizationContext.Current;
+        string directory = CreateTempDirectory();
+        SynchronizationContext? previousContext = SynchronizationContext.Current;
         var callerContext = new SynchronizationContext();
         try
         {
@@ -39,7 +47,7 @@ public sealed class TelemetryCoordinatorThreadingTests
     [Fact]
     public async Task RefreshAsync_PublishesProviderSnapshotBeforeObservatoryCompletes()
     {
-        var directory = CreateTempDirectory();
+        string directory = CreateTempDirectory();
         var observatory = new BlockingObservatoryService();
         try
         {
@@ -60,14 +68,14 @@ public sealed class TelemetryCoordinatorThreadingTests
                 }
             };
 
-            var refreshTask = coordinator.RefreshAsync(RefreshTrigger.Startup, CancellationToken.None);
-            var published = await interim.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Task<TelemetrySnapshot> refreshTask = coordinator.RefreshAsync(RefreshTrigger.Startup, CancellationToken.None);
+            TelemetrySnapshot published = await interim.Task.WaitAsync(TimeSpan.FromSeconds(10));
 
             Assert.False(refreshTask.IsCompleted);
             Assert.Contains(published.Sources, source => source.Provider == "Codex rollouts");
 
             observatory.Complete();
-            var final = await refreshTask.WaitAsync(TimeSpan.FromSeconds(10));
+            TelemetrySnapshot final = await refreshTask.WaitAsync(TimeSpan.FromSeconds(10));
             Assert.Contains(final.Sources, source => source.Provider == "Codex rollouts" && source.State == TelemetryHealthState.Live);
         }
         finally
@@ -81,7 +89,7 @@ public sealed class TelemetryCoordinatorThreadingTests
 
     private static string CreateTempDirectory()
     {
-        var directory = Path.Combine(Path.GetTempPath(), "TajsTokens.Coordinator.Tests", Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(Path.GetTempPath(), "TajsTokens.Coordinator.Tests", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         return directory;
     }
@@ -91,7 +99,7 @@ public sealed class TelemetryCoordinatorThreadingTests
         try
         {
             SqliteConnection.ClearAllPools();
-            Directory.Delete(directory, recursive: true);
+            Directory.Delete(directory, true);
         }
         catch (IOException)
         {
@@ -113,14 +121,18 @@ public sealed class TelemetryCoordinatorThreadingTests
             return Task.FromResult<IReadOnlyList<TokenUsage>>([]);
         }
 
-        public Task<IReadOnlyList<TokenTimeBucket>> GetHourlyUsageAsync(CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<TokenTimeBucket>>([]);
+        public Task<IReadOnlyList<TokenTimeBucket>> GetHourlyUsageAsync(CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyList<TokenTimeBucket>>([]);
+        }
     }
 
     private sealed class EmptyQuotaProvider : ICodexQuotaProvider
     {
-        public Task<IReadOnlyList<QuotaSnapshot>> GetQuotaSnapshotsAsync(CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<QuotaSnapshot>>([]);
+        public Task<IReadOnlyList<QuotaSnapshot>> GetQuotaSnapshotsAsync(CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyList<QuotaSnapshot>>([]);
+        }
     }
 
     private sealed class BlockingObservatoryService : ICodexObservatoryService
@@ -128,9 +140,14 @@ public sealed class TelemetryCoordinatorThreadingTests
         private readonly TaskCompletionSource<CodexObservatoryRefreshResult> _completion =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        public Task<CodexObservatoryRefreshResult> RefreshAsync(CancellationToken cancellationToken) =>
-            _completion.Task.WaitAsync(cancellationToken);
+        public Task<CodexObservatoryRefreshResult> RefreshAsync(CancellationToken cancellationToken)
+        {
+            return _completion.Task.WaitAsync(cancellationToken);
+        }
 
-        public void Complete() => _completion.TrySetResult(new CodexObservatoryRefreshResult(1, 0, 0, 0, 0, 0, 0));
+        public void Complete()
+        {
+            _completion.TrySetResult(new CodexObservatoryRefreshResult(1, 0, 0, 0, 0, 0, 0));
+        }
     }
 }

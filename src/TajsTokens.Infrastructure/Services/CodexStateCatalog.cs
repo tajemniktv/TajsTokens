@@ -1,7 +1,15 @@
+// Taj's Tokens | CodexStateCatalog.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
+
+#endregion
 
 namespace TajsTokens.Infrastructure.Services;
 
@@ -30,10 +38,10 @@ internal sealed record CodexStateCatalogBatch(
     IReadOnlyList<CodexStateEdge> Edges);
 
 /// <summary>
-/// Reads Codex's private local thread catalog as an optional, read-only acceleration source.
-/// The schema is deliberately fingerprinted rather than treated as a stable provider contract.
-/// Unknown, malformed or unreadable databases return <see langword="null"/> so callers can fail
-/// open to rollout filesystem discovery.
+///     Reads Codex's private local thread catalog as an optional, read-only acceleration source.
+///     The schema is deliberately fingerprinted rather than treated as a stable provider contract.
+///     Unknown, malformed or unreadable databases return <see langword="null" /> so callers can fail
+///     open to rollout filesystem discovery.
 /// </summary>
 internal sealed class CodexStateCatalog
 {
@@ -48,7 +56,7 @@ internal sealed class CodexStateCatalog
         "tokens_used",
         "model",
         "reasoning_effort",
-        "archived"
+        "archived",
     ];
 
     private readonly string? _codexHome;
@@ -62,13 +70,13 @@ internal sealed class CodexStateCatalog
         long minimumUpdatedAtMs,
         CancellationToken cancellationToken)
     {
-        foreach (var databasePath in DiscoverCandidateDatabases())
+        foreach (string databasePath in DiscoverCandidateDatabases())
         {
             cancellationToken.ThrowIfCancellationRequested();
 
             try
             {
-                var result = await TryReadDatabaseAsync(
+                CodexStateCatalogBatch? result = await TryReadDatabaseAsync(
                     databasePath,
                     Math.Max(0, minimumUpdatedAtMs),
                     cancellationToken);
@@ -121,7 +129,7 @@ internal sealed class CodexStateCatalog
 
     private static StateDatabaseCandidate? TryBuildCandidate(string path)
     {
-        var fileName = Path.GetFileName(path);
+        string fileName = Path.GetFileName(path);
         const string prefix = "state_";
         const string suffix = ".sqlite";
         if (!fileName.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) ||
@@ -130,12 +138,12 @@ internal sealed class CodexStateCatalog
             return null;
         }
 
-        var generationText = fileName[prefix.Length..^suffix.Length];
+        string generationText = fileName[prefix.Length..^suffix.Length];
         if (!int.TryParse(
                 generationText,
                 NumberStyles.None,
                 CultureInfo.InvariantCulture,
-                out var generation))
+                out int generation))
         {
             return null;
         }
@@ -151,12 +159,9 @@ internal sealed class CodexStateCatalog
         long minimumUpdatedAtMs,
         CancellationToken cancellationToken)
     {
-        var connectionString = new SqliteConnectionStringBuilder
+        string connectionString = new SqliteConnectionStringBuilder
         {
-            DataSource = databasePath,
-            Mode = SqliteOpenMode.ReadOnly,
-            Cache = SqliteCacheMode.Shared,
-            Pooling = true
+            DataSource = databasePath, Mode = SqliteOpenMode.ReadOnly, Cache = SqliteCacheMode.Shared, Pooling = true,
         }.ToString();
 
         await using var connection = new SqliteConnection(connectionString);
@@ -164,7 +169,7 @@ internal sealed class CodexStateCatalog
 
         // Keep this optional acceleration source explicitly read-only as well as using
         // Mode=ReadOnly. This is a defense-in-depth guard for the private Codex state catalog.
-        await using (var queryOnly = connection.CreateCommand())
+        await using (SqliteCommand queryOnly = connection.CreateCommand())
         {
             queryOnly.CommandText = "PRAGMA query_only = ON;";
             await queryOnly.ExecuteNonQueryAsync(cancellationToken);
@@ -179,69 +184,70 @@ internal sealed class CodexStateCatalog
         // updated_at_ms index. If a private build leaves them null, use the compatibility fallback
         // rather than wrapping the indexed column in COALESCE and quietly turning every refresh into
         // a full scan/sort.
-        var nullTimestampCommand = connection.CreateCommand();
+        SqliteCommand nullTimestampCommand = connection.CreateCommand();
         nullTimestampCommand.CommandText = """
-            SELECT 1
-            FROM threads
-            WHERE created_at_ms IS NULL OR updated_at_ms IS NULL
-            LIMIT 1;
-            """;
+                                           SELECT 1
+                                           FROM threads
+                                           WHERE created_at_ms IS NULL OR updated_at_ms IS NULL
+                                           LIMIT 1;
+                                           """;
         if (await nullTimestampCommand.ExecuteScalarAsync(cancellationToken) is not null)
         {
             return null;
         }
 
-        var totalCommand = connection.CreateCommand();
+        SqliteCommand totalCommand = connection.CreateCommand();
         totalCommand.CommandText = "SELECT COUNT(*) FROM threads;";
-        var totalThreadCount = checked((int)ReadRequiredInt64(
+        int totalThreadCount = checked((int)ReadRequiredInt64(
             await totalCommand.ExecuteScalarAsync(cancellationToken),
             "threads count"));
 
-        var threadCommand = connection.CreateCommand();
+        SqliteCommand threadCommand = connection.CreateCommand();
         threadCommand.CommandText = """
-            SELECT id,
-                   rollout_path,
-                   created_at_ms,
-                   updated_at_ms,
-                   tokens_used,
-                   model,
-                   reasoning_effort,
-                   archived
-            FROM threads
-            WHERE updated_at_ms >= $minimum
-            ORDER BY updated_at_ms, id;
-            """;
+                                    SELECT id,
+                                           rollout_path,
+                                           created_at_ms,
+                                           updated_at_ms,
+                                           tokens_used,
+                                           model,
+                                           reasoning_effort,
+                                           archived
+                                    FROM threads
+                                    WHERE updated_at_ms >= $minimum
+                                    ORDER BY updated_at_ms, id;
+                                    """;
         threadCommand.Parameters.AddWithValue("$minimum", minimumUpdatedAtMs);
 
         var threads = new List<CodexStateThread>();
         long maxUpdatedAtMs = 0;
-        await using (var reader = await threadCommand.ExecuteReaderAsync(cancellationToken))
+        await using (SqliteDataReader reader = await threadCommand.ExecuteReaderAsync(cancellationToken))
         {
             while (await reader.ReadAsync(cancellationToken))
             {
-                var threadId = ReadRequiredString(reader.GetValue(0), "threads.id");
-                var rolloutPath = ReadRequiredString(reader.GetValue(1), "threads.rollout_path");
-                var normalizedPath = Path.GetFullPath(rolloutPath);
-                var createdAtMs = ReadRequiredInt64(reader.GetValue(2), "threads.created_at_ms");
-                var updatedAtMs = ReadRequiredInt64(reader.GetValue(3), "threads.updated_at_ms");
-                var tokensUsed = ReadRequiredInt64(reader.GetValue(4), "threads.tokens_used");
-                var archived = ReadRequiredInt64(reader.GetValue(7), "threads.archived") != 0;
+                string threadId = ReadRequiredString(reader.GetValue(0), "threads.id");
+                string rolloutPath = ReadRequiredString(reader.GetValue(1), "threads.rollout_path");
+                string normalizedPath = Path.GetFullPath(rolloutPath);
+                long createdAtMs = ReadRequiredInt64(reader.GetValue(2), "threads.created_at_ms");
+                long updatedAtMs = ReadRequiredInt64(reader.GetValue(3), "threads.updated_at_ms");
+                long tokensUsed = ReadRequiredInt64(reader.GetValue(4), "threads.tokens_used");
+                bool archived = ReadRequiredInt64(reader.GetValue(7), "threads.archived") != 0;
 
                 maxUpdatedAtMs = Math.Max(maxUpdatedAtMs, updatedAtMs);
-                threads.Add(new CodexStateThread(
-                    threadId,
-                    normalizedPath,
-                    HashPath(normalizedPath),
-                    createdAtMs,
-                    updatedAtMs,
-                    tokensUsed,
-                    ReadOptionalString(reader.GetValue(5)),
-                    ReadOptionalString(reader.GetValue(6)),
-                    archived));
+                threads.Add(
+                    new CodexStateThread(
+                        threadId,
+                        normalizedPath,
+                        HashPath(normalizedPath),
+                        createdAtMs,
+                        updatedAtMs,
+                        tokensUsed,
+                        ReadOptionalString(reader.GetValue(5)),
+                        ReadOptionalString(reader.GetValue(6)),
+                        archived));
             }
         }
 
-        var edges = await ReadSpawnEdgesAsync(connection, cancellationToken);
+        IReadOnlyList<CodexStateEdge> edges = await ReadSpawnEdgesAsync(connection, cancellationToken);
         return new CodexStateCatalogBatch(
             databasePath,
             totalThreadCount,
@@ -254,7 +260,7 @@ internal sealed class CodexStateCatalog
         SqliteConnection connection,
         CancellationToken cancellationToken)
     {
-        var tableCommand = connection.CreateCommand();
+        SqliteCommand tableCommand = connection.CreateCommand();
         tableCommand.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'threads' LIMIT 1;";
         if (await tableCommand.ExecuteScalarAsync(cancellationToken) is null)
         {
@@ -262,9 +268,9 @@ internal sealed class CodexStateCatalog
         }
 
         var columns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var pragma = connection.CreateCommand();
+        SqliteCommand pragma = connection.CreateCommand();
         pragma.CommandText = "PRAGMA table_info(threads);";
-        await using var reader = await pragma.ExecuteReaderAsync(cancellationToken);
+        await using SqliteDataReader reader = await pragma.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
             columns.Add(ReadRequiredString(reader.GetValue(1), "threads column name"));
@@ -277,7 +283,7 @@ internal sealed class CodexStateCatalog
         SqliteConnection connection,
         CancellationToken cancellationToken)
     {
-        var tableCommand = connection.CreateCommand();
+        SqliteCommand tableCommand = connection.CreateCommand();
         tableCommand.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'thread_spawn_edges' LIMIT 1;";
         if (await tableCommand.ExecuteScalarAsync(cancellationToken) is null)
         {
@@ -285,25 +291,26 @@ internal sealed class CodexStateCatalog
         }
 
         var edges = new List<CodexStateEdge>();
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            SELECT e.parent_thread_id,
-                   e.child_thread_id,
-                   e.status,
-                   child.created_at_ms
-            FROM thread_spawn_edges e
-            JOIN threads parent ON parent.id = e.parent_thread_id
-            JOIN threads child ON child.id = e.child_thread_id
-            WHERE e.parent_thread_id <> e.child_thread_id;
-            """;
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                              SELECT e.parent_thread_id,
+                                     e.child_thread_id,
+                                     e.status,
+                                     child.created_at_ms
+                              FROM thread_spawn_edges e
+                              JOIN threads parent ON parent.id = e.parent_thread_id
+                              JOIN threads child ON child.id = e.child_thread_id
+                              WHERE e.parent_thread_id <> e.child_thread_id;
+                              """;
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            edges.Add(new CodexStateEdge(
-                ReadRequiredString(reader.GetValue(0), "thread_spawn_edges.parent_thread_id"),
-                ReadRequiredString(reader.GetValue(1), "thread_spawn_edges.child_thread_id"),
-                ReadOptionalString(reader.GetValue(2)) ?? "unknown",
-                ReadRequiredInt64(reader.GetValue(3), "thread_spawn_edges child created_at_ms")));
+            edges.Add(
+                new CodexStateEdge(
+                    ReadRequiredString(reader.GetValue(0), "thread_spawn_edges.parent_thread_id"),
+                    ReadRequiredString(reader.GetValue(1), "thread_spawn_edges.child_thread_id"),
+                    ReadOptionalString(reader.GetValue(2)) ?? "unknown",
+                    ReadRequiredInt64(reader.GetValue(3), "thread_spawn_edges child created_at_ms")));
         }
 
         return RemoveCyclicEdges(edges);
@@ -314,20 +321,17 @@ internal sealed class CodexStateCatalog
         var accepted = new List<CodexStateEdge>(edges.Count);
         var parentsByChild = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var edge in edges)
+        foreach (CodexStateEdge edge in edges)
         {
             if (parentsByChild.ContainsKey(edge.ChildThreadId))
             {
                 continue;
             }
 
-            var cursor = edge.ParentThreadId;
-            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-            {
-                edge.ChildThreadId
-            };
-            var cycle = false;
-            while (parentsByChild.TryGetValue(cursor, out var parent))
+            string cursor = edge.ParentThreadId;
+            var visited = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { edge.ChildThreadId };
+            bool cycle = false;
+            while (parentsByChild.TryGetValue(cursor, out string? parent))
             {
                 if (!visited.Add(cursor))
                 {
@@ -384,8 +388,8 @@ internal sealed class CodexStateCatalog
                 int integer => integer,
                 short integer => integer,
                 byte integer => integer,
-                string text when long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed) => parsed,
-                _ => throw new InvalidDataException($"Recognized Codex state has invalid {field}.")
+                string text when long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out long parsed) => parsed,
+                _ => throw new InvalidDataException($"Recognized Codex state has invalid {field}."),
             };
         }
         catch (OverflowException exception)
@@ -394,13 +398,15 @@ internal sealed class CodexStateCatalog
         }
     }
 
-    private static bool IsCatalogFailure(Exception exception) =>
-        exception is SqliteException or IOException or UnauthorizedAccessException or InvalidDataException or
+    private static bool IsCatalogFailure(Exception exception)
+    {
+        return exception is SqliteException or IOException or UnauthorizedAccessException or InvalidDataException or
             ArgumentException or NotSupportedException or InvalidCastException or FormatException or OverflowException;
+    }
 
     private static string HashPath(string path)
     {
-        var normalized = OperatingSystem.IsWindows()
+        string normalized = OperatingSystem.IsWindows()
             ? path.ToUpperInvariant()
             : path;
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized)))

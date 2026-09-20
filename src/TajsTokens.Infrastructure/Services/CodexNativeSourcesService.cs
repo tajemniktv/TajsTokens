@@ -1,12 +1,21 @@
+// Taj's Tokens | CodexNativeSourcesService.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
+using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
+
+#endregion
 
 namespace TajsTokens.Infrastructure.Services;
 
 /// <summary>
-/// Read-model facade for Codex-native observations. Source-specific acquisition and row parsing
-/// live in <see cref="CodexNativeSourceGateway"/> so this type remains a presentation boundary.
+///     Read-model facade for Codex-native observations. Source-specific acquisition and row parsing
+///     live in <see cref="CodexNativeSourceGateway" /> so this type remains a presentation boundary.
 /// </summary>
-public sealed class CodexNativeSourcesService : TajsTokens.Core.Interfaces.ICodexNativeSourcesReadModel
+public sealed class CodexNativeSourcesService : ICodexNativeSourcesReadModel
 {
     private readonly CodexNativeSourceGateway _gateway;
 
@@ -21,37 +30,60 @@ public sealed class CodexNativeSourcesService : TajsTokens.Core.Interfaces.ICode
 
     public CodexStateDbExplorerService Explorer => _gateway.Explorer;
 
-    public Task<CodexNativeSourcesSnapshot> ReadAsync(CancellationToken cancellationToken = default) =>
-        _gateway.ReadAsync(cancellationToken);
+    public Task<CodexNativeSourcesSnapshot> ReadAsync(CodexNativeSourcesQuery query, CancellationToken cancellationToken = default)
+    {
+        return _gateway.ReadAsync(query, cancellationToken);
+    }
 
-    public Task<CodexNativeSourcesSnapshot> ReadAsync(CodexNativeSourcesQuery query, CancellationToken cancellationToken = default) =>
-        _gateway.ReadAsync(query, cancellationToken);
-
-    public Task<CodexNativeSourcesSnapshot> InspectAsync(CancellationToken cancellationToken = default) =>
-        _gateway.InspectAsync(cancellationToken);
-
-    public Task ReleaseLogsSnapshotAsync(string id) => _gateway.ReleaseLogsSnapshotAsync(id);
+    public Task ReleaseLogsSnapshotAsync(string id)
+    {
+        return _gateway.ReleaseLogsSnapshotAsync(id);
+    }
 
     public Task<CodexLogsSource> ReadLogsAsync(
         CodexLogsQuery? query = null,
-        CancellationToken cancellationToken = default) =>
-        _gateway.ReadLogsAsync(query, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        return _gateway.ReadLogsAsync(query, cancellationToken);
+    }
 
-    public Task<CodexMemorySource> ReadMemoryAsync(CancellationToken cancellationToken = default) =>
-        _gateway.ReadMemoryAsync(cancellationToken);
+    public Task<CodexNativeSourcesSnapshot> ReadAsync(CancellationToken cancellationToken = default)
+    {
+        return _gateway.ReadAsync(cancellationToken);
+    }
 
-    public Task<CodexGoalsSource> ReadGoalsAsync(CancellationToken cancellationToken = default) =>
-        _gateway.ReadGoalsAsync(cancellationToken);
+    public Task<CodexNativeSourcesSnapshot> InspectAsync(CancellationToken cancellationToken = default)
+    {
+        return _gateway.InspectAsync(cancellationToken);
+    }
 
-    public Task<CodexQueueSource> ReadQueueAsync(CancellationToken cancellationToken = default) =>
-        _gateway.ReadQueueAsync(cancellationToken);
+    public Task<CodexMemorySource> ReadMemoryAsync(CancellationToken cancellationToken = default)
+    {
+        return _gateway.ReadMemoryAsync(cancellationToken);
+    }
 
-    public Task<CodexArtifactsSource> ReadArtifactsAsync(CancellationToken cancellationToken = default) =>
-        _gateway.ReadArtifactsAsync(cancellationToken);
+    public Task<CodexGoalsSource> ReadGoalsAsync(CancellationToken cancellationToken = default)
+    {
+        return _gateway.ReadGoalsAsync(cancellationToken);
+    }
 
-    public Task<CodexDesktopCatalogSource> ReadDesktopCatalogAsync(CancellationToken cancellationToken = default) =>
-        _gateway.ReadDesktopCatalogAsync(cancellationToken);
+    public Task<CodexQueueSource> ReadQueueAsync(CancellationToken cancellationToken = default)
+    {
+        return _gateway.ReadQueueAsync(cancellationToken);
+    }
 
-    public Task<CodexThreadSummariesSource> ReadThreadSummariesAsync(CancellationToken cancellationToken = default) =>
-        _gateway.ReadThreadSummariesAsync(cancellationToken);
+    public Task<CodexArtifactsSource> ReadArtifactsAsync(CancellationToken cancellationToken = default)
+    {
+        return _gateway.ReadArtifactsAsync(cancellationToken);
+    }
+
+    public Task<CodexDesktopCatalogSource> ReadDesktopCatalogAsync(CancellationToken cancellationToken = default)
+    {
+        return _gateway.ReadDesktopCatalogAsync(cancellationToken);
+    }
+
+    public Task<CodexThreadSummariesSource> ReadThreadSummariesAsync(CancellationToken cancellationToken = default)
+    {
+        return _gateway.ReadThreadSummariesAsync(cancellationToken);
+    }
 }

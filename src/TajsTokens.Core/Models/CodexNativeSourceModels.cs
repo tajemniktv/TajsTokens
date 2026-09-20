@@ -1,3 +1,7 @@
+// Taj's Tokens | CodexNativeSourceModels.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
 namespace TajsTokens.Core.Models;
 
 /// <summary>Codex-owned SQLite source families surfaced by the local observability boundary.</summary>
@@ -9,13 +13,13 @@ public enum CodexNativeSourceKind
     Queue,
     Artifacts,
     DesktopCatalog,
-    ThreadSummaries
+    ThreadSummaries,
 }
 
 /// <summary>
-/// Bounded, read-only query options for the source-native Codex logs store.
-/// Timestamps are expressed as UTC instants while the returned entries retain Codex's raw
-/// Unix-second and nanosecond fields.
+///     Bounded, read-only query options for the source-native Codex logs store.
+///     Timestamps are expressed as UTC instants while the returned entries retain Codex's raw
+///     Unix-second and nanosecond fields.
 /// </summary>
 public sealed record CodexLogsQuery
 {
@@ -28,6 +32,7 @@ public sealed record CodexLogsQuery
 
     /// <summary>Request a short-lived read-only WAL snapshot for navigation.</summary>
     public bool KeepSnapshot { get; init; }
+
     public string? SnapshotId { get; init; }
 
     public DateTimeOffset? FromUtc { get; init; }
@@ -49,8 +54,8 @@ public sealed record CodexLogsQuery
     public string? ProcessUuid { get; init; }
 
     /// <summary>
-    /// Whether rows without a source-provided thread ID remain eligible. A missing thread_id
-    /// column is not treated as evidence that every row is threadless.
+    ///     Whether rows without a source-provided thread ID remain eligible. A missing thread_id
+    ///     column is not treated as evidence that every row is threadless.
     /// </summary>
     public bool IncludeThreadless { get; init; } = true;
 
@@ -74,21 +79,21 @@ public sealed record CodexLogsCapabilities(
 
     public IReadOnlyList<string> AvailableOptionalColumns =>
     [
-        .. (HasMessages ? [MessageColumn!] : Array.Empty<string>()),
-        .. (HasModulePath ? ["module_path"] : Array.Empty<string>()),
-        .. (HasFile ? ["file"] : Array.Empty<string>()),
-        .. (HasLine ? ["line"] : Array.Empty<string>()),
-        .. (HasThreadId ? ["thread_id"] : Array.Empty<string>()),
-        .. (HasProcessUuid ? ["process_uuid"] : Array.Empty<string>()),
-        .. (HasEstimatedBytes ? ["estimated_bytes"] : Array.Empty<string>())
+        .. HasMessages ? [MessageColumn!] : Array.Empty<string>(),
+        .. HasModulePath ? ["module_path"] : Array.Empty<string>(),
+        .. HasFile ? ["file"] : Array.Empty<string>(),
+        .. HasLine ? ["line"] : Array.Empty<string>(),
+        .. HasThreadId ? ["thread_id"] : Array.Empty<string>(),
+        .. HasProcessUuid ? ["process_uuid"] : Array.Empty<string>(),
+        .. HasEstimatedBytes ? ["estimated_bytes"] : Array.Empty<string>(),
     ];
 
     public static CodexLogsCapabilities None { get; } = new(null, false, false, false, false, false, false);
 }
 
 /// <summary>
-/// A source-native log row. Message text is present only when the query explicitly requested it;
-/// HasMessage remains available without transferring the content-bearing value.
+///     A source-native log row. Message text is present only when the query explicitly requested it;
+///     HasMessage remains available without transferring the content-bearing value.
 /// </summary>
 public sealed record CodexLogEntry(
     long Id,
@@ -143,7 +148,7 @@ public enum CodexNativeSourceAvailability
     Unsupported,
     Empty,
     Available,
-    Error
+    Error,
 }
 
 public sealed record CodexNativeSourceInfo(
@@ -174,12 +179,14 @@ public sealed record CodexNativeSourceInfo(
 
     public string StatusText => Availability switch
     {
-        CodexNativeSourceAvailability.Available => $"Available · {SupportedTables.Count:N0} supported table(s)" + (HasMoreRows ? " · more rows available" : string.Empty) + (Warnings.Count > 0 ? $" · {Warnings.Count} warning(s)" : string.Empty),
+        CodexNativeSourceAvailability.Available => $"Available · {SupportedTables.Count:N0} supported table(s)" +
+                                                   (HasMoreRows ? " · more rows available" : string.Empty) +
+                                                   (Warnings.Count > 0 ? $" · {Warnings.Count} warning(s)" : string.Empty),
         CodexNativeSourceAvailability.Empty => "Supported · no rows observed",
         CodexNativeSourceAvailability.Unsupported => "Source found · capability unsupported",
         CodexNativeSourceAvailability.Unavailable => "Source not discovered",
         CodexNativeSourceAvailability.Error => $"Inspection failed · {Error ?? "unknown error"}",
-        _ => "Unknown"
+        _ => "Unknown",
     };
 }
 
@@ -198,9 +205,9 @@ public sealed record CodexMemoryJob(
     long? LastSuccessWatermark);
 
 /// <summary>
-/// Stage-one memory metadata. RawMemory and RolloutSummary are intentionally not included: the
-/// source remains locally inspectable through the raw explorer, but this read model only carries
-/// metadata and presence flags.
+///     Stage-one memory metadata. RawMemory and RolloutSummary are intentionally not included: the
+///     source remains locally inspectable through the raw explorer, but this read model only carries
+///     metadata and presence flags.
 /// </summary>
 public sealed record CodexMemoryStage1Output(
     string ThreadId,
@@ -302,19 +309,27 @@ public sealed record CodexThreadSummary(
 
 /// <summary>Discovery provenance only, not a guarantee of schema compatibility or authority.</summary>
 public sealed record CodexNativeSourceInstance(
-    CodexNativeSourceKind Kind, string DatabasePath, string DiscoveryKind,
-    int? Generation, DateTimeOffset LastWriteTimeUtc);
+    CodexNativeSourceKind Kind,
+    string DatabasePath,
+    string DiscoveryKind,
+    int? Generation,
+    DateTimeOffset LastWriteTimeUtc);
 
 public sealed record CodexNativeSourceSelection(
-    CodexNativeSourceKind Kind, string? SelectedPath,
-    IReadOnlyList<CodexNativeSourceInstance> Candidates, string Policy, string Rationale);
+    CodexNativeSourceKind Kind,
+    string? SelectedPath,
+    IReadOnlyList<CodexNativeSourceInstance> Candidates,
+    string Policy,
+    string Rationale);
 
 /// <summary>Per-request choices. Never changes the Codex installation or global discovery state.</summary>
 public sealed record CodexNativeSourcesQuery
 {
     public CodexAuxiliaryQuery Auxiliary { get; init; } = new();
+
     public IReadOnlyDictionary<CodexNativeSourceKind, string> SelectedPaths { get; init; } =
         new Dictionary<CodexNativeSourceKind, string>();
+
     public CodexLogsQuery Logs { get; init; } = new();
 }
 
@@ -346,6 +361,6 @@ public sealed record CodexNativeSourcesSnapshot(
         Queue.Source,
         Artifacts.Source,
         DesktopCatalog.Source,
-        ThreadSummaries.Source
+        ThreadSummaries.Source,
     ];
 }

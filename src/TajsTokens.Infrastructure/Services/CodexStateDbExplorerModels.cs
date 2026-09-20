@@ -1,8 +1,12 @@
+// Taj's Tokens | CodexStateDbExplorerModels.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
 namespace TajsTokens.Infrastructure.Services;
 
 /// <summary>
-/// A discovered Codex state database. This is source metadata only; it is not a TajsTokens
-/// workspace, session, or provider identity.
+///     A discovered Codex state database. This is source metadata only; it is not a TajsTokens
+///     workspace, session, or provider identity.
 /// </summary>
 public sealed record CodexStateDatabaseCandidate(
     string Path,
@@ -14,8 +18,8 @@ public sealed record CodexStateDatabaseCandidate(
     public string SourceDescription { get; init; } = "Explicit source";
 
     /// <summary>
-    /// Stable acquisition-location label. This is discovery provenance only; it is not a
-    /// provider, database, or domain classification.
+    ///     Stable acquisition-location label. This is discovery provenance only; it is not a
+    ///     provider, database, or domain classification.
     /// </summary>
     public string DiscoveryKind { get; init; } = "explicit";
 
@@ -31,8 +35,8 @@ public sealed record CodexStateColumnInfo(
     bool IsPrimaryKey)
 {
     /// <summary>
-    /// Raw value from PRAGMA table_xinfo hidden column. Zero means ordinary; other values are
-    /// retained as source metadata (for example generated or virtual-table columns).
+    ///     Raw value from PRAGMA table_xinfo hidden column. Zero means ordinary; other values are
+    ///     retained as source metadata (for example generated or virtual-table columns).
     /// </summary>
     public int Hidden { get; init; }
 
@@ -55,8 +59,8 @@ public sealed record CodexStateIndexInfo(
     IReadOnlyList<string> Columns)
 {
     /// <summary>
-    /// The raw sqlite_master definition, including expression/collation details that PRAGMA
-    /// index_info does not expose. It remains source text, not an interpreted capability.
+    ///     The raw sqlite_master definition, including expression/collation details that PRAGMA
+    ///     index_info does not expose. It remains source text, not an interpreted capability.
     /// </summary>
     public string? Sql { get; init; }
 }
@@ -106,8 +110,8 @@ public sealed record CodexStateRawPage(
     public string RangeSummary => TotalRows < 0
         ? "Rows loaded (total unavailable)"
         : TotalRows == 0
-        ? "0 rows"
-        : $"Rows {PageIndex * PageSize + 1:N0}–{Math.Min(TotalRows, (PageIndex + 1L) * PageSize):N0} of {TotalRows:N0}";
+            ? "0 rows"
+            : $"Rows {PageIndex * PageSize + 1:N0}–{Math.Min(TotalRows, (PageIndex + 1L) * PageSize):N0} of {TotalRows:N0}";
 }
 
 public sealed record CodexStateTableSnapshot(
@@ -126,8 +130,8 @@ public sealed record CodexStateTableSnapshot(
     public int RowObservationCount { get; init; }
 
     /// <summary>
-    /// Raw inspection algorithm used for the row fingerprint (for example full, count-only, or
-    /// unavailable). Fingerprints from different modes are not treated as content-comparable.
+    ///     Raw inspection algorithm used for the row fingerprint (for example full, count-only, or
+    ///     unavailable). Fingerprints from different modes are not treated as content-comparable.
     /// </summary>
     public string RowFingerprintMode { get; init; } = string.Empty;
 
@@ -143,9 +147,9 @@ public sealed record CodexStateTableSnapshot(
 }
 
 /// <summary>
-/// A bounded raw row observation retained in an in-memory inspection snapshot. The identity is
-/// an inspection aid (a primary-key value when one is exposed, otherwise a content hash), not a
-/// claim that the source has stable domain identity.
+///     A bounded raw row observation retained in an in-memory inspection snapshot. The identity is
+///     an inspection aid (a primary-key value when one is exposed, otherwise a content hash), not a
+///     claim that the source has stable domain identity.
 /// </summary>
 public sealed record CodexStateRowObservation(
     string DatabasePath,
@@ -175,21 +179,21 @@ public sealed record CodexStateInspectionSnapshot(
     IReadOnlyList<CodexStateTableSnapshot> Tables)
 {
     /// <summary>
-    /// Every object observed in sqlite_master, including indexes and triggers that are not
-    /// represented by <see cref="CodexStateTableSnapshot"/> rows.
+    ///     Every object observed in sqlite_master, including indexes and triggers that are not
+    ///     represented by <see cref="CodexStateTableSnapshot" /> rows.
     /// </summary>
     public IReadOnlyList<CodexStateSchemaObjectInfo> SchemaObjects { get; init; } =
         Array.Empty<CodexStateSchemaObjectInfo>();
 
     /// <summary>
-    /// A deterministic fingerprint of the discovered sqlite_master objects and their declared
-    /// columns/indexes. It intentionally excludes row content.
+    ///     A deterministic fingerprint of the discovered sqlite_master objects and their declared
+    ///     columns/indexes. It intentionally excludes row content.
     /// </summary>
     public string SchemaFingerprint { get; init; } = string.Empty;
 
     /// <summary>
-    /// Rows retained only for bounded, in-memory comparison evidence. These values are never
-    /// written to the TajsTokens database by the explorer.
+    ///     Rows retained only for bounded, in-memory comparison evidence. These values are never
+    ///     written to the TajsTokens database by the explorer.
     /// </summary>
     public IReadOnlyDictionary<string, IReadOnlyList<CodexStateRowObservation>> RowObservations { get; init; } =
         new Dictionary<string, IReadOnlyList<CodexStateRowObservation>>(StringComparer.OrdinalIgnoreCase);
@@ -215,8 +219,8 @@ public sealed record CodexStateInspectionResult(
 }
 
 /// <summary>
-/// Result of inspecting all currently discovered source instances. A failed source is retained
-/// as an unavailable item so one locked, invalid, or disappearing file cannot hide other sources.
+///     Result of inspecting all currently discovered source instances. A failed source is retained
+///     as an unavailable item so one locked, invalid, or disappearing file cannot hide other sources.
 /// </summary>
 public sealed record CodexStateSourceInspection(
     CodexStateDatabaseCandidate Database,
@@ -290,15 +294,15 @@ public sealed record CodexStateTableDiff(
         _ when SchemaChanged && RowsChanged => $"Schema and rows changed · {PreviousRowCount:N0} → {CurrentRowCount:N0}",
         _ when SchemaChanged => "Schema changed",
         _ when RowsChanged => $"Rows changed · {PreviousRowCount:N0} → {CurrentRowCount:N0}",
-        _ => "No row differences observed"
+        _ => "No row differences observed",
     };
 
     public string EvidenceSummary
     {
         get
         {
-            var summary = string.IsNullOrWhiteSpace(RowComparisonNote)
-                ? (RowComparisonComplete ? "complete row observation" : "row comparison unavailable")
+            string summary = string.IsNullOrWhiteSpace(RowComparisonNote)
+                ? RowComparisonComplete ? "complete row observation" : "row comparison unavailable"
                 : RowComparisonNote;
             return RowChanges.Count == 0
                 ? AppendSchemaSummary(summary)
@@ -328,15 +332,15 @@ public sealed record CodexStateTableDiff(
         }
 
         const int maxNames = 12;
-        var displayed = names.Take(maxNames).ToArray();
-        var suffix = names.Count > displayed.Length ? $", … +{names.Count - displayed.Length:N0} more" : string.Empty;
+        string[] displayed = names.Take(maxNames).ToArray();
+        string suffix = names.Count > displayed.Length ? $", … +{names.Count - displayed.Length:N0} more" : string.Empty;
         details.Add($"{label} {string.Join(", ", displayed)}{suffix}");
     }
 }
 
 /// <summary>
-/// A raw row-level difference candidate. It is tied to both inspected source instances and is
-/// intentionally not a domain event or relationship.
+///     A raw row-level difference candidate. It is tied to both inspected source instances and is
+///     intentionally not a domain event or relationship.
 /// </summary>
 public sealed record CodexStateRowDiff(
     string TableName,
@@ -389,9 +393,9 @@ public sealed record CodexStateInspectionDiff(
         StringComparison.Ordinal);
 
     /// <summary>
-    /// True when the comparison has any schema/row result entry, including an explicit incomplete
-    /// coverage entry. Use <see cref="HasObservedChanges"/> when only confirmed differences are
-    /// desired.
+    ///     True when the comparison has any schema/row result entry, including an explicit incomplete
+    ///     coverage entry. Use <see cref="HasObservedChanges" /> when only confirmed differences are
+    ///     desired.
     /// </summary>
     public bool HasChanges => SchemaChanged || Tables.Count > 0;
 
@@ -404,8 +408,8 @@ public sealed record CodexStateInspectionDiff(
 }
 
 /// <summary>
-/// A raw match for an exact source-native column/value lookup. This is deliberately not a
-/// relationship or domain object: each match remains tied to its originating database object.
+///     A raw match for an exact source-native column/value lookup. This is deliberately not a
+///     relationship or domain object: each match remains tied to its originating database object.
 /// </summary>
 public sealed record CodexStateKeyTraceMatch(
     string DatabasePath,
@@ -446,7 +450,7 @@ public sealed record CodexStateKeyTraceResult(
     {
         get
         {
-            var summary = HasMatches
+            string summary = HasMatches
                 ? $"{Matches.Count:N0} exact source matches for {ColumnName}={Value}"
                 : $"No exact source matches for {ColumnName}={Value}";
             if (MayBeTruncated)

@@ -1,8 +1,16 @@
+// Taj's Tokens | CodexStateDbExplorerService.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Models;
+
+#endregion
 
 namespace TajsTokens.Infrastructure.Services;
 
@@ -14,78 +22,51 @@ internal enum CodexOrderedSourceTable
     QueuedItems,
     ThreadArtifacts,
     LocalThreadCatalog,
-    ThreadTurnSummaries
+    ThreadTurnSummaries,
 }
 
 internal enum CodexRelationSourceTable
 {
     ThreadGoalContinuationDeferrals,
-    QueuedThreadRevisions
+    QueuedThreadRevisions,
 }
 
 /// <summary>
-/// Read-only inspection boundary for Codex's private SQLite databases and captured snapshots.
-///
-/// This service intentionally returns source-shaped schema and values. It does not reuse the
-/// observatory models and does not write to either Codex or the TajsTokens database.
+///     Read-only inspection boundary for Codex's private SQLite databases and captured snapshots.
+///     This service intentionally returns source-shaped schema and values. It does not reuse the
+///     observatory models and does not write to either Codex or the TajsTokens database.
 /// </summary>
 public sealed class CodexStateDbExplorerService
 {
     private const int DefaultPageSize = 50;
     private const int MaxPageSize = 500;
     private const int MaxRelationKeys = 250;
-    private static readonly string RelationParameterList = string.Join(", ", Enumerable.Range(0, MaxRelationKeys).Select(static index => string.Concat("$value", index.ToString(CultureInfo.InvariantCulture))));
     private const int MaxFingerprintRows = 100_000;
     private const long MaxFingerprintDatabaseBytes = 64L * 1024 * 1024;
 
-    private readonly string _codexHome;
-    private readonly string? _snapshotDirectory;
-
-    private sealed record OrderedSourceSpecification(
-        string TableName,
-        string OrderedQuery,
-        string UnorderedQuery,
-        IReadOnlyList<string> RequiredOrderColumns);
-
-    private sealed record RelationSourceSpecification(
-        string TableName,
-        string OrderedQuery,
-        string UnorderedQuery,
-        string RequiredOrderColumn);
-
-    private sealed record RowFingerprintResult(
-        string Fingerprint,
-        IReadOnlyList<CodexStateRowObservation> Observations,
-        bool Complete,
-        bool Bounded,
-        string Note,
-        string Mode)
-    {
-        public static RowFingerprintResult CountOnly(string fingerprint, string note) =>
-            new(fingerprint, Array.Empty<CodexStateRowObservation>(), false, true, note, "count-only");
-
-        public static RowFingerprintResult Unavailable(string fingerprint, string note) =>
-            new(fingerprint, Array.Empty<CodexStateRowObservation>(), false, false, note, "unavailable");
-    }
+    private static readonly string RelationParameterList = string.Join(
+        ", ",
+        Enumerable.Range(0, MaxRelationKeys).Select(static index => string.Concat("$value", index.ToString(CultureInfo.InvariantCulture))));
 
     public CodexStateDbExplorerService(string? codexHome = null, string? snapshotDirectory = null)
     {
-        var useDefaultRoots = string.IsNullOrWhiteSpace(codexHome);
-        _codexHome = Path.GetFullPath(string.IsNullOrWhiteSpace(codexHome)
-            ? ResolveCodexHome()
-            : codexHome);
-        var resolvedSnapshotDirectory = snapshotDirectory ?? (useDefaultRoots ? ResolveSnapshotDirectory() : null);
-        _snapshotDirectory = string.IsNullOrWhiteSpace(resolvedSnapshotDirectory)
+        bool useDefaultRoots = string.IsNullOrWhiteSpace(codexHome);
+        CodexHome = Path.GetFullPath(
+            string.IsNullOrWhiteSpace(codexHome)
+                ? ResolveCodexHome()
+                : codexHome);
+        string? resolvedSnapshotDirectory = snapshotDirectory ?? (useDefaultRoots ? ResolveSnapshotDirectory() : null);
+        SnapshotDirectory = string.IsNullOrWhiteSpace(resolvedSnapshotDirectory)
             ? null
             : Path.GetFullPath(resolvedSnapshotDirectory);
     }
 
-    public string CodexHome => _codexHome;
+    public string CodexHome { get; }
 
-    public string? SnapshotDirectory => _snapshotDirectory;
+    public string? SnapshotDirectory { get; }
 
     /// <summary>
-    /// Finds Codex state databases and captured SQLite snapshots without opening or modifying them.
+    ///     Finds Codex state databases and captured SQLite snapshots without opening or modifying them.
     /// </summary>
     public IReadOnlyList<CodexStateDatabaseCandidate> DiscoverCandidates()
     {
@@ -94,14 +75,14 @@ public sealed class CodexStateDbExplorerService
             var roots = new List<(string Path, string Pattern, string Description, string Kind)>();
             // Codex keeps several private SQLite stores in its home directory. The filename is
             // only a discovery hint; every .sqlite/.db file is surfaced for schema inspection.
-            AddRoot(roots, _codexHome, "*.db", "Codex home", "codex-home");
-            AddRoot(roots, _codexHome, "*.sqlite", "Codex home", "codex-home");
-            AddRoot(roots, Path.Combine(_codexHome, "sqlite"), "*.db", "Codex sqlite folder", "codex-sqlite-folder");
-            AddRoot(roots, Path.Combine(_codexHome, "sqlite"), "*.sqlite", "Codex sqlite folder", "codex-sqlite-folder");
-            if (_snapshotDirectory is not null)
+            AddRoot(roots, CodexHome, "*.db", "Codex home", "codex-home");
+            AddRoot(roots, CodexHome, "*.sqlite", "Codex home", "codex-home");
+            AddRoot(roots, Path.Combine(CodexHome, "sqlite"), "*.db", "Codex sqlite folder", "codex-sqlite-folder");
+            AddRoot(roots, Path.Combine(CodexHome, "sqlite"), "*.sqlite", "Codex sqlite folder", "codex-sqlite-folder");
+            if (SnapshotDirectory is not null)
             {
-                AddRoot(roots, _snapshotDirectory, "*.sqlite", "Snapshot folder", "snapshot-folder");
-                AddRoot(roots, _snapshotDirectory, "*.db", "Snapshot folder", "snapshot-folder");
+                AddRoot(roots, SnapshotDirectory, "*.sqlite", "Snapshot folder", "snapshot-folder");
+                AddRoot(roots, SnapshotDirectory, "*.db", "Snapshot folder", "snapshot-folder");
             }
 
             return roots
@@ -121,21 +102,21 @@ public sealed class CodexStateDbExplorerService
     }
 
     /// <summary>
-    /// Inspects every currently discovered source independently. Inspection failures are returned
-    /// alongside successful results so an unavailable, locked, invalid, or disappearing source
-    /// does not prevent local inspection of the remaining files.
+    ///     Inspects every currently discovered source independently. Inspection failures are returned
+    ///     alongside successful results so an unavailable, locked, invalid, or disappearing source
+    ///     does not prevent local inspection of the remaining files.
     /// </summary>
     public async Task<CodexStateMultiInspectionResult> InspectDiscoveredAsync(
         bool includeRowFingerprints = false,
         CancellationToken cancellationToken = default)
     {
         var sources = new List<CodexStateSourceInspection>();
-        foreach (var candidate in DiscoverCandidates())
+        foreach (CodexStateDatabaseCandidate candidate in DiscoverCandidates())
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                var inspection = await InspectAsync(
+                CodexStateInspectionResult inspection = await InspectAsync(
                     candidate.Path,
                     includeRowFingerprints,
                     cancellationToken);
@@ -147,10 +128,11 @@ public sealed class CodexStateDbExplorerService
             }
             catch (Exception exception) when (IsSourceInspectionFailure(exception))
             {
-                sources.Add(new CodexStateSourceInspection(
-                    candidate,
-                    null,
-                    SummarizeSourceFailure(exception)));
+                sources.Add(
+                    new CodexStateSourceInspection(
+                        candidate,
+                        null,
+                        SummarizeSourceFailure(exception)));
             }
         }
 
@@ -160,86 +142,87 @@ public sealed class CodexStateDbExplorerService
     public async Task<CodexStateInspectionResult> InspectAsync(
         string databasePath,
         CancellationToken cancellationToken = default)
-        => await InspectAsync(databasePath, includeRowFingerprints: true, cancellationToken: cancellationToken);
+    {
+        return await InspectAsync(databasePath, true, cancellationToken);
+    }
 
     public async Task<CodexStateInspectionResult> InspectAsync(
         string databasePath,
         bool includeRowFingerprints,
         CancellationToken cancellationToken = default)
     {
-        var candidate = CreateCandidateForPath(databasePath);
-        await using var connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
+        CodexStateDatabaseCandidate candidate = CreateCandidateForPath(databasePath);
+        await using SqliteConnection connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
 
         var tables = new List<CodexStateTableInfo>();
         var schemaObjects = new List<CodexStateSchemaObjectInfo>();
-        await using var schemaCommand = connection.CreateCommand();
+        await using SqliteCommand schemaCommand = connection.CreateCommand();
         schemaCommand.CommandText = """
-            SELECT type, name, tbl_name, sql
-            FROM sqlite_master
-            ORDER BY type COLLATE BINARY, name COLLATE BINARY;
-            """;
+                                    SELECT type, name, tbl_name, sql
+                                    FROM sqlite_master
+                                    ORDER BY type COLLATE BINARY, name COLLATE BINARY;
+                                    """;
 
-        await using var schemaReader = await schemaCommand.ExecuteReaderAsync(cancellationToken);
+        await using SqliteDataReader schemaReader = await schemaCommand.ExecuteReaderAsync(cancellationToken);
         while (await schemaReader.ReadAsync(cancellationToken))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var objectType = schemaReader.GetString(0);
-            var objectName = schemaReader.GetString(1);
-            var associatedTableName = schemaReader.IsDBNull(2) ? null : schemaReader.GetString(2);
+            string objectType = schemaReader.GetString(0);
+            string objectName = schemaReader.GetString(1);
+            string? associatedTableName = schemaReader.IsDBNull(2) ? null : schemaReader.GetString(2);
             // sqlite_master columns are (type, name, tbl_name, sql). Keep the raw object
             // definition for every object, including standalone indexes and triggers.
-            var sql = schemaReader.IsDBNull(3) ? null : schemaReader.GetString(3);
-            schemaObjects.Add(new CodexStateSchemaObjectInfo(objectName, objectType, sql)
-            {
-                AssociatedTableName = associatedTableName
-            });
+            string? sql = schemaReader.IsDBNull(3) ? null : schemaReader.GetString(3);
+            schemaObjects.Add(new CodexStateSchemaObjectInfo(objectName, objectType, sql) { AssociatedTableName = associatedTableName });
 
             if (objectType is not ("table" or "view"))
             {
                 continue;
             }
 
-            var columns = await ReadColumnsAsync(connection, objectName, cancellationToken);
-            var indexes = await ReadIndexesAsync(connection, objectName, cancellationToken);
-            var rowCount = await TryReadRowCountAsync(connection, objectName, cancellationToken);
+            IReadOnlyList<CodexStateColumnInfo> columns = await ReadColumnsAsync(connection, objectName, cancellationToken);
+            IReadOnlyList<CodexStateIndexInfo> indexes = await ReadIndexesAsync(connection, objectName, cancellationToken);
+            long rowCount = await TryReadRowCountAsync(connection, objectName, cancellationToken);
 
             var table = new CodexStateTableInfo(objectName, objectType, sql, rowCount, columns, indexes);
             tables.Add(table with { SchemaFingerprint = FingerprintSchema(table) });
         }
 
-        var capturedAtUtc = DateTimeOffset.UtcNow;
+        DateTimeOffset capturedAtUtc = DateTimeOffset.UtcNow;
         var snapshots = new List<CodexStateTableSnapshot>(tables.Count);
         var rowObservations = new Dictionary<string, IReadOnlyList<CodexStateRowObservation>>(
             StringComparer.OrdinalIgnoreCase);
-        var allowDeepRowFingerprint = includeRowFingerprints && candidate.SizeBytes <= MaxFingerprintDatabaseBytes;
-        foreach (var table in tables)
+        bool allowDeepRowFingerprint = includeRowFingerprints && candidate.SizeBytes <= MaxFingerprintDatabaseBytes;
+        foreach (CodexStateTableInfo table in tables)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var schemaFingerprint = table.SchemaFingerprint;
-            var rowResult = includeRowFingerprints
+            string schemaFingerprint = table.SchemaFingerprint;
+            RowFingerprintResult rowResult = includeRowFingerprints
                 ? await ComputeRowFingerprintAsync(
                     connection,
                     table,
                     allowDeepRowFingerprint,
                     candidate,
                     cancellationToken)
-                : RowFingerprintResult.CountOnly(FingerprintBoundedRowObservation(table),
+                : RowFingerprintResult.CountOnly(
+                    FingerprintBoundedRowObservation(table),
                     "count-only inspection requested");
-            snapshots.Add(new CodexStateTableSnapshot(
-                table.Name,
-                table.ObjectType,
-                table.RowCount,
-                schemaFingerprint,
-                rowResult.Fingerprint)
-            {
-                RowComparisonComplete = rowResult.Complete,
-                RowComparisonBounded = rowResult.Bounded,
-                RowComparisonNote = rowResult.Note,
-                RowObservationCount = rowResult.Observations.Count,
-                RowFingerprintMode = rowResult.Mode,
-                Columns = table.Columns,
-                Indexes = table.Indexes
-            });
+            snapshots.Add(
+                new CodexStateTableSnapshot(
+                    table.Name,
+                    table.ObjectType,
+                    table.RowCount,
+                    schemaFingerprint,
+                    rowResult.Fingerprint)
+                {
+                    RowComparisonComplete = rowResult.Complete,
+                    RowComparisonBounded = rowResult.Bounded,
+                    RowComparisonNote = rowResult.Note,
+                    RowObservationCount = rowResult.Observations.Count,
+                    RowFingerprintMode = rowResult.Mode,
+                    Columns = table.Columns,
+                    Indexes = table.Indexes,
+                });
             rowObservations[table.Name] = rowResult.Observations
                 .Select(observation => observation with { CapturedAtUtc = capturedAtUtc })
                 .ToArray();
@@ -253,7 +236,7 @@ public sealed class CodexStateDbExplorerService
             SchemaObjects = schemaObjects,
             SchemaFingerprint = ComputeSchemaFingerprint(schemaObjects, snapshots),
             RowObservations = rowObservations,
-            SourceDescription = candidate.SourceDescription
+            SourceDescription = candidate.SourceDescription,
         };
 
         return new CodexStateInspectionResult(candidate, tables, snapshot);
@@ -270,34 +253,34 @@ public sealed class CodexStateDbExplorerService
         pageIndex = Math.Max(0, pageIndex);
         pageSize = Math.Clamp(pageSize, 1, MaxPageSize);
 
-        var candidate = CreateCandidateForPath(databasePath);
-        await using var connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
-        var objectType = await ReadObjectTypeAsync(connection, tableName, cancellationToken);
+        CodexStateDatabaseCandidate candidate = CreateCandidateForPath(databasePath);
+        await using SqliteConnection connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
+        string? objectType = await ReadObjectTypeAsync(connection, tableName, cancellationToken);
         if (objectType is null)
         {
             throw new KeyNotFoundException($"The source database does not contain a table or view named '{tableName}'.");
         }
 
-        var totalRows = await TryReadRowCountAsync(connection, tableName, cancellationToken);
-        var offset = checked((long)pageIndex * pageSize);
+        long totalRows = await TryReadRowCountAsync(connection, tableName, cancellationToken);
+        long offset = checked((long)pageIndex * pageSize);
         var columns = new List<string>();
         var rows = new List<CodexStateRawRow>();
 
-        await using var command = connection.CreateCommand();
+        await using SqliteCommand command = connection.CreateCommand();
         command.CommandText = $"SELECT * FROM {QuoteIdentifier(tableName)} LIMIT $limit OFFSET $offset;";
         command.Parameters.AddWithValue("$limit", pageSize);
         command.Parameters.AddWithValue("$offset", offset);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        for (var index = 0; index < reader.FieldCount; index++)
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        for (int index = 0; index < reader.FieldCount; index++)
         {
             columns.Add(reader.GetName(index));
         }
 
         while (await reader.ReadAsync(cancellationToken))
         {
-            var values = new object?[reader.FieldCount];
+            object?[] values = new object?[reader.FieldCount];
             var display = new StringBuilder();
-            for (var index = 0; index < reader.FieldCount; index++)
+            for (int index = 0; index < reader.FieldCount; index++)
             {
                 values[index] = reader.IsDBNull(index) ? null : reader.GetValue(index);
                 if (index > 0)
@@ -322,9 +305,9 @@ public sealed class CodexStateDbExplorerService
     }
 
     /// <summary>
-    /// Reads a bounded page after applying source-native ordering. Ordering belongs at the SQLite
-    /// boundary so a table larger than the page cannot hide its newest/highest-ranked rows.
-    /// Unknown order columns are ignored to keep schema variants inspectable.
+    ///     Reads a bounded page after applying source-native ordering. Ordering belongs at the SQLite
+    ///     boundary so a table larger than the page cannot hide its newest/highest-ranked rows.
+    ///     Unknown order columns are ignored to keep schema variants inspectable.
     /// </summary>
     internal async Task<CodexStateRawPage> ReadOrderedPageAsync(
         string databasePath,
@@ -336,41 +319,70 @@ public sealed class CodexStateDbExplorerService
     {
         pageIndex = Math.Max(0, pageIndex);
         pageSize = Math.Clamp(pageSize, 1, MaxPageSize);
-        var specification = sourceTable switch
+        OrderedSourceSpecification specification = sourceTable switch
         {
-            CodexOrderedSourceTable.Jobs => new OrderedSourceSpecification("jobs", "SELECT * FROM jobs ORDER BY started_at DESC, kind ASC, job_key ASC LIMIT $limit OFFSET $offset;", "SELECT * FROM jobs LIMIT $limit OFFSET $offset;", ["started_at", "kind", "job_key"]),
-            CodexOrderedSourceTable.Stage1Outputs => new OrderedSourceSpecification("stage1_outputs", "SELECT * FROM stage1_outputs ORDER BY source_updated_at DESC, thread_id ASC LIMIT $limit OFFSET $offset;", "SELECT * FROM stage1_outputs LIMIT $limit OFFSET $offset;", ["source_updated_at", "thread_id"]),
-            CodexOrderedSourceTable.ThreadGoals => new OrderedSourceSpecification("thread_goals", "SELECT * FROM thread_goals ORDER BY updated_at_ms DESC, thread_id ASC LIMIT $limit OFFSET $offset;", "SELECT * FROM thread_goals LIMIT $limit OFFSET $offset;", ["updated_at_ms", "thread_id"]),
-            CodexOrderedSourceTable.QueuedItems => new OrderedSourceSpecification("queued_items", "SELECT * FROM queued_items ORDER BY thread_id ASC, queue_order ASC, id ASC LIMIT $limit OFFSET $offset;", "SELECT * FROM queued_items LIMIT $limit OFFSET $offset;", ["thread_id", "queue_order", "id"]),
-            CodexOrderedSourceTable.ThreadArtifacts => new OrderedSourceSpecification("thread_artifacts", "SELECT * FROM thread_artifacts ORDER BY thread_id ASC, created_at ASC, id ASC LIMIT $limit OFFSET $offset;", "SELECT * FROM thread_artifacts LIMIT $limit OFFSET $offset;", ["thread_id", "created_at", "id"]),
-            CodexOrderedSourceTable.LocalThreadCatalog => new OrderedSourceSpecification("local_thread_catalog", "SELECT * FROM local_thread_catalog ORDER BY source_recency_at DESC, source_created_at DESC, host_id ASC, thread_id ASC LIMIT $limit OFFSET $offset;", "SELECT * FROM local_thread_catalog LIMIT $limit OFFSET $offset;", ["source_recency_at", "source_created_at", "host_id", "thread_id"]),
-            CodexOrderedSourceTable.ThreadTurnSummaries => new OrderedSourceSpecification("thread_turn_summaries", "SELECT * FROM thread_turn_summaries ORDER BY updated_at DESC, thread_id ASC LIMIT $limit OFFSET $offset;", "SELECT * FROM thread_turn_summaries LIMIT $limit OFFSET $offset;", ["updated_at", "thread_id"]),
-            _ => throw new ArgumentOutOfRangeException(nameof(sourceTable), sourceTable, "Unknown ordered Codex source table.")
+            CodexOrderedSourceTable.Jobs => new OrderedSourceSpecification(
+                "jobs",
+                "SELECT * FROM jobs ORDER BY started_at DESC, kind ASC, job_key ASC LIMIT $limit OFFSET $offset;",
+                "SELECT * FROM jobs LIMIT $limit OFFSET $offset;",
+                ["started_at", "kind", "job_key"]),
+            CodexOrderedSourceTable.Stage1Outputs => new OrderedSourceSpecification(
+                "stage1_outputs",
+                "SELECT * FROM stage1_outputs ORDER BY source_updated_at DESC, thread_id ASC LIMIT $limit OFFSET $offset;",
+                "SELECT * FROM stage1_outputs LIMIT $limit OFFSET $offset;",
+                ["source_updated_at", "thread_id"]),
+            CodexOrderedSourceTable.ThreadGoals => new OrderedSourceSpecification(
+                "thread_goals",
+                "SELECT * FROM thread_goals ORDER BY updated_at_ms DESC, thread_id ASC LIMIT $limit OFFSET $offset;",
+                "SELECT * FROM thread_goals LIMIT $limit OFFSET $offset;",
+                ["updated_at_ms", "thread_id"]),
+            CodexOrderedSourceTable.QueuedItems => new OrderedSourceSpecification(
+                "queued_items",
+                "SELECT * FROM queued_items ORDER BY thread_id ASC, queue_order ASC, id ASC LIMIT $limit OFFSET $offset;",
+                "SELECT * FROM queued_items LIMIT $limit OFFSET $offset;",
+                ["thread_id", "queue_order", "id"]),
+            CodexOrderedSourceTable.ThreadArtifacts => new OrderedSourceSpecification(
+                "thread_artifacts",
+                "SELECT * FROM thread_artifacts ORDER BY thread_id ASC, created_at ASC, id ASC LIMIT $limit OFFSET $offset;",
+                "SELECT * FROM thread_artifacts LIMIT $limit OFFSET $offset;",
+                ["thread_id", "created_at", "id"]),
+            CodexOrderedSourceTable.LocalThreadCatalog => new OrderedSourceSpecification(
+                "local_thread_catalog",
+                "SELECT * FROM local_thread_catalog ORDER BY source_recency_at DESC, source_created_at DESC, host_id ASC, thread_id ASC LIMIT $limit OFFSET $offset;",
+                "SELECT * FROM local_thread_catalog LIMIT $limit OFFSET $offset;",
+                ["source_recency_at", "source_created_at", "host_id", "thread_id"]),
+            CodexOrderedSourceTable.ThreadTurnSummaries => new OrderedSourceSpecification(
+                "thread_turn_summaries",
+                "SELECT * FROM thread_turn_summaries ORDER BY updated_at DESC, thread_id ASC LIMIT $limit OFFSET $offset;",
+                "SELECT * FROM thread_turn_summaries LIMIT $limit OFFSET $offset;",
+                ["updated_at", "thread_id"]),
+            _ => throw new ArgumentOutOfRangeException(nameof(sourceTable), sourceTable, "Unknown ordered Codex source table."),
         };
 
-        var candidate = CreateCandidateForPath(databasePath);
-        await using var connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
-        var objectType = await ReadObjectTypeAsync(connection, specification.TableName, cancellationToken);
+        CodexStateDatabaseCandidate candidate = CreateCandidateForPath(databasePath);
+        await using SqliteConnection connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
+        string? objectType = await ReadObjectTypeAsync(connection, specification.TableName, cancellationToken);
         if (objectType is null)
         {
             throw new KeyNotFoundException($"The source database does not contain a table or view named '{specification.TableName}'.");
         }
 
-        var availableColumns = (await ReadColumnsAsync(connection, specification.TableName, cancellationToken))
+        HashSet<string> availableColumns = (await ReadColumnsAsync(connection, specification.TableName, cancellationToken))
             .Select(column => column.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var totalRows = await TryReadRowCountAsync(connection, specification.TableName, cancellationToken);
-        var offset = checked((long)pageIndex * pageSize);
-        var query = specification.RequiredOrderColumns.All(availableColumns.Contains)
+        long totalRows = await TryReadRowCountAsync(connection, specification.TableName, cancellationToken);
+        long offset = checked((long)pageIndex * pageSize);
+        string query = specification.RequiredOrderColumns.All(availableColumns.Contains)
             ? specification.OrderedQuery
             : specification.UnorderedQuery;
         if (threadId is not null)
         {
             if (!availableColumns.Contains("thread_id"))
-                throw new NotSupportedException($"{specification.TableName} has no native thread_id; thread-scoped results are unavailable.");
-            var from = "FROM " + specification.TableName;
+                throw new NotSupportedException(
+                    $"{specification.TableName} has no native thread_id; thread-scoped results are unavailable.");
+            string from = "FROM " + specification.TableName;
             query = query.Replace(from, from + " WHERE thread_id = $thread", StringComparison.Ordinal);
-            using var count = connection.CreateCommand();
+            using SqliteCommand count = connection.CreateCommand();
             count.CommandText = $"SELECT COUNT(*) FROM {QuoteIdentifier(specification.TableName)} WHERE thread_id = $thread;";
             count.Parameters.AddWithValue("$thread", threadId);
             totalRows = Convert.ToInt64(await count.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture);
@@ -394,9 +406,9 @@ public sealed class CodexStateDbExplorerService
     }
 
     /// <summary>
-    /// Reads a bounded, source-ordered page from the dedicated logs table. The query text is built
-    /// only from fixed source-native column names; all user filters, limits and offsets are bound
-    /// parameters. Log bodies are selected only when the caller explicitly opts in.
+    ///     Reads a bounded, source-ordered page from the dedicated logs table. The query text is built
+    ///     only from fixed source-native column names; all user filters, limits and offsets are bound
+    ///     parameters. Log bodies are selected only when the caller explicitly opts in.
     /// </summary>
     internal async Task<CodexStateRawPage> ReadLogsPageAsync(
         string databasePath,
@@ -409,49 +421,50 @@ public sealed class CodexStateDbExplorerService
         ArgumentNullException.ThrowIfNull(query);
         ArgumentNullException.ThrowIfNull(capabilities);
 
-        var pageIndex = Math.Max(0, query.PageIndex);
-        var pageSize = Math.Clamp(query.PageSize, 1, MaxPageSize - 1);
-        var offset = checked((long)pageIndex * pageSize);
-        var filters = BuildLogFilters(query, capabilities, out var parameters);
-        var candidate = CreateCandidateForPath(databasePath);
-        await using var ownedConnection = snapshotConnection is null ? await OpenReadOnlyAsync(candidate.Path, cancellationToken) : null;
-        var connection = snapshotConnection ?? ownedConnection!;
-        using var ownedTransaction = snapshotTransaction is null ? connection.BeginTransaction(deferred: true) : null;
-        var transaction = snapshotTransaction ?? ownedTransaction;
-        await using var countCommand = connection.CreateCommand();
+        int pageIndex = Math.Max(0, query.PageIndex);
+        int pageSize = Math.Clamp(query.PageSize, 1, MaxPageSize - 1);
+        long offset = checked((long)pageIndex * pageSize);
+        string filters = BuildLogFilters(query, capabilities, out IReadOnlyList<(string Name, object Value)> parameters);
+        CodexStateDatabaseCandidate candidate = CreateCandidateForPath(databasePath);
+        await using SqliteConnection? ownedConnection =
+            snapshotConnection is null ? await OpenReadOnlyAsync(candidate.Path, cancellationToken) : null;
+        SqliteConnection connection = snapshotConnection ?? ownedConnection!;
+        using SqliteTransaction? ownedTransaction = snapshotTransaction is null ? connection.BeginTransaction(true) : null;
+        SqliteTransaction? transaction = snapshotTransaction ?? ownedTransaction;
+        await using SqliteCommand countCommand = connection.CreateCommand();
         countCommand.Transaction = transaction;
         countCommand.CommandText = $"SELECT COUNT(*) FROM logs{filters};";
         AddLogParameters(countCommand, parameters);
-        var scalar = await countCommand.ExecuteScalarAsync(cancellationToken);
-        var totalRows = scalar is null or DBNull ? 0L : Convert.ToInt64(scalar, CultureInfo.InvariantCulture);
+        object? scalar = await countCommand.ExecuteScalarAsync(cancellationToken);
+        long totalRows = scalar is null or DBNull ? 0L : Convert.ToInt64(scalar, CultureInfo.InvariantCulture);
 
-        var messageColumn = capabilities.MessageColumn;
-        var messageExpression = query.IncludeMessages && messageColumn is not null
+        string? messageColumn = capabilities.MessageColumn;
+        string messageExpression = query.IncludeMessages && messageColumn is not null
             ? QuoteIdentifier(messageColumn)
             : "NULL";
-        var messagePresentExpression = messageColumn is null
+        string messagePresentExpression = messageColumn is null
             ? "0"
             : $"{QuoteIdentifier(messageColumn)} IS NOT NULL";
-        var select = $"""
-            SELECT
-                id AS id,
-                ts AS ts,
-                ts_nanos AS ts_nanos,
-                level AS level,
-                target AS target,
-                {messageExpression} AS message,
-                {messagePresentExpression} AS has_message,
-                {SelectLogColumn(capabilities.HasModulePath, "module_path")} AS module_path,
-                {SelectLogColumn(capabilities.HasFile, "file")} AS file,
-                {SelectLogColumn(capabilities.HasLine, "line")} AS line,
-                {SelectLogColumn(capabilities.HasThreadId, "thread_id")} AS thread_id,
-                {SelectLogColumn(capabilities.HasProcessUuid, "process_uuid")} AS process_uuid,
-                {SelectLogColumn(capabilities.HasEstimatedBytes, "estimated_bytes")} AS estimated_bytes
-            FROM logs
-            {filters}
-            ORDER BY ts DESC, ts_nanos DESC, id DESC
-            LIMIT $limit OFFSET $offset;
-            """;
+        string select = $"""
+                         SELECT
+                             id AS id,
+                             ts AS ts,
+                             ts_nanos AS ts_nanos,
+                             level AS level,
+                             target AS target,
+                             {messageExpression} AS message,
+                             {messagePresentExpression} AS has_message,
+                             {SelectLogColumn(capabilities.HasModulePath, "module_path")} AS module_path,
+                             {SelectLogColumn(capabilities.HasFile, "file")} AS file,
+                             {SelectLogColumn(capabilities.HasLine, "line")} AS line,
+                             {SelectLogColumn(capabilities.HasThreadId, "thread_id")} AS thread_id,
+                             {SelectLogColumn(capabilities.HasProcessUuid, "process_uuid")} AS process_uuid,
+                             {SelectLogColumn(capabilities.HasEstimatedBytes, "estimated_bytes")} AS estimated_bytes
+                         FROM logs
+                         {filters}
+                         ORDER BY ts DESC, ts_nanos DESC, id DESC
+                         LIMIT $limit OFFSET $offset;
+                         """;
 
         return await ReadRawPageAsync(
             connection,
@@ -472,8 +485,10 @@ public sealed class CodexStateDbExplorerService
             cancellationToken);
     }
 
-    private static string SelectLogColumn(bool available, string columnName) =>
-        available ? QuoteIdentifier(columnName) : "NULL";
+    private static string SelectLogColumn(bool available, string columnName)
+    {
+        return available ? QuoteIdentifier(columnName) : "NULL";
+    }
 
     private static string BuildLogFilters(
         CodexLogsQuery query,
@@ -483,7 +498,7 @@ public sealed class CodexStateDbExplorerService
         var clauses = new List<string>();
         var values = new List<(string Name, object Value)>();
 
-        var levels = (query.Levels ?? Array.Empty<string>())
+        string?[] levels = (query.Levels ?? Array.Empty<string>())
             .Select(level => level?.Trim())
             .Where(level => !string.IsNullOrWhiteSpace(level))
             .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -492,9 +507,9 @@ public sealed class CodexStateDbExplorerService
         if (levels.Length > 0)
         {
             var names = new List<string>(levels.Length);
-            for (var index = 0; index < levels.Length; index++)
+            for (int index = 0; index < levels.Length; index++)
             {
-                var name = $"$level{index.ToString(CultureInfo.InvariantCulture)}";
+                string name = $"$level{index.ToString(CultureInfo.InvariantCulture)}";
                 names.Add(name);
                 values.Add((name, levels[index]!));
             }
@@ -504,14 +519,14 @@ public sealed class CodexStateDbExplorerService
 
         if (query.FromUtc is { } fromUtc)
         {
-            var name = "$from_ts";
+            string name = "$from_ts";
             clauses.Add("ts >= $from_ts");
             values.Add((name, ToSourceTimestampBound(fromUtc)));
         }
 
         if (query.ToUtcExclusive is { } toUtcExclusive)
         {
-            var name = "$to_ts";
+            string name = "$to_ts";
             clauses.Add("ts < $to_ts");
             values.Add((name, ToSourceTimestampBound(toUtcExclusive)));
         }
@@ -541,7 +556,7 @@ public sealed class CodexStateDbExplorerService
         string? value,
         string parameterName)
     {
-        var normalized = TrimToNull(value);
+        string? normalized = TrimToNull(value);
         if (normalized is null)
         {
             return;
@@ -581,7 +596,7 @@ public sealed class CodexStateDbExplorerService
         string? value,
         string parameterName)
     {
-        var normalized = TrimToNull(value);
+        string? normalized = TrimToNull(value);
         if (normalized is null)
         {
             return;
@@ -601,27 +616,31 @@ public sealed class CodexStateDbExplorerService
         SqliteCommand command,
         IReadOnlyList<(string Name, object Value)> parameters)
     {
-        foreach (var (name, value) in parameters)
+        foreach ((string name, object value) in parameters)
         {
             command.Parameters.AddWithValue(name, value);
         }
     }
 
-    private static string? TrimToNull(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    private static string? TrimToNull(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+    }
 
     private static long ToSourceTimestampBound(DateTimeOffset value)
     {
-        var seconds = value.ToUnixTimeSeconds();
+        long seconds = value.ToUnixTimeSeconds();
         return value > DateTimeOffset.FromUnixTimeSeconds(seconds)
             ? checked(seconds + 1)
             : seconds;
     }
 
-    private static string EscapeLikePattern(string value) =>
-        value.Replace("\\", "\\\\", StringComparison.Ordinal)
+    private static string EscapeLikePattern(string value)
+    {
+        return value.Replace("\\", "\\\\", StringComparison.Ordinal)
             .Replace("%", "\\%", StringComparison.Ordinal)
             .Replace("_", "\\_", StringComparison.Ordinal);
+    }
 
     /// <summary>Reads rows whose source-native relation key is one of the supplied values.</summary>
     internal async Task<CodexStateRawPage> ReadRowsByTextValuesAsync(
@@ -632,30 +651,30 @@ public sealed class CodexStateDbExplorerService
     {
         ArgumentNullException.ThrowIfNull(values);
         ArgumentOutOfRangeException.ThrowIfGreaterThan(values.Count, MaxRelationKeys);
-        var specification = sourceTable switch
+        RelationSourceSpecification specification = sourceTable switch
         {
             CodexRelationSourceTable.ThreadGoalContinuationDeferrals => new RelationSourceSpecification(
                 "thread_goal_continuation_deferrals",
-                BuildRelationQuery("thread_goal_continuation_deferrals", ordered: false),
-                BuildRelationQuery("thread_goal_continuation_deferrals", ordered: false),
+                BuildRelationQuery("thread_goal_continuation_deferrals", false),
+                BuildRelationQuery("thread_goal_continuation_deferrals", false),
                 string.Empty),
             CodexRelationSourceTable.QueuedThreadRevisions => new RelationSourceSpecification(
                 "queued_thread_revisions",
-                BuildRelationQuery("queued_thread_revisions", ordered: true),
-                BuildRelationQuery("queued_thread_revisions", ordered: false),
+                BuildRelationQuery("queued_thread_revisions", true),
+                BuildRelationQuery("queued_thread_revisions", false),
                 "revision"),
-            _ => throw new ArgumentOutOfRangeException(nameof(sourceTable), sourceTable, "Unknown Codex relation table.")
+            _ => throw new ArgumentOutOfRangeException(nameof(sourceTable), sourceTable, "Unknown Codex relation table."),
         };
 
-        var candidate = CreateCandidateForPath(databasePath);
-        await using var connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
-        var objectType = await ReadObjectTypeAsync(connection, specification.TableName, cancellationToken);
+        CodexStateDatabaseCandidate candidate = CreateCandidateForPath(databasePath);
+        await using SqliteConnection connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
+        string? objectType = await ReadObjectTypeAsync(connection, specification.TableName, cancellationToken);
         if (objectType is null)
         {
             throw new KeyNotFoundException($"The source database does not contain a table or view named '{specification.TableName}'.");
         }
 
-        var availableColumns = (await ReadColumnsAsync(connection, specification.TableName, cancellationToken))
+        HashSet<string> availableColumns = (await ReadColumnsAsync(connection, specification.TableName, cancellationToken))
             .Select(column => column.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (!availableColumns.Contains("thread_id"))
@@ -663,7 +682,7 @@ public sealed class CodexStateDbExplorerService
             return new CodexStateRawPage(candidate.Path, specification.TableName, 0, 1, 0, [], []);
         }
 
-        var distinctValues = values
+        string[] distinctValues = values
             .Where(value => !string.IsNullOrWhiteSpace(value))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
@@ -674,7 +693,7 @@ public sealed class CodexStateDbExplorerService
 
         // The key set is already bounded by the gateway's visible base page. Do not apply a
         // second arbitrary row limit here: relation rows must remain complete for those keys.
-        var query = specification.RequiredOrderColumn.Length > 0 && availableColumns.Contains(specification.RequiredOrderColumn)
+        string query = specification.RequiredOrderColumn.Length > 0 && availableColumns.Contains(specification.RequiredOrderColumn)
             ? specification.OrderedQuery
             : specification.UnorderedQuery;
         return await ReadRawPageAsync(
@@ -687,7 +706,7 @@ public sealed class CodexStateDbExplorerService
             () =>
             {
                 var command = new SqliteCommand(query, connection);
-                for (var index = 0; index < MaxRelationKeys; index++)
+                for (int index = 0; index < MaxRelationKeys; index++)
                 {
                     command.Parameters.AddWithValue(
                         string.Concat("$value", index.ToString(CultureInfo.InvariantCulture)),
@@ -699,8 +718,9 @@ public sealed class CodexStateDbExplorerService
             cancellationToken);
     }
 
-    private static string BuildRelationQuery(string tableName, bool ordered) =>
-        tableName switch
+    private static string BuildRelationQuery(string tableName, bool ordered)
+    {
+        return tableName switch
         {
             "thread_goal_continuation_deferrals" => string.Concat(
                 "SELECT * FROM thread_goal_continuation_deferrals WHERE thread_id IN (",
@@ -714,8 +734,9 @@ public sealed class CodexStateDbExplorerService
                 "SELECT * FROM queued_thread_revisions WHERE thread_id IN (",
                 RelationParameterList,
                 ");"),
-            _ => throw new ArgumentOutOfRangeException(nameof(tableName), tableName, "Unknown Codex relation table.")
+            _ => throw new ArgumentOutOfRangeException(nameof(tableName), tableName, "Unknown Codex relation table."),
         };
+    }
 
     /// <summary>Reads a source-native integer aggregate without applying a bounded row page.</summary>
     public async Task<long?> ReadMaxInt64Async(
@@ -726,15 +747,15 @@ public sealed class CodexStateDbExplorerService
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tableName);
         ArgumentException.ThrowIfNullOrWhiteSpace(columnName);
-        var candidate = CreateCandidateForPath(databasePath);
-        await using var connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
-        var objectType = await ReadObjectTypeAsync(connection, tableName, cancellationToken);
+        CodexStateDatabaseCandidate candidate = CreateCandidateForPath(databasePath);
+        await using SqliteConnection connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
+        string? objectType = await ReadObjectTypeAsync(connection, tableName, cancellationToken);
         if (objectType is null)
         {
             throw new KeyNotFoundException($"The source database does not contain a table or view named '{tableName}'.");
         }
 
-        var availableColumns = (await ReadColumnsAsync(connection, tableName, cancellationToken))
+        HashSet<string> availableColumns = (await ReadColumnsAsync(connection, tableName, cancellationToken))
             .Select(column => column.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         if (!availableColumns.Contains(columnName))
@@ -742,9 +763,9 @@ public sealed class CodexStateDbExplorerService
             return null;
         }
 
-        await using var command = connection.CreateCommand();
+        await using SqliteCommand command = connection.CreateCommand();
         command.CommandText = $"SELECT MAX(CAST({QuoteIdentifier(columnName)} AS INTEGER)) FROM {QuoteIdentifier(tableName)};";
-        var value = await command.ExecuteScalarAsync(cancellationToken);
+        object? value = await command.ExecuteScalarAsync(cancellationToken);
         return value is null or DBNull ? null : Convert.ToInt64(value, CultureInfo.InvariantCulture);
     }
 
@@ -760,18 +781,18 @@ public sealed class CodexStateDbExplorerService
     {
         var columns = new List<string>();
         var rows = new List<CodexStateRawRow>();
-        await using var command = createCommand();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        for (var index = 0; index < reader.FieldCount; index++)
+        await using SqliteCommand command = createCommand();
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        for (int index = 0; index < reader.FieldCount; index++)
         {
             columns.Add(reader.GetName(index));
         }
 
         while (await reader.ReadAsync(cancellationToken))
         {
-            var values = new object?[reader.FieldCount];
+            object?[] values = new object?[reader.FieldCount];
             var display = new StringBuilder();
-            for (var index = 0; index < reader.FieldCount; index++)
+            for (int index = 0; index < reader.FieldCount; index++)
             {
                 values[index] = reader.IsDBNull(index) ? null : reader.GetValue(index);
                 if (index > 0)
@@ -789,9 +810,9 @@ public sealed class CodexStateDbExplorerService
     }
 
     /// <summary>
-    /// Searches the supplied source files for an exact column name and exact value. The query is
-    /// intentionally per-object and unjoined: a match is evidence from that source object only,
-    /// not an inferred relationship between databases or tables.
+    ///     Searches the supplied source files for an exact column name and exact value. The query is
+    ///     intentionally per-object and unjoined: a match is evidence from that source object only,
+    ///     not an inferred relationship between databases or tables.
     /// </summary>
     public async Task<CodexStateKeyTraceResult> TraceKeyAsync(
         IEnumerable<string> databasePaths,
@@ -808,11 +829,11 @@ public sealed class CodexStateDbExplorerService
         var matches = new List<CodexStateKeyTraceMatch>();
         var unavailable = new List<string>();
         var paths = new List<string>();
-        foreach (var path in databasePaths.Where(path => !string.IsNullOrWhiteSpace(path)))
+        foreach (string path in databasePaths.Where(path => !string.IsNullOrWhiteSpace(path)))
         {
             try
             {
-                var fullPath = Path.GetFullPath(path);
+                string fullPath = Path.GetFullPath(path);
                 if (!paths.Contains(fullPath, StringComparer.OrdinalIgnoreCase))
                 {
                     paths.Add(fullPath);
@@ -824,9 +845,9 @@ public sealed class CodexStateDbExplorerService
             }
         }
 
-        var truncated = false;
+        bool truncated = false;
 
-        foreach (var databasePath in paths)
+        foreach (string databasePath in paths)
         {
             if (truncated)
             {
@@ -840,14 +861,15 @@ public sealed class CodexStateDbExplorerService
                 // Schema-only inspection avoids scanning content-heavy source tables twice.
                 inspection = await InspectAsync(
                     databasePath,
-                    includeRowFingerprints: false,
-                    cancellationToken: cancellationToken);
+                    false,
+                    cancellationToken);
             }
             catch (OperationCanceledException)
             {
                 throw;
             }
-            catch (Exception exception) when (exception is SqliteException or IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+            catch (Exception exception) when (exception is SqliteException or IOException or UnauthorizedAccessException
+                                                  or ArgumentException or InvalidOperationException)
             {
                 // A single unavailable/corrupt source must not hide matches from the other
                 // discovered stores. Preserve the failure as source evidence for the caller.
@@ -855,7 +877,7 @@ public sealed class CodexStateDbExplorerService
                 continue;
             }
 
-            var matchingTables = inspection.Tables
+            CodexStateTableInfo[] matchingTables = inspection.Tables
                 .Where(table => table.Columns.Any(column =>
                     string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase)))
                 .ToArray();
@@ -873,7 +895,8 @@ public sealed class CodexStateDbExplorerService
             {
                 throw;
             }
-            catch (Exception exception) when (exception is SqliteException or IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+            catch (Exception exception) when (exception is SqliteException or IOException or UnauthorizedAccessException
+                                                  or ArgumentException or InvalidOperationException)
             {
                 unavailable.Add($"{databasePath}: {exception.Message.ReplaceLineEndings(" ").Trim()}");
                 continue;
@@ -881,24 +904,25 @@ public sealed class CodexStateDbExplorerService
 
             await using (connection)
             {
-                foreach (var table in matchingTables)
+                foreach (CodexStateTableInfo table in matchingTables)
                 {
                     if (truncated)
                     {
                         break;
                     }
 
-                    var sourceColumn = table.Columns.First(column =>
+                    CodexStateColumnInfo sourceColumn = table.Columns.First(column =>
                         string.Equals(column.Name, columnName, StringComparison.OrdinalIgnoreCase));
-                    await using var command = connection.CreateCommand();
-                    command.CommandText = $"SELECT * FROM {QuoteIdentifier(table.Name)} WHERE {QuoteIdentifier(sourceColumn.Name)} COLLATE BINARY = $value COLLATE BINARY LIMIT $limit;";
+                    await using SqliteCommand command = connection.CreateCommand();
+                    command.CommandText =
+                        $"SELECT * FROM {QuoteIdentifier(table.Name)} WHERE {QuoteIdentifier(sourceColumn.Name)} COLLATE BINARY = $value COLLATE BINARY LIMIT $limit;";
                     command.Parameters.AddWithValue("$value", value);
                     command.Parameters.AddWithValue("$limit", maxMatches - matches.Count + 1);
 
                     try
                     {
-                        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-                        var columns = Enumerable.Range(0, reader.FieldCount)
+                        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+                        string[] columns = Enumerable.Range(0, reader.FieldCount)
                             .Select(reader.GetName)
                             .ToArray();
                         while (await reader.ReadAsync(cancellationToken))
@@ -909,30 +933,31 @@ public sealed class CodexStateDbExplorerService
                                 break;
                             }
 
-                            var values = new object?[reader.FieldCount];
-                            for (var index = 0; index < reader.FieldCount; index++)
+                            object?[] values = new object?[reader.FieldCount];
+                            for (int index = 0; index < reader.FieldCount; index++)
                             {
                                 values[index] = reader.IsDBNull(index) ? null : reader.GetValue(index);
                             }
 
-                            matches.Add(new CodexStateKeyTraceMatch(
-                                inspection.Database.Path,
-                                inspection.Database.SourceDescription,
-                                table.Name,
-                                sourceColumn.Name,
-                                columns,
-                                values)
-                            {
-                                SourceCandidate = inspection.Database,
-                                InspectionCapturedAtUtc = inspection.Snapshot.CapturedAtUtc
-                            });
+                            matches.Add(
+                                new CodexStateKeyTraceMatch(
+                                    inspection.Database.Path,
+                                    inspection.Database.SourceDescription,
+                                    table.Name,
+                                    sourceColumn.Name,
+                                    columns,
+                                    values)
+                                {
+                                    SourceCandidate = inspection.Database, InspectionCapturedAtUtc = inspection.Snapshot.CapturedAtUtc,
+                                });
                         }
                     }
                     catch (OperationCanceledException)
                     {
                         throw;
                     }
-                    catch (Exception exception) when (exception is SqliteException or IOException or UnauthorizedAccessException or ArgumentException or InvalidOperationException)
+                    catch (Exception exception) when (exception is SqliteException or IOException or UnauthorizedAccessException
+                                                          or ArgumentException or InvalidOperationException)
                     {
                         unavailable.Add($"{databasePath} · {table.Name}: {exception.Message.ReplaceLineEndings(" ").Trim()}");
                     }
@@ -940,11 +965,7 @@ public sealed class CodexStateDbExplorerService
             }
         }
 
-        return new CodexStateKeyTraceResult(columnName, value, matches)
-        {
-            UnavailableSources = unavailable,
-            MayBeTruncated = truncated
-        };
+        return new CodexStateKeyTraceResult(columnName, value, matches) { UnavailableSources = unavailable, MayBeTruncated = truncated };
     }
 
     public static CodexStateInspectionDiff Compare(
@@ -954,101 +975,104 @@ public sealed class CodexStateDbExplorerService
         ArgumentNullException.ThrowIfNull(baseline);
         ArgumentNullException.ThrowIfNull(current);
 
-        var before = baseline.ByName;
-        var after = current.ByName;
+        IReadOnlyDictionary<string, CodexStateTableSnapshot> before = baseline.ByName;
+        IReadOnlyDictionary<string, CodexStateTableSnapshot> after = current.ByName;
         var diffs = new List<CodexStateTableDiff>();
 
-        foreach (var name in before.Keys.Union(after.Keys, StringComparer.OrdinalIgnoreCase)
+        foreach (string name in before.Keys.Union(after.Keys, StringComparer.OrdinalIgnoreCase)
                      .OrderBy(value => value, StringComparer.OrdinalIgnoreCase))
         {
-            var hasBefore = before.TryGetValue(name, out var previous);
-            var hasAfter = after.TryGetValue(name, out var next);
+            bool hasBefore = before.TryGetValue(name, out CodexStateTableSnapshot? previous);
+            bool hasAfter = after.TryGetValue(name, out CodexStateTableSnapshot? next);
             if (!hasBefore)
             {
-                diffs.Add(CreateTableDiff(
-                    baseline,
-                    current,
-                    name,
-                    "added",
-                    null,
-                    next!.RowCount,
-                    schemaChanged: true,
-                    rowsChanged: true,
-                    rowComparisonComplete: false,
-                    rowComparisonBounded: false,
-                    "table added; no baseline row comparison is available",
-                    addedColumns: next.Columns.Select(column => column.Name).ToArray(),
-                    addedIndexes: next.Indexes.Select(index => index.Name).ToArray()));
+                diffs.Add(
+                    CreateTableDiff(
+                        baseline,
+                        current,
+                        name,
+                        "added",
+                        null,
+                        next!.RowCount,
+                        true,
+                        true,
+                        false,
+                        false,
+                        "table added; no baseline row comparison is available",
+                        addedColumns: next.Columns.Select(column => column.Name).ToArray(),
+                        addedIndexes: next.Indexes.Select(index => index.Name).ToArray()));
                 continue;
             }
 
             if (!hasAfter)
             {
-                diffs.Add(CreateTableDiff(
-                    baseline,
-                    current,
-                    name,
-                    "removed",
-                    previous!.RowCount,
-                    null,
-                    schemaChanged: true,
-                    rowsChanged: true,
-                    rowComparisonComplete: false,
-                    rowComparisonBounded: false,
-                    "table removed; no current row comparison is available",
-                    removedColumns: previous.Columns.Select(column => column.Name).ToArray(),
-                    removedIndexes: previous.Indexes.Select(index => index.Name).ToArray()));
+                diffs.Add(
+                    CreateTableDiff(
+                        baseline,
+                        current,
+                        name,
+                        "removed",
+                        previous!.RowCount,
+                        null,
+                        true,
+                        true,
+                        false,
+                        false,
+                        "table removed; no current row comparison is available",
+                        removedColumns: previous.Columns.Select(column => column.Name).ToArray(),
+                        removedIndexes: previous.Indexes.Select(index => index.Name).ToArray()));
                 continue;
             }
 
-            var schemaChanged = !string.Equals(previous!.SchemaFingerprint, next!.SchemaFingerprint, StringComparison.Ordinal);
-            var rowCountChanged = previous.RowCount >= 0 && next.RowCount >= 0 && previous.RowCount != next.RowCount;
-            var rowFingerprintModesComparable =
-                (!string.IsNullOrWhiteSpace(previous.RowFingerprintMode) ||
-                 !string.IsNullOrWhiteSpace(next.RowFingerprintMode))
+            bool schemaChanged = !string.Equals(previous!.SchemaFingerprint, next!.SchemaFingerprint, StringComparison.Ordinal);
+            bool rowCountChanged = previous.RowCount >= 0 && next.RowCount >= 0 && previous.RowCount != next.RowCount;
+            bool rowFingerprintModesComparable =
+                !string.IsNullOrWhiteSpace(previous.RowFingerprintMode) ||
+                !string.IsNullOrWhiteSpace(next.RowFingerprintMode)
                     ? string.Equals(previous.RowFingerprintMode, next.RowFingerprintMode, StringComparison.Ordinal)
                     : true;
-            var rowsChanged = rowCountChanged ||
-                (rowFingerprintModesComparable &&
-                 !string.Equals(previous.RowFingerprint, next.RowFingerprint, StringComparison.Ordinal));
-            var rowComparisonComplete = previous.RowComparisonComplete && next.RowComparisonComplete;
-            var rowComparisonBounded = previous.RowComparisonBounded || next.RowComparisonBounded;
-            var rowIdentityPairingSafe = rowComparisonComplete && CanPairRows(baseline, current, previous, next);
+            bool rowsChanged = rowCountChanged ||
+                               rowFingerprintModesComparable &&
+                               !string.Equals(previous.RowFingerprint, next.RowFingerprint, StringComparison.Ordinal);
+            bool rowComparisonComplete = previous.RowComparisonComplete && next.RowComparisonComplete;
+            bool rowComparisonBounded = previous.RowComparisonBounded || next.RowComparisonBounded;
+            bool rowIdentityPairingSafe = rowComparisonComplete && CanPairRows(baseline, current, previous, next);
             rowComparisonComplete = rowComparisonComplete && rowIdentityPairingSafe;
-            var rowChanges = rowIdentityPairingSafe
+            IReadOnlyList<CodexStateRowDiff> rowChanges = rowIdentityPairingSafe
                 ? CompareRows(baseline, current, previous, next)
                 : Array.Empty<CodexStateRowDiff>();
-            var rowComparisonNote = BuildRowComparisonNote(
+            string rowComparisonNote = BuildRowComparisonNote(
                 previous,
                 next,
                 rowComparisonComplete,
                 rowComparisonBounded,
                 rowFingerprintModesComparable,
                 rowIdentityPairingSafe);
-            var schemaDetails = CompareSchemaDetails(previous, next);
+            SchemaDifference schemaDetails = CompareSchemaDetails(previous, next);
 
             if (schemaChanged || rowsChanged || !rowComparisonComplete)
             {
-                var changeKind = schemaChanged || rowsChanged ? "changed" : "incomplete";
-                diffs.Add(CreateTableDiff(
-                    baseline,
-                    current,
-                    name,
-                    changeKind,
-                    previous.RowCount,
-                    next.RowCount,
-                    schemaChanged,
-                    rowsChanged,
-                    rowComparisonComplete,
-                    rowComparisonBounded,
-                    rowComparisonNote,
-                    rowChanges,
-                    schemaDetails.AddedColumns,
-                    schemaDetails.RemovedColumns,
-                    schemaDetails.ChangedColumns,
-                    schemaDetails.AddedIndexes,
-                    schemaDetails.RemovedIndexes,
-                    schemaDetails.ChangedIndexes));
+                string changeKind = schemaChanged || rowsChanged ? "changed" : "incomplete";
+                diffs.Add(
+                    CreateTableDiff(
+                        baseline,
+                        current,
+                        name,
+                        changeKind,
+                        previous.RowCount,
+                        next.RowCount,
+                        schemaChanged,
+                        rowsChanged,
+                        rowComparisonComplete,
+                        rowComparisonBounded,
+                        rowComparisonNote,
+                        rowChanges,
+                        schemaDetails.AddedColumns,
+                        schemaDetails.RemovedColumns,
+                        schemaDetails.ChangedColumns,
+                        schemaDetails.AddedIndexes,
+                        schemaDetails.RemovedIndexes,
+                        schemaDetails.ChangedIndexes));
             }
         }
 
@@ -1062,7 +1086,7 @@ public sealed class CodexStateDbExplorerService
             BaselineSchemaFingerprint = baseline.SchemaFingerprint,
             CurrentSchemaFingerprint = current.SchemaFingerprint,
             BaselineSourceDescription = baseline.SourceDescription,
-            CurrentSourceDescription = current.SourceDescription
+            CurrentSourceDescription = current.SourceDescription,
         };
     }
 
@@ -1109,7 +1133,7 @@ public sealed class CodexStateDbExplorerService
             ChangedColumns = changedColumns ?? Array.Empty<string>(),
             AddedIndexes = addedIndexes ?? Array.Empty<string>(),
             RemovedIndexes = removedIndexes ?? Array.Empty<string>(),
-            ChangedIndexes = changedIndexes ?? Array.Empty<string>()
+            ChangedIndexes = changedIndexes ?? Array.Empty<string>(),
         };
     }
 
@@ -1117,28 +1141,36 @@ public sealed class CodexStateDbExplorerService
         CodexStateTableSnapshot previous,
         CodexStateTableSnapshot next)
     {
-        var beforeColumns = previous.Columns.ToDictionary(column => column.Name, StringComparer.OrdinalIgnoreCase);
-        var afterColumns = next.Columns.ToDictionary(column => column.Name, StringComparer.OrdinalIgnoreCase);
-        var addedColumns = afterColumns.Keys.Except(beforeColumns.Keys, StringComparer.OrdinalIgnoreCase)
+        Dictionary<string, CodexStateColumnInfo> beforeColumns = previous.Columns.ToDictionary(
+            column => column.Name,
+            StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, CodexStateColumnInfo> afterColumns = next.Columns.ToDictionary(
+            column => column.Name,
+            StringComparer.OrdinalIgnoreCase);
+        string[] addedColumns = afterColumns.Keys.Except(beforeColumns.Keys, StringComparer.OrdinalIgnoreCase)
             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        var removedColumns = beforeColumns.Keys.Except(afterColumns.Keys, StringComparer.OrdinalIgnoreCase)
+        string[] removedColumns = beforeColumns.Keys.Except(afterColumns.Keys, StringComparer.OrdinalIgnoreCase)
             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        var changedColumns = beforeColumns.Keys.Intersect(afterColumns.Keys, StringComparer.OrdinalIgnoreCase)
+        string[] changedColumns = beforeColumns.Keys.Intersect(afterColumns.Keys, StringComparer.OrdinalIgnoreCase)
             .Where(name => !Equals(beforeColumns[name], afterColumns[name]))
             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-        var beforeIndexes = previous.Indexes.ToDictionary(index => index.Name, StringComparer.OrdinalIgnoreCase);
-        var afterIndexes = next.Indexes.ToDictionary(index => index.Name, StringComparer.OrdinalIgnoreCase);
-        var addedIndexes = afterIndexes.Keys.Except(beforeIndexes.Keys, StringComparer.OrdinalIgnoreCase)
+        Dictionary<string, CodexStateIndexInfo> beforeIndexes = previous.Indexes.ToDictionary(
+            index => index.Name,
+            StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, CodexStateIndexInfo> afterIndexes = next.Indexes.ToDictionary(
+            index => index.Name,
+            StringComparer.OrdinalIgnoreCase);
+        string[] addedIndexes = afterIndexes.Keys.Except(beforeIndexes.Keys, StringComparer.OrdinalIgnoreCase)
             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        var removedIndexes = beforeIndexes.Keys.Except(afterIndexes.Keys, StringComparer.OrdinalIgnoreCase)
+        string[] removedIndexes = beforeIndexes.Keys.Except(afterIndexes.Keys, StringComparer.OrdinalIgnoreCase)
             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-        var changedIndexes = beforeIndexes.Keys.Intersect(afterIndexes.Keys, StringComparer.OrdinalIgnoreCase)
+        string[] changedIndexes = beforeIndexes.Keys.Intersect(afterIndexes.Keys, StringComparer.OrdinalIgnoreCase)
             .Where(name => !Equals(beforeIndexes[name], afterIndexes[name]))
             .OrderBy(name => name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -1152,22 +1184,14 @@ public sealed class CodexStateDbExplorerService
             changedIndexes);
     }
 
-    private sealed record SchemaDifference(
-        IReadOnlyList<string> AddedColumns,
-        IReadOnlyList<string> RemovedColumns,
-        IReadOnlyList<string> ChangedColumns,
-        IReadOnlyList<string> AddedIndexes,
-        IReadOnlyList<string> RemovedIndexes,
-        IReadOnlyList<string> ChangedIndexes);
-
     private static bool CanPairRows(
         CodexStateInspectionSnapshot baseline,
         CodexStateInspectionSnapshot current,
         CodexStateTableSnapshot previous,
         CodexStateTableSnapshot next)
     {
-        if (!baseline.RowObservations.TryGetValue(previous.Name, out var beforeRows) ||
-            !current.RowObservations.TryGetValue(next.Name, out var afterRows))
+        if (!baseline.RowObservations.TryGetValue(previous.Name, out IReadOnlyList<CodexStateRowObservation>? beforeRows) ||
+            !current.RowObservations.TryGetValue(next.Name, out IReadOnlyList<CodexStateRowObservation>? afterRows))
         {
             return false;
         }
@@ -1186,15 +1210,15 @@ public sealed class CodexStateDbExplorerService
         CodexStateTableSnapshot previous,
         CodexStateTableSnapshot next)
     {
-        if (!baseline.RowObservations.TryGetValue(previous.Name, out var beforeRows) ||
-            !current.RowObservations.TryGetValue(next.Name, out var afterRows))
+        if (!baseline.RowObservations.TryGetValue(previous.Name, out IReadOnlyList<CodexStateRowObservation>? beforeRows) ||
+            !current.RowObservations.TryGetValue(next.Name, out IReadOnlyList<CodexStateRowObservation>? afterRows))
         {
             return Array.Empty<CodexStateRowDiff>();
         }
 
-        var beforeGroups = beforeRows.GroupBy(row => row.RowIdentity, StringComparer.Ordinal)
+        Dictionary<string, CodexStateRowObservation[]> beforeGroups = beforeRows.GroupBy(row => row.RowIdentity, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
-        var afterGroups = afterRows.GroupBy(row => row.RowIdentity, StringComparer.Ordinal)
+        Dictionary<string, CodexStateRowObservation[]> afterGroups = afterRows.GroupBy(row => row.RowIdentity, StringComparer.Ordinal)
             .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.Ordinal);
         // Duplicate identities are ambiguous source evidence. Do not manufacture a row pairing.
         if (beforeGroups.Any(group => group.Value.Length != 1) || afterGroups.Any(group => group.Value.Length != 1))
@@ -1203,14 +1227,14 @@ public sealed class CodexStateDbExplorerService
         }
 
         var changes = new List<CodexStateRowDiff>();
-        foreach (var identity in beforeGroups.Keys.Union(afterGroups.Keys, StringComparer.Ordinal)
+        foreach (string identity in beforeGroups.Keys.Union(afterGroups.Keys, StringComparer.Ordinal)
                      .OrderBy(value => value, StringComparer.Ordinal))
         {
-            var hasBefore = beforeGroups.TryGetValue(identity, out var beforeGroup);
-            var hasAfter = afterGroups.TryGetValue(identity, out var afterGroup);
-            var beforeRow = hasBefore ? beforeGroup![0] : null;
-            var afterRow = hasAfter ? afterGroup![0] : null;
-            var changeKind = !hasBefore
+            bool hasBefore = beforeGroups.TryGetValue(identity, out CodexStateRowObservation[]? beforeGroup);
+            bool hasAfter = afterGroups.TryGetValue(identity, out CodexStateRowObservation[]? afterGroup);
+            CodexStateRowObservation? beforeRow = hasBefore ? beforeGroup![0] : null;
+            CodexStateRowObservation? afterRow = hasAfter ? afterGroup![0] : null;
+            string? changeKind = !hasBefore
                 ? "added"
                 : !hasAfter
                     ? "removed"
@@ -1222,25 +1246,26 @@ public sealed class CodexStateDbExplorerService
                 continue;
             }
 
-            changes.Add(new CodexStateRowDiff(
-                next.Name,
-                changeKind,
-                identity,
-                beforeRow?.RowHash,
-                afterRow?.RowHash,
-                beforeRow?.Columns ?? Array.Empty<string>(),
-                beforeRow?.Values ?? Array.Empty<object?>(),
-                afterRow?.Columns ?? Array.Empty<string>(),
-                afterRow?.Values ?? Array.Empty<object?>())
-            {
-                BaselineDatabasePath = baseline.DatabasePath,
-                CurrentDatabasePath = current.DatabasePath,
-                BaselineSourceDescription = baseline.SourceDescription,
-                CurrentSourceDescription = current.SourceDescription,
-                BaselineCapturedAtUtc = baseline.CapturedAtUtc,
-                CurrentCapturedAtUtc = current.CapturedAtUtc,
-                IdentityKind = afterRow?.IdentityKind ?? beforeRow?.IdentityKind ?? "unknown"
-            });
+            changes.Add(
+                new CodexStateRowDiff(
+                    next.Name,
+                    changeKind,
+                    identity,
+                    beforeRow?.RowHash,
+                    afterRow?.RowHash,
+                    beforeRow?.Columns ?? Array.Empty<string>(),
+                    beforeRow?.Values ?? Array.Empty<object?>(),
+                    afterRow?.Columns ?? Array.Empty<string>(),
+                    afterRow?.Values ?? Array.Empty<object?>())
+                {
+                    BaselineDatabasePath = baseline.DatabasePath,
+                    CurrentDatabasePath = current.DatabasePath,
+                    BaselineSourceDescription = baseline.SourceDescription,
+                    CurrentSourceDescription = current.SourceDescription,
+                    BaselineCapturedAtUtc = baseline.CapturedAtUtc,
+                    CurrentCapturedAtUtc = current.CapturedAtUtc,
+                    IdentityKind = afterRow?.IdentityKind ?? beforeRow?.IdentityKind ?? "unknown",
+                });
         }
 
         return changes;
@@ -1259,11 +1284,11 @@ public sealed class CodexStateDbExplorerService
             return $"complete row observation ({previous.RowObservationCount:N0} → {next.RowObservationCount:N0} rows)";
         }
 
-        var notes = new[] { previous.RowComparisonNote, next.RowComparisonNote }
+        string[] notes = new[] { previous.RowComparisonNote, next.RowComparisonNote }
             .Where(note => !string.IsNullOrWhiteSpace(note))
             .Distinct(StringComparer.Ordinal)
             .ToArray();
-        var prefix = bounded ? "bounded/count-only" : "row comparison unavailable";
+        string prefix = bounded ? "bounded/count-only" : "row comparison unavailable";
         if (!rowFingerprintModesComparable)
         {
             notes = notes.Append(
@@ -1280,8 +1305,8 @@ public sealed class CodexStateDbExplorerService
     }
 
     /// <summary>
-    /// Computes a database-level schema fingerprint from sorted source-object fingerprints. Row
-    /// observations are deliberately excluded so the value changes only when schema metadata does.
+    ///     Computes a database-level schema fingerprint from sorted source-object fingerprints. Row
+    ///     observations are deliberately excluded so the value changes only when schema metadata does.
     /// </summary>
     public static string ComputeSchemaFingerprint(
         IEnumerable<CodexStateTableSnapshot> tables)
@@ -1291,9 +1316,9 @@ public sealed class CodexStateDbExplorerService
     }
 
     /// <summary>
-    /// Computes a database fingerprint from the observed schema objects and table metadata. All
-    /// values are length-prefixed so null, empty, and delimiter-containing source values remain
-    /// distinct. Row content and row fingerprints are intentionally excluded.
+    ///     Computes a database fingerprint from the observed schema objects and table metadata. All
+    ///     values are length-prefixed so null, empty, and delimiter-containing source values remain
+    ///     distinct. Row content and row fingerprints are intentionally excluded.
     /// </summary>
     public static string ComputeSchemaFingerprint(
         IEnumerable<CodexStateSchemaObjectInfo> schemaObjects,
@@ -1303,7 +1328,7 @@ public sealed class CodexStateDbExplorerService
         ArgumentNullException.ThrowIfNull(tables);
 
         var builder = new StringBuilder();
-        foreach (var schemaObject in schemaObjects
+        foreach (CodexStateSchemaObjectInfo schemaObject in schemaObjects
                      .OrderBy(value => value.ObjectType, StringComparer.Ordinal)
                      .ThenBy(value => value.Name, StringComparer.Ordinal))
         {
@@ -1313,7 +1338,7 @@ public sealed class CodexStateDbExplorerService
             AppendSchemaText(builder, "object.sql", schemaObject.Sql);
         }
 
-        foreach (var table in tables
+        foreach (CodexStateTableSnapshot table in tables
                      .OrderBy(value => value.ObjectType, StringComparer.Ordinal)
                      .ThenBy(value => value.Name, StringComparer.Ordinal))
         {
@@ -1326,8 +1351,8 @@ public sealed class CodexStateDbExplorerService
     }
 
     /// <summary>
-    /// Creates a text export for a selected page. Column-name heuristics redact content-bearing
-    /// values and paths, while the live explorer continues to expose the raw values in memory.
+    ///     Creates a text export for a selected page. Column-name heuristics redact content-bearing
+    ///     values and paths, while the live explorer continues to expose the raw values in memory.
     /// </summary>
     public static string BuildSanitizedExport(CodexStateRawPage page)
     {
@@ -1340,10 +1365,13 @@ public sealed class CodexStateDbExplorerService
         builder.AppendLine();
         builder.AppendLine(string.Join("\t", page.Columns.Select(EscapeExportValue)));
 
-        foreach (var row in page.Rows)
+        foreach (CodexStateRawRow row in page.Rows)
         {
-            builder.AppendLine(string.Join("\t", page.Columns.Zip(row.Values, SanitizeForExport)
-                .Select(EscapeExportValue)));
+            builder.AppendLine(
+                string.Join(
+                    "\t",
+                    page.Columns.Zip(row.Values, SanitizeForExport)
+                        .Select(EscapeExportValue)));
         }
 
         return builder.ToString();
@@ -1353,7 +1381,7 @@ public sealed class CodexStateDbExplorerService
         IEnumerable<CodexStateInspectionResult> inspections)
     {
         ArgumentNullException.ThrowIfNull(inspections);
-        var results = inspections
+        CodexStateInspectionResult[] results = inspections
             .Where(inspection => inspection is not null)
             .OrderBy(inspection => inspection.Database.Path, StringComparer.OrdinalIgnoreCase)
             .ToArray();
@@ -1363,7 +1391,7 @@ public sealed class CodexStateDbExplorerService
         builder.AppendLine($"Databases: {results.Length:N0}");
         builder.AppendLine();
 
-        foreach (var inspection in results)
+        foreach (CodexStateInspectionResult inspection in results)
         {
             builder.AppendLine($"-- SOURCE: {inspection.Database.Path}");
             builder.AppendLine($"-- SOURCE KIND: {inspection.Database.SourceDescription}");
@@ -1372,13 +1400,13 @@ public sealed class CodexStateDbExplorerService
             builder.AppendLine($"-- SCHEMA FINGERPRINT: {inspection.Snapshot.SchemaFingerprint}");
             builder.AppendLine();
 
-            foreach (var table in inspection.Tables.OrderBy(table => table.Name, StringComparer.OrdinalIgnoreCase))
+            foreach (CodexStateTableInfo table in inspection.Tables.OrderBy(table => table.Name, StringComparer.OrdinalIgnoreCase))
             {
                 builder.Append("-- OBJECT: ").Append(table.ObjectType).Append(' ').AppendLine(table.Name);
                 builder.Append("-- ROW COUNT OBSERVED: ").AppendLine(
                     table.RowCount < 0 ? "unavailable" : table.RowCount.ToString(CultureInfo.InvariantCulture));
                 builder.AppendLine(table.Sql ?? "-- SQL: (not provided)");
-                foreach (var column in table.Columns)
+                foreach (CodexStateColumnInfo column in table.Columns)
                 {
                     builder.Append("-- COLUMN ").Append(column.Ordinal.ToString(CultureInfo.InvariantCulture))
                         .Append(": ").Append(column.Name).Append(" ").Append(column.DeclaredType)
@@ -1388,7 +1416,7 @@ public sealed class CodexStateDbExplorerService
                         .Append(" DEFAULT=").AppendLine(column.DefaultValue ?? "NULL");
                 }
 
-                foreach (var index in table.Indexes.OrderBy(index => index.Name, StringComparer.Ordinal))
+                foreach (CodexStateIndexInfo index in table.Indexes.OrderBy(index => index.Name, StringComparer.Ordinal))
                 {
                     builder.Append("-- INDEX: ").Append(index.Name)
                         .Append(" UNIQUE=").Append(index.IsUnique)
@@ -1401,7 +1429,7 @@ public sealed class CodexStateDbExplorerService
                 builder.AppendLine();
             }
 
-            foreach (var schemaObject in inspection.SchemaObjects
+            foreach (CodexStateSchemaObjectInfo schemaObject in inspection.SchemaObjects
                          .Where(schemaObject => schemaObject.ObjectType is not ("table" or "view"))
                          .OrderBy(schemaObject => schemaObject.ObjectType, StringComparer.Ordinal)
                          .ThenBy(schemaObject => schemaObject.Name, StringComparer.Ordinal))
@@ -1430,8 +1458,21 @@ public sealed class CodexStateDbExplorerService
 
         return new[]
             {
-                "thread", "rollout", "token", "model", "goal", "queue", "log", "memory", "stage",
-                "automation", "catalog", "summary", "timeline", "project", "artifact"
+                "thread",
+                "rollout",
+                "token",
+                "model",
+                "goal",
+                "queue",
+                "log",
+                "memory",
+                "stage",
+                "automation",
+                "catalog",
+                "summary",
+                "timeline",
+                "project",
+                "artifact",
             }
             .Any(token => tableName.Contains(token, StringComparison.OrdinalIgnoreCase));
     }
@@ -1440,28 +1481,25 @@ public sealed class CodexStateDbExplorerService
         string databasePath,
         CancellationToken cancellationToken)
     {
-        var connectionString = new SqliteConnectionStringBuilder
+        string connectionString = new SqliteConnectionStringBuilder
         {
-            DataSource = databasePath,
-            Mode = SqliteOpenMode.ReadOnly,
-            Cache = SqliteCacheMode.Private,
-            Pooling = false
+            DataSource = databasePath, Mode = SqliteOpenMode.ReadOnly, Cache = SqliteCacheMode.Private, Pooling = false,
         }.ToString();
 
         var connection = new SqliteConnection(connectionString);
         try
         {
             await connection.OpenAsync(cancellationToken);
-            await using (var queryOnly = connection.CreateCommand())
+            await using (SqliteCommand queryOnly = connection.CreateCommand())
             {
                 queryOnly.CommandText = "PRAGMA query_only = ON;";
                 await queryOnly.ExecuteNonQueryAsync(cancellationToken);
             }
 
-            await using (var verify = connection.CreateCommand())
+            await using (SqliteCommand verify = connection.CreateCommand())
             {
                 verify.CommandText = "PRAGMA query_only;";
-                var value = await verify.ExecuteScalarAsync(cancellationToken);
+                object? value = await verify.ExecuteScalarAsync(cancellationToken);
                 if (Convert.ToInt64(value, CultureInfo.InvariantCulture) != 1)
                 {
                     throw new InvalidOperationException("SQLite did not enable query_only mode.");
@@ -1482,10 +1520,10 @@ public sealed class CodexStateDbExplorerService
         string tableName,
         CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
+        await using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "SELECT type FROM sqlite_master WHERE name = $name LIMIT 1;";
         command.Parameters.AddWithValue("$name", tableName);
-        return (await command.ExecuteScalarAsync(cancellationToken)) as string;
+        return await command.ExecuteScalarAsync(cancellationToken) as string;
     }
 
     private static async Task<IReadOnlyList<CodexStateColumnInfo>> ReadColumnsAsync(
@@ -1494,25 +1532,26 @@ public sealed class CodexStateDbExplorerService
         CancellationToken cancellationToken)
     {
         var columns = new List<CodexStateColumnInfo>();
-        await using var command = connection.CreateCommand();
+        await using SqliteCommand command = connection.CreateCommand();
         // table_xinfo includes generated/hidden columns that table_info omits. Keeping the raw
         // hidden flag makes schema variation visible without assigning a meaning to it.
         command.CommandText = $"PRAGMA table_xinfo({QuoteIdentifier(tableName)});";
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
-            columns.Add(new CodexStateColumnInfo(
-                Convert.ToInt32(reader.GetValue(0), CultureInfo.InvariantCulture),
-                reader.GetString(1),
-                reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
-                Convert.ToInt32(reader.GetValue(3), CultureInfo.InvariantCulture) != 0,
-                reader.IsDBNull(4) ? null : Convert.ToString(reader.GetValue(4), CultureInfo.InvariantCulture),
-                Convert.ToInt32(reader.GetValue(5), CultureInfo.InvariantCulture) != 0)
-            {
-                Hidden = reader.FieldCount > 6
-                    ? Convert.ToInt32(reader.GetValue(6), CultureInfo.InvariantCulture)
-                    : 0
-            });
+            columns.Add(
+                new CodexStateColumnInfo(
+                    Convert.ToInt32(reader.GetValue(0), CultureInfo.InvariantCulture),
+                    reader.GetString(1),
+                    reader.IsDBNull(2) ? string.Empty : reader.GetString(2),
+                    Convert.ToInt32(reader.GetValue(3), CultureInfo.InvariantCulture) != 0,
+                    reader.IsDBNull(4) ? null : Convert.ToString(reader.GetValue(4), CultureInfo.InvariantCulture),
+                    Convert.ToInt32(reader.GetValue(5), CultureInfo.InvariantCulture) != 0)
+                {
+                    Hidden = reader.FieldCount > 6
+                        ? Convert.ToInt32(reader.GetValue(6), CultureInfo.InvariantCulture)
+                        : 0,
+                });
         }
 
         return columns;
@@ -1525,34 +1564,34 @@ public sealed class CodexStateDbExplorerService
     {
         var indexes = new List<CodexStateIndexInfo>();
         var descriptors = new List<(string Name, bool IsUnique, string Origin, bool IsPartial, string? Sql)>();
-        await using (var command = connection.CreateCommand())
+        await using (SqliteCommand command = connection.CreateCommand())
         {
             command.CommandText = $"PRAGMA index_list({QuoteIdentifier(tableName)});";
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
             while (await reader.ReadAsync(cancellationToken))
             {
-                var name = reader.GetString(1);
-                descriptors.Add((
-                    name,
-                    Convert.ToInt32(reader.GetValue(2), CultureInfo.InvariantCulture) != 0,
-                    reader.FieldCount > 3 && !reader.IsDBNull(3) ? reader.GetString(3) : string.Empty,
-                    reader.FieldCount > 4 && !reader.IsDBNull(4) && Convert.ToInt32(reader.GetValue(4), CultureInfo.InvariantCulture) != 0,
-                    await ReadIndexSqlAsync(connection, name, cancellationToken)));
+                string name = reader.GetString(1);
+                descriptors.Add(
+                    (
+                        name,
+                        Convert.ToInt32(reader.GetValue(2), CultureInfo.InvariantCulture) != 0,
+                        reader.FieldCount > 3 && !reader.IsDBNull(3) ? reader.GetString(3) : string.Empty,
+                        reader.FieldCount > 4 && !reader.IsDBNull(4) &&
+                        Convert.ToInt32(reader.GetValue(4), CultureInfo.InvariantCulture) != 0,
+                        await ReadIndexSqlAsync(connection, name, cancellationToken)));
             }
         }
 
-        foreach (var descriptor in descriptors)
+        foreach ((string Name, bool IsUnique, string Origin, bool IsPartial, string? Sql) descriptor in descriptors)
         {
-            var columns = await ReadIndexColumnsAsync(connection, descriptor.Name, cancellationToken);
-            indexes.Add(new CodexStateIndexInfo(
-                descriptor.Name,
-                descriptor.IsUnique,
-                descriptor.Origin,
-                descriptor.IsPartial,
-                columns)
-            {
-                Sql = descriptor.Sql
-            });
+            IReadOnlyList<string> columns = await ReadIndexColumnsAsync(connection, descriptor.Name, cancellationToken);
+            indexes.Add(
+                new CodexStateIndexInfo(
+                    descriptor.Name,
+                    descriptor.IsUnique,
+                    descriptor.Origin,
+                    descriptor.IsPartial,
+                    columns) { Sql = descriptor.Sql });
         }
 
         return indexes;
@@ -1563,10 +1602,10 @@ public sealed class CodexStateDbExplorerService
         string indexName,
         CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
+        await using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "SELECT sql FROM sqlite_master WHERE type = 'index' AND name = $name LIMIT 1;";
         command.Parameters.AddWithValue("$name", indexName);
-        var value = await command.ExecuteScalarAsync(cancellationToken);
+        object? value = await command.ExecuteScalarAsync(cancellationToken);
         return value is DBNull or null ? null : Convert.ToString(value, CultureInfo.InvariantCulture);
     }
 
@@ -1576,9 +1615,9 @@ public sealed class CodexStateDbExplorerService
         CancellationToken cancellationToken)
     {
         var columns = new List<(int Sequence, string Name)>();
-        await using var command = connection.CreateCommand();
+        await using SqliteCommand command = connection.CreateCommand();
         command.CommandText = $"PRAGMA index_info({QuoteIdentifier(indexName)});";
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
             if (!reader.IsDBNull(2))
@@ -1595,11 +1634,11 @@ public sealed class CodexStateDbExplorerService
         string tableName,
         CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
+        await using SqliteCommand command = connection.CreateCommand();
         command.CommandText = $"SELECT COUNT(*) FROM {QuoteIdentifier(tableName)};";
         try
         {
-            var value = await command.ExecuteScalarAsync(cancellationToken);
+            object? value = await command.ExecuteScalarAsync(cancellationToken);
             return Convert.ToInt64(value, CultureInfo.InvariantCulture);
         }
         catch (SqliteException)
@@ -1617,7 +1656,7 @@ public sealed class CodexStateDbExplorerService
     {
         if (!allowDeepRowFingerprint)
         {
-            var note = candidate.SizeBytes > MaxFingerprintDatabaseBytes
+            string note = candidate.SizeBytes > MaxFingerprintDatabaseBytes
                 ? $"count-only: database exceeds {MaxFingerprintDatabaseBytes / (1024 * 1024):N0} MiB"
                 : "count-only inspection requested";
             return RowFingerprintResult.CountOnly(FingerprintBoundedRowObservation(table), note);
@@ -1632,19 +1671,19 @@ public sealed class CodexStateDbExplorerService
 
         var rowHashes = new List<string>();
         var observations = new List<CodexStateRowObservation>();
-        var bounded = false;
+        bool bounded = false;
         try
         {
-            await using var command = connection.CreateCommand();
+            await using SqliteCommand command = connection.CreateCommand();
             command.CommandText = $"SELECT * FROM {QuoteIdentifier(table.Name)};";
-            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-            var columns = Enumerable.Range(0, reader.FieldCount)
+            await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+            string[] columns = Enumerable.Range(0, reader.FieldCount)
                 .Select(reader.GetName)
                 .ToArray();
-            var columnPositions = columns
+            Dictionary<string, int> columnPositions = columns
                 .Select((name, position) => (name, position))
                 .ToDictionary(item => item.name, item => item.position, StringComparer.OrdinalIgnoreCase);
-            var primaryKeyColumns = table.Columns
+            string[] primaryKeyColumns = table.Columns
                 .Where(column => column.IsPrimaryKey)
                 .OrderBy(column => column.Ordinal)
                 .Select(column => column.Name)
@@ -1660,27 +1699,28 @@ public sealed class CodexStateDbExplorerService
                     break;
                 }
 
-                var values = new object?[reader.FieldCount];
-                for (var index = 0; index < reader.FieldCount; index++)
+                object?[] values = new object?[reader.FieldCount];
+                for (int index = 0; index < reader.FieldCount; index++)
                 {
                     values[index] = reader.IsDBNull(index) ? null : reader.GetValue(index);
                 }
 
-                var rowHash = ComputeRowHash(columns, values);
-                var (identityKind, rowIdentity) = BuildRowIdentity(
+                string rowHash = ComputeRowHash(columns, values);
+                (string identityKind, string rowIdentity) = BuildRowIdentity(
                     primaryKeyColumns,
                     columnPositions,
                     values,
                     rowHash);
-                observations.Add(new CodexStateRowObservation(
-                    candidate.Path,
-                    candidate.SourceDescription,
-                    table.Name,
-                    identityKind,
-                    rowIdentity,
-                    rowHash,
-                    columns,
-                    values));
+                observations.Add(
+                    new CodexStateRowObservation(
+                        candidate.Path,
+                        candidate.SourceDescription,
+                        table.Name,
+                        identityKind,
+                        rowIdentity,
+                        rowHash,
+                        columns,
+                        values));
                 rowHashes.Add(rowHash);
             }
         }
@@ -1697,16 +1737,16 @@ public sealed class CodexStateDbExplorerService
         }
 
         rowHashes.Sort(StringComparer.Ordinal);
-        var material = $"rows={table.RowCount}\nbounded={bounded}\n{string.Join('\n', rowHashes)}";
+        string material = $"rows={table.RowCount}\nbounded={bounded}\n{string.Join('\n', rowHashes)}";
         return new RowFingerprintResult(
             Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material))),
             observations,
-            Complete: !bounded,
-            Bounded: bounded,
-            Note: bounded
+            !bounded,
+            bounded,
+            bounded
                 ? $"bounded row observation at {MaxFingerprintRows:N0} rows"
                 : $"complete row observation ({observations.Count:N0} rows)",
-            Mode: "full");
+            "full");
     }
 
     private static string ComputeRowHash(
@@ -1714,7 +1754,7 @@ public sealed class CodexStateDbExplorerService
         IReadOnlyList<object?> values)
     {
         var builder = new StringBuilder();
-        for (var index = 0; index < columns.Count; index++)
+        for (int index = 0; index < columns.Count; index++)
         {
             AppendSchemaText(builder, "column", columns[index]);
             builder.Append("value:");
@@ -1731,14 +1771,14 @@ public sealed class CodexStateDbExplorerService
         IReadOnlyList<object?> values,
         string rowHash)
     {
-        var positions = primaryKeyColumns
-            .Select(name => columnPositions.TryGetValue(name, out var position) ? position : -1)
+        int[] positions = primaryKeyColumns
+            .Select(name => columnPositions.TryGetValue(name, out int position) ? position : -1)
             .ToArray();
         if (positions.Length == primaryKeyColumns.Count &&
             positions.All(position => position >= 0 && position < values.Count && values[position] is not null))
         {
             var builder = new StringBuilder("pk:");
-            for (var index = 0; index < primaryKeyColumns.Count; index++)
+            for (int index = 0; index < primaryKeyColumns.Count; index++)
             {
                 if (index > 0)
                 {
@@ -1757,7 +1797,7 @@ public sealed class CodexStateDbExplorerService
 
     private static string FingerprintBoundedRowObservation(CodexStateTableInfo table)
     {
-        var material = $"rows={table.RowCount}\nbounded=true";
+        string material = $"rows={table.RowCount}\nbounded=true";
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(material)));
     }
 
@@ -1767,7 +1807,7 @@ public sealed class CodexStateDbExplorerService
         AppendSchemaText(builder, "type", table.ObjectType);
         AppendSchemaText(builder, "name", table.Name);
         AppendSchemaText(builder, "sql", table.Sql);
-        foreach (var column in table.Columns)
+        foreach (CodexStateColumnInfo column in table.Columns)
         {
             builder.Append("column:").Append(column.Ordinal).Append('|');
             AppendSchemaText(builder, "name", column.Name);
@@ -1778,7 +1818,7 @@ public sealed class CodexStateDbExplorerService
             AppendSchemaText(builder, "hidden", column.Hidden.ToString(CultureInfo.InvariantCulture));
         }
 
-        foreach (var index in table.Indexes.OrderBy(index => index.Name, StringComparer.Ordinal))
+        foreach (CodexStateIndexInfo index in table.Indexes.OrderBy(index => index.Name, StringComparer.Ordinal))
         {
             AppendSchemaText(builder, "index.name", index.Name);
             AppendSchemaText(builder, "index.unique", index.IsUnique.ToString());
@@ -1869,27 +1909,52 @@ public sealed class CodexStateDbExplorerService
         return Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;
     }
 
-    private static bool IsContentBearingColumn(string columnName) =>
-        new[] { "prompt", "content", "message", "body", "text", "reason", "summary", "description", "objective", "output", "arguments", "payload", "json", "metadata", "details", "stack", "trace" }
+    private static bool IsContentBearingColumn(string columnName)
+    {
+        return new[]
+            {
+                "prompt",
+                "content",
+                "message",
+                "body",
+                "text",
+                "reason",
+                "summary",
+                "description",
+                "objective",
+                "output",
+                "arguments",
+                "payload",
+                "json",
+                "metadata",
+                "details",
+                "stack",
+                "trace",
+            }
             .Any(token => columnName.Contains(token, StringComparison.OrdinalIgnoreCase));
+    }
 
-    private static bool IsPathColumn(string columnName) =>
-        columnName.Contains("path", StringComparison.OrdinalIgnoreCase) ||
-        columnName.Contains("file", StringComparison.OrdinalIgnoreCase);
+    private static bool IsPathColumn(string columnName)
+    {
+        return columnName.Contains("path", StringComparison.OrdinalIgnoreCase) ||
+               columnName.Contains("file", StringComparison.OrdinalIgnoreCase);
+    }
 
-    private static string EscapeExportValue(object value) =>
-        (Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty)
-        .Replace("\t", " ", StringComparison.Ordinal)
-        .Replace("\r", " ", StringComparison.Ordinal)
-        .Replace("\n", " ", StringComparison.Ordinal);
+    private static string EscapeExportValue(object value)
+    {
+        return (Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty)
+            .Replace("\t", " ", StringComparison.Ordinal)
+            .Replace("\r", " ", StringComparison.Ordinal)
+            .Replace("\n", " ", StringComparison.Ordinal);
+    }
 
     public static string FormatRawValue(object? value)
     {
-        var formatted = value switch
+        string formatted = value switch
         {
             null => "NULL",
             byte[] bytes => $"<blob {bytes.Length:N0} bytes> {Convert.ToHexString(bytes)}",
-            _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty
+            _ => Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty,
         };
 
         const int maxDisplayCharacters = 16_384;
@@ -1898,17 +1963,23 @@ public sealed class CodexStateDbExplorerService
             : formatted[..maxDisplayCharacters] + "… [display truncated]";
     }
 
-    private static string QuoteIdentifier(string identifier) =>
-        $"\"{identifier.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
+    private static string QuoteIdentifier(string identifier)
+    {
+        return $"\"{identifier.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
+    }
 
-    private static bool IsSourceInspectionFailure(Exception exception) =>
-        exception is SqliteException or IOException or UnauthorizedAccessException or
+    private static bool IsSourceInspectionFailure(Exception exception)
+    {
+        return exception is SqliteException or IOException or UnauthorizedAccessException or
             ArgumentException or InvalidOperationException or InvalidDataException or
             NotSupportedException or InvalidCastException or FormatException or OverflowException or
             ObjectDisposedException;
+    }
 
-    private static string SummarizeSourceFailure(Exception exception) =>
-        exception.Message.ReplaceLineEndings(" ").Trim();
+    private static string SummarizeSourceFailure(Exception exception)
+    {
+        return exception.Message.ReplaceLineEndings(" ").Trim();
+    }
 
     private CodexStateDatabaseCandidate CreateCandidateForPath(string databasePath)
     {
@@ -1917,7 +1988,7 @@ public sealed class CodexStateDbExplorerService
             throw new ArgumentException("A database path is required.", nameof(databasePath));
         }
 
-        var fullPath = Path.GetFullPath(databasePath);
+        string fullPath = Path.GetFullPath(databasePath);
         if (!File.Exists(fullPath))
         {
             throw new FileNotFoundException("The selected Codex state database was not found.", fullPath);
@@ -1927,11 +1998,11 @@ public sealed class CodexStateDbExplorerService
                    string.Equals(candidate.Path, fullPath, StringComparison.OrdinalIgnoreCase))
                ?? TryCreateCandidate(fullPath, "Explicit source", "explicit")
                ?? new CodexStateDatabaseCandidate(
-                    fullPath,
-                    Path.GetFileName(fullPath),
-                    null,
-                    File.GetLastWriteTimeUtc(fullPath),
-                    new FileInfo(fullPath).Length);
+                   fullPath,
+                   Path.GetFileName(fullPath),
+                   null,
+                   File.GetLastWriteTimeUtc(fullPath),
+                   new FileInfo(fullPath).Length);
     }
 
     private static IEnumerable<CodexStateDatabaseCandidate> EnumerateRoot(
@@ -1955,9 +2026,9 @@ public sealed class CodexStateDbExplorerService
             yield break;
         }
 
-        foreach (var file in files)
+        foreach (string file in files)
         {
-            var candidate = TryCreateCandidate(file, sourceDescription, discoveryKind);
+            CodexStateDatabaseCandidate? candidate = TryCreateCandidate(file, sourceDescription, discoveryKind);
             if (candidate is not null)
             {
                 yield return candidate;
@@ -1982,19 +2053,15 @@ public sealed class CodexStateDbExplorerService
     {
         try
         {
-            var fileName = Path.GetFileName(path);
-            var generation = TryParseGeneration(fileName);
+            string fileName = Path.GetFileName(path);
+            int? generation = TryParseGeneration(fileName);
             var info = new FileInfo(path);
             return new CodexStateDatabaseCandidate(
                 Path.GetFullPath(path),
                 fileName,
                 generation,
                 info.LastWriteTimeUtc,
-                info.Length)
-            {
-                SourceDescription = sourceDescription,
-                DiscoveryKind = discoveryKind
-            };
+                info.Length) { SourceDescription = sourceDescription, DiscoveryKind = discoveryKind };
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
@@ -2004,7 +2071,7 @@ public sealed class CodexStateDbExplorerService
 
     private static int? TryParseGeneration(string fileName)
     {
-        var prefix = fileName.StartsWith("state_", StringComparison.OrdinalIgnoreCase)
+        string? prefix = fileName.StartsWith("state_", StringComparison.OrdinalIgnoreCase)
             ? "state_"
             : fileName.StartsWith("thread_history_", StringComparison.OrdinalIgnoreCase)
                 ? "thread_history_"
@@ -2014,16 +2081,16 @@ public sealed class CodexStateDbExplorerService
             return null;
         }
 
-        var digits = fileName[prefix.Length..].TakeWhile(char.IsDigit).ToArray();
+        char[] digits = fileName[prefix.Length..].TakeWhile(char.IsDigit).ToArray();
         return digits.Length == 0 ||
-               !int.TryParse(new string(digits), NumberStyles.None, CultureInfo.InvariantCulture, out var generation)
+               !int.TryParse(new string(digits), NumberStyles.None, CultureInfo.InvariantCulture, out int generation)
             ? null
             : generation;
     }
 
     private static string ResolveCodexHome()
     {
-        var configured = Environment.GetEnvironmentVariable("CODEX_HOME");
+        string? configured = Environment.GetEnvironmentVariable("CODEX_HOME");
         return string.IsNullOrWhiteSpace(configured)
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex")
             : configured;
@@ -2031,7 +2098,7 @@ public sealed class CodexStateDbExplorerService
 
     private static string? ResolveSnapshotDirectory()
     {
-        var configured = Environment.GetEnvironmentVariable("TAJSTOKENS_CODEX_SNAPSHOT_DIR");
+        string? configured = Environment.GetEnvironmentVariable("TAJSTOKENS_CODEX_SNAPSHOT_DIR");
         if (!string.IsNullOrWhiteSpace(configured))
         {
             return configured;
@@ -2041,14 +2108,53 @@ public sealed class CodexStateDbExplorerService
              directory is not null;
              directory = directory.Parent)
         {
-            var privateDirectory = Path.Combine(directory.FullName, "private");
+            string privateDirectory = Path.Combine(directory.FullName, "private");
             if (Directory.Exists(privateDirectory))
             {
                 return privateDirectory;
             }
         }
 
-        var currentPrivate = Path.Combine(Environment.CurrentDirectory, "private");
+        string currentPrivate = Path.Combine(Environment.CurrentDirectory, "private");
         return Directory.Exists(currentPrivate) ? currentPrivate : null;
     }
+
+    private sealed record OrderedSourceSpecification(
+        string TableName,
+        string OrderedQuery,
+        string UnorderedQuery,
+        IReadOnlyList<string> RequiredOrderColumns);
+
+    private sealed record RelationSourceSpecification(
+        string TableName,
+        string OrderedQuery,
+        string UnorderedQuery,
+        string RequiredOrderColumn);
+
+    private sealed record RowFingerprintResult(
+        string Fingerprint,
+        IReadOnlyList<CodexStateRowObservation> Observations,
+        bool Complete,
+        bool Bounded,
+        string Note,
+        string Mode)
+    {
+        public static RowFingerprintResult CountOnly(string fingerprint, string note)
+        {
+            return new RowFingerprintResult(fingerprint, Array.Empty<CodexStateRowObservation>(), false, true, note, "count-only");
+        }
+
+        public static RowFingerprintResult Unavailable(string fingerprint, string note)
+        {
+            return new RowFingerprintResult(fingerprint, Array.Empty<CodexStateRowObservation>(), false, false, note, "unavailable");
+        }
+    }
+
+    private sealed record SchemaDifference(
+        IReadOnlyList<string> AddedColumns,
+        IReadOnlyList<string> RemovedColumns,
+        IReadOnlyList<string> ChangedColumns,
+        IReadOnlyList<string> AddedIndexes,
+        IReadOnlyList<string> RemovedIndexes,
+        IReadOnlyList<string> ChangedIndexes);
 }

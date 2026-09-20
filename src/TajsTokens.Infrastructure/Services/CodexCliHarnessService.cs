@@ -1,3 +1,9 @@
+// Taj's Tokens | CodexCliHarnessService.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Diagnostics;
 using System.Text;
 using TajsTokens.Core.Enums;
@@ -5,11 +11,13 @@ using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
 using TajsTokens.Infrastructure.Providers;
 
+#endregion
+
 namespace TajsTokens.Infrastructure.Services;
 
 /// <summary>
-/// Runs a configured custom Codex CLI on explicit user request. The process boundary is kept
-/// separate from Codex telemetry collection; prompts and output are returned to the caller only.
+///     Runs a configured custom Codex CLI on explicit user request. The process boundary is kept
+///     separate from Codex telemetry collection; prompts and output are returned to the caller only.
 /// </summary>
 public sealed class CodexCliHarnessService : ICodexCliHarness
 {
@@ -21,11 +29,8 @@ public sealed class CodexCliHarnessService : ICodexCliHarness
         ArgumentNullException.ThrowIfNull(request);
         ValidateRequest(request);
 
-        var arguments = BuildArguments(request);
-        using var process = new Process
-        {
-            StartInfo = ExternalProcess.CreateStartInfo(request.Command, arguments)
-        };
+        IReadOnlyList<string> arguments = BuildArguments(request);
+        using var process = new Process { StartInfo = ExternalProcess.CreateStartInfo(request.Command, arguments) };
 
         if (!string.IsNullOrWhiteSpace(request.WorkingDirectory))
         {
@@ -34,8 +39,8 @@ public sealed class CodexCliHarnessService : ICodexCliHarness
 
         using var timeoutSource = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutSource.CancelAfter(request.Timeout);
-        var processToken = timeoutSource.Token;
-        var startedAtUtc = DateTimeOffset.UtcNow;
+        CancellationToken processToken = timeoutSource.Token;
+        DateTimeOffset startedAtUtc = DateTimeOffset.UtcNow;
         var stdoutTask = Task.CompletedTask;
         var stderrTask = Task.CompletedTask;
 
@@ -97,7 +102,7 @@ public sealed class CodexCliHarnessService : ICodexCliHarness
 
     internal static IReadOnlyList<string> BuildArguments(CodexCliHarnessRequest request)
     {
-        var arguments = request.Arguments.ToList();
+        List<string> arguments = request.Arguments.ToList();
         if (request.PromptMode == CodexCliPromptMode.LastArgument && request.Prompt.Length > 0)
         {
             arguments.Add(request.Prompt);

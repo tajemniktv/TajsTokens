@@ -1,16 +1,27 @@
+// Taj's Tokens | CodexForecastDataset.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
 namespace TajsTokens.Core.Models;
 
 public enum ForecastReplayAvailability
 {
     ReconstructedEventTime,
-    CollectedByOrigin
+    CollectedByOrigin,
 }
 
 public sealed record CodexPredictiveTokenEvent(
-    string SessionId, DateTimeOffset ObservedAtUtc, DateTimeOffset? CapturedAtUtc,
-    string? Model, string? ReasoningEffort,
-    long UncachedInputTokens, long CacheReadTokens, long CacheWriteTokens,
-    long NonReasoningOutputTokens, long ReasoningOutputTokens, long ReportedTotalTokens);
+    string SessionId,
+    DateTimeOffset ObservedAtUtc,
+    DateTimeOffset? CapturedAtUtc,
+    string? Model,
+    string? ReasoningEffort,
+    long UncachedInputTokens,
+    long CacheReadTokens,
+    long CacheWriteTokens,
+    long NonReasoningOutputTokens,
+    long ReasoningOutputTokens,
+    long ReportedTotalTokens);
 
 public sealed record CodexForecastDataset(
     IReadOnlyList<QuotaSnapshot> Quota,

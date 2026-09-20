@@ -1,25 +1,134 @@
-<Page x:Class="TajsTokens.App.Pages.UsagePage" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
-<Page.Resources>
-<DataTemplate x:Key="CompactUsageRow"><Grid Padding="4,8" ColumnSpacing="16"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="100"/><ColumnDefinition Width="70"/></Grid.ColumnDefinitions><TextBlock Text="{Binding Label}" TextTrimming="CharacterEllipsis" ToolTipService.ToolTip="{Binding Label}"/><TextBlock Grid.Column="1" Text="{Binding TotalText}" TextAlignment="Right" FontWeight="SemiBold"/><TextBlock Grid.Column="2" Text="{Binding Sessions}" TextAlignment="Right"/></Grid></DataTemplate>
-</Page.Resources>
-<ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
-<Grid Padding="0" RowSpacing="12">
-<Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
-<Border Style="{StaticResource CardStyle}"><StackPanel Spacing="6"><TextBlock x:Name="SummaryText" Style="{StaticResource HeroMetricStyle}"/><TextBlock x:Name="PeriodText" Style="{StaticResource CaptionStyle}"/><Canvas x:Name="UsageTimeline" Height="90" SizeChanged="OnTimelineSizeChanged" AutomationProperties.Name="Recorded token activity timeline"/><TextBlock x:Name="TimelineCaption" Style="{StaticResource CaptionStyle}"/></StackPanel></Border>
-<StackPanel Grid.Row="1" Spacing="8"><ScrollViewer HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled" VerticalScrollBarVisibility="Disabled"><StackPanel Orientation="Horizontal" Spacing="8">
-<ComboBox x:Name="RangeCombo" Header="History" SelectedIndex="2" SelectionChanged="OnQueryChanged" Width="140"><ComboBoxItem Content="24 hours" Tag="1"/><ComboBoxItem Content="7 days" Tag="7"/><ComboBoxItem Content="30 days" Tag="30"/><ComboBoxItem Content="90 days" Tag="90"/><ComboBoxItem Content="All retained" Tag="all"/><ComboBoxItem Content="Selected period" Tag="custom" IsEnabled="False"/></ComboBox>
-<ComboBox x:Name="ViewCombo" Header="Group by" SelectedIndex="0" SelectionChanged="OnQueryChanged" Width="140"><ComboBoxItem Content="Models" Tag="Model"/><ComboBoxItem Content="Projects" Tag="Session repository"/><ComboBoxItem Content="Sessions" Tag="Session"/><ComboBoxItem Content="Hourly" Tag="Hour"/><ComboBoxItem Content="Daily" Tag="Day"/><ComboBoxItem Content="Monthly" Tag="Month"/></ComboBox>
-<ComboBox x:Name="SortCombo" Header="Sort" SelectedIndex="0" SelectionChanged="OnViewChanged" Width="130"><ComboBoxItem Content="Most tokens"/><ComboBoxItem Content="Name / date"/></ComboBox>
-<Button Content="Refresh" Click="OnRefreshClicked" VerticalAlignment="Bottom"/><Button Content="Clear filters" Click="OnClearClicked" VerticalAlignment="Bottom"/>
-</StackPanel></ScrollViewer><ScrollViewer HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled" VerticalScrollBarVisibility="Disabled"><StackPanel x:Name="FilterChips" Orientation="Horizontal" Spacing="8"/></ScrollViewer></StackPanel>
-<Grid Grid.Row="2" ColumnSpacing="12"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="200"/></Grid.ColumnDefinitions><StackPanel><TextBlock x:Name="StatusText" Text="Loading…" Style="{StaticResource CaptionStyle}"/><CheckBox x:Name="DetailedColumns" Content="Detailed token columns" Checked="OnColumnsChanged" Unchecked="OnColumnsChanged"/></StackPanel><TextBox Grid.Column="1" x:Name="SearchBox" PlaceholderText="Find in these rows" TextChanged="OnSearchChanged" VerticalAlignment="Bottom"/></Grid>
-<ScrollViewer Grid.Row="3" HorizontalContentAlignment="Stretch" HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled" VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
-<Grid x:Name="UsageTable" RowSpacing="4"><Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-<Grid x:Name="CompactHeader" Padding="16,8" ColumnSpacing="16"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="100"/><ColumnDefinition Width="70"/></Grid.ColumnDefinitions><TextBlock Text="Name / period"/><TextBlock Grid.Column="1" Text="Tokens" TextAlignment="Right"/><TextBlock Grid.Column="2" Text="Sessions" TextAlignment="Right"/></Grid>
-<Grid x:Name="DetailedHeader" Visibility="Collapsed" Padding="12,8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"><Grid.ColumnDefinitions><ColumnDefinition Width="300"/><ColumnDefinition Width="100"/><ColumnDefinition Width="100"/><ColumnDefinition Width="100"/><ColumnDefinition Width="100"/><ColumnDefinition Width="100"/><ColumnDefinition Width="100"/><ColumnDefinition Width="100"/></Grid.ColumnDefinitions><TextBlock Grid.Column="0" Text="Name / period"/><TextBlock Grid.Column="1" Text="Input¹" TextAlignment="Right"/><TextBlock Grid.Column="2" Text="Output²" TextAlignment="Right"/><TextBlock Grid.Column="3" Text="Cache read" TextAlignment="Right"/><TextBlock Grid.Column="4" Text="Cache write" TextAlignment="Right"/><TextBlock Grid.Column="5" Text="Reasoning²" TextAlignment="Right"/><TextBlock Grid.Column="6" Text="Total" TextAlignment="Right"/><TextBlock Grid.Column="7" Text="Sessions" TextAlignment="Right"/></Grid>
-<ListView Grid.Row="1" x:Name="RowsList" MaxHeight="360" SelectionMode="Single" SelectionChanged="OnRowSelected">
-<ListView.ItemContainerStyle><Style TargetType="ListViewItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/></Style></ListView.ItemContainerStyle>
-<ListView.ItemTemplate><DataTemplate><Grid Padding="0,5"><Grid.ColumnDefinitions><ColumnDefinition Width="300"/><ColumnDefinition Width="100"/><ColumnDefinition Width="100"/><ColumnDefinition Width="100"/><ColumnDefinition Width="100"/><ColumnDefinition Width="100"/><ColumnDefinition Width="100"/><ColumnDefinition Width="100"/></Grid.ColumnDefinitions><TextBlock Grid.Column="0" Text="{Binding Label}" TextTrimming="CharacterEllipsis"/><TextBlock Grid.Column="1" Text="{Binding InputText}" TextAlignment="Right" TextTrimming="CharacterEllipsis"/><TextBlock Grid.Column="2" Text="{Binding OutputText}" TextAlignment="Right" TextTrimming="CharacterEllipsis"/><TextBlock Grid.Column="3" Text="{Binding CacheText}" TextAlignment="Right" TextTrimming="CharacterEllipsis"/><TextBlock Grid.Column="4" Text="{Binding WriteText}" TextAlignment="Right" TextTrimming="CharacterEllipsis"/><TextBlock Grid.Column="5" Text="{Binding ReasoningText}" TextAlignment="Right" TextTrimming="CharacterEllipsis"/><TextBlock Grid.Column="6" Text="{Binding TotalText}" TextAlignment="Right" TextTrimming="CharacterEllipsis"/><TextBlock Grid.Column="7" Text="{Binding Sessions}" TextAlignment="Right" TextTrimming="CharacterEllipsis"/></Grid></DataTemplate></ListView.ItemTemplate>
-</ListView></Grid></ScrollViewer>
-<StackPanel Grid.Row="4" Spacing="6"><StackPanel Orientation="Horizontal" Spacing="8"><Button x:Name="DrillButton" Content="Explore selected usage" Click="OnDrillClicked" IsEnabled="False"/><Button x:Name="OpenThreadButton" Content="Open thread" Click="OnOpenThreadClicked" IsEnabled="False"/></StackPanel><TextBlock x:Name="DetailText" TextWrapping="Wrap" IsTextSelectionEnabled="True" MaxHeight="75"/><Expander Header="About these totals" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"><TextBlock Text="¹ Input excludes cache reads. ² Output excludes reasoning: five disjoint categories. Recorded activity on this computer, not subscription cost. Times are local; daily/monthly groups retain their original UTC boundaries. Empty periods do not prove idle time." Style="{StaticResource SubtitleStyle}"/></Expander></StackPanel>
-</Grid></ScrollViewer></Page>
+<Page x:Class="TajsTokens.App.Pages.UsagePage" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Page.Resources>
+    </Page.Resources>
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalContentAlignment="Stretch">
+        <Grid Padding="0" RowSpacing="12">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" /><RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+            <Border Style="{StaticResource CardStyle}">
+                <StackPanel Spacing="6">
+                    <TextBlock x:Name="SummaryText" Style="{StaticResource HeroMetricStyle}" />
+                    <TextBlock x:Name="PeriodText" Style="{StaticResource CaptionStyle}" />
+                    <Canvas x:Name="UsageTimeline" Height="90" SizeChanged="OnTimelineSizeChanged"
+                            AutomationProperties.Name="Recorded token activity timeline" />
+                    <TextBlock x:Name="TimelineCaption" Style="{StaticResource CaptionStyle}" />
+                </StackPanel>
+            </Border>
+            <StackPanel Grid.Row="1" Spacing="8">
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled" VerticalScrollBarVisibility="Disabled">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <ComboBox x:Name="RangeCombo" Header="History" SelectedIndex="2" SelectionChanged="OnQueryChanged" Width="140">
+                            <ComboBoxItem Content="24 hours" Tag="1" /><ComboBoxItem Content="7 days" Tag="7" />
+                            <ComboBoxItem Content="30 days" Tag="30" /><ComboBoxItem Content="90 days" Tag="90" />
+                            <ComboBoxItem Content="All retained" Tag="all" />
+                            <ComboBoxItem Content="Selected period" Tag="custom" IsEnabled="False" />
+                        </ComboBox>
+                        <ComboBox x:Name="ViewCombo" Header="Group by" SelectedIndex="0" SelectionChanged="OnQueryChanged" Width="140">
+                            <ComboBoxItem Content="Models" Tag="Model" /><ComboBoxItem Content="Projects" Tag="Session repository" />
+                            <ComboBoxItem Content="Sessions" Tag="Session" /><ComboBoxItem Content="Hourly" Tag="Hour" />
+                            <ComboBoxItem Content="Daily" Tag="Day" /><ComboBoxItem Content="Monthly" Tag="Month" />
+                        </ComboBox>
+                        <ComboBox x:Name="SortCombo" Header="Sort" SelectedIndex="0" SelectionChanged="OnViewChanged" Width="130">
+                            <ComboBoxItem Content="Most tokens" /><ComboBoxItem Content="Name / date" />
+                        </ComboBox>
+                        <Button Content="Refresh" Click="OnRefreshClicked" VerticalAlignment="Bottom" />
+                        <Button Content="Clear filters" Click="OnClearClicked" VerticalAlignment="Bottom" />
+                    </StackPanel>
+                </ScrollViewer>
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" HorizontalScrollMode="Enabled" VerticalScrollBarVisibility="Disabled">
+                    <StackPanel x:Name="FilterChips" Orientation="Horizontal" Spacing="8" />
+                </ScrollViewer>
+            </StackPanel>
+            <Grid Grid.Row="2" ColumnSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" /><ColumnDefinition Width="200" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock x:Name="StatusText" Text="Loading…" Style="{StaticResource CaptionStyle}" />
+                    <CheckBox x:Name="DetailedColumns" Content="Detailed token columns" Checked="OnColumnsChanged"
+                              Unchecked="OnColumnsChanged" />
+                </StackPanel>
+                <TextBox Grid.Column="1" x:Name="SearchBox" PlaceholderText="Find in these rows" TextChanged="OnSearchChanged"
+                         VerticalAlignment="Bottom" />
+            </Grid>
+            <ScrollViewer Grid.Row="3" HorizontalContentAlignment="Stretch" HorizontalScrollBarVisibility="Auto"
+                          HorizontalScrollMode="Enabled" VerticalScrollMode="Disabled" VerticalScrollBarVisibility="Disabled">
+                <Grid x:Name="UsageTable" RowSpacing="4">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" /><RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+                    <Grid x:Name="CompactHeader" Padding="16,8" ColumnSpacing="16">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" /><ColumnDefinition Width="100" /><ColumnDefinition Width="70" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="Name / period" /><TextBlock Grid.Column="1" Text="Tokens" TextAlignment="Right" />
+                        <TextBlock Grid.Column="2" Text="Sessions" TextAlignment="Right" />
+                    </Grid>
+                    <Grid x:Name="DetailedHeader" Visibility="Collapsed" Padding="12,8"
+                          Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="300" /><ColumnDefinition Width="100" /><ColumnDefinition Width="100" />
+                            <ColumnDefinition Width="100" /><ColumnDefinition Width="100" /><ColumnDefinition Width="100" />
+                            <ColumnDefinition Width="100" /><ColumnDefinition Width="100" />
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Grid.Column="0" Text="Name / period" /><TextBlock Grid.Column="1" Text="Input¹" TextAlignment="Right" />
+                        <TextBlock Grid.Column="2" Text="Output²" TextAlignment="Right" />
+                        <TextBlock Grid.Column="3" Text="Cache read" TextAlignment="Right" />
+                        <TextBlock Grid.Column="4" Text="Cache write" TextAlignment="Right" />
+                        <TextBlock Grid.Column="5" Text="Reasoning²" TextAlignment="Right" />
+                        <TextBlock Grid.Column="6" Text="Total" TextAlignment="Right" />
+                        <TextBlock Grid.Column="7" Text="Sessions" TextAlignment="Right" />
+                    </Grid>
+                    <ListView Grid.Row="1" x:Name="RowsList" MaxHeight="360" SelectionMode="Single" SelectionChanged="OnRowSelected">
+                        <ListView.ItemContainerStyle>
+                            <Style TargetType="ListViewItem">
+                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                            </Style>
+                        </ListView.ItemContainerStyle>
+                        <ListView.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Padding="0,5">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="300" /><ColumnDefinition Width="100" /><ColumnDefinition Width="100" />
+                                        <ColumnDefinition Width="100" /><ColumnDefinition Width="100" /><ColumnDefinition Width="100" />
+                                        <ColumnDefinition Width="100" /><ColumnDefinition Width="100" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="1" Text="{Binding InputText}" TextAlignment="Right"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="2" Text="{Binding OutputText}" TextAlignment="Right"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="3" Text="{Binding CacheText}" TextAlignment="Right"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="4" Text="{Binding WriteText}" TextAlignment="Right"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="5" Text="{Binding ReasoningText}" TextAlignment="Right"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="6" Text="{Binding TotalText}" TextAlignment="Right"
+                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBlock Grid.Column="7" Text="{Binding Sessions}" TextAlignment="Right"
+                                               TextTrimming="CharacterEllipsis" />
+                                </Grid>
+                            </DataTemplate>
+                        </ListView.ItemTemplate>
+                    </ListView>
+                </Grid>
+            </ScrollViewer>
+            <StackPanel Grid.Row="4" Spacing="6">
+                <StackPanel Orientation="Horizontal" Spacing="8">
+                    <Button x:Name="DrillButton" Content="Explore selected usage" Click="OnDrillClicked" IsEnabled="False" />
+                    <Button x:Name="OpenThreadButton" Content="Open thread" Click="OnOpenThreadClicked" IsEnabled="False" />
+                </StackPanel>
+                <TextBlock x:Name="DetailText" TextWrapping="Wrap" IsTextSelectionEnabled="True" MaxHeight="75" />
+                <Expander Header="About these totals" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                    <TextBlock
+                        Text="¹ Input excludes cache reads. ² Output excludes reasoning: five disjoint categories. Recorded activity on this computer, not subscription cost. Times are local; daily/monthly groups retain their original UTC boundaries. Empty periods do not prove idle time."
+                        Style="{StaticResource SubtitleStyle}" />
+                </Expander>
+            </StackPanel>
+        </Grid>
+    </ScrollViewer>
+</Page>

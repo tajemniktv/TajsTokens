@@ -1,13 +1,21 @@
+// Taj's Tokens | CodexDataExplorerPage.xaml.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
+
+#endregion
 
 namespace TajsTokens.App.Pages;
 
 public sealed partial class CodexDataExplorerPage : Page
 {
-    private string? _threadId;
     private bool _loaded;
+    private string? _threadId;
 
     public CodexDataExplorerPage()
     {
@@ -22,7 +30,7 @@ public sealed partial class CodexDataExplorerPage : Page
         {
             CodexDataExplorerRequest request => request.ThreadId,
             string text when text.StartsWith("thread:", StringComparison.OrdinalIgnoreCase) => text[7..],
-            _ => null
+            _ => null,
         };
         FilterHintText.Text = string.IsNullOrWhiteSpace(_threadId)
             ? "Select a source family, then inspect its bounded observations."
@@ -36,7 +44,10 @@ public sealed partial class CodexDataExplorerPage : Page
         ShowSources();
     }
 
-    private void OnSourcesClicked(object sender, RoutedEventArgs e) => ShowSources();
+    private void OnSourcesClicked(object sender, RoutedEventArgs e)
+    {
+        ShowSources();
+    }
 
     private void OnRawClicked(object sender, RoutedEventArgs e)
     {

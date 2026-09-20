@@ -1,14 +1,23 @@
+// Taj's Tokens | CodexReconciliationAudit.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using TajsTokens.Core.Models;
+
+#endregion
 
 namespace TajsTokens.Infrastructure.Ingestion;
 
 /// <summary>Read-only, aggregate-only research. Never supplies canonical accounting.</summary>
 public static class CodexReconciliationAudit
 {
-    public static async Task<ReconciliationAuditReport> RunAsync(IEnumerable<string> paths,
+    public static async Task<ReconciliationAuditReport> RunAsync(
+        IEnumerable<string> paths,
         CancellationToken cancellationToken = default)
     {
         var reader = new FileSystemCodexSessionEventProvider();
@@ -16,7 +25,7 @@ public static class CodexReconciliationAudit
         var report = new ReconciliationAuditReport();
         var fingerprints = new Dictionary<string, int>();
         var sequences = new List<CodexSequenceComparison.Sequence>();
-        foreach (var path in paths.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase)
+        foreach (string path in paths.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase)
                      .Order(StringComparer.OrdinalIgnoreCase))
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -24,8 +33,8 @@ public static class CodexReconciliationAudit
             try
             {
                 var before = new FileInfo(path);
-                var length = before.Length;
-                var written = before.LastWriteTimeUtc;
+                long length = before.Length;
+                DateTime written = before.LastWriteTimeUtc;
                 var parseState = new RolloutParseState(path, path);
                 var state = new ReconciliationExperimentState();
                 var responses = new CodexResponseUsageComparison();
@@ -34,10 +43,10 @@ public static class CodexReconciliationAudit
                 long unownedRecords = 0;
                 long unownedTokenRecords = 0;
                 long observations = 0;
-                await foreach (var raw in reader.ReadNewJsonLinesAsync(path, 0, cancellationToken))
+                await foreach (RawSessionRecord raw in reader.ReadNewJsonLinesAsync(path, 0, cancellationToken))
                 {
                     if (raw.EndByteOffset > length) break;
-                    var parsed = parser.Parse(raw, parseState);
+                    ParsedRolloutRecord parsed = parser.Parse(raw, parseState);
                     if (parseState.OwnershipEstablished)
                         responses.Observe(raw.Payload, parseState.OwnSessionId!);
                     if (!parseState.OwnershipEstablished)
@@ -50,13 +59,28 @@ public static class CodexReconciliationAudit
                     state.Apply(row);
                     // Same session/time/model/counters across physical files is a repeat candidate,
                     // not proof of common request identity. Hashes never leave this invocation.
-                    var payload = JsonSerializer.Serialize(new { row.SessionId, row.ObservedAtUtc,
-                        row.Model, row.ReasoningEffort, row.TotalTokenUsage, row.LastTokenUsage });
+                    string payload = JsonSerializer.Serialize(
+                        new
+                        {
+                            row.SessionId,
+                            row.ObservedAtUtc,
+                            row.Model,
+                            row.ReasoningEffort,
+                            row.TotalTokenUsage,
+                            row.LastTokenUsage,
+                        });
                     localFingerprints.Add(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(payload))));
                     // Deliberately omit owner only for candidate classification, never accounting.
                     // Keep timestamp/model and complete category vectors: scalar coincidences are insufficient.
-                    var comparable = JsonSerializer.Serialize(new { row.ObservedAtUtc,
-                        row.Model, row.ReasoningEffort, row.TotalTokenUsage, row.LastTokenUsage });
+                    string comparable = JsonSerializer.Serialize(
+                        new
+                        {
+                            row.ObservedAtUtc,
+                            row.Model,
+                            row.ReasoningEffort,
+                            row.TotalTokenUsage,
+                            row.LastTokenUsage,
+                        });
                     sequence.Add(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(comparable))));
                 }
                 var after = new FileInfo(path);
@@ -67,7 +91,7 @@ public static class CodexReconciliationAudit
                 }
                 report.StableFiles++;
                 responses.Complete();
-                foreach (var (key, count) in responses.Counts)
+                foreach ((string key, long count) in responses.Counts)
                     report.ResponseComparison[key] = report.ResponseComparison.GetValueOrDefault(key) + count;
                 report.PreOwnershipRecordsExcluded += unownedRecords;
                 report.PreOwnershipTokenRecordsExcluded += unownedTokenRecords;
@@ -82,7 +106,7 @@ public static class CodexReconciliationAudit
                     report.FilesWithExcludedPrefix++;
                     report.TokenRecordsInExcludedPrefixes += unownedTokenRecords;
                 }
-                if (sequence.Count > 0) sequences.Add(new(parseState.OwnSessionId, sequence));
+                if (sequence.Count > 0) sequences.Add(new CodexSequenceComparison.Sequence(parseState.OwnSessionId, sequence));
                 report.TokenObservations += observations;
                 report.IncumbentTokens += state.IncumbentTotal;
                 report.HighWatermarkTokens += state.ContainmentTotal;
@@ -90,15 +114,15 @@ public static class CodexReconciliationAudit
                 report.IncompleteCounterObservations += state.IncompleteCounters;
                 report.TotalsOnlyDrops += state.TotalsOnlyDrops;
                 report.EqualTotalCategoryChanges += state.EqualTotalCategoryChanges;
-                foreach (var (key, value) in state.Transitions)
+                foreach ((string key, ReconciliationTransitionTotals value) in state.Transitions)
                 {
-                    if (!report.Transitions.TryGetValue(key, out var aggregate))
-                        report.Transitions.Add(key, aggregate = new());
+                    if (!report.Transitions.TryGetValue(key, out ReconciliationTransitionTotals? aggregate))
+                        report.Transitions.Add(key, aggregate = new ReconciliationTransitionTotals());
                     aggregate.Add(value);
                 }
                 if (state.IncumbentTotal != state.ContainmentTotal || state.IncumbentTotal != state.LineageTotal)
                     report.DisagreeingFiles++;
-                foreach (var fingerprint in localFingerprints)
+                foreach (string fingerprint in localFingerprints)
                     fingerprints[fingerprint] = fingerprints.GetValueOrDefault(fingerprint) + 1;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
@@ -118,17 +142,19 @@ public sealed class ReconciliationAuditReport
 {
     public string Version => "reconciliation-audit/v6";
     public Dictionary<string, long> ResponseComparison { get; set; } = [];
+
     public string Interpretation => "Physical-file experiment, not canonical usage. Candidates use scalar counters; " +
-        "cross-file matches are not request identity. Changed/unreadable/malformed files excluded. " +
-        "Ordered owned-token sequences classify equal/prefix/divergent/non-prefix overlap candidates, not byte copies. " +
-        "Pre-ownership records (including possible inherited history) remain excluded by the production parser. " +
-        "Transition buckets describe pre-step scalar watermark relationships and usable snapshot presence, not lineage. " +
-        "Below-watermark buckets distinguish falling, repeated and recovering totals against the previous complete snapshot. " +
-        "Their token deltas partition physical-file totals, including agreeing transitions; differences can cancel. " +
-        "Response comparison uses per-file thread/response keys and single pending records, breaks at lifecycle boundaries, " +
-        "and compares vectors without claiming native pairing, complete coverage or category consistency. Counts overlap; " +
-        "response records never add tokens and no identity values leave the audit. " +
-        "No account attribution, deduplication, quota fit or production promotion.";
+                                    "cross-file matches are not request identity. Changed/unreadable/malformed files excluded. " +
+                                    "Ordered owned-token sequences classify equal/prefix/divergent/non-prefix overlap candidates, not byte copies. " +
+                                    "Pre-ownership records (including possible inherited history) remain excluded by the production parser. " +
+                                    "Transition buckets describe pre-step scalar watermark relationships and usable snapshot presence, not lineage. " +
+                                    "Below-watermark buckets distinguish falling, repeated and recovering totals against the previous complete snapshot. " +
+                                    "Their token deltas partition physical-file totals, including agreeing transitions; differences can cancel. " +
+                                    "Response comparison uses per-file thread/response keys and single pending records, breaks at lifecycle boundaries, " +
+                                    "and compares vectors without claiming native pairing, complete coverage or category consistency. Counts overlap; " +
+                                    "response records never add tokens and no identity values leave the audit. " +
+                                    "No account attribution, deduplication, quota fit or production promotion.";
+
     public Dictionary<string, ReconciliationTransitionTotals> Transitions { get; set; } = [];
     public long PreOwnershipRecordsExcluded { get; set; }
     public long PreOwnershipTokenRecordsExcluded { get; set; }
@@ -192,32 +218,41 @@ public sealed class ReconciliationExperimentState
 
     public void Apply(CodexTokenCountObservation row)
     {
-        var cumulative = row.TotalTokenUsage is { IsComplete: true, IsNonNegative: true };
-        var last = row.LastTokenUsage is { IsComplete: true, IsNonNegative: true };
-        var relationship = !cumulative ? "unusable-cumulative"
+        bool cumulative = row.TotalTokenUsage is { IsComplete: true, IsNonNegative: true };
+        bool last = row.LastTokenUsage is { IsComplete: true, IsNonNegative: true };
+        string relationship = !cumulative ? "unusable-cumulative"
             : PreviousCompleteSnapshot is null ? "first-cumulative"
             : row.TotalTokens < HighWatermark ? "below-watermark/" +
-                (row.TotalTokens < PreviousCompleteSnapshot.TotalTokens ? "falling"
-                    : row.TotalTokens == PreviousCompleteSnapshot.TotalTokens ? "repeated" : "recovering")
+                                                (row.TotalTokens < PreviousCompleteSnapshot.TotalTokens ? "falling"
+                                                    : row.TotalTokens == PreviousCompleteSnapshot.TotalTokens ? "repeated" : "recovering")
             : row.TotalTokens == HighWatermark ? "at-watermark" : "above-watermark";
-        var key = Occurrences.Contains(row.SourceEventId) ? "occurrence-retry"
+        string key = Occurrences.Contains(row.SourceEventId)
+            ? "occurrence-retry"
             : relationship + (last ? "/usable-last" : "/unusable-last");
-        var incumbent = IncumbentTotal;
-        var containment = ContainmentTotal;
-        var lineage = LineageTotal;
+        long incumbent = IncumbentTotal;
+        long containment = ContainmentTotal;
+        long lineage = LineageTotal;
         ApplyCounters(row);
-        var a = IncumbentTotal - incumbent;
-        var b = ContainmentTotal - containment;
-        var c = LineageTotal - lineage;
-        if (!Transitions.TryGetValue(key, out var aggregate)) Transitions.Add(key, aggregate = new());
-        aggregate.Add(new() { Observations = 1, Disagreements = a != b || a != c ? 1 : 0,
-            IncumbentTokens = a, HighWatermarkTokens = b, LineageTokens = c });
+        long a = IncumbentTotal - incumbent;
+        long b = ContainmentTotal - containment;
+        long c = LineageTotal - lineage;
+        if (!Transitions.TryGetValue(key, out ReconciliationTransitionTotals? aggregate))
+            Transitions.Add(key, aggregate = new ReconciliationTransitionTotals());
+        aggregate.Add(
+            new ReconciliationTransitionTotals
+            {
+                Observations = 1,
+                Disagreements = a != b || a != c ? 1 : 0,
+                IncumbentTokens = a,
+                HighWatermarkTokens = b,
+                LineageTokens = c,
+            });
     }
 
     private void ApplyCounters(CodexTokenCountObservation row)
     {
-        var duplicate = !Occurrences.Add(row.SourceEventId);
-        var decision = CodexTokenCounterReducer.Reduce(row, Incumbent, duplicate);
+        bool duplicate = !Occurrences.Add(row.SourceEventId);
+        CodexTokenAccountingDecision decision = CodexTokenCounterReducer.Reduce(row, Incumbent, duplicate);
         IncumbentTotal += decision.Delta.ReportedTotalTokens;
         if (decision.AdvanceState) Incumbent = decision.NextState;
         if (duplicate) return;
@@ -226,7 +261,7 @@ public sealed class ReconciliationExperimentState
             IncompleteCounters++;
             return;
         }
-        var total = row.TotalTokens;
+        long total = row.TotalTokens;
         if (PreviousCompleteSnapshot is { } previous && previous.TotalTokens == total && previous != row.TotalTokenUsage)
             EqualTotalCategoryChanges++;
         PreviousCompleteSnapshot = row.TotalTokenUsage;

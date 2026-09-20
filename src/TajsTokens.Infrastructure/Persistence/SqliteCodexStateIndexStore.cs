@@ -1,6 +1,14 @@
+// Taj's Tokens | SqliteCodexStateIndexStore.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Globalization;
 using Microsoft.Data.Sqlite;
 using TajsTokens.Infrastructure.Services;
+
+#endregion
 
 namespace TajsTokens.Infrastructure.Persistence;
 
@@ -13,24 +21,28 @@ internal sealed record CodexStateThreadFingerprint(
     bool Archived,
     string RolloutPathHash)
 {
-    public bool Matches(CodexStateThread thread) =>
-        UpdatedAtMs == thread.UpdatedAtMs &&
-        TokensUsed == thread.TokensUsed &&
-        string.Equals(Model, thread.Model, StringComparison.Ordinal) &&
-        string.Equals(ReasoningEffort, thread.ReasoningEffort, StringComparison.Ordinal) &&
-        Archived == thread.Archived &&
-        string.Equals(RolloutPathHash, thread.RolloutPathHash, StringComparison.Ordinal);
+    public bool Matches(CodexStateThread thread)
+    {
+        return UpdatedAtMs == thread.UpdatedAtMs &&
+               TokensUsed == thread.TokensUsed &&
+               string.Equals(Model, thread.Model, StringComparison.Ordinal) &&
+               string.Equals(ReasoningEffort, thread.ReasoningEffort, StringComparison.Ordinal) &&
+               Archived == thread.Archived &&
+               string.Equals(RolloutPathHash, thread.RolloutPathHash, StringComparison.Ordinal);
+    }
 
-    public bool CatalogMetadataMatches(CodexStateThread thread) =>
-        string.Equals(Model, thread.Model, StringComparison.Ordinal) &&
-        string.Equals(ReasoningEffort, thread.ReasoningEffort, StringComparison.Ordinal) &&
-        Archived == thread.Archived &&
-        string.Equals(RolloutPathHash, thread.RolloutPathHash, StringComparison.Ordinal);
+    public bool CatalogMetadataMatches(CodexStateThread thread)
+    {
+        return string.Equals(Model, thread.Model, StringComparison.Ordinal) &&
+               string.Equals(ReasoningEffort, thread.ReasoningEffort, StringComparison.Ordinal) &&
+               Archived == thread.Archived &&
+               string.Equals(RolloutPathHash, thread.RolloutPathHash, StringComparison.Ordinal);
+    }
 }
 
 /// <summary>
-/// Owns the small TajsTokens-side cursor/fingerprint state for Codex's optional private SQLite
-/// catalog. It intentionally stores only privacy-safe change evidence, never provider-owned paths.
+///     Owns the small TajsTokens-side cursor/fingerprint state for Codex's optional private SQLite
+///     catalog. It intentionally stores only privacy-safe change evidence, never provider-owned paths.
 /// </summary>
 internal sealed class SqliteCodexStateIndexStore
 {
@@ -63,20 +75,20 @@ internal sealed class SqliteCodexStateIndexStore
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
 
-            var bootstrap = connection.CreateCommand();
+            SqliteCommand bootstrap = connection.CreateCommand();
             bootstrap.CommandText = """
-                CREATE TABLE IF NOT EXISTS codex_state_index_schema (
-                    component TEXT PRIMARY KEY,
-                    version INTEGER NOT NULL
-                );
-                """;
+                                    CREATE TABLE IF NOT EXISTS codex_state_index_schema (
+                                        component TEXT PRIMARY KEY,
+                                        version INTEGER NOT NULL
+                                    );
+                                    """;
             await bootstrap.ExecuteNonQueryAsync(cancellationToken);
 
-            var versionCommand = connection.CreateCommand();
+            SqliteCommand versionCommand = connection.CreateCommand();
             versionCommand.CommandText = "SELECT version FROM codex_state_index_schema WHERE component = $component;";
             versionCommand.Parameters.AddWithValue("$component", Component);
-            var rawVersion = await versionCommand.ExecuteScalarAsync(cancellationToken);
-            var version = rawVersion is null || rawVersion is DBNull
+            object? rawVersion = await versionCommand.ExecuteScalarAsync(cancellationToken);
+            int version = rawVersion is null || rawVersion is DBNull
                 ? 0
                 : Convert.ToInt32(rawVersion, CultureInfo.InvariantCulture);
 
@@ -88,35 +100,35 @@ internal sealed class SqliteCodexStateIndexStore
 
             if (version == 0)
             {
-                var migration = connection.CreateCommand();
+                SqliteCommand migration = connection.CreateCommand();
                 migration.CommandText = """
-                    CREATE TABLE IF NOT EXISTS codex_state_thread_fingerprints (
-                        thread_id TEXT PRIMARY KEY,
-                        updated_at_ms INTEGER NOT NULL,
-                        tokens_used INTEGER NOT NULL,
-                        model TEXT,
-                        reasoning_effort TEXT,
-                        archived INTEGER NOT NULL,
-                        rollout_path_hash TEXT NOT NULL,
-                        applied_at_utc TEXT NOT NULL
-                    );
+                                        CREATE TABLE IF NOT EXISTS codex_state_thread_fingerprints (
+                                            thread_id TEXT PRIMARY KEY,
+                                            updated_at_ms INTEGER NOT NULL,
+                                            tokens_used INTEGER NOT NULL,
+                                            model TEXT,
+                                            reasoning_effort TEXT,
+                                            archived INTEGER NOT NULL,
+                                            rollout_path_hash TEXT NOT NULL,
+                                            applied_at_utc TEXT NOT NULL
+                                        );
 
-                    CREATE INDEX IF NOT EXISTS idx_codex_state_fingerprints_updated
-                        ON codex_state_thread_fingerprints(updated_at_ms, thread_id);
+                                        CREATE INDEX IF NOT EXISTS idx_codex_state_fingerprints_updated
+                                            ON codex_state_thread_fingerprints(updated_at_ms, thread_id);
 
-                    CREATE TABLE IF NOT EXISTS codex_state_sync (
-                        component TEXT PRIMARY KEY,
-                        watermark_updated_at_ms INTEGER NOT NULL,
-                        updated_at_utc TEXT NOT NULL
-                    );
+                                        CREATE TABLE IF NOT EXISTS codex_state_sync (
+                                            component TEXT PRIMARY KEY,
+                                            watermark_updated_at_ms INTEGER NOT NULL,
+                                            updated_at_utc TEXT NOT NULL
+                                        );
 
-                    INSERT INTO codex_state_sync(component, watermark_updated_at_ms, updated_at_utc)
-                    VALUES('codex-state-index', 0, '0001-01-01T00:00:00.0000000+00:00')
-                    ON CONFLICT(component) DO NOTHING;
+                                        INSERT INTO codex_state_sync(component, watermark_updated_at_ms, updated_at_utc)
+                                        VALUES('codex-state-index', 0, '0001-01-01T00:00:00.0000000+00:00')
+                                        ON CONFLICT(component) DO NOTHING;
 
-                    INSERT INTO codex_state_index_schema(component, version)
-                    VALUES('codex-state-index', 1);
-                    """;
+                                        INSERT INTO codex_state_index_schema(component, version)
+                                        VALUES('codex-state-index', 1);
+                                        """;
                 await migration.ExecuteNonQueryAsync(cancellationToken);
                 version = 1;
             }
@@ -125,14 +137,14 @@ internal sealed class SqliteCodexStateIndexStore
             {
                 // The indexed fast path must revisit unchanged historical files after the
                 // typed-v4 workload parser upgrade, not only files Codex happened to update.
-                using var transaction = connection.BeginTransaction();
-                using var migration = connection.CreateCommand();
+                using SqliteTransaction transaction = connection.BeginTransaction();
+                using SqliteCommand migration = connection.CreateCommand();
                 migration.Transaction = transaction;
                 migration.CommandText = """
-                    DELETE FROM codex_state_thread_fingerprints;
-                    UPDATE codex_state_sync SET watermark_updated_at_ms = 0 WHERE component = 'codex-state-index';
-                    UPDATE codex_state_index_schema SET version = 2 WHERE component = 'codex-state-index';
-                    """;
+                                        DELETE FROM codex_state_thread_fingerprints;
+                                        UPDATE codex_state_sync SET watermark_updated_at_ms = 0 WHERE component = 'codex-state-index';
+                                        UPDATE codex_state_index_schema SET version = 2 WHERE component = 'codex-state-index';
+                                        """;
                 await migration.ExecuteNonQueryAsync(cancellationToken);
                 transaction.Commit();
                 version = 2;
@@ -142,14 +154,14 @@ internal sealed class SqliteCodexStateIndexStore
             {
                 // Revisit unchanged catalog files for typed-v5 quota provenance. Only the
                 // acceleration cache is invalidated; native evidence and byte checkpoints survive.
-                using var transaction = connection.BeginTransaction();
-                using var migration = connection.CreateCommand();
+                using SqliteTransaction transaction = connection.BeginTransaction();
+                using SqliteCommand migration = connection.CreateCommand();
                 migration.Transaction = transaction;
                 migration.CommandText = """
-                    DELETE FROM codex_state_thread_fingerprints;
-                    UPDATE codex_state_sync SET watermark_updated_at_ms = 0 WHERE component = 'codex-state-index';
-                    UPDATE codex_state_index_schema SET version = 3 WHERE component = 'codex-state-index';
-                    """;
+                                        DELETE FROM codex_state_thread_fingerprints;
+                                        UPDATE codex_state_sync SET watermark_updated_at_ms = 0 WHERE component = 'codex-state-index';
+                                        UPDATE codex_state_index_schema SET version = 3 WHERE component = 'codex-state-index';
+                                        """;
                 await migration.ExecuteNonQueryAsync(cancellationToken);
                 transaction.Commit();
                 version = 3;
@@ -159,14 +171,14 @@ internal sealed class SqliteCodexStateIndexStore
             {
                 // typed-v6 adds tier-setting evidence. Byte checkpoints and retained facts survive;
                 // only disposable selection hints must be invalidated to revisit unchanged files.
-                using var transaction = connection.BeginTransaction();
-                using var migration = connection.CreateCommand();
+                using SqliteTransaction transaction = connection.BeginTransaction();
+                using SqliteCommand migration = connection.CreateCommand();
                 migration.Transaction = transaction;
                 migration.CommandText = """
-                    DELETE FROM codex_state_thread_fingerprints;
-                    UPDATE codex_state_sync SET watermark_updated_at_ms = 0 WHERE component = 'codex-state-index';
-                    UPDATE codex_state_index_schema SET version = 4 WHERE component = 'codex-state-index';
-                    """;
+                                        DELETE FROM codex_state_thread_fingerprints;
+                                        UPDATE codex_state_sync SET watermark_updated_at_ms = 0 WHERE component = 'codex-state-index';
+                                        UPDATE codex_state_index_schema SET version = 4 WHERE component = 'codex-state-index';
+                                        """;
                 await migration.ExecuteNonQueryAsync(cancellationToken);
                 transaction.Commit();
                 version = 4;
@@ -177,14 +189,14 @@ internal sealed class SqliteCodexStateIndexStore
                 // Re-select indexed Desktop suffixed paths after ownership parsing was corrected.
                 // Unaffected files keep their parser version and byte checkpoints; alternates
                 // remain outside catalog-selected acquisition.
-                using var transaction = connection.BeginTransaction();
-                using var migration = connection.CreateCommand();
+                using SqliteTransaction transaction = connection.BeginTransaction();
+                using SqliteCommand migration = connection.CreateCommand();
                 migration.Transaction = transaction;
                 migration.CommandText = """
-                    DELETE FROM codex_state_thread_fingerprints;
-                    UPDATE codex_state_sync SET watermark_updated_at_ms = 0 WHERE component = 'codex-state-index';
-                    UPDATE codex_state_index_schema SET version = 5 WHERE component = 'codex-state-index';
-                    """;
+                                        DELETE FROM codex_state_thread_fingerprints;
+                                        UPDATE codex_state_sync SET watermark_updated_at_ms = 0 WHERE component = 'codex-state-index';
+                                        UPDATE codex_state_index_schema SET version = 5 WHERE component = 'codex-state-index';
+                                        """;
                 await migration.ExecuteNonQueryAsync(cancellationToken);
                 transaction.Commit();
                 version = 5;
@@ -192,14 +204,14 @@ internal sealed class SqliteCodexStateIndexStore
 
             if (version == 5)
             {
-                using var transaction = connection.BeginTransaction();
-                using var migration = connection.CreateCommand();
+                using SqliteTransaction transaction = connection.BeginTransaction();
+                using SqliteCommand migration = connection.CreateCommand();
                 migration.Transaction = transaction;
                 migration.CommandText = """
-                    DELETE FROM codex_state_thread_fingerprints;
-                    UPDATE codex_state_sync SET watermark_updated_at_ms = 0 WHERE component = 'codex-state-index';
-                    UPDATE codex_state_index_schema SET version = 6 WHERE component = 'codex-state-index';
-                    """;
+                                        DELETE FROM codex_state_thread_fingerprints;
+                                        UPDATE codex_state_sync SET watermark_updated_at_ms = 0 WHERE component = 'codex-state-index';
+                                        UPDATE codex_state_index_schema SET version = 6 WHERE component = 'codex-state-index';
+                                        """;
                 await migration.ExecuteNonQueryAsync(cancellationToken);
                 transaction.Commit();
                 version = 6;
@@ -224,10 +236,10 @@ internal sealed class SqliteCodexStateIndexStore
         await InitializeAsync(cancellationToken);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = "SELECT watermark_updated_at_ms FROM codex_state_sync WHERE component = $component;";
         command.Parameters.AddWithValue("$component", Component);
-        var result = await command.ExecuteScalarAsync(cancellationToken);
+        object? result = await command.ExecuteScalarAsync(cancellationToken);
         return result is null || result is DBNull
             ? 0
             : Convert.ToInt64(result, CultureInfo.InvariantCulture);
@@ -239,14 +251,14 @@ internal sealed class SqliteCodexStateIndexStore
         await InitializeAsync(cancellationToken);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            SELECT thread_id, updated_at_ms, tokens_used, model, reasoning_effort, archived, rollout_path_hash
-            FROM codex_state_thread_fingerprints;
-            """;
+                              SELECT thread_id, updated_at_ms, tokens_used, model, reasoning_effort, archived, rollout_path_hash
+                              FROM codex_state_thread_fingerprints;
+                              """;
 
         var results = new Dictionary<string, CodexStateThreadFingerprint>(StringComparer.OrdinalIgnoreCase);
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
         while (await reader.ReadAsync(cancellationToken))
         {
             var fingerprint = new CodexStateThreadFingerprint(
@@ -270,10 +282,10 @@ internal sealed class SqliteCodexStateIndexStore
         await InitializeAsync(cancellationToken);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = "SELECT total_tokens FROM codex_counter_state WHERE session_id = $session LIMIT 1;";
         command.Parameters.AddWithValue("$session", sessionId);
-        var result = await command.ExecuteScalarAsync(cancellationToken);
+        object? result = await command.ExecuteScalarAsync(cancellationToken);
         return result is null || result is DBNull
             ? null
             : Convert.ToInt64(result, CultureInfo.InvariantCulture);
@@ -287,35 +299,35 @@ internal sealed class SqliteCodexStateIndexStore
         await InitializeAsync(cancellationToken);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
-        using var transaction = connection.BeginTransaction();
+        using SqliteTransaction transaction = connection.BeginTransaction();
 
-        var appliedAt = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
-        var upsert = connection.CreateCommand();
+        string appliedAt = DateTimeOffset.UtcNow.ToString("O", CultureInfo.InvariantCulture);
+        SqliteCommand upsert = connection.CreateCommand();
         upsert.Transaction = transaction;
         upsert.CommandText = """
-            INSERT INTO codex_state_thread_fingerprints(
-                thread_id, updated_at_ms, tokens_used, model, reasoning_effort, archived,
-                rollout_path_hash, applied_at_utc)
-            VALUES($thread, $updated, $tokens, $model, $reasoning, $archived, $pathHash, $applied)
-            ON CONFLICT(thread_id) DO UPDATE SET
-                updated_at_ms = excluded.updated_at_ms,
-                tokens_used = excluded.tokens_used,
-                model = excluded.model,
-                reasoning_effort = excluded.reasoning_effort,
-                archived = excluded.archived,
-                rollout_path_hash = excluded.rollout_path_hash,
-                applied_at_utc = excluded.applied_at_utc;
-            """;
-        var threadParameter = upsert.Parameters.Add("$thread", SqliteType.Text);
-        var updatedParameter = upsert.Parameters.Add("$updated", SqliteType.Integer);
-        var tokensParameter = upsert.Parameters.Add("$tokens", SqliteType.Integer);
-        var modelParameter = upsert.Parameters.Add("$model", SqliteType.Text);
-        var reasoningParameter = upsert.Parameters.Add("$reasoning", SqliteType.Text);
-        var archivedParameter = upsert.Parameters.Add("$archived", SqliteType.Integer);
-        var pathHashParameter = upsert.Parameters.Add("$pathHash", SqliteType.Text);
-        var appliedParameter = upsert.Parameters.Add("$applied", SqliteType.Text);
+                             INSERT INTO codex_state_thread_fingerprints(
+                                 thread_id, updated_at_ms, tokens_used, model, reasoning_effort, archived,
+                                 rollout_path_hash, applied_at_utc)
+                             VALUES($thread, $updated, $tokens, $model, $reasoning, $archived, $pathHash, $applied)
+                             ON CONFLICT(thread_id) DO UPDATE SET
+                                 updated_at_ms = excluded.updated_at_ms,
+                                 tokens_used = excluded.tokens_used,
+                                 model = excluded.model,
+                                 reasoning_effort = excluded.reasoning_effort,
+                                 archived = excluded.archived,
+                                 rollout_path_hash = excluded.rollout_path_hash,
+                                 applied_at_utc = excluded.applied_at_utc;
+                             """;
+        SqliteParameter threadParameter = upsert.Parameters.Add("$thread", SqliteType.Text);
+        SqliteParameter updatedParameter = upsert.Parameters.Add("$updated", SqliteType.Integer);
+        SqliteParameter tokensParameter = upsert.Parameters.Add("$tokens", SqliteType.Integer);
+        SqliteParameter modelParameter = upsert.Parameters.Add("$model", SqliteType.Text);
+        SqliteParameter reasoningParameter = upsert.Parameters.Add("$reasoning", SqliteType.Text);
+        SqliteParameter archivedParameter = upsert.Parameters.Add("$archived", SqliteType.Integer);
+        SqliteParameter pathHashParameter = upsert.Parameters.Add("$pathHash", SqliteType.Text);
+        SqliteParameter appliedParameter = upsert.Parameters.Add("$applied", SqliteType.Text);
 
-        foreach (var thread in appliedThreads)
+        foreach (CodexStateThread thread in appliedThreads)
         {
             cancellationToken.ThrowIfCancellationRequested();
             threadParameter.Value = thread.ThreadId;
@@ -329,14 +341,14 @@ internal sealed class SqliteCodexStateIndexStore
             await upsert.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        var watermark = connection.CreateCommand();
+        SqliteCommand watermark = connection.CreateCommand();
         watermark.Transaction = transaction;
         watermark.CommandText = """
-            UPDATE codex_state_sync
-            SET watermark_updated_at_ms = $watermark,
-                updated_at_utc = $updated
-            WHERE component = $component;
-            """;
+                                UPDATE codex_state_sync
+                                SET watermark_updated_at_ms = $watermark,
+                                    updated_at_utc = $updated
+                                WHERE component = $component;
+                                """;
         watermark.Parameters.AddWithValue("$watermark", Math.Max(0, watermarkUpdatedAtMs));
         watermark.Parameters.AddWithValue("$updated", appliedAt);
         watermark.Parameters.AddWithValue("$component", Component);

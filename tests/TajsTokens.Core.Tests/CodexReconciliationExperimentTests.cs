@@ -1,13 +1,22 @@
+// Taj's Tokens | CodexReconciliationExperimentTests.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Text.Json;
 using TajsTokens.Core.Models;
+using TajsTokens.Infrastructure.Ingestion;
 using Xunit.Abstractions;
 using ExperimentState = TajsTokens.Infrastructure.Ingestion.ReconciliationExperimentState;
+
+#endregion
 
 namespace TajsTokens.Core.Tests;
 
 /// <summary>
-/// Original research counter experiments, not ports of third-party algorithms. These scalar
-/// baselines isolate assumptions; they do not establish canonical identity or change production.
+///     Original research counter experiments, not ports of third-party algorithms. These scalar
+///     baselines isolate assumptions; they do not establish canonical identity or change production.
 /// </summary>
 public sealed class CodexReconciliationExperimentTests(ITestOutputHelper output)
 {
@@ -18,30 +27,75 @@ public sealed class CodexReconciliationExperimentTests(ITestOutputHelper output)
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);
         while (root is not null && !File.Exists(Path.Combine(root.FullName, "TajsTokens.slnx"))) root = root.Parent;
-        var directory = Path.Combine(root!.FullName, ".codex", "temp", "reconciliation-test-" + Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(root!.FullName, ".codex", "temp", "reconciliation-test-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
         try
         {
             const string id = "00000000-0000-0000-0000-000000000001";
-            string Meta(string owner) => JsonSerializer.Serialize(new { type = "session_meta", timestamp = Start,
-                payload = new { id = owner } });
-            string Tokens(int total) => JsonSerializer.Serialize(new { type = "event_msg", timestamp = Start,
-                payload = new { type = "token_count", info = new { total_token_usage = new {
-                    input_tokens = total, cached_input_tokens = 0, cache_write_input_tokens = 0,
-                    output_tokens = 0, reasoning_output_tokens = 0, total_tokens = total } } } });
-            var source = Path.Combine(directory, $"rollout-{id}.jsonl");
-            var copy = Path.Combine(directory, $"copy-{id}.jsonl");
-            var broken = Path.Combine(directory, $"broken-{id}.jsonl");
-            var unowned = Path.Combine(directory, "no-filename-owner.jsonl");
-            var response = JsonSerializer.Serialize(new { type = "token_usage_record", payload = new {
-                thread_id = id, turn_id = "private-turn", root_turn_id = "private-root", session_id = "private-session",
-                response_id = "private-response", usage = new { input_tokens = 100, cached_input_tokens = 0,
-                    output_tokens = 0, reasoning_output_tokens = 0, total_tokens = 100 } } });
-            await File.WriteAllTextAsync(source, string.Join('\n', Meta("parent"), Tokens(900), Meta(id), response, Tokens(100), Tokens(20), Tokens(110)) + "\n");
+
+            string Meta(string owner)
+            {
+                return JsonSerializer.Serialize(new { type = "session_meta", timestamp = Start, payload = new { id = owner } });
+            }
+
+            string Tokens(int total)
+            {
+                return JsonSerializer.Serialize(
+                    new
+                    {
+                        type = "event_msg",
+                        timestamp = Start,
+                        payload = new
+                        {
+                            type = "token_count",
+                            info = new
+                            {
+                                total_token_usage = new
+                                {
+                                    input_tokens = total,
+                                    cached_input_tokens = 0,
+                                    cache_write_input_tokens = 0,
+                                    output_tokens = 0,
+                                    reasoning_output_tokens = 0,
+                                    total_tokens = total,
+                                },
+                            },
+                        },
+                    });
+            }
+
+            string source = Path.Combine(directory, $"rollout-{id}.jsonl");
+            string copy = Path.Combine(directory, $"copy-{id}.jsonl");
+            string broken = Path.Combine(directory, $"broken-{id}.jsonl");
+            string unowned = Path.Combine(directory, "no-filename-owner.jsonl");
+            string response = JsonSerializer.Serialize(
+                new
+                {
+                    type = "token_usage_record",
+                    payload = new
+                    {
+                        thread_id = id,
+                        turn_id = "private-turn",
+                        root_turn_id = "private-root",
+                        session_id = "private-session",
+                        response_id = "private-response",
+                        usage = new
+                        {
+                            input_tokens = 100,
+                            cached_input_tokens = 0,
+                            output_tokens = 0,
+                            reasoning_output_tokens = 0,
+                            total_tokens = 100,
+                        },
+                    },
+                });
+            await File.WriteAllTextAsync(
+                source,
+                string.Join('\n', Meta("parent"), Tokens(900), Meta(id), response, Tokens(100), Tokens(20), Tokens(110)) + "\n");
             File.Copy(source, copy);
             await File.WriteAllTextAsync(broken, string.Join('\n', Meta(id), response, "{malformed}") + "\n");
             await File.WriteAllTextAsync(unowned, Tokens(700) + "\n");
-            var report = await TajsTokens.Infrastructure.Ingestion.CodexReconciliationAudit.RunAsync([source, copy, source, broken, unowned]);
+            ReconciliationAuditReport report = await CodexReconciliationAudit.RunAsync([source, copy, source, broken, unowned]);
             Assert.Equal(4, report.FilesExamined);
             Assert.Equal(3, report.StableFiles);
             Assert.Equal(1, report.FailedFilesExcluded);
@@ -68,20 +122,31 @@ public sealed class CodexReconciliationExperimentTests(ITestOutputHelper output)
             Assert.Equal(2, report.TokenRecordsInExcludedPrefixes);
             Assert.Equal(1, report.SequenceRelationships!.EqualSequences);
             Assert.Equal(0, report.SequenceRelationships.CrossOwnerPairs);
-            var serialized = JsonSerializer.Serialize(report);
+            string serialized = JsonSerializer.Serialize(report);
             Assert.DoesNotContain(id, serialized);
             Assert.DoesNotContain(directory, serialized);
             Assert.DoesNotContain("private-response", serialized);
         }
-        finally { Directory.Delete(directory, true); }
+        finally
+        {
+            Directory.Delete(directory, true);
+        }
     }
 
     [Fact]
     public void MissingCumulativeCountersAreNotAZeroWatermark()
     {
         var state = new ExperimentState();
-        var row = new CodexTokenCountObservation("last-only", "source", "session", null, Start, null, null,
-            null, new(50, 0, 0, 0, 0, 50));
+        var row = new CodexTokenCountObservation(
+            "last-only",
+            "source",
+            "session",
+            null,
+            Start,
+            null,
+            null,
+            null,
+            new CodexTokenUsageSnapshot(50, 0, 0, 0, 0, 50));
         state.Apply(row);
         Assert.Equal(50, state.IncumbentTotal);
         Assert.Equal(1, state.IncompleteCounters);
@@ -96,8 +161,15 @@ public sealed class CodexReconciliationExperimentTests(ITestOutputHelper output)
         var state = new ExperimentState();
         state.Apply(Row("source", 0, 100, null));
         state = JsonSerializer.Deserialize<ExperimentState>(JsonSerializer.Serialize(state))!;
-        var reshuffled = new CodexTokenCountObservation("source:1", "source", "session", null,
-            Start.AddSeconds(1), "model", "effort", new(90, 0, 0, 10, 0, 100), null);
+        var reshuffled = new CodexTokenCountObservation(
+            "source:1",
+            "source",
+            "session",
+            null,
+            Start.AddSeconds(1),
+            "model",
+            "effort",
+            new CodexTokenUsageSnapshot(90, 0, 0, 10, 0, 100));
         state.Apply(reshuffled);
         state.Apply(reshuffled); // Retrying the same physical occurrence is not another change.
         Assert.Equal(1, state.EqualTotalCategoryChanges);
@@ -124,9 +196,9 @@ public sealed class CodexReconciliationExperimentTests(ITestOutputHelper output)
         state = JsonSerializer.Deserialize<ExperimentState>(JsonSerializer.Serialize(state))!;
         state.Apply(Row("source", 2, 20, 20));
         state.Apply(Row("source", 3, 30, 10));
-        var falling = state.Transitions["below-watermark/falling/usable-last"];
-        var repeated = state.Transitions["below-watermark/repeated/usable-last"];
-        var recovering = state.Transitions["below-watermark/recovering/usable-last"];
+        ReconciliationTransitionTotals falling = state.Transitions["below-watermark/falling/usable-last"];
+        ReconciliationTransitionTotals repeated = state.Transitions["below-watermark/repeated/usable-last"];
+        ReconciliationTransitionTotals recovering = state.Transitions["below-watermark/recovering/usable-last"];
         Assert.Equal(1, falling.Observations);
         Assert.Equal(20, falling.IncumbentTokens);
         Assert.Equal(1, repeated.Observations);
@@ -139,16 +211,21 @@ public sealed class CodexReconciliationExperimentTests(ITestOutputHelper output)
 
     [Theory]
     [MemberData(nameof(Cases))]
-    public void CompareAssumptionsAndEveryRestartBoundary(string name, long[] totals, long?[] last,
-        long incumbent, long containment, long lineage)
+    public void CompareAssumptionsAndEveryRestartBoundary(
+        string name,
+        long[] totals,
+        long?[] last,
+        long incumbent,
+        long containment,
+        long lineage)
     {
-        var records = totals.Select((n, i) => Row("source-a", i, n, last[i])).ToArray();
-        for (var restart = 0; restart <= records.Length; restart++)
+        CodexTokenCountObservation[] records = totals.Select((n, i) => Row("source-a", i, n, last[i])).ToArray();
+        for (int restart = 0; restart <= records.Length; restart++)
         {
             var state = new ExperimentState();
-            foreach (var row in records.Take(restart)) Apply(state, row);
+            foreach (CodexTokenCountObservation row in records.Take(restart)) Apply(state, row);
             state = JsonSerializer.Deserialize<ExperimentState>(JsonSerializer.Serialize(state))!;
-            foreach (var row in records.Skip(restart)) Apply(state, row);
+            foreach (CodexTokenCountObservation row in records.Skip(restart)) Apply(state, row);
             Assert.Equal(incumbent, state.IncumbentTotal);
             Assert.Equal(containment, state.ContainmentTotal);
             Assert.Equal(lineage, state.LineageTotal);
@@ -158,20 +235,25 @@ public sealed class CodexReconciliationExperimentTests(ITestOutputHelper output)
             Assert.Equal(lineage, state.Transitions.Values.Sum(x => x.LineageTokens));
             if (name.Contains("ambiguous")) Assert.True(state.AmbiguousWithoutLast);
         }
-        output.WriteLine($"{name}: incumbent={incumbent}; high-watermark-only={containment}; bounded total-minus-last={lineage}. Not ground truth.");
+        output.WriteLine(
+            $"{name}: incumbent={incumbent}; high-watermark-only={containment}; bounded total-minus-last={lineage}. Not ground truth.");
     }
 
     [Fact]
     public void CopiedPhysicalSourcesRemainSeparateAndProcessingOrderDoesNotCanonicalizeThem()
     {
-        var a = new[] { Row("original", 0, 100, 100), Row("original", 1, 120, 20) };
-        var copy = new[] { Row("copy", 0, 100, 100), Row("copy", 1, 120, 20) };
-        foreach (var records in new[] { a.Concat(copy), copy.Concat(a), new[] { a[0], copy[0], a[1], copy[1] } })
+        CodexTokenCountObservation[] a = new[] { Row("original", 0, 100, 100), Row("original", 1, 120, 20) };
+        CodexTokenCountObservation[] copy = new[] { Row("copy", 0, 100, 100), Row("copy", 1, 120, 20) };
+        foreach (IEnumerable<CodexTokenCountObservation> records in new[]
+                 {
+                     a.Concat(copy), copy.Concat(a), new[] { a[0], copy[0], a[1], copy[1] },
+                 })
         {
             var states = new Dictionary<string, ExperimentState>();
-            foreach (var row in records)
+            foreach (CodexTokenCountObservation row in records)
             {
-                if (!states.TryGetValue(row.SourceFile, out var state)) states.Add(row.SourceFile, state = new());
+                if (!states.TryGetValue(row.SourceFile, out ExperimentState? state))
+                    states.Add(row.SourceFile, state = new ExperimentState());
                 Apply(state, row);
             }
             Assert.Equal(240, states.Values.Sum(s => s.IncumbentTotal));
@@ -184,9 +266,9 @@ public sealed class CodexReconciliationExperimentTests(ITestOutputHelper output)
     public void BoundedLineageEvictionMakesOldReplayAmbiguousRatherThanProvingNewWork()
     {
         var state = new ExperimentState();
-        for (var i = 1; i <= 33; i++) Apply(state, Row("source", i, i * 100, i * 100));
+        for (int i = 1; i <= 33; i++) Apply(state, Row("source", i, i * 100, i * 100));
         Assert.Equal(32, state.Heads.Count);
-        var before = state.LineageTotal;
+        long before = state.LineageTotal;
         Apply(state, Row("source", 34, 100, 100));
         Assert.Equal(before + 100, state.LineageTotal);
         // This bounded heuristic cannot recognize the evicted replay: a concrete negative fixture.
@@ -196,8 +278,9 @@ public sealed class CodexReconciliationExperimentTests(ITestOutputHelper output)
     public void ExactOccurrenceRetryIsIdempotentButDistinctEqualCountersRemainAmbiguous()
     {
         var state = new ExperimentState();
-        var first = Row("source", 0, 100, 100);
-        Apply(state, first); Apply(state, first);
+        CodexTokenCountObservation first = Row("source", 0, 100, 100);
+        Apply(state, first);
+        Apply(state, first);
         Assert.Equal(100, state.IncumbentTotal);
         Assert.Equal(100, state.LineageTotal);
         Apply(state, Row("source", 1, 100, 100));
@@ -208,10 +291,22 @@ public sealed class CodexReconciliationExperimentTests(ITestOutputHelper output)
         // Counters alone cannot resolve that alternative; this result is not a deduplication oracle.
     }
 
-    private static CodexTokenCountObservation Row(string file, int sequence, long total, long? last) =>
-        new(file + ":" + sequence, file, "session", null, Start.AddSeconds(sequence), "model", "effort",
-            new(total, 0, 0, 0, 0, total), last is { } n ? new(n, 0, 0, 0, 0, n) : null);
+    private static CodexTokenCountObservation Row(string file, int sequence, long total, long? last)
+    {
+        return new CodexTokenCountObservation(
+            file + ":" + sequence,
+            file,
+            "session",
+            null,
+            Start.AddSeconds(sequence),
+            "model",
+            "effort",
+            new CodexTokenUsageSnapshot(total, 0, 0, 0, 0, total),
+            last is { } n ? new CodexTokenUsageSnapshot(n, 0, 0, 0, 0, n) : null);
+    }
 
     private static void Apply(ExperimentState state, CodexTokenCountObservation row)
-        => state.Apply(row);
+    {
+        state.Apply(row);
+    }
 }

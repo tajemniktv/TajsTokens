@@ -1,6 +1,14 @@
+// Taj's Tokens | CodexSessionIngestionServiceTests.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
 using TajsTokens.Infrastructure.Ingestion;
+
+#endregion
 
 namespace TajsTokens.Core.Tests;
 
@@ -9,8 +17,8 @@ public sealed class CodexSessionIngestionServiceTests
     [Fact]
     public async Task IngestAsync_WhenSourceIsAppended_ResumesFromCheckpoint()
     {
-        var directory = Directory.CreateTempSubdirectory("tajstokens-ingestion-");
-        var filePath = Path.Combine(directory.FullName, "rollout.jsonl");
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-ingestion-");
+        string filePath = Path.Combine(directory.FullName, "rollout.jsonl");
 
         try
         {
@@ -19,7 +27,7 @@ public sealed class CodexSessionIngestionServiceTests
             var service = new CodexSessionIngestionService(new FileSystemCodexSessionEventProvider(), checkpoints);
 
             Assert.Equal(1, (await service.IngestAsync(filePath, CancellationToken.None)).RecordsScanned);
-            var firstIdentity = checkpoints.Checkpoint!.SourceIdentity;
+            string? firstIdentity = checkpoints.Checkpoint!.SourceIdentity;
 
             await File.AppendAllTextAsync(filePath, "{\"n\":2}\n");
             Assert.Equal(1, (await service.IngestAsync(filePath, CancellationToken.None)).RecordsScanned);
@@ -27,16 +35,16 @@ public sealed class CodexSessionIngestionServiceTests
         }
         finally
         {
-            directory.Delete(recursive: true);
+            directory.Delete(true);
         }
     }
 
     [Fact]
     public async Task IngestAsync_WhenPathIsReplacedByLargerFile_ResetsCheckpoint()
     {
-        var directory = Directory.CreateTempSubdirectory("tajstokens-ingestion-");
-        var filePath = Path.Combine(directory.FullName, "rollout.jsonl");
-        var replacementPath = Path.Combine(directory.FullName, "replacement.jsonl");
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-ingestion-");
+        string filePath = Path.Combine(directory.FullName, "rollout.jsonl");
+        string replacementPath = Path.Combine(directory.FullName, "replacement.jsonl");
 
         try
         {
@@ -45,17 +53,17 @@ public sealed class CodexSessionIngestionServiceTests
             var service = new CodexSessionIngestionService(new FileSystemCodexSessionEventProvider(), checkpoints);
 
             Assert.Equal(1, (await service.IngestAsync(filePath, CancellationToken.None)).RecordsScanned);
-            var originalIdentity = checkpoints.Checkpoint!.SourceIdentity;
+            string? originalIdentity = checkpoints.Checkpoint!.SourceIdentity;
 
             await File.WriteAllTextAsync(replacementPath, "{\"replacement\":true,\"padding\":\"xxxxxxxxxxxxxxxx\"}\n");
-            File.Move(replacementPath, filePath, overwrite: true);
+            File.Move(replacementPath, filePath, true);
 
             Assert.Equal(1, (await service.IngestAsync(filePath, CancellationToken.None)).RecordsScanned);
             Assert.NotEqual(originalIdentity, checkpoints.Checkpoint!.SourceIdentity);
         }
         finally
         {
-            directory.Delete(recursive: true);
+            directory.Delete(true);
         }
     }
 
@@ -63,10 +71,13 @@ public sealed class CodexSessionIngestionServiceTests
     {
         public FileIngestionCheckpoint? Checkpoint { get; private set; }
 
-        public Task<FileIngestionCheckpoint?> GetCheckpointAsync(string filePath, CancellationToken cancellationToken) =>
-            Task.FromResult(Checkpoint is not null && string.Equals(Checkpoint.FilePath, filePath, StringComparison.Ordinal)
-                ? Checkpoint
-                : null);
+        public Task<FileIngestionCheckpoint?> GetCheckpointAsync(string filePath, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(
+                Checkpoint is not null && string.Equals(Checkpoint.FilePath, filePath, StringComparison.Ordinal)
+                    ? Checkpoint
+                    : null);
+        }
 
         public Task SaveCheckpointAsync(FileIngestionCheckpoint checkpoint, CancellationToken cancellationToken)
         {

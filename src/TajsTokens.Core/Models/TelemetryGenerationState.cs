@@ -1,16 +1,24 @@
+// Taj's Tokens | TelemetryGenerationState.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using TajsTokens.Core.Enums;
+
+#endregion
 
 namespace TajsTokens.Core.Models;
 
 public enum TelemetryDataQuality
 {
     Primary = 0,
-    Fallback = 1
+    Fallback = 1,
 }
 
 /// <summary>
-/// Freshness for one quota lane. A provider response may refresh one supported lane while another
-/// remains stale/unavailable, so quota health must not be collapsed into one process-wide boolean.
+///     Freshness for one quota lane. A provider response may refresh one supported lane while another
+///     remains stale/unavailable, so quota health must not be collapsed into one process-wide boolean.
 /// </summary>
 public sealed record QuotaLaneState(
     QuotaWindowKind Kind,
@@ -23,9 +31,10 @@ public sealed record QuotaLaneState(
 {
     public bool IsFresh => State == TelemetryHealthState.Live;
 }
+
 /// <summary>
-/// Structured provenance for the currently displayed token-accounting generation. Freshness,
-/// fallback quality, local-only coverage and reconciliation status are independent dimensions.
+///     Structured provenance for the currently displayed token-accounting generation. Freshness,
+///     fallback quality, local-only coverage and reconciliation status are independent dimensions.
 /// </summary>
 public sealed record TokenAccountingGenerationState(
     string Source,

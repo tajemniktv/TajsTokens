@@ -1,8 +1,16 @@
+// Taj's Tokens | CodexObservatoryService.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
 using TajsTokens.Infrastructure.Ingestion;
 using TajsTokens.Infrastructure.Persistence;
+
+#endregion
 
 namespace TajsTokens.Infrastructure.Services;
 
@@ -13,15 +21,15 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
     private static readonly TimeSpan StateReconciliationInterval = TimeSpan.FromMinutes(5);
 
     private readonly ICodexSessionIngestionService _ingestionService;
-    private readonly ICodexObservatoryStore _store;
+    private readonly IReadOnlyList<string> _roots;
     private readonly CodexStateCatalog? _stateCatalog;
     private readonly SqliteCodexStateIndexStore? _stateIndexStore;
-    private readonly IReadOnlyList<string> _roots;
+    private readonly ICodexObservatoryStore _store;
     private readonly TimeProvider _timeProvider;
-    private long? _lastStateReconciliation;
-    private string? _lastStateCatalogPath;
-    private CodexCollectionCoverage? _lastCoverage;
     private int _backfillOffset;
+    private CodexCollectionCoverage? _lastCoverage;
+    private string? _lastStateCatalogPath;
+    private long? _lastStateReconciliation;
 
     public CodexObservatoryService(
         ICodexSessionIngestionService ingestionService,
@@ -59,7 +67,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
         {
             try
             {
-                var indexed = await TryRefreshFromStateCatalogAsync(cancellationToken);
+                CodexObservatoryRefreshResult? indexed = await TryRefreshFromStateCatalogAsync(cancellationToken);
                 if (indexed is not null)
                 {
                     return indexed;
@@ -70,7 +78,8 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
                 throw;
             }
             catch (Exception exception) when (
-                exception is SqliteException or IOException or UnauthorizedAccessException or InvalidOperationException or InvalidDataException or
+                exception is SqliteException or IOException or UnauthorizedAccessException or InvalidOperationException
+                    or InvalidDataException or
                     InvalidCastException or FormatException or OverflowException or ArgumentException or NotSupportedException)
             {
                 // Codex's state database is a private optional acceleration source. Any state/index
@@ -84,32 +93,50 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
     public async Task<CodexRolloutInspectionReport> InspectAlternateRolloutsAsync(int offset, CancellationToken cancellationToken)
     {
         offset = Math.Max(0, offset);
-        var observedAt = _timeProvider.GetUtcNow();
+        DateTimeOffset observedAt = _timeProvider.GetUtcNow();
         // Separate read-only inspection: no ingestion, checkpoint, cursor, or cached-coverage writes.
-        var catalog = _stateCatalog is null ? null : await _stateCatalog.TryReadSinceAsync(0, cancellationToken);
+        CodexStateCatalogBatch? catalog = _stateCatalog is null ? null : await _stateCatalog.TryReadSinceAsync(0, cancellationToken);
         if (catalog is null)
-            return new(observedAt, null, null, 0, [], "No usable selected state catalog. Alternate-path ownership and the unindexed path count are unknown.");
+            return new CodexRolloutInspectionReport(
+                observedAt,
+                null,
+                null,
+                0,
+                [],
+                "No usable selected state catalog. Alternate-path ownership and the unindexed path count are unknown.");
 
-        var indexed = catalog.Threads.Select(thread => thread.RolloutPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var alternates = DiscoverFiles(cancellationToken).Where(path => !indexed.Contains(path))
+        HashSet<string> indexed = catalog.Threads.Select(thread => thread.RolloutPath).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        string[] alternates = DiscoverFiles(cancellationToken).Where(path => !indexed.Contains(path))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase).ToArray();
-        var owners = catalog.Threads.GroupBy(thread => thread.ThreadId, StringComparer.OrdinalIgnoreCase)
+        Dictionary<string, CodexStateThread[]> owners = catalog.Threads.GroupBy(thread => thread.ThreadId, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.ToArray(), StringComparer.OrdinalIgnoreCase);
         var comparisons = new List<CodexRolloutComparison>();
         var reader = new CodexRolloutComparisonReader();
-        foreach (var path in alternates.Skip(offset).Take(8))
+        foreach (string path in alternates.Skip(offset).Take(8))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var id = CodexRolloutParser.ExtractSessionIdFromFileName(path);
-            if (id is null || !owners.TryGetValue(id, out var matches) || matches.Length != 1)
+            string? id = CodexRolloutParser.ExtractSessionIdFromFileName(path);
+            if (id is null || !owners.TryGetValue(id, out CodexStateThread[]? matches) || matches.Length != 1)
             {
-                comparisons.Add(new(path, null, CodexRolloutComparisonKind.Unresolved, false, false, null,
-                    "No unique indexed counterpart from filename identity. A first session_meta may be a copied non-owning prefix; ownership is not guessed."));
+                comparisons.Add(
+                    new CodexRolloutComparison(
+                        path,
+                        null,
+                        CodexRolloutComparisonKind.Unresolved,
+                        false,
+                        false,
+                        null,
+                        "No unique indexed counterpart from filename identity. A first session_meta may be a copied non-owning prefix; ownership is not guessed."));
                 continue;
             }
             comparisons.Add(await reader.CompareAsync(path, matches[0].RolloutPath, matches[0].ThreadId, cancellationToken));
         }
-        return new(observedAt, catalog.DatabasePath, alternates.Length, offset, comparisons,
+        return new CodexRolloutInspectionReport(
+            observedAt,
+            catalog.DatabasePath,
+            alternates.Length,
+            offset,
+            comparisons,
             "Read-only sample: up to 8 pairs, 2 MiB and 20,000 records per file. Native paths outside discovery roots are compared when indexed. " +
             "Filesystem discovery and cross-file reads are best-effort, not an atomic snapshot. Results describe this inspection only; no import, merge, export, or durable content copy occurs.");
     }
@@ -123,18 +150,18 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
         }
 
         await _stateIndexStore.InitializeAsync(cancellationToken);
-        var watermark = await _stateIndexStore.GetWatermarkAsync(cancellationToken);
+        long watermark = await _stateIndexStore.GetWatermarkAsync(cancellationToken);
 
         // updated_at_ms is an acceleration hint, not a complete change journal (Codex can update
         // rollout_path alone). Reconcile compact catalog fingerprints periodically even in a
         // long-running process; unchanged rollout bodies remain unopened. Use monotonic elapsed time.
-        var reconciliationStarted = _timeProvider.GetTimestamp();
-        var reconciliationDue = _lastStateReconciliation is not long lastReconciliation ||
-            _timeProvider.GetElapsedTime(lastReconciliation, reconciliationStarted) >= StateReconciliationInterval;
-        var minimumUpdatedAtMs = !reconciliationDue
+        long reconciliationStarted = _timeProvider.GetTimestamp();
+        bool reconciliationDue = _lastStateReconciliation is not long lastReconciliation ||
+                                 _timeProvider.GetElapsedTime(lastReconciliation, reconciliationStarted) >= StateReconciliationInterval;
+        long minimumUpdatedAtMs = !reconciliationDue
             ? Math.Max(0, watermark - StateOverlapMs)
             : 0;
-        var catalog = await _stateCatalog.TryReadSinceAsync(minimumUpdatedAtMs, cancellationToken);
+        CodexStateCatalogBatch? catalog = await _stateCatalog.TryReadSinceAsync(minimumUpdatedAtMs, cancellationToken);
         if (catalog is null)
         {
             return null;
@@ -153,52 +180,57 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
         reconciliationDue |= !string.Equals(_lastStateCatalogPath, catalog.DatabasePath, StringComparison.OrdinalIgnoreCase);
         if (reconciliationDue)
         {
-            var discovered = DiscoverFiles(cancellationToken).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var indexed = catalog.Threads.Select(thread => thread.RolloutPath)
+            HashSet<string> discovered = DiscoverFiles(cancellationToken).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            HashSet<string> indexed = catalog.Threads.Select(thread => thread.RolloutPath)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             _lastCoverage = new CodexCollectionCoverage(
-                _timeProvider.GetUtcNow(), indexed.Count, indexed.Count(File.Exists), discovered.Count,
-                discovered.Count(path => !indexed.Contains(path)), indexed.Count(path => !discovered.Contains(path)));
+                _timeProvider.GetUtcNow(),
+                indexed.Count,
+                indexed.Count(File.Exists),
+                discovered.Count,
+                discovered.Count(path => !indexed.Contains(path)),
+                indexed.Count(path => !discovered.Contains(path)));
         }
 
-        var fingerprints = await _stateIndexStore.GetFingerprintsAsync(cancellationToken);
-        var changedThreads = catalog.Threads
+        IReadOnlyDictionary<string, CodexStateThreadFingerprint> fingerprints =
+            await _stateIndexStore.GetFingerprintsAsync(cancellationToken);
+        CodexStateThread[] changedThreads = catalog.Threads
             .Where(thread =>
-                !fingerprints.TryGetValue(thread.ThreadId, out var fingerprint) ||
+                !fingerprints.TryGetValue(thread.ThreadId, out CodexStateThreadFingerprint? fingerprint) ||
                 !fingerprint.Matches(thread))
             .ToArray();
 
         // Bound indexed refreshes so an upgrade's old corpus cannot hold recent captures behind a
         // whole-history pass. Reserve half the batch for rotating older work, including retries.
         // This is a file-count bound, not a latency guarantee for a single large/slow file.
-        var recent = changedThreads.OrderByDescending(x => x.UpdatedAtMs)
+        CodexStateThread[] recent = changedThreads.OrderByDescending(x => x.UpdatedAtMs)
             .ThenBy(x => x.ThreadId, StringComparer.Ordinal).Take(8).ToArray();
-        var older = changedThreads.Except(recent).OrderBy(x => x.UpdatedAtMs)
+        CodexStateThread[] older = changedThreads.Except(recent).OrderBy(x => x.UpdatedAtMs)
             .ThenBy(x => x.ThreadId, StringComparer.Ordinal).ToArray();
-        var offset = older.Length == 0 ? 0 : _backfillOffset % older.Length;
-        var batch = recent.Concat(older.Skip(offset).Concat(older.Take(offset)).Take(8)).ToArray();
+        int offset = older.Length == 0 ? 0 : _backfillOffset % older.Length;
+        CodexStateThread[] batch = recent.Concat(older.Skip(offset).Concat(older.Take(offset)).Take(8)).ToArray();
         _backfillOffset = older.Length == 0 ? 0 : (offset + Math.Min(8, older.Length)) % older.Length;
-        var deferred = changedThreads.Except(batch).ToArray();
+        CodexStateThread[] deferred = changedThreads.Except(batch).ToArray();
 
         // Edge persistence is intentionally independent of rollout selection. Codex can insert a
         // spawn edge without changing the child's thread fingerprint, and relationships are cheap to
         // reconcile against the already-normalized TajsTokens graph.
         await ReconcileSpawnEdgesAsync(catalog.Edges, cancellationToken);
 
-        var filesScanned = 0;
-        var recordsScanned = 0;
-        var normalized = 0;
-        var errors = 0;
+        int filesScanned = 0;
+        int recordsScanned = 0;
+        int normalized = 0;
+        int errors = 0;
         long bytes = 0;
         var sessionsTouched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var appliedThreads = new List<CodexStateThread>(changedThreads.Length);
         long? earliestUnappliedUpdatedAtMs = deferred.Length == 0 ? null : deferred.Min(x => x.UpdatedAtMs);
 
-        foreach (var thread in batch)
+        foreach (CodexStateThread thread in batch)
         {
             cancellationToken.ThrowIfCancellationRequested();
             filesScanned++;
-            fingerprints.TryGetValue(thread.ThreadId, out var previousFingerprint);
+            fingerprints.TryGetValue(thread.ThreadId, out CodexStateThreadFingerprint? previousFingerprint);
 
             try
             {
@@ -212,14 +244,14 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
                 var infoBefore = new FileInfo(thread.RolloutPath);
                 bytes = checked(bytes + infoBefore.Length);
 
-                var result = await _ingestionService.IngestAsync(thread.RolloutPath, cancellationToken);
+                CodexIngestionResult result = await _ingestionService.IngestAsync(thread.RolloutPath, cancellationToken);
                 recordsScanned += result.RecordsScanned;
                 normalized += result.RecordsNormalized;
 
                 var infoAfter = new FileInfo(thread.RolloutPath);
                 infoAfter.Refresh();
-                var sourceIdentity = result.SourceIdentity ?? CodexSessionIngestionService.GetSourceIdentity(thread.RolloutPath);
-                var touchedSessionId = result.SessionId ?? thread.ThreadId;
+                string sourceIdentity = result.SourceIdentity ?? CodexSessionIngestionService.GetSourceIdentity(thread.RolloutPath);
+                string touchedSessionId = result.SessionId ?? thread.ThreadId;
                 await _store.UpsertRolloutFileAsync(
                     sourceIdentity,
                     thread.RolloutPath,
@@ -260,9 +292,11 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
             }
         }
 
-        var nextWatermark = earliestUnappliedUpdatedAtMs is long unappliedAt
+        long nextWatermark = earliestUnappliedUpdatedAtMs is long unappliedAt
             ? Math.Max(0, unappliedAt - StateOverlapMs)
-            : minimumUpdatedAtMs == 0 ? catalog.MaxUpdatedAtMs : Math.Max(watermark, catalog.MaxUpdatedAtMs);
+            : minimumUpdatedAtMs == 0
+                ? catalog.MaxUpdatedAtMs
+                : Math.Max(watermark, catalog.MaxUpdatedAtMs);
 
         if (appliedThreads.Count > 0 || nextWatermark != watermark)
         {
@@ -283,11 +317,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
             normalized,
             sessionsTouched.Count,
             errors,
-            bytes)
-        {
-            Coverage = _lastCoverage,
-            DeferredFiles = deferred.Length
-        };
+            bytes) { Coverage = _lastCoverage, DeferredFiles = deferred.Length };
     }
 
     private async Task<bool> CanCommitFingerprintAsync(
@@ -312,7 +342,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
             return true;
         }
 
-        var persistedCounterTotal = await _stateIndexStore!.GetPersistedCounterTotalAsync(
+        long? persistedCounterTotal = await _stateIndexStore!.GetPersistedCounterTotalAsync(
             thread.ThreadId,
             cancellationToken);
         if (persistedCounterTotal == thread.TokensUsed)
@@ -324,7 +354,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
         // token_count in the retained rollout. In that degraded-coverage case, accept the fingerprint
         // only when the rollout itself has reached EOF and its write timestamp has caught up to the
         // state update. The tolerance covers the observed few-millisecond state-vs-rollout skew.
-        var stateUpdatedUtc = FromUnixMillisecondsOrEpoch(thread.UpdatedAtMs).UtcDateTime;
+        DateTime stateUpdatedUtc = FromUnixMillisecondsOrEpoch(thread.UpdatedAtMs).UtcDateTime;
         return fileInfo.LastWriteTimeUtc >= stateUpdatedUtc.AddMilliseconds(-StateRolloutVisibilityToleranceMs);
     }
 
@@ -337,14 +367,14 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
             return;
         }
 
-        var existing = await _store.GetAgentRelationshipsAsync(cancellationToken);
+        IReadOnlyList<AgentRelationship> existing = await _store.GetAgentRelationshipsAsync(cancellationToken);
         var known = new HashSet<string>(
             existing.Select(relationship => RelationshipKey(
                 relationship.ParentAgentId,
                 relationship.ChildAgentId)),
             StringComparer.OrdinalIgnoreCase);
 
-        foreach (var edge in edges)
+        foreach (CodexStateEdge edge in edges)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!known.Add(RelationshipKey(edge.ParentThreadId, edge.ChildThreadId)))
@@ -364,15 +394,15 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
     private async Task<CodexObservatoryRefreshResult> RefreshFromFilesystemAsync(
         CancellationToken cancellationToken)
     {
-        var files = DiscoverFiles(cancellationToken);
-        var filesScanned = 0;
-        var recordsScanned = 0;
-        var normalized = 0;
-        var errors = 0;
+        IReadOnlyList<string> files = DiscoverFiles(cancellationToken);
+        int filesScanned = 0;
+        int recordsScanned = 0;
+        int normalized = 0;
+        int errors = 0;
         long bytes = 0;
         var sessionsTouched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        foreach (var file in files)
+        foreach (string file in files)
         {
             cancellationToken.ThrowIfCancellationRequested();
             filesScanned++;
@@ -385,14 +415,14 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
                 }
 
                 bytes = checked(bytes + info.Length);
-                var filenameSessionId = CodexRolloutParser.ExtractSessionIdFromFileName(file);
+                string? filenameSessionId = CodexRolloutParser.ExtractSessionIdFromFileName(file);
 
-                var result = await _ingestionService.IngestAsync(file, cancellationToken);
-                var sourceIdentity = result.SourceIdentity ?? CodexSessionIngestionService.GetSourceIdentity(file);
+                CodexIngestionResult result = await _ingestionService.IngestAsync(file, cancellationToken);
+                string sourceIdentity = result.SourceIdentity ?? CodexSessionIngestionService.GetSourceIdentity(file);
                 recordsScanned += result.RecordsScanned;
                 normalized += result.RecordsNormalized;
 
-                var touchedSessionId = result.SessionId ?? filenameSessionId;
+                string? touchedSessionId = result.SessionId ?? filenameSessionId;
                 if (result.RecordsScanned > 0 && !string.IsNullOrWhiteSpace(touchedSessionId))
                 {
                     sessionsTouched.Add(touchedSessionId);
@@ -435,10 +465,10 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
             RecurseSubdirectories = true,
             IgnoreInaccessible = true,
             ReturnSpecialDirectories = false,
-            AttributesToSkip = FileAttributes.ReparsePoint
+            AttributesToSkip = FileAttributes.ReparsePoint,
         };
 
-        foreach (var root in _roots)
+        foreach (string root in _roots)
         {
             cancellationToken.ThrowIfCancellationRequested();
             if (!Directory.Exists(root))
@@ -448,7 +478,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
 
             try
             {
-                foreach (var file in Directory.EnumerateFiles(root, "*.jsonl", options))
+                foreach (string file in Directory.EnumerateFiles(root, "*.jsonl", options))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     files.Add(Path.GetFullPath(file));
@@ -471,15 +501,21 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
         return files
             .OrderByDescending(file =>
             {
-                try { return File.GetLastWriteTimeUtc(file); }
-                catch { return DateTime.MinValue; }
+                try
+                {
+                    return File.GetLastWriteTimeUtc(file);
+                }
+                catch
+                {
+                    return DateTime.MinValue;
+                }
             })
             .ToArray();
     }
 
     private static IEnumerable<string> GetDefaultRoots()
     {
-        var codexHome = GetCodexHome();
+        string codexHome = GetCodexHome();
         yield return Path.Combine(codexHome, "sessions");
         yield return Path.Combine(codexHome, "archived_sessions");
         yield return Path.Combine(codexHome, "archive");
@@ -487,7 +523,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
 
     internal static string GetCodexHome()
     {
-        var codexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
+        string? codexHome = Environment.GetEnvironmentVariable("CODEX_HOME");
         if (string.IsNullOrWhiteSpace(codexHome))
         {
             codexHome = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex");
@@ -496,10 +532,15 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
         return Path.GetFullPath(codexHome);
     }
 
-    private static string RelationshipKey(string parent, string child) => $"{parent}\0{child}";
+    private static string RelationshipKey(string parent, string child)
+    {
+        return $"{parent}\0{child}";
+    }
 
-    private static long? MinTimestamp(long? current, long candidate) =>
-        current is null ? candidate : Math.Min(current.Value, candidate);
+    private static long? MinTimestamp(long? current, long candidate)
+    {
+        return current is null ? candidate : Math.Min(current.Value, candidate);
+    }
 
     private static DateTimeOffset FromUnixMillisecondsOrEpoch(long milliseconds)
     {

@@ -20,7 +20,9 @@
     <ScrollViewer>
         <StackPanel Padding="24" Spacing="16" MaxWidth="1100" HorizontalAlignment="Stretch">
             <TextBlock Text="Diagnostics" FontSize="28" FontWeight="SemiBold" />
-            <TextBlock Text="The collector's latest health, quota decisions, and recent refresh events. Expand a row for evidence and recovery guidance." TextWrapping="Wrap" Opacity="0.75" />
+            <TextBlock
+                Text="The collector's latest health, quota decisions, and recent refresh events. Expand a row for evidence and recovery guidance."
+                TextWrapping="Wrap" Opacity="0.75" />
             <TextBlock x:Name="StatusText" TextWrapping="Wrap" />
             <StackPanel Orientation="Horizontal" Spacing="8">
                 <Button x:Name="RefreshButton" Content="Refresh now" Click="OnRefreshClicked" />
@@ -32,29 +34,39 @@
             <TextBlock Text="Source health" FontSize="20" FontWeight="SemiBold" />
             <TextBlock x:Name="EmptySourcesText" Text="No source results have been published yet." Opacity="0.7" />
             <ItemsControl x:Name="SourceItems" ItemTemplate="{StaticResource DiagnosticTemplate}" />
-            <Expander Header="Provider-native account evidence and comparisons" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+            <Expander Header="Provider-native account evidence and comparisons" HorizontalAlignment="Stretch"
+                      HorizontalContentAlignment="Stretch">
                 <StackPanel Spacing="10">
-                    <TextBlock Text="Backend activity, estimated thread credits and experimental daily reports remain separate evidence; they are never added to rollout totals or treated as interchangeable quota percentages. Automatic reads run at most every 30 minutes. Normal account/activity reads use Codex app-server authentication. If enabled in Quota history, the experimental daily adapter reads the selected Codex login in memory; it never refreshes or writes credentials and does not read browser data. Reading retained comparisons makes no backend request." TextWrapping="Wrap" />
+                    <TextBlock
+                        Text="Backend activity, estimated thread credits and experimental daily reports remain separate evidence; they are never added to rollout totals or treated as interchangeable quota percentages. Automatic reads run at most every 30 minutes. Normal account/activity reads use Codex app-server authentication. If enabled in Quota history, the experimental daily adapter reads the selected Codex login in memory; it never refreshes or writes credentials and does not read browser data. Reading retained comparisons makes no backend request."
+                        TextWrapping="Wrap" />
                     <StackPanel Orientation="Horizontal" Spacing="8">
                         <Button x:Name="ServerReadButton" Content="Read retained comparisons" Click="OnServerReadClicked" />
                         <Button x:Name="ServerCollectButton" Content="Fetch server evidence" Click="OnServerCollectClicked" />
                     </StackPanel>
-                    <TextBlock x:Name="ServerEvidenceText" Text="Read retained comparisons to inspect availability, coverage and mismatches." TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                    <TextBlock x:Name="ServerEvidenceText"
+                               Text="Read retained comparisons to inspect availability, coverage and mismatches." TextWrapping="Wrap"
+                               IsTextSelectionEnabled="True" />
                 </StackPanel>
             </Expander>
             <Expander Header="Recent refresh events" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                 <StackPanel Spacing="8">
-                    <TextBlock Text="Up to 50 events from the latest collector snapshot; this is not a durable incident log." TextWrapping="Wrap" Opacity="0.7" />
+                    <TextBlock Text="Up to 50 events from the latest collector snapshot; this is not a durable incident log."
+                               TextWrapping="Wrap" Opacity="0.7" />
                     <TextBlock x:Name="EventsText" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
                 </StackPanel>
             </Expander>
             <Expander Header="Investigation and recovery" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                 <StackPanel Spacing="10">
-                    <TextBlock Text="These tools inspect local sources. Opening them does not export data, import alternate rollouts, or reset owned history." TextWrapping="Wrap" />
+                    <TextBlock
+                        Text="These tools inspect local sources. Opening them does not export data, import alternate rollouts, or reset owned history."
+                        TextWrapping="Wrap" />
                     <Button Content="Rollout coverage" Click="OnCoverageClicked" />
                     <Button Content="Native sources" Click="OnSourcesClicked" />
                     <Button Content="Settings and data paths" Click="OnSettingsClicked" />
-                    <TextBlock Text="Backups created by local deployment are kept alongside the data folder. For recovery, stop TajsTokens and preserve the entire data directory first; binary rollback does not downgrade the database. Do not copy a live SQLite database without its WAL." TextWrapping="Wrap" Opacity="0.75" />
+                    <TextBlock
+                        Text="Backups created by local deployment are kept alongside the data folder. For recovery, stop TajsTokens and preserve the entire data directory first; binary rollback does not downgrade the database. Do not copy a live SQLite database without its WAL."
+                        TextWrapping="Wrap" Opacity="0.75" />
                 </StackPanel>
             </Expander>
         </StackPanel>

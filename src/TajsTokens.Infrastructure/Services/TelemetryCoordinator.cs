@@ -1,3 +1,9 @@
+// Taj's Tokens | TelemetryCoordinator.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using TajsTokens.Core.Enums;
@@ -5,28 +11,30 @@ using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
 using TajsTokens.Infrastructure.Persistence;
 
+#endregion
+
 namespace TajsTokens.Infrastructure.Services;
 
 /// <summary>
-/// Owns provider refresh serialization for the whole process. Dashboard, tray, alerts, Observatory,
-/// and historical intelligence consume one refresh cadence rather than creating competing loops.
+///     Owns provider refresh serialization for the whole process. Dashboard, tray, alerts, Observatory,
+///     and historical intelligence consume one refresh cadence rather than creating competing loops.
 /// </summary>
 public sealed class TelemetryCoordinator
 {
-    private readonly ICodexTokenAccountingProvider _tokenProvider;
-    private readonly ICodexQuotaProvider _quotaProvider;
-    private readonly SqliteTelemetryRepository _repository;
-    private readonly ICodexObservatoryService? _observatoryService;
-    private readonly IIntelligenceService? _intelligenceService;
-    private readonly CodexServerEvidenceService? _serverEvidence;
-    private readonly SemaphoreSlim _refreshGate = new(1, 1);
-    private readonly SemaphoreSlim _intelligenceRefreshGate = new(1, 1);
-    private readonly ConcurrentQueue<TelemetryRefreshEvent> _backgroundEvents = new();
     private readonly object _activeRefreshSync = new();
+    private readonly ConcurrentQueue<TelemetryRefreshEvent> _backgroundEvents = new();
+    private readonly SemaphoreSlim _intelligenceRefreshGate = new(1, 1);
+    private readonly IIntelligenceService? _intelligenceService;
+    private readonly ICodexObservatoryService? _observatoryService;
+    private readonly ICodexQuotaProvider _quotaProvider;
+    private readonly SemaphoreSlim _refreshGate = new(1, 1);
+    private readonly SqliteTelemetryRepository _repository;
+    private readonly CodexServerEvidenceService? _serverEvidence;
+    private readonly ICodexTokenAccountingProvider _tokenProvider;
     private CancellationTokenSource? _activeRefreshCancellation;
     private RefreshTrigger? _activeRefreshTrigger;
-    private TelemetrySnapshot _latest = TelemetrySnapshot.Empty;
     private string _lastTokenSourceName = "Token accounting";
+    private TelemetrySnapshot _latest = TelemetrySnapshot.Empty;
 
     public TelemetryCoordinator(
         ICodexTokenAccountingProvider tokenProvider,
@@ -49,12 +57,14 @@ public sealed class TelemetryCoordinator
     public event Action<TelemetrySnapshot>? SnapshotUpdated;
 
     /// <summary>
-    /// Refreshes telemetry without ever running provider/database work on a caller's UI
-    /// SynchronizationContext. Microsoft.Data.Sqlite executes much of its work synchronously, so an
-    /// ordinary async call from WinUI can otherwise block the dispatcher despite using await.
+    ///     Refreshes telemetry without ever running provider/database work on a caller's UI
+    ///     SynchronizationContext. Microsoft.Data.Sqlite executes much of its work synchronously, so an
+    ///     ordinary async call from WinUI can otherwise block the dispatcher despite using await.
     /// </summary>
-    public Task<TelemetrySnapshot> RefreshAsync(RefreshTrigger trigger, CancellationToken cancellationToken) =>
-        Task.Run(() => RefreshCoreAsync(trigger, cancellationToken), cancellationToken);
+    public Task<TelemetrySnapshot> RefreshAsync(RefreshTrigger trigger, CancellationToken cancellationToken)
+    {
+        return Task.Run(() => RefreshCoreAsync(trigger, cancellationToken), cancellationToken);
+    }
 
     private async Task<TelemetrySnapshot> RefreshCoreAsync(RefreshTrigger trigger, CancellationToken cancellationToken)
     {
@@ -77,35 +87,37 @@ public sealed class TelemetryCoordinator
             _activeRefreshTrigger = trigger;
         }
 
-        var refreshToken = refreshCancellation.Token;
+        CancellationToken refreshToken = refreshCancellation.Token;
         try
         {
-            var startedAt = DateTimeOffset.UtcNow;
+            DateTimeOffset startedAt = DateTimeOffset.UtcNow;
             var stopwatch = Stopwatch.StartNew();
-            var previous = Latest;
-            var retainedTokenForecast = previous.TokenForecast is { } oldForecast
-                ? oldForecast with { IsStale = true } : null;
+            TelemetrySnapshot previous = Latest;
+            TokenWorkloadForecast? retainedTokenForecast = previous.TokenForecast is { } oldForecast
+                ? oldForecast with { IsStale = true }
+                : null;
             var sources = new List<ProviderHealthSnapshot>(6);
             var events = new List<TelemetryRefreshEvent>();
-            while (_backgroundEvents.TryDequeue(out var backgroundEvent))
+            while (_backgroundEvents.TryDequeue(out TelemetryRefreshEvent? backgroundEvent))
             {
                 events.Add(backgroundEvent);
             }
 
-            var persistenceAvailable = false;
+            bool persistenceAvailable = false;
             try
             {
                 await _repository.InitializeAsync(refreshToken);
                 persistenceAvailable = true;
-                sources.Add(new ProviderHealthSnapshot(
-                    "SQLite",
-                    TelemetryHealthState.Live,
-                    "Local telemetry history is available.",
-                    startedAt));
+                sources.Add(
+                    new ProviderHealthSnapshot(
+                        "SQLite",
+                        TelemetryHealthState.Live,
+                        "Local telemetry history is available.",
+                        startedAt));
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                var detail = SummarizeError(exception);
+                string detail = SummarizeError(exception);
                 sources.Add(new ProviderHealthSnapshot("SQLite", TelemetryHealthState.Error, detail));
                 events.Add(new TelemetryRefreshEvent(startedAt, "Persistence unavailable", detail));
             }
@@ -114,40 +126,40 @@ public sealed class TelemetryCoordinator
             // intentionally refreshed only after the Observatory writer commits changed rollouts, so
             // the final snapshot contains the turn that triggered this refresh rather than lagging by
             // one cadence. Provider-authoritative quota can still publish progressively beforehand.
-            var tokenUsages = previous.TokenUsages;
-            var hourlyBuckets = previous.HourlyBuckets;
-            var tokenFresh = false;
-            var tokenGeneration = previous.TokenGeneration is null
+            IReadOnlyList<TokenUsage> tokenUsages = previous.TokenUsages;
+            IReadOnlyList<TokenTimeBucket> hourlyBuckets = previous.HourlyBuckets;
+            bool tokenFresh = false;
+            TokenAccountingGenerationState? tokenGeneration = previous.TokenGeneration is null
                 ? null
                 : previous.TokenGeneration with { State = TelemetryHealthState.Stale };
-            var observatoryFresh = _observatoryService is null;
-            var currentForecasts = previous.CurrentForecasts
+            bool observatoryFresh = _observatoryService is null;
+            CurrentQuotaForecast[] currentForecasts = previous.CurrentForecasts
                 .Select(item => item with { State = TelemetryHealthState.Stale })
                 .ToArray();
 
-            var quotaSnapshots = previous.QuotaSnapshots;
-            var quotaLanes = BuildInitialQuotaLanes(previous);
+            IReadOnlyList<QuotaSnapshot> quotaSnapshots = previous.QuotaSnapshots;
+            IReadOnlyList<QuotaLaneState> quotaLanes = BuildInitialQuotaLanes(previous);
             IReadOnlyList<QuotaSnapshot> freshQuotaSnapshots = [];
             CodexServerObservation? quotaMetadata = null;
-            var quotaFresh = false;
-            var quotaResponseHasSupportedWindow = false;
+            bool quotaFresh = false;
+            bool quotaResponseHasSupportedWindow = false;
             try
             {
-                var response = await _quotaProvider.GetQuotaResponseAsync(refreshToken);
+                CodexQuotaResponse response = await _quotaProvider.GetQuotaResponseAsync(refreshToken);
                 freshQuotaSnapshots = response.Snapshots;
                 if (freshQuotaSnapshots.Any(item => item.AccountKey != response.AccountKey))
                     throw new InvalidOperationException("Quota response contains inconsistent backend-account scope.");
                 quotaMetadata = response.MetadataObservation;
-                var compatiblePrevious = previous with
+                TelemetrySnapshot compatiblePrevious = previous with
                 {
                     QuotaSnapshots = previous.QuotaSnapshots.Where(item => item.AccountKey == response.AccountKey).ToArray(),
                     QuotaLanes = previous.QuotaLanes.Select(lane =>
                         lane.Snapshot is { } retained && retained.AccountKey != response.AccountKey
                             ? lane with { Snapshot = null, State = TelemetryHealthState.Unavailable, LastSuccessUtc = null }
-                            : lane).ToArray()
+                            : lane).ToArray(),
                 };
                 currentForecasts = currentForecasts.Where(item => item.Current.AccountKey == response.AccountKey).ToArray();
-                var supported = freshQuotaSnapshots
+                QuotaSnapshot[] supported = freshQuotaSnapshots
                     .Where(snapshot => snapshot.Kind is QuotaWindowKind.FiveHour or QuotaWindowKind.Weekly)
                     .ToArray();
                 quotaResponseHasSupportedWindow = supported.Length > 0;
@@ -155,47 +167,50 @@ public sealed class TelemetryCoordinator
 
                 quotaLanes = BuildQuotaLanes(compatiblePrevious, supported, startedAt);
                 quotaFresh = quotaResponseHasSupportedWindow && quotaLanes.All(lane => lane.IsFresh || lane.NotReportedByProvider);
-                var liveCount = quotaLanes.Count(lane => lane.State == TelemetryHealthState.Live);
-                var staleCount = quotaLanes.Count(lane => lane.State == TelemetryHealthState.Stale);
-                var unavailableCount = quotaLanes.Count(lane => lane.State == TelemetryHealthState.Unavailable);
+                int liveCount = quotaLanes.Count(lane => lane.State == TelemetryHealthState.Live);
+                int staleCount = quotaLanes.Count(lane => lane.State == TelemetryHealthState.Stale);
+                int unavailableCount = quotaLanes.Count(lane => lane.State == TelemetryHealthState.Unavailable);
 
-                var sourceState = quotaFresh
+                TelemetryHealthState sourceState = quotaFresh
                     ? TelemetryHealthState.Live
                     : liveCount > 0 || staleCount > 0
                         ? TelemetryHealthState.Stale
                         : TelemetryHealthState.Unavailable;
-                var detail = quotaFresh
+                string detail = quotaFresh
                     ? $"{liveCount} reported quota window(s) refreshed; {quotaLanes.Count(lane => lane.NotReportedByProvider)} not reported by Codex. No model turn was created."
                     : quotaResponseHasSupportedWindow
                         ? $"Partial provider-authoritative quota refresh: {liveCount} live, {staleCount} stale, {unavailableCount} unavailable lane(s). Fresh lanes remain independently usable."
                         : "The app-server responded but did not expose a supported five-hour or weekly window; previous lanes remain stale when available.";
 
                 detail += $" {QuotaAccountScope.Describe(response.AccountKey)}; local rollout work is not account-attributed.";
-                sources.Add(new ProviderHealthSnapshot(
-                    "Codex app-server",
-                    sourceState,
-                    detail,
-                    liveCount > 0 ? startedAt : PreviousSuccess(previous, "Codex app-server")));
-                events.Add(new TelemetryRefreshEvent(
-                    startedAt,
-                    "Quota refresh",
-                    quotaFresh
-                        ? "Refreshed the quota windows reported by Codex. Unreported windows are not treated as unlimited."
-                        : quotaResponseHasSupportedWindow
-                            ? "Captured a partial Codex quota response; retained omitted last-known-good lanes as stale."
-                            : "Codex app-server returned no supported five-hour or weekly quota windows."));
+                sources.Add(
+                    new ProviderHealthSnapshot(
+                        "Codex app-server",
+                        sourceState,
+                        detail,
+                        liveCount > 0 ? startedAt : PreviousSuccess(previous, "Codex app-server")));
+                events.Add(
+                    new TelemetryRefreshEvent(
+                        startedAt,
+                        "Quota refresh",
+                        quotaFresh
+                            ? "Refreshed the quota windows reported by Codex. Unreported windows are not treated as unlimited."
+                            : quotaResponseHasSupportedWindow
+                                ? "Captured a partial Codex quota response; retained omitted last-known-good lanes as stale."
+                                : "Codex app-server returned no supported five-hour or weekly quota windows."));
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                var detail = SummarizeError(exception);
+                string detail = SummarizeError(exception);
                 quotaLanes = BuildInitialQuotaLanes(previous);
                 quotaFresh = false;
-                var hasPrevious = quotaLanes.Any(lane => lane.Snapshot is not null);
-                sources.Add(new ProviderHealthSnapshot(
-                    "Codex app-server",
-                    hasPrevious ? TelemetryHealthState.Stale : TelemetryHealthState.Unavailable,
-                    hasPrevious ? $"Using last-known-good quota lanes as stale. {detail}" : detail,
-                    PreviousSuccess(previous, "Codex app-server")));
+                bool hasPrevious = quotaLanes.Any(lane => lane.Snapshot is not null);
+                sources.Add(
+                    new ProviderHealthSnapshot(
+                        "Codex app-server",
+                        hasPrevious ? TelemetryHealthState.Stale : TelemetryHealthState.Unavailable,
+                        hasPrevious ? $"Using last-known-good quota lanes as stale. {detail}" : detail,
+                        PreviousSuccess(previous, "Codex app-server")));
                 events.Add(new TelemetryRefreshEvent(startedAt, "Quota unavailable", detail));
             }
 
@@ -204,8 +219,8 @@ public sealed class TelemetryCoordinator
                 try
                 {
                     if (quotaMetadata is not null)
-                        await _repository.SaveServerEvidenceAsync(new([quotaMetadata]), refreshToken);
-                    foreach (var snapshot in freshQuotaSnapshots.Where(snapshot =>
+                        await _repository.SaveServerEvidenceAsync(new CodexServerCollection([quotaMetadata]), refreshToken);
+                    foreach (QuotaSnapshot snapshot in freshQuotaSnapshots.Where(snapshot =>
                                  snapshot.Kind is QuotaWindowKind.FiveHour or QuotaWindowKind.Weekly))
                     {
                         await _repository.UpsertQuotaSnapshotAsync(snapshot, refreshToken);
@@ -214,29 +229,32 @@ public sealed class TelemetryCoordinator
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
                     persistenceAvailable = false;
-                    var detail = SummarizeError(exception);
+                    string detail = SummarizeError(exception);
                     ReplaceSource(sources, new ProviderHealthSnapshot("SQLite", TelemetryHealthState.Error, detail));
-                    events.Add(new TelemetryRefreshEvent(
-                        startedAt,
-                        "Persistence error",
-                        $"Live provider data is still available, but fresh quota observations were not stored: {detail}"));
+                    events.Add(
+                        new TelemetryRefreshEvent(
+                            startedAt,
+                            "Persistence error",
+                            $"Live provider data is still available, but fresh quota observations were not stored: {detail}"));
                 }
             }
 
             Task<CodexObservatoryRefreshResult>? observatoryTask = null;
             if (persistenceAvailable && _observatoryService is not null)
             {
-                var scanSources = sources.ToList();
-                scanSources.Add(new ProviderHealthSnapshot(
-                    "Codex rollouts",
-                    TelemetryHealthState.Stale,
-                    "Scanning local Codex rollout history (changed sources) in the background; provider quota is already usable and the last complete token generation remains visible.",
-                    PreviousSuccess(previous, "Codex rollouts")));
-                var scanEvents = events.ToList();
-                scanEvents.Add(new TelemetryRefreshEvent(
-                    DateTimeOffset.UtcNow,
-                    "Codex observatory scan",
-                    "Incremental rollout ingestion started in the background. Native accounting will project the committed generation afterward."));
+                List<ProviderHealthSnapshot> scanSources = sources.ToList();
+                scanSources.Add(
+                    new ProviderHealthSnapshot(
+                        "Codex rollouts",
+                        TelemetryHealthState.Stale,
+                        "Scanning local Codex rollout history (changed sources) in the background; provider quota is already usable and the last complete token generation remains visible.",
+                        PreviousSuccess(previous, "Codex rollouts")));
+                List<TelemetryRefreshEvent> scanEvents = events.ToList();
+                scanEvents.Add(
+                    new TelemetryRefreshEvent(
+                        DateTimeOffset.UtcNow,
+                        "Codex observatory scan",
+                        "Incremental rollout ingestion started in the background. Native accounting will project the committed generation afterward."));
 
                 PublishSnapshot(
                     trigger,
@@ -260,45 +278,51 @@ public sealed class TelemetryCoordinator
             {
                 try
                 {
-                    var observatory = await observatoryTask;
-                    var sourcePresent = observatory.FilesDiscovered > 0;
+                    CodexObservatoryRefreshResult observatory = await observatoryTask;
+                    bool sourcePresent = observatory.FilesDiscovered > 0;
                     observatoryFresh = sourcePresent && observatory.Errors == 0 && observatory.DeferredFiles == 0;
-                    var state = observatoryFresh
+                    TelemetryHealthState state = observatoryFresh
                         ? TelemetryHealthState.Live
                         : sourcePresent
                             ? TelemetryHealthState.Stale
                             : TelemetryHealthState.Unavailable;
-                    var detail = observatory.FilesDiscovered == 0
+                    string detail = observatory.FilesDiscovered == 0
                         ? "No local Codex rollout JSONL sources were discovered. Previously normalized history, if any, remains historical rather than live."
                         : $"{observatory.FilesDiscovered} catalog rollout(s), {observatory.FilesScanned} changed file(s) scanned, {observatory.RecordsScanned} new complete record(s), {observatory.RecordsNormalized} normalized, {observatory.SessionsTouched} touched session(s), {FormatByteCount(observatory.BytesObserved)} observed on changed sources." +
-                          (observatory.Errors > 0 ? $" {observatory.Errors} file(s) could not be refreshed and will retry." : string.Empty) +
-                          (observatory.DeferredFiles > 0 ? $" {observatory.DeferredFiles} changed indexed file(s) remain queued for later bounded passes; token history is not yet fully refreshed." : string.Empty);
+                          (observatory.Errors > 0
+                              ? $" {observatory.Errors} file(s) could not be refreshed and will retry."
+                              : string.Empty) +
+                          (observatory.DeferredFiles > 0
+                              ? $" {observatory.DeferredFiles} changed indexed file(s) remain queued for later bounded passes; token history is not yet fully refreshed."
+                              : string.Empty);
                     if (observatory.Coverage is { } coverage)
                     {
                         detail += $" Best-effort path coverage at {coverage.ObservedAtUtc:u}: " +
-                            $"{coverage.AccessibleIndexedPaths}/{coverage.IndexedPaths} indexed paths accessible; " +
-                            $"{coverage.DiscoveredPaths} files in configured discovery roots, {coverage.UnindexedPaths} not indexed; " +
-                            $"{coverage.IndexedOutsideDiscovery} indexed paths outside that discovered set. " +
-                            "Unindexed files may be alternate copies, not missing tasks; they are not automatically imported while the state index is usable. " +
-                            "These path counts do not measure unique work or durable collection completeness. " +
-                            "Use Codex > Rollout coverage for bounded, read-only alternate-file comparisons.";
+                                  $"{coverage.AccessibleIndexedPaths}/{coverage.IndexedPaths} indexed paths accessible; " +
+                                  $"{coverage.DiscoveredPaths} files in configured discovery roots, {coverage.UnindexedPaths} not indexed; " +
+                                  $"{coverage.IndexedOutsideDiscovery} indexed paths outside that discovered set. " +
+                                  "Unindexed files may be alternate copies, not missing tasks; they are not automatically imported while the state index is usable. " +
+                                  "These path counts do not measure unique work or durable collection completeness. " +
+                                  "Use Codex > Rollout coverage for bounded, read-only alternate-file comparisons.";
                     }
-                    sources.Add(new ProviderHealthSnapshot(
-                        "Codex rollouts",
-                        state,
-                        detail,
-                        observatoryFresh ? startedAt : PreviousSuccess(previous, "Codex rollouts")));
+                    sources.Add(
+                        new ProviderHealthSnapshot(
+                            "Codex rollouts",
+                            state,
+                            detail,
+                            observatoryFresh ? startedAt : PreviousSuccess(previous, "Codex rollouts")));
                     events.Add(new TelemetryRefreshEvent(startedAt, "Codex observatory", detail));
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
                     observatoryFresh = false;
-                    var detail = SummarizeError(exception);
-                    sources.Add(new ProviderHealthSnapshot(
-                        "Codex rollouts",
-                        TelemetryHealthState.Stale,
-                        $"Rollout observatory refresh failed; previously normalized history remains available. {detail}",
-                        PreviousSuccess(previous, "Codex rollouts")));
+                    string detail = SummarizeError(exception);
+                    sources.Add(
+                        new ProviderHealthSnapshot(
+                            "Codex rollouts",
+                            TelemetryHealthState.Stale,
+                            $"Rollout observatory refresh failed; previously normalized history remains available. {detail}",
+                            PreviousSuccess(previous, "Codex rollouts")));
                     events.Add(new TelemetryRefreshEvent(startedAt, "Codex observatory unavailable", detail));
                 }
             }
@@ -307,12 +331,12 @@ public sealed class TelemetryCoordinator
 
             try
             {
-                var accounting = await _tokenProvider.GetSnapshotAsync(refreshToken);
-                var projectedUsages = accounting.Usage;
-                var projectedHourly = accounting.Hourly;
-                var hasPreviousTokenGeneration = previous.TokenUsages.Count > 0 || previous.HourlyBuckets.Count > 0;
-                var accountingFresh = accounting.IsFallback || observatoryFresh;
-                var accountingQuality = accounting.IsFallback
+                CodexTokenAccountingSnapshot accounting = await _tokenProvider.GetSnapshotAsync(refreshToken);
+                IReadOnlyList<TokenUsage> projectedUsages = accounting.Usage;
+                IReadOnlyList<TokenTimeBucket> projectedHourly = accounting.Hourly;
+                bool hasPreviousTokenGeneration = previous.TokenUsages.Count > 0 || previous.HourlyBuckets.Count > 0;
+                bool accountingFresh = accounting.IsFallback || observatoryFresh;
+                TelemetryDataQuality accountingQuality = accounting.IsFallback
                     ? TelemetryDataQuality.Fallback
                     : TelemetryDataQuality.Primary;
 
@@ -330,7 +354,7 @@ public sealed class TelemetryCoordinator
                     tokenFresh = false;
                 }
 
-                var generationState = accountingFresh
+                TelemetryHealthState generationState = accountingFresh
                     ? TelemetryHealthState.Live
                     : tokenUsages.Count > 0 || hourlyBuckets.Count > 0
                         ? TelemetryHealthState.Stale
@@ -355,11 +379,12 @@ public sealed class TelemetryCoordinator
                         State = TelemetryHealthState.Stale,
                         Diagnostic = AppendDiagnostic(
                             tokenGeneration.Diagnostic,
-                            "Upstream rollout ingestion was incomplete; preserving the last complete displayed token generation.")
+                            "Upstream rollout ingestion was incomplete; preserving the last complete displayed token generation."),
                     };
                 }
 
-                var accountingDetail = $"{projectedUsages.Count} model row(s), {projectedHourly.Count} hourly bucket(s). {accounting.Coverage}";
+                string accountingDetail =
+                    $"{projectedUsages.Count} model row(s), {projectedHourly.Count} hourly bucket(s). {accounting.Coverage}";
                 if (accounting.IsFallback)
                 {
                     accountingDetail += " Fresh fallback generation; fallback quality is degraded independently of freshness.";
@@ -375,25 +400,27 @@ public sealed class TelemetryCoordinator
                     accountingDetail += $" {accounting.Diagnostic}";
                 }
 
-                sources.Add(new ProviderHealthSnapshot(
-                    accounting.Source,
-                    generationState,
-                    accountingDetail,
-                    generationState == TelemetryHealthState.Live
-                        ? startedAt
-                        : PreviousSuccess(previous, accounting.Source)));
-                events.Add(new TelemetryRefreshEvent(
-                    startedAt,
-                    accountingFresh ? "Token refresh" : "Token generation stale",
-                    accountingFresh
-                        ? $"Loaded {FormatTokenCount(projectedUsages.Sum(item => item.Breakdown.Total))} local-history tokens from {accounting.Source}" +
-                          (accounting.IsFallback ? " using explicit fallback quality." : ".")
-                        : "Native accounting projection remained usable, but upstream rollout ingestion was incomplete so the generation was not promoted as live."));
+                sources.Add(
+                    new ProviderHealthSnapshot(
+                        accounting.Source,
+                        generationState,
+                        accountingDetail,
+                        generationState == TelemetryHealthState.Live
+                            ? startedAt
+                            : PreviousSuccess(previous, accounting.Source)));
+                events.Add(
+                    new TelemetryRefreshEvent(
+                        startedAt,
+                        accountingFresh ? "Token refresh" : "Token generation stale",
+                        accountingFresh
+                            ? $"Loaded {FormatTokenCount(projectedUsages.Sum(item => item.Breakdown.Total))} local-history tokens from {accounting.Source}" +
+                              (accounting.IsFallback ? " using explicit fallback quality." : ".")
+                            : "Native accounting projection remained usable, but upstream rollout ingestion was incomplete so the generation was not promoted as live."));
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                var detail = SummarizeError(exception);
-                var hasPrevious = previous.TokenUsages.Count > 0 || previous.HourlyBuckets.Count > 0;
+                string detail = SummarizeError(exception);
+                bool hasPrevious = previous.TokenUsages.Count > 0 || previous.HourlyBuckets.Count > 0;
                 tokenUsages = previous.TokenUsages;
                 hourlyBuckets = previous.HourlyBuckets;
                 tokenFresh = false;
@@ -401,15 +428,15 @@ public sealed class TelemetryCoordinator
                 {
                     tokenGeneration = tokenGeneration with
                     {
-                        State = TelemetryHealthState.Stale,
-                        Diagnostic = AppendDiagnostic(tokenGeneration.Diagnostic, detail)
+                        State = TelemetryHealthState.Stale, Diagnostic = AppendDiagnostic(tokenGeneration.Diagnostic, detail),
                     };
                 }
-                sources.Add(new ProviderHealthSnapshot(
-                    _lastTokenSourceName,
-                    hasPrevious ? TelemetryHealthState.Stale : TelemetryHealthState.Unavailable,
-                    hasPrevious ? $"Using last-known-good token data. {detail}" : detail,
-                    PreviousSuccess(previous, _lastTokenSourceName)));
+                sources.Add(
+                    new ProviderHealthSnapshot(
+                        _lastTokenSourceName,
+                        hasPrevious ? TelemetryHealthState.Stale : TelemetryHealthState.Unavailable,
+                        hasPrevious ? $"Using last-known-good token data. {detail}" : detail,
+                        PreviousSuccess(previous, _lastTokenSourceName)));
                 events.Add(new TelemetryRefreshEvent(startedAt, "Token accounting unavailable", detail));
             }
 
@@ -418,17 +445,24 @@ public sealed class TelemetryCoordinator
                 try
                 {
                     currentForecasts = (await _intelligenceService.BuildAndPersistCurrentForecastsAsync(
-                        quotaLanes, DateTimeOffset.UtcNow, refreshToken)).ToArray();
-                    var liveForecasts = currentForecasts.Count(item => item.IsFresh && item.Forecast is not null);
-                    events.Add(new TelemetryRefreshEvent(
+                        quotaLanes,
                         DateTimeOffset.UtcNow,
-                        "Current forecasts",
-                        $"Built and persisted {liveForecasts} provider-anchored current forecast(s)."));
+                        refreshToken)).ToArray();
+                    int liveForecasts = currentForecasts.Count(item => item.IsFresh && item.Forecast is not null);
+                    events.Add(
+                        new TelemetryRefreshEvent(
+                            DateTimeOffset.UtcNow,
+                            "Current forecasts",
+                            $"Built and persisted {liveForecasts} provider-anchored current forecast(s)."));
                 }
                 catch (Exception exception) when (exception is not OperationCanceledException)
                 {
                     currentForecasts = currentForecasts
-                        .Select(item => item with { State = TelemetryHealthState.Stale, Diagnostic = AppendDiagnostic(item.Diagnostic, SummarizeError(exception)) })
+                        .Select(item => item with
+                        {
+                            State = TelemetryHealthState.Stale,
+                            Diagnostic = AppendDiagnostic(item.Diagnostic, SummarizeError(exception)),
+                        })
                         .ToArray();
                     events.Add(new TelemetryRefreshEvent(DateTimeOffset.UtcNow, "Forecast unavailable", SummarizeError(exception)));
                 }
@@ -448,12 +482,13 @@ public sealed class TelemetryCoordinator
             }
             refreshToken.ThrowIfCancellationRequested();
             stopwatch.Stop();
-            events.Add(new TelemetryRefreshEvent(
-                DateTimeOffset.UtcNow,
-                "Refresh completed",
-                $"{trigger.ToString().ToLowerInvariant()} refresh finished in {stopwatch.Elapsed.TotalSeconds:0.0}s."));
+            events.Add(
+                new TelemetryRefreshEvent(
+                    DateTimeOffset.UtcNow,
+                    "Refresh completed",
+                    $"{trigger.ToString().ToLowerInvariant()} refresh finished in {stopwatch.Elapsed.TotalSeconds:0.0}s."));
 
-            var publishedSnapshot = PublishSnapshot(
+            TelemetrySnapshot publishedSnapshot = PublishSnapshot(
                 trigger,
                 tokenUsages,
                 hourlyBuckets,
@@ -465,7 +500,8 @@ public sealed class TelemetryCoordinator
                 events,
                 quotaLanes,
                 tokenGeneration,
-                currentForecasts, tokenForecast);
+                currentForecasts,
+                tokenForecast);
 
             // Historical intelligence is derived from already-persisted normalized telemetry. Queue
             // it only after the final telemetry snapshot has been published, and never hold the
@@ -501,8 +537,13 @@ public sealed class TelemetryCoordinator
 
     private async Task CollectServerEvidenceAsync(CancellationToken token)
     {
-        try { await _serverEvidence!.CollectAsync(false, token); }
-        catch (OperationCanceledException) when (token.IsCancellationRequested) { }
+        try
+        {
+            await _serverEvidence!.CollectAsync(false, token);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested)
+        {
+        }
     }
 
     public async Task RunPeriodicAsync(TimeSpan interval, CancellationToken cancellationToken)
@@ -526,10 +567,11 @@ public sealed class TelemetryCoordinator
         }
         catch (Exception exception)
         {
-            _backgroundEvents.Enqueue(new TelemetryRefreshEvent(
-                DateTimeOffset.UtcNow,
-                "Startup refresh failed",
-                $"Periodic telemetry will retry. {SummarizeError(exception)}"));
+            _backgroundEvents.Enqueue(
+                new TelemetryRefreshEvent(
+                    DateTimeOffset.UtcNow,
+                    "Startup refresh failed",
+                    $"Periodic telemetry will retry. {SummarizeError(exception)}"));
         }
 
         using var timer = new PeriodicTimer(interval);
@@ -551,10 +593,11 @@ public sealed class TelemetryCoordinator
                 }
                 catch (Exception exception)
                 {
-                    _backgroundEvents.Enqueue(new TelemetryRefreshEvent(
-                        DateTimeOffset.UtcNow,
-                        "Periodic refresh failed",
-                        $"Telemetry will retry on the next interval. {SummarizeError(exception)}"));
+                    _backgroundEvents.Enqueue(
+                        new TelemetryRefreshEvent(
+                            DateTimeOffset.UtcNow,
+                            "Periodic refresh failed",
+                            $"Telemetry will retry on the next interval. {SummarizeError(exception)}"));
                 }
             }
         }
@@ -570,7 +613,7 @@ public sealed class TelemetryCoordinator
 
     private async Task RefreshIntelligenceAsync(CancellationToken cancellationToken)
     {
-        var entered = false;
+        bool entered = false;
         try
         {
             entered = await _intelligenceRefreshGate.WaitAsync(0, cancellationToken);
@@ -579,21 +622,23 @@ public sealed class TelemetryCoordinator
                 return;
             }
 
-            var intelligence = await _intelligenceService.RefreshAsync(cancellationToken);
-            _backgroundEvents.Enqueue(new TelemetryRefreshEvent(
-                DateTimeOffset.UtcNow,
-                "Historical intelligence",
-                $"Detected {intelligence.ResetEventsDetected} new reset/re-anchor event(s); current forecasts are owned by the provider-anchored refresh path."));
+            IntelligenceRefreshResult intelligence = await _intelligenceService.RefreshAsync(cancellationToken);
+            _backgroundEvents.Enqueue(
+                new TelemetryRefreshEvent(
+                    DateTimeOffset.UtcNow,
+                    "Historical intelligence",
+                    $"Detected {intelligence.ResetEventsDetected} new reset/re-anchor event(s); current forecasts are owned by the provider-anchored refresh path."));
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
         }
         catch (Exception exception)
         {
-            _backgroundEvents.Enqueue(new TelemetryRefreshEvent(
-                DateTimeOffset.UtcNow,
-                "Intelligence unavailable",
-                $"Telemetry remains available; historical intelligence will retry. {SummarizeError(exception)}"));
+            _backgroundEvents.Enqueue(
+                new TelemetryRefreshEvent(
+                    DateTimeOffset.UtcNow,
+                    "Intelligence unavailable",
+                    $"Telemetry remains available; historical intelligence will retry. {SummarizeError(exception)}"));
         }
         finally
         {
@@ -631,10 +676,7 @@ public sealed class TelemetryCoordinator
             sources.ToArray(),
             events.ToArray())
         {
-            QuotaLanes = quotaLanes,
-            CurrentForecasts = currentForecasts,
-            TokenGeneration = tokenGeneration,
-            TokenForecast = tokenForecast
+            QuotaLanes = quotaLanes, CurrentForecasts = currentForecasts, TokenGeneration = tokenGeneration, TokenForecast = tokenForecast,
         };
 
         Volatile.Write(ref _latest, snapshot);
@@ -650,7 +692,7 @@ public sealed class TelemetryCoordinator
                 .Select(lane => lane with
                 {
                     State = lane.Snapshot is null ? TelemetryHealthState.Unavailable : TelemetryHealthState.Stale,
-                    NotReportedByProvider = false
+                    NotReportedByProvider = false,
                 })
                 .ToArray();
         }
@@ -658,7 +700,7 @@ public sealed class TelemetryCoordinator
         return ExpectedQuotaKeys()
             .Select(key =>
             {
-                var snapshot = previous.QuotaSnapshots
+                QuotaSnapshot? snapshot = previous.QuotaSnapshots
                     .Where(item => item.Kind == key.Kind &&
                                    string.Equals(item.Provider, key.Provider, StringComparison.Ordinal) &&
                                    string.Equals(item.Profile, key.Profile, StringComparison.Ordinal))
@@ -680,8 +722,8 @@ public sealed class TelemetryCoordinator
         IReadOnlyList<QuotaSnapshot> fresh,
         DateTimeOffset observedAtUtc)
     {
-        var previousLanes = BuildInitialQuotaLanes(previous);
-        var keys = previousLanes
+        IReadOnlyList<QuotaLaneState> previousLanes = BuildInitialQuotaLanes(previous);
+        (QuotaWindowKind Kind, string Provider, string Profile)[] keys = previousLanes
             .Select(lane => (lane.Kind, lane.Provider, lane.Profile))
             .Concat(fresh.Select(snapshot => (snapshot.Kind, snapshot.Provider, snapshot.Profile)))
             .Concat(ExpectedQuotaKeys())
@@ -690,7 +732,7 @@ public sealed class TelemetryCoordinator
 
         return keys.Select(key =>
         {
-            var freshSnapshot = fresh
+            QuotaSnapshot? freshSnapshot = fresh
                 .Where(item => item.Kind == key.Kind &&
                                string.Equals(item.Provider, key.Provider, StringComparison.Ordinal) &&
                                string.Equals(item.Profile, key.Profile, StringComparison.Ordinal))
@@ -707,19 +749,24 @@ public sealed class TelemetryCoordinator
                     observedAtUtc);
             }
 
-            var previousLane = previousLanes.FirstOrDefault(lane =>
+            QuotaLaneState? previousLane = previousLanes.FirstOrDefault(lane =>
                 lane.Kind == key.Kind &&
                 string.Equals(lane.Provider, key.Provider, StringComparison.Ordinal) &&
                 string.Equals(lane.Profile, key.Profile, StringComparison.Ordinal));
             return previousLane is null
-                ? new QuotaLaneState(key.Kind, key.Provider, key.Profile, null, TelemetryHealthState.Unavailable,
+                ? new QuotaLaneState(
+                    key.Kind,
+                    key.Provider,
+                    key.Profile,
+                    null,
+                    TelemetryHealthState.Unavailable,
                     NotReportedByProvider: fresh.Count > 0)
                 : previousLane with
                 {
                     State = previousLane.Snapshot is null
                         ? TelemetryHealthState.Unavailable
                         : TelemetryHealthState.Stale,
-                    NotReportedByProvider = fresh.Count > 0
+                    NotReportedByProvider = fresh.Count > 0,
                 };
         }).ToArray();
     }
@@ -734,24 +781,28 @@ public sealed class TelemetryCoordinator
         TelemetrySnapshot snapshot,
         QuotaWindowKind kind,
         string provider,
-        string profile) =>
-        snapshot.QuotaLanes.FirstOrDefault(lane =>
+        string profile)
+    {
+        return snapshot.QuotaLanes.FirstOrDefault(lane =>
             lane.Kind == kind &&
             string.Equals(lane.Provider, provider, StringComparison.Ordinal) &&
             string.Equals(lane.Profile, profile, StringComparison.Ordinal))?.LastSuccessUtc;
+    }
 
-    private static string AppendDiagnostic(string? existing, string addition) =>
-        string.IsNullOrWhiteSpace(existing) ? addition : $"{existing} {addition}";
+    private static string AppendDiagnostic(string? existing, string addition)
+    {
+        return string.IsNullOrWhiteSpace(existing) ? addition : $"{existing} {addition}";
+    }
 
     private static IReadOnlyList<QuotaSnapshot> MergeQuotaSnapshots(
         IReadOnlyList<QuotaSnapshot> previous,
         IReadOnlyList<QuotaSnapshot> fresh)
     {
-        var merged = previous.ToDictionary(
+        Dictionary<(string Provider, string Profile, QuotaWindowKind Kind), QuotaSnapshot> merged = previous.ToDictionary(
             snapshot => (snapshot.Provider, snapshot.Profile, snapshot.Kind),
             snapshot => snapshot);
 
-        foreach (var snapshot in fresh)
+        foreach (QuotaSnapshot snapshot in fresh)
         {
             merged[(snapshot.Provider, snapshot.Profile, snapshot.Kind)] = snapshot;
         }
@@ -763,12 +814,18 @@ public sealed class TelemetryCoordinator
             .ToArray();
     }
 
-    private static DateTimeOffset? PreviousSuccess(TelemetrySnapshot snapshot, string provider) =>
-        snapshot.Sources.FirstOrDefault(source => string.Equals(source.Provider, provider, StringComparison.OrdinalIgnoreCase))?.LastSuccessUtc;
+    private static DateTimeOffset? PreviousSuccess(TelemetrySnapshot snapshot, string provider)
+    {
+        return snapshot.Sources.FirstOrDefault(source => string.Equals(source.Provider, provider, StringComparison.OrdinalIgnoreCase))
+            ?.LastSuccessUtc;
+    }
 
     private static void ReplaceSource(IList<ProviderHealthSnapshot> sources, ProviderHealthSnapshot replacement)
     {
-        var index = sources.ToList().FindIndex(source => string.Equals(source.Provider, replacement.Provider, StringComparison.OrdinalIgnoreCase));
+        int index = sources.ToList().FindIndex(source => string.Equals(
+            source.Provider,
+            replacement.Provider,
+            StringComparison.OrdinalIgnoreCase));
         if (index >= 0)
         {
             sources[index] = replacement;
@@ -781,31 +838,31 @@ public sealed class TelemetryCoordinator
 
     private static string FormatTokenCount(long value)
     {
-        var absolute = Math.Abs((double)value);
+        double absolute = Math.Abs((double)value);
         return absolute switch
         {
             >= 1_000_000_000 => $"{value / 1_000_000_000d:0.00}B",
             >= 1_000_000 => $"{value / 1_000_000d:0.0}M",
             >= 1_000 => $"{value / 1_000d:0.0}K",
-            _ => value.ToString("N0")
+            _ => value.ToString("N0"),
         };
     }
 
     private static string FormatByteCount(long value)
     {
-        var absolute = Math.Abs((double)value);
+        double absolute = Math.Abs((double)value);
         return absolute switch
         {
             >= 1_073_741_824 => $"{value / 1_073_741_824d:0.00} GiB",
             >= 1_048_576 => $"{value / 1_048_576d:0.0} MiB",
             >= 1_024 => $"{value / 1_024d:0.0} KiB",
-            _ => $"{value:N0} B"
+            _ => $"{value:N0} B",
         };
     }
 
     private static string SummarizeError(Exception exception)
     {
-        var message = exception.Message.ReplaceLineEndings(" ").Trim();
+        string message = exception.Message.ReplaceLineEndings(" ").Trim();
         return message.Length <= 320 ? message : message[..320] + "…";
     }
 }

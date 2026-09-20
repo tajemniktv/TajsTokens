@@ -1,6 +1,15 @@
+// Taj's Tokens | SqliteCodexRolloutBatchWriterTests.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using Microsoft.Data.Sqlite;
+using TajsTokens.Core.Models;
 using TajsTokens.Infrastructure.Ingestion;
 using TajsTokens.Infrastructure.Persistence;
+
+#endregion
 
 namespace TajsTokens.Core.Tests;
 
@@ -9,9 +18,9 @@ public sealed class SqliteCodexRolloutBatchWriterTests
     [Fact]
     public async Task WriteBatchAsync_CommitsStorageOnlyRecordsAndFileStateOncePerBatch()
     {
-        var directory = Directory.CreateTempSubdirectory("tajstokens-rollout-batch-");
-        var database = Path.Combine(directory.FullName, "telemetry.db");
-        var sourcePath = Path.Combine(directory.FullName, "private", "rollout.jsonl");
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-rollout-batch-");
+        string database = Path.Combine(directory.FullName, "telemetry.db");
+        string sourcePath = Path.Combine(directory.FullName, "private", "rollout.jsonl");
 
         try
         {
@@ -20,7 +29,7 @@ public sealed class SqliteCodexRolloutBatchWriterTests
             var observatory = new SqliteCodexObservatoryStore(database);
             await observatory.InitializeAsync(CancellationToken.None);
             var writer = new SqliteCodexIngestionBatchWriter(database, observatory);
-            var now = DateTimeOffset.UtcNow;
+            DateTimeOffset now = DateTimeOffset.UtcNow;
 
             await writer.WriteBatchAsync(
                 "source-1",
@@ -29,11 +38,11 @@ public sealed class SqliteCodexRolloutBatchWriterTests
                 [
                     ParsedRolloutRecord.StorageOnly("r1", "token_count", 111, now, "session-a"),
                     ParsedRolloutRecord.StorageOnly("r2", "item_completed", 222, now.AddSeconds(1), "session-a"),
-                    ParsedRolloutRecord.StorageOnly("r2", "item_completed", 222, now.AddSeconds(1), "session-a")
+                    ParsedRolloutRecord.StorageOnly("r2", "item_completed", 222, now.AddSeconds(1), "session-a"),
                 ],
                 CancellationToken.None);
 
-            var storage = Assert.Single(await observatory.GetRolloutStorageAsync(10, CancellationToken.None));
+            CodexRolloutStorageSummary storage = Assert.Single(await observatory.GetRolloutStorageAsync(10, CancellationToken.None));
             Assert.Equal("session-a", storage.SessionId);
             Assert.Equal(1_234, storage.SizeBytes);
             Assert.Equal(2, storage.RecordsSeen);
@@ -43,7 +52,7 @@ public sealed class SqliteCodexRolloutBatchWriterTests
         finally
         {
             SqliteConnection.ClearAllPools();
-            directory.Delete(recursive: true);
+            directory.Delete(true);
         }
     }
 }

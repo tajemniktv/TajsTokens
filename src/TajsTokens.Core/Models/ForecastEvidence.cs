@@ -1,3 +1,7 @@
+// Taj's Tokens | ForecastEvidence.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
 namespace TajsTokens.Core.Models;
 
 /// <summary>Versioned, rebuildable forecast diagnostics, not provider evidence or calibrated probability.</summary>
@@ -42,18 +46,36 @@ public sealed record QuotaHorizonPrediction(
 }
 
 /// <summary>Exact selected numeric calculation, not training data or a claim of causal feature weights.</summary>
-public sealed record CodexNumericInference(string Contract, double Intercept,
-    IReadOnlyList<double> Inputs, IReadOnlyList<double> Weights, double Minimum, double Maximum)
+public sealed record CodexNumericInference(
+    string Contract,
+    double Intercept,
+    IReadOnlyList<double> Inputs,
+    IReadOnlyList<double> Weights,
+    double Minimum,
+    double Maximum)
 {
-    public double Reconstruct() => Math.Clamp(Intercept + Inputs.Select((value, i) => value * Weights[i]).Sum(), Minimum, Maximum);
-    public bool Equals(CodexNumericInference? other) => other is not null && Contract == other.Contract &&
-        Intercept.Equals(other.Intercept) && Minimum.Equals(other.Minimum) && Maximum.Equals(other.Maximum) &&
-        Inputs.SequenceEqual(other.Inputs) && Weights.SequenceEqual(other.Weights);
+
+    public bool Equals(CodexNumericInference? other)
+    {
+        return other is not null && Contract == other.Contract &&
+               Intercept.Equals(other.Intercept) && Minimum.Equals(other.Minimum) && Maximum.Equals(other.Maximum) &&
+               Inputs.SequenceEqual(other.Inputs) && Weights.SequenceEqual(other.Weights);
+    }
+
+    public double Reconstruct()
+    {
+        return Math.Clamp(Intercept + Inputs.Select((value, i) => value * Weights[i]).Sum(), Minimum, Maximum);
+    }
+
     public override int GetHashCode()
     {
-        var hash = new HashCode(); hash.Add(Contract); hash.Add(Intercept); hash.Add(Minimum); hash.Add(Maximum);
-        foreach (var value in Inputs) hash.Add(value);
-        foreach (var value in Weights) hash.Add(value);
+        var hash = new HashCode();
+        hash.Add(Contract);
+        hash.Add(Intercept);
+        hash.Add(Minimum);
+        hash.Add(Maximum);
+        foreach (double value in Inputs) hash.Add(value);
+        foreach (double value in Weights) hash.Add(value);
         return hash.ToHashCode();
     }
 }

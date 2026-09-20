@@ -1,15 +1,23 @@
+// Taj's Tokens | TokscaleProvider.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.ComponentModel;
 using System.Globalization;
 using System.Text.Json;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
 
+#endregion
+
 namespace TajsTokens.Infrastructure.Providers;
 
 /// <summary>
-/// Bootstrap token-accounting provider backed by Tokscale's documented machine-readable CLI.
-/// TajsTokens intentionally keeps this adapter at the process/JSON boundary so native accounting
-/// can later run beside it for reconciliation without coupling the domain model to Tokscale.
+///     Bootstrap token-accounting provider backed by Tokscale's documented machine-readable CLI.
+///     TajsTokens intentionally keeps this adapter at the process/JSON boundary so native accounting
+///     can later run beside it for reconciliation without coupling the domain model to Tokscale.
 /// </summary>
 public sealed class TokscaleProvider : ITokscaleProvider
 {
@@ -19,7 +27,7 @@ public sealed class TokscaleProvider : ITokscaleProvider
 
     public async Task<IReadOnlyList<TokenUsage>> GetUsageObservationsAsync(CancellationToken cancellationToken)
     {
-        var result = await RunTokscaleAsync(
+        ExternalCommandResult result = await RunTokscaleAsync(
             ["models", "--json", "--group-by", "client,model", "--client", "codex"],
             cancellationToken);
 
@@ -29,7 +37,7 @@ public sealed class TokscaleProvider : ITokscaleProvider
 
     public async Task<IReadOnlyList<TokenTimeBucket>> GetHourlyUsageAsync(CancellationToken cancellationToken)
     {
-        var result = await RunTokscaleAsync(
+        ExternalCommandResult result = await RunTokscaleAsync(
             ["hourly", "--json", "--client", "codex"],
             cancellationToken);
 
@@ -39,36 +47,37 @@ public sealed class TokscaleProvider : ITokscaleProvider
 
     internal static IReadOnlyList<TokenUsage> ParseModelUsageJson(string json, DateTimeOffset observedAtUtc)
     {
-        using var document = JsonDocument.Parse(json);
-        var entries = FindEntries(document.RootElement);
+        using JsonDocument document = JsonDocument.Parse(json);
+        IReadOnlyList<JsonElement> entries = FindEntries(document.RootElement);
         var results = new List<TokenUsage>();
 
-        foreach (var entry in entries)
+        foreach (JsonElement entry in entries)
         {
             EnsureObjectRow(entry, "model");
             ValidateTokenFields(entry, "model");
 
-            var model = ReadString(entry, "model");
+            string? model = ReadString(entry, "model");
             if (string.IsNullOrWhiteSpace(model))
             {
                 throw new JsonException("Tokscale model row did not contain a non-empty model identifier.");
             }
 
-            var client = ReadString(entry, "client") ?? "codex";
+            string client = ReadString(entry, "client") ?? "codex";
             if (!string.Equals(client, "codex", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            var breakdown = ReadBreakdown(entry);
-            results.Add(new TokenUsage(
-                "tokscale",
-                client,
-                model,
-                observedAtUtc,
-                breakdown,
-                Profile: ReadString(entry, "profile") ?? "default",
-                SessionId: ReadString(entry, "sessionId")));
+            TokenBreakdown breakdown = ReadBreakdown(entry);
+            results.Add(
+                new TokenUsage(
+                    "tokscale",
+                    client,
+                    model,
+                    observedAtUtc,
+                    breakdown,
+                    ReadString(entry, "profile") ?? "default",
+                    ReadString(entry, "sessionId")));
         }
 
         return results;
@@ -76,17 +85,17 @@ public sealed class TokscaleProvider : ITokscaleProvider
 
     internal static IReadOnlyList<TokenTimeBucket> ParseHourlyJson(string json)
     {
-        using var document = JsonDocument.Parse(json);
-        var entries = FindEntries(document.RootElement);
+        using JsonDocument document = JsonDocument.Parse(json);
+        IReadOnlyList<JsonElement> entries = FindEntries(document.RootElement);
         var results = new List<TokenTimeBucket>();
 
-        foreach (var entry in entries)
+        foreach (JsonElement entry in entries)
         {
             EnsureObjectRow(entry, "hourly");
             ValidateTokenFields(entry, "hourly");
 
-            var label = ReadBucketLabel(entry);
-            var startUtc = ReadBucketTimestamp(entry);
+            string label = ReadBucketLabel(entry);
+            DateTimeOffset? startUtc = ReadBucketTimestamp(entry);
             results.Add(new TokenTimeBucket("tokscale", label, startUtc, ReadBreakdown(entry)));
         }
 
@@ -103,8 +112,8 @@ public sealed class TokscaleProvider : ITokscaleProvider
         // Exit codes such as 127/9009 are not enough by themselves: a real Tokscale invocation or
         // one of its dependencies can legitimately fail with the same code. Require diagnostics that
         // identify the command we attempted to launch before treating the result as discovery failure.
-        var commandName = Path.GetFileName(command);
-        var detail = $"{result.StandardError}\n{result.StandardOutput}";
+        string commandName = Path.GetFileName(command);
+        string detail = $"{result.StandardError}\n{result.StandardOutput}";
         return detail.Contains($"'{commandName}' is not recognized", StringComparison.OrdinalIgnoreCase) ||
                detail.Contains($"\"{commandName}\" is not recognized", StringComparison.OrdinalIgnoreCase) ||
                detail.Contains($"{commandName}: command not found", StringComparison.OrdinalIgnoreCase) ||
@@ -118,7 +127,7 @@ public sealed class TokscaleProvider : ITokscaleProvider
     {
         try
         {
-            var direct = await ExternalProcess.RunToCompletionAsync(
+            ExternalCommandResult direct = await ExternalProcess.RunToCompletionAsync(
                 "tokscale",
                 arguments,
                 s_commandTimeout,
@@ -139,7 +148,7 @@ public sealed class TokscaleProvider : ITokscaleProvider
 
         try
         {
-            var fallback = await ExternalProcess.RunToCompletionAsync(
+            ExternalCommandResult fallback = await ExternalProcess.RunToCompletionAsync(
                 "npx",
                 npxArguments,
                 s_npxCommandTimeout,
@@ -158,10 +167,12 @@ public sealed class TokscaleProvider : ITokscaleProvider
         }
     }
 
-    private static InvalidOperationException CreateNpxUnavailableException(Exception? innerException = null) =>
-        new(
+    private static InvalidOperationException CreateNpxUnavailableException(Exception? innerException = null)
+    {
+        return new InvalidOperationException(
             "Tokscale is not installed globally and the npx fallback is unavailable. Install Tokscale or Node.js/npm, or make either command available on PATH.",
             innerException);
+    }
 
     private static IReadOnlyList<JsonElement> FindEntries(JsonElement root)
     {
@@ -175,9 +186,9 @@ public sealed class TokscaleProvider : ITokscaleProvider
             throw new JsonException("Tokscale payload root was neither an array nor a supported object.");
         }
 
-        foreach (var propertyName in new[] { "entries", "hours", "data" })
+        foreach (string propertyName in new[] { "entries", "hours", "data" })
         {
-            if (root.TryGetProperty(propertyName, out var entries) && entries.ValueKind == JsonValueKind.Array)
+            if (root.TryGetProperty(propertyName, out JsonElement entries) && entries.ValueKind == JsonValueKind.Array)
             {
                 return entries.EnumerateArray().ToArray();
             }
@@ -196,16 +207,16 @@ public sealed class TokscaleProvider : ITokscaleProvider
 
     private static void ValidateTokenFields(JsonElement entry, string rowKind)
     {
-        var foundAny = false;
-        foreach (var propertyName in s_tokenPropertyNames)
+        bool foundAny = false;
+        foreach (string propertyName in s_tokenPropertyNames)
         {
-            if (!entry.TryGetProperty(propertyName, out var property))
+            if (!entry.TryGetProperty(propertyName, out JsonElement property))
             {
                 continue;
             }
 
             foundAny = true;
-            if (!TryReadLongValue(property, out var value) || value < 0)
+            if (!TryReadLongValue(property, out long value) || value < 0)
             {
                 throw new JsonException($"Tokscale {rowKind} row contained an invalid '{propertyName}' token value.");
             }
@@ -219,17 +230,17 @@ public sealed class TokscaleProvider : ITokscaleProvider
 
     private static TokenBreakdown ReadBreakdown(JsonElement entry)
     {
-        var input = ReadLong(entry, "input");
-        var cacheRead = ReadLong(entry, "cacheRead");
-        var cacheWrite = ReadLong(entry, "cacheWrite");
-        var output = ReadLong(entry, "output");
-        var reasoning = ReadLong(entry, "reasoning");
-        var reportedTotal = ReadNullableLong(entry, "total");
+        long input = ReadLong(entry, "input");
+        long cacheRead = ReadLong(entry, "cacheRead");
+        long cacheWrite = ReadLong(entry, "cacheWrite");
+        long output = ReadLong(entry, "output");
+        long reasoning = ReadLong(entry, "reasoning");
+        long? reportedTotal = ReadNullableLong(entry, "total");
 
         // Current Tokscale JSON exposes disjoint output/reasoning buckets. Older builds briefly
         // exposed output inclusive of reasoning; normalize that shape when the reported total makes
         // the relationship unambiguous instead of double counting it.
-        var nonReasoningOutput = output;
+        long nonReasoningOutput = output;
         if (reportedTotal is long total &&
             checked(input + cacheRead + cacheWrite + output + reasoning) > total &&
             checked(input + cacheRead + cacheWrite + output) == total)
@@ -242,9 +253,10 @@ public sealed class TokscaleProvider : ITokscaleProvider
 
     private static string ReadBucketLabel(JsonElement entry)
     {
-        var date = ReadString(entry, "date");
+        string? date = ReadString(entry, "date");
         string? hour;
-        if (entry.TryGetProperty("hour", out var hourElement) && hourElement.ValueKind == JsonValueKind.Number && hourElement.TryGetInt32(out var numericHour))
+        if (entry.TryGetProperty("hour", out JsonElement hourElement) && hourElement.ValueKind == JsonValueKind.Number &&
+            hourElement.TryGetInt32(out int numericHour))
         {
             if (numericHour is < 0 or > 23)
             {
@@ -258,11 +270,12 @@ public sealed class TokscaleProvider : ITokscaleProvider
             hour = ReadString(entry, "hour");
         }
 
-        var label = (date, hour) switch
+        string? label = (date, hour) switch
         {
             ({ Length: > 0 }, { Length: > 0 }) => $"{date} {hour}",
             (_, { Length: > 0 }) => hour,
-            _ => ReadString(entry, "label") ?? ReadString(entry, "timestamp") ?? ReadString(entry, "startUtc") ?? ReadString(entry, "start")
+            _ => ReadString(entry, "label") ??
+                 ReadString(entry, "timestamp") ?? ReadString(entry, "startUtc") ?? ReadString(entry, "start"),
         };
 
         if (string.IsNullOrWhiteSpace(label))
@@ -275,10 +288,14 @@ public sealed class TokscaleProvider : ITokscaleProvider
 
     private static DateTimeOffset? ReadBucketTimestamp(JsonElement entry)
     {
-        foreach (var propertyName in new[] { "timestamp", "startUtc", "start" })
+        foreach (string propertyName in new[] { "timestamp", "startUtc", "start" })
         {
-            var value = ReadString(entry, propertyName);
-            if (value is not null && DateTimeOffset.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed))
+            string? value = ReadString(entry, propertyName);
+            if (value is not null && DateTimeOffset.TryParse(
+                    value,
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.RoundtripKind,
+                    out DateTimeOffset parsed))
             {
                 return parsed.ToUniversalTime();
             }
@@ -289,7 +306,7 @@ public sealed class TokscaleProvider : ITokscaleProvider
 
     private static string? ReadString(JsonElement element, string propertyName)
     {
-        if (!element.TryGetProperty(propertyName, out var property))
+        if (!element.TryGetProperty(propertyName, out JsonElement property))
         {
             return null;
         }
@@ -298,20 +315,23 @@ public sealed class TokscaleProvider : ITokscaleProvider
         {
             JsonValueKind.String => property.GetString(),
             JsonValueKind.Number => property.GetRawText(),
-            _ => null
+            _ => null,
         };
     }
 
-    private static long ReadLong(JsonElement element, string propertyName) => ReadNullableLong(element, propertyName) ?? 0;
+    private static long ReadLong(JsonElement element, string propertyName)
+    {
+        return ReadNullableLong(element, propertyName) ?? 0;
+    }
 
     private static long? ReadNullableLong(JsonElement element, string propertyName)
     {
-        if (!element.TryGetProperty(propertyName, out var property))
+        if (!element.TryGetProperty(propertyName, out JsonElement property))
         {
             return null;
         }
 
-        return TryReadLongValue(property, out var value) ? value : null;
+        return TryReadLongValue(property, out long value) ? value : null;
     }
 
     private static bool TryReadLongValue(JsonElement property, out long value)
@@ -321,7 +341,11 @@ public sealed class TokscaleProvider : ITokscaleProvider
             return true;
         }
 
-        if (property.ValueKind == JsonValueKind.String && long.TryParse(property.GetString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out value))
+        if (property.ValueKind == JsonValueKind.String && long.TryParse(
+                property.GetString(),
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out value))
         {
             return true;
         }
@@ -337,7 +361,7 @@ public sealed class TokscaleProvider : ITokscaleProvider
             return;
         }
 
-        var detail = string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput : result.StandardError;
+        string detail = string.IsNullOrWhiteSpace(result.StandardError) ? result.StandardOutput : result.StandardError;
         detail = detail.Trim();
         if (detail.Length > 500)
         {

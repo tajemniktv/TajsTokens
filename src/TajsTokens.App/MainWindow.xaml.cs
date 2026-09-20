@@ -1,52 +1,70 @@
+// Taj's Tokens | MainWindow.xaml.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
+using System.Diagnostics;
+using System.Text.Json;
+using Windows.Graphics;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
 using TajsTokens.App.Pages;
-using Microsoft.UI.Windowing;
-using System.Text.Json;
+
+#endregion
 
 namespace TajsTokens.App;
 
 public sealed partial class MainWindow : Window
 {
-    private bool _synchronizing;
-    private readonly string _windowStatePath = System.IO.Path.Combine(((App)Application.Current).Services.DataFolder, "window-state.json");
     private readonly DispatcherTimer _saveWindowTimer = new() { Interval = TimeSpan.FromMilliseconds(500) };
+    private readonly string _windowStatePath = Path.Combine(((App)Application.Current).Services.DataFolder, "window-state.json");
+    private bool _synchronizing;
     private WindowSizeState _windowSize = new(1200, 850, false);
-    private sealed record WindowSizeState(int Width, int Height, bool Maximized);
+
     public MainWindow()
     {
         InitializeComponent();
         try
         {
-            if (System.IO.File.Exists(_windowStatePath))
-                _windowSize = JsonSerializer.Deserialize<WindowSizeState>(System.IO.File.ReadAllText(_windowStatePath)) ?? _windowSize;
+            if (File.Exists(_windowStatePath))
+                _windowSize = JsonSerializer.Deserialize<WindowSizeState>(File.ReadAllText(_windowStatePath)) ?? _windowSize;
         }
-        catch (Exception e) when (e is System.IO.IOException or UnauthorizedAccessException or JsonException) { }
-        var area = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary).WorkArea;
-        _windowSize = _windowSize with { Width = Math.Clamp(_windowSize.Width, Math.Min(700, area.Width), area.Width),
-            Height = Math.Clamp(_windowSize.Height, Math.Min(650, area.Height), area.Height) };
-        AppWindow.Resize(new Windows.Graphics.SizeInt32(_windowSize.Width, _windowSize.Height));
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException or JsonException)
+        {
+        }
+        RectInt32 area = DisplayArea.GetFromWindowId(AppWindow.Id, DisplayAreaFallback.Primary).WorkArea;
+        _windowSize = _windowSize with
+        {
+            Width = Math.Clamp(_windowSize.Width, Math.Min(700, area.Width), area.Width),
+            Height = Math.Clamp(_windowSize.Height, Math.Min(650, area.Height), area.Height),
+        };
+        AppWindow.Resize(new SizeInt32(_windowSize.Width, _windowSize.Height));
         if (_windowSize.Maximized && AppWindow.Presenter is OverlappedPresenter presenter) presenter.Maximize();
         _saveWindowTimer.Tick += (_, _) => SaveWindowSize();
         AppWindow.Closing += (_, _) => SaveWindowSize();
         Closed += (_, _) => SaveWindowSize();
         AppWindow.Changed += (_, args) =>
         {
-            if ((!args.DidSizeChange && !args.DidPresenterChange) || AppWindow.Presenter is not OverlappedPresenter p ||
+            if (!args.DidSizeChange && !args.DidPresenterChange || AppWindow.Presenter is not OverlappedPresenter p ||
                 p.State == OverlappedPresenterState.Minimized) return;
             if (p.State == OverlappedPresenterState.Restored)
             {
-                var size = AppWindow.Size;
+                SizeInt32 size = AppWindow.Size;
                 if (size.Width <= 0 || size.Height <= 0) return;
                 if (size.Width < 700 || size.Height < 650)
                 {
-                    AppWindow.Resize(new Windows.Graphics.SizeInt32(Math.Max(700, size.Width), Math.Max(650, size.Height)));
+                    AppWindow.Resize(new SizeInt32(Math.Max(700, size.Width), Math.Max(650, size.Height)));
                     return;
                 }
-                _windowSize = new(size.Width, size.Height, false);
+                _windowSize = new WindowSizeState(size.Width, size.Height, false);
             }
-            else _windowSize = _windowSize with { Maximized = true };
+            else
+            {
+                _windowSize = _windowSize with { Maximized = true };
+            }
             _saveWindowTimer.Stop();
             _saveWindowTimer.Start();
         };
@@ -58,12 +76,12 @@ public sealed partial class MainWindow : Window
         _saveWindowTimer.Stop();
         try
         {
-            System.IO.File.WriteAllText(_windowStatePath + ".tmp", JsonSerializer.Serialize(_windowSize));
-            System.IO.File.Move(_windowStatePath + ".tmp", _windowStatePath, overwrite: true);
+            File.WriteAllText(_windowStatePath + ".tmp", JsonSerializer.Serialize(_windowSize));
+            File.Move(_windowStatePath + ".tmp", _windowStatePath, true);
         }
-        catch (Exception e) when (e is System.IO.IOException or UnauthorizedAccessException)
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException)
         {
-            System.Diagnostics.Debug.WriteLine("Window size could not be saved: " + e.GetType().Name);
+            Debug.WriteLine("Window size could not be saved: " + e.GetType().Name);
         }
     }
 
@@ -88,20 +106,27 @@ public sealed partial class MainWindow : Window
         {
             ContentFrame.Tag = e.Parameter;
             AppNavigation.IsBackEnabled = ContentFrame.CanGoBack;
-            var tag = e.SourcePageType == typeof(CodexIntelligencePage) ? "codex-intelligence" :
+            string tag = e.SourcePageType == typeof(CodexIntelligencePage) ? "codex-intelligence" :
                 e.SourcePageType == typeof(ForecastsPage) && Equals(e.Parameter, "model-lab") ? "model-lab" :
                 e.SourcePageType == typeof(ForecastsPage) ? "forecasts" :
                 e.SourcePageType == typeof(CodexPage) ? "codex" :
-                e.SourcePageType == typeof(AnalyticsPage) ? "analytics" : e.SourcePageType == typeof(DiagnosticsPage) ? "diagnostics" :
-                e.SourcePageType == typeof(CodexRolloutCoveragePage) ? "coverage" : e.SourcePageType == typeof(CodexSourcesPage) ? "sources" :
-                e.SourcePageType == typeof(CodexDataExplorerPage) ? "codex-data" : e.SourcePageType == typeof(CodexCliHarnessPage) ? "codex-cli" : "settings";
-            var items = AppNavigation.MenuItems.OfType<NavigationViewItem>();
-            var selected = tag == "settings" ? AppNavigation.SettingsItem :
-                items.Concat(items.SelectMany(x => x.MenuItems.OfType<NavigationViewItem>())).FirstOrDefault(x => Equals(x.Tag, tag));
-            foreach (var parent in items.Where(x => x.MenuItems.Contains(selected))) parent.IsExpanded = true;
+                e.SourcePageType == typeof(AnalyticsPage) ? "analytics" :
+                e.SourcePageType == typeof(DiagnosticsPage) ? "diagnostics" :
+                e.SourcePageType == typeof(CodexRolloutCoveragePage) ? "coverage" :
+                e.SourcePageType == typeof(CodexSourcesPage) ? "sources" :
+                e.SourcePageType == typeof(CodexDataExplorerPage) ? "codex-data" :
+                e.SourcePageType == typeof(CodexCliHarnessPage) ? "codex-cli" : "settings";
+            IEnumerable<NavigationViewItem> items = AppNavigation.MenuItems.OfType<NavigationViewItem>();
+            object? selected = tag == "settings"
+                ? AppNavigation.SettingsItem
+                : items.Concat(items.SelectMany(x => x.MenuItems.OfType<NavigationViewItem>())).FirstOrDefault(x => Equals(x.Tag, tag));
+            foreach (NavigationViewItem parent in items.Where(x => x.MenuItems.Contains(selected))) parent.IsExpanded = true;
             AppNavigation.SelectedItem = selected;
         }
-        finally { _synchronizing = false; }
+        finally
+        {
+            _synchronizing = false;
+        }
     }
 
     private void OnNavigationSelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
@@ -118,7 +143,7 @@ public sealed partial class MainWindow : Window
             return;
         }
 
-        var pageType = page switch
+        Type pageType = page switch
         {
             "codex-intelligence" => typeof(CodexIntelligencePage),
             "codex-cli" => typeof(CodexCliHarnessPage),
@@ -131,9 +156,11 @@ public sealed partial class MainWindow : Window
             "analytics" => typeof(AnalyticsPage),
             "diagnostics" => typeof(DiagnosticsPage),
             "settings" => typeof(SettingsPage),
-            _ => typeof(CodexIntelligencePage)
+            _ => typeof(CodexIntelligencePage),
         };
 
         Navigate(pageType, page == "model-lab" ? "model-lab" : null);
     }
+
+    private sealed record WindowSizeState(int Width, int Height, bool Maximized);
 }

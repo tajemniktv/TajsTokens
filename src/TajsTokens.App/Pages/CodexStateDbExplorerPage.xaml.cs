@@ -1,24 +1,33 @@
+// Taj's Tokens | CodexStateDbExplorerPage.xaml.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Text;
 using Windows.ApplicationModel.DataTransfer;
+using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using TajsTokens.Infrastructure.Services;
+
+#endregion
 
 namespace TajsTokens.App.Pages;
 
 public sealed partial class CodexStateDbExplorerPage : Page
 {
     private readonly HashSet<CodexStateRawRow> _selectedRawRows = [];
+    private CodexStateInspectionSnapshot? _baseline;
     private CancellationTokenSource? _cancellation;
     private CodexStateInspectionResult? _inspection;
-    private CodexStateRawPage? _page;
-    private CodexStateInspectionSnapshot? _baseline;
-    private string? _selectedDatabasePath;
-    private int _pageIndex;
-    private bool _loaded;
-    private bool _suppressDatabaseSelection;
     private long _loadGeneration;
+    private bool _loaded;
+    private CodexStateRawPage? _page;
+    private int _pageIndex;
+    private string? _selectedDatabasePath;
+    private bool _suppressDatabaseSelection;
 
     public CodexStateDbExplorerPage()
     {
@@ -39,10 +48,13 @@ public sealed partial class CodexStateDbExplorerPage : Page
     private void OnUnloaded(object sender, RoutedEventArgs e)
     {
         _loaded = false;
-        ReplaceCancellation(cancelOnly: true);
+        ReplaceCancellation(true);
     }
 
-    private async void OnRefreshClicked(object sender, RoutedEventArgs e) => await RefreshInspectionAsync();
+    private async void OnRefreshClicked(object sender, RoutedEventArgs e)
+    {
+        await RefreshInspectionAsync();
+    }
 
     private async Task RefreshInspectionAsync()
     {
@@ -51,17 +63,17 @@ public sealed partial class CodexStateDbExplorerPage : Page
             return;
         }
 
-        var cancellation = _cancellation;
+        CancellationTokenSource? cancellation = _cancellation;
         if (cancellation is null || cancellation.IsCancellationRequested)
         {
             return;
         }
 
-        var generation = Interlocked.Increment(ref _loadGeneration);
+        long generation = Interlocked.Increment(ref _loadGeneration);
         try
         {
             StatusText.Text = "Discovering Codex state databases…";
-            var candidates = await Task.Run(
+            IReadOnlyList<CodexStateDatabaseCandidate> candidates = await Task.Run(
                 () => App.Services.CodexStateExplorer.DiscoverCandidates(),
                 cancellation.Token);
             if (!CanApply(generation, cancellation))
@@ -69,15 +81,18 @@ public sealed partial class CodexStateDbExplorerPage : Page
                 return;
             }
 
-            var selected = candidates.FirstOrDefault(candidate =>
-                    string.Equals(candidate.Path, _selectedDatabasePath, StringComparison.OrdinalIgnoreCase))
-                ?? candidates.FirstOrDefault();
+            CodexStateDatabaseCandidate? selected = candidates.FirstOrDefault(candidate =>
+                                                        string.Equals(
+                                                            candidate.Path,
+                                                            _selectedDatabasePath,
+                                                            StringComparison.OrdinalIgnoreCase))
+                                                    ?? candidates.FirstOrDefault();
             _suppressDatabaseSelection = true;
             try
             {
                 DatabaseComboBox.ItemsSource = candidates;
                 DatabaseComboBox.SelectedItem = selected;
-                var comparisonPath = (ComparisonComboBox.SelectedItem as CodexStateDatabaseCandidate)?.Path;
+                string? comparisonPath = (ComparisonComboBox.SelectedItem as CodexStateDatabaseCandidate)?.Path;
                 ComparisonComboBox.ItemsSource = candidates;
                 ComparisonComboBox.SelectedItem = candidates.FirstOrDefault(candidate =>
                     string.Equals(candidate.Path, comparisonPath, StringComparison.OrdinalIgnoreCase));
@@ -90,14 +105,15 @@ public sealed partial class CodexStateDbExplorerPage : Page
             {
                 _inspection = null;
                 _page = null;
-                ClearInspection("No Codex SQLite files were discovered under the configured CODEX_HOME, its sqlite folder, or the snapshot folder.");
+                ClearInspection(
+                    "No Codex SQLite files were discovered under the configured CODEX_HOME, its sqlite folder, or the snapshot folder.");
                 return;
             }
 
             _selectedDatabasePath = selected.Path;
             DatabasePathText.Text = selected.Path;
             StatusText.Text = $"Opening {selected.FileName} read-only with SQLite query_only…";
-            var inspection = await Task.Run(
+            CodexStateInspectionResult inspection = await Task.Run(
                 () => App.Services.CodexStateExplorer.InspectAsync(selected.Path, cancellation.Token),
                 cancellation.Token);
             if (!CanApply(generation, cancellation))
@@ -134,17 +150,17 @@ public sealed partial class CodexStateDbExplorerPage : Page
 
     private async Task InspectSelectedDatabaseAsync(string databasePath)
     {
-        var cancellation = _cancellation;
+        CancellationTokenSource? cancellation = _cancellation;
         if (cancellation is null || cancellation.IsCancellationRequested)
         {
             return;
         }
 
-        var generation = Interlocked.Increment(ref _loadGeneration);
+        long generation = Interlocked.Increment(ref _loadGeneration);
         try
         {
             StatusText.Text = $"Opening {Path.GetFileName(databasePath)} read-only with SQLite query_only…";
-            var inspection = await Task.Run(
+            CodexStateInspectionResult inspection = await Task.Run(
                 () => App.Services.CodexStateExplorer.InspectAsync(databasePath, cancellation.Token),
                 cancellation.Token);
             if (CanApply(generation, cancellation))
@@ -166,9 +182,9 @@ public sealed partial class CodexStateDbExplorerPage : Page
 
     private async void OnCompareClicked(object sender, RoutedEventArgs e)
     {
-        var current = _inspection;
+        CodexStateInspectionResult? current = _inspection;
         var comparison = ComparisonComboBox.SelectedItem as CodexStateDatabaseCandidate;
-        var cancellation = _cancellation;
+        CancellationTokenSource? cancellation = _cancellation;
         if (current is null || comparison is null || cancellation is null || cancellation.IsCancellationRequested)
         {
             ComparisonText.Text = current is null
@@ -177,11 +193,11 @@ public sealed partial class CodexStateDbExplorerPage : Page
             return;
         }
 
-        var generation = Interlocked.Increment(ref _loadGeneration);
+        long generation = Interlocked.Increment(ref _loadGeneration);
         try
         {
             StatusText.Text = $"Comparing {Path.GetFileName(current.Database.Path)} with {Path.GetFileName(comparison.Path)}…";
-            var other = await Task.Run(
+            CodexStateInspectionResult other = await Task.Run(
                 () => App.Services.CodexStateExplorer.InspectAsync(comparison.Path, cancellation.Token),
                 cancellation.Token);
             if (!CanApply(generation, cancellation))
@@ -189,9 +205,9 @@ public sealed partial class CodexStateDbExplorerPage : Page
                 return;
             }
 
-            var diff = CodexStateDbExplorerService.Compare(current.Snapshot, other.Snapshot);
+            CodexStateInspectionDiff diff = CodexStateDbExplorerService.Compare(current.Snapshot, other.Snapshot);
             ComparisonDiffList.ItemsSource = diff.Tables;
-            var schemaSummary = diff.SchemaChanged
+            string schemaSummary = diff.SchemaChanged
                 ? $"schema changed ({ShortFingerprint(diff.BaselineSchemaFingerprint)} → {ShortFingerprint(diff.CurrentSchemaFingerprint)})"
                 : $"schema identical ({ShortFingerprint(diff.CurrentSchemaFingerprint)})";
             ComparisonText.Text =
@@ -220,11 +236,11 @@ public sealed partial class CodexStateDbExplorerPage : Page
 
     private async void OnTraceClicked(object sender, RoutedEventArgs e)
     {
-        var columnName = TraceColumnTextBox.Text?.Trim();
+        string? columnName = TraceColumnTextBox.Text?.Trim();
         // Preserve the literal value exactly as entered. Only the column identifier is trimmed;
         // source equality is decided by SQLite's parameterized comparison.
-        var value = TraceValueTextBox.Text;
-        var cancellation = _cancellation;
+        string value = TraceValueTextBox.Text;
+        CancellationTokenSource? cancellation = _cancellation;
         if (string.IsNullOrWhiteSpace(columnName) || string.IsNullOrWhiteSpace(value))
         {
             TraceStatusText.Text = "Enter an exact source column name and value first.";
@@ -236,13 +252,13 @@ public sealed partial class CodexStateDbExplorerPage : Page
             return;
         }
 
-        var generation = Interlocked.Increment(ref _loadGeneration);
+        long generation = Interlocked.Increment(ref _loadGeneration);
         try
         {
-            var selectedCandidates = new[]
+            CodexStateDatabaseCandidate[] selectedCandidates = new[]
                 {
                     DatabaseComboBox.SelectedItem as CodexStateDatabaseCandidate,
-                    ComparisonComboBox.SelectedItem as CodexStateDatabaseCandidate
+                    ComparisonComboBox.SelectedItem as CodexStateDatabaseCandidate,
                 }
                 .Where(candidate => candidate is not null)
                 .Cast<CodexStateDatabaseCandidate>()
@@ -256,7 +272,7 @@ public sealed partial class CodexStateDbExplorerPage : Page
             }
 
             TraceStatusText.Text = $"Searching {selectedCandidates.Length:N0} selected store(s) for exact {columnName}={value}…";
-            var result = await Task.Run(
+            CodexStateKeyTraceResult result = await Task.Run(
                 () => App.Services.CodexStateExplorer.TraceKeyAsync(
                     selectedCandidates.Select(candidate => candidate.Path),
                     columnName,
@@ -269,7 +285,8 @@ public sealed partial class CodexStateDbExplorerPage : Page
             }
 
             TraceList.ItemsSource = result.Matches;
-            TraceStatusText.Text = $"{result.Summary} across {selectedCandidates.Length:N0} selected store(s). Same-looking values are observations only; no semantic identity was inferred.";
+            TraceStatusText.Text =
+                $"{result.Summary} across {selectedCandidates.Length:N0} selected store(s). Same-looking values are observations only; no semantic identity was inferred.";
             StatusText.Text = "Source-native key trace complete; no joins or source mutations were performed.";
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -309,12 +326,16 @@ public sealed partial class CodexStateDbExplorerPage : Page
         SelectedTableSchemaText.Text = $"{table.RowCount:N0} rows · source SQL is shown below; this is not a normalized product model.";
         ColumnsText.Text = table.Columns.Count == 0
             ? "Columns: (none reported by PRAGMA table_info)"
-            : "Columns: " + string.Join(", ", table.Columns.Select(column =>
-                $"{column.Name} {column.DeclaredType}{(column.IsPrimaryKey ? " PK" : string.Empty)}"));
+            : "Columns: " + string.Join(
+                ", ",
+                table.Columns.Select(column =>
+                    $"{column.Name} {column.DeclaredType}{(column.IsPrimaryKey ? " PK" : string.Empty)}"));
         IndexesText.Text = table.Indexes.Count == 0
             ? "Indexes: none"
-            : "Indexes: " + string.Join(", ", table.Indexes.Select(index =>
-                $"{index.Name} ({string.Join(", ", index.Columns)})"));
+            : "Indexes: " + string.Join(
+                ", ",
+                table.Indexes.Select(index =>
+                    $"{index.Name} ({string.Join(", ", index.Columns)})"));
         SqlText.Text = string.IsNullOrWhiteSpace(table.Sql) ? "SQL: (not provided)" : table.Sql;
 
         _pageIndex = 0;
@@ -323,18 +344,18 @@ public sealed partial class CodexStateDbExplorerPage : Page
 
     private async Task LoadPageAsync(string tableName)
     {
-        var databasePath = _selectedDatabasePath;
-        var cancellation = _cancellation;
+        string? databasePath = _selectedDatabasePath;
+        CancellationTokenSource? cancellation = _cancellation;
         if (databasePath is null || cancellation is null || cancellation.IsCancellationRequested)
         {
             return;
         }
 
-        var pageIndex = _pageIndex;
-        var generation = Interlocked.Increment(ref _loadGeneration);
+        int pageIndex = _pageIndex;
+        long generation = Interlocked.Increment(ref _loadGeneration);
         try
         {
-            var page = await Task.Run(
+            CodexStateRawPage page = await Task.Run(
                 () => App.Services.CodexStateExplorer.ReadPageAsync(
                     databasePath,
                     tableName,
@@ -372,18 +393,15 @@ public sealed partial class CodexStateDbExplorerPage : Page
         RawGrid.HorizontalAlignment = HorizontalAlignment.Left;
 
         RawGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(44) });
-        for (var columnIndex = 0; columnIndex < page.Columns.Count; columnIndex++)
+        for (int columnIndex = 0; columnIndex < page.Columns.Count; columnIndex++)
         {
-            RawGrid.ColumnDefinitions.Add(new ColumnDefinition
-            {
-                Width = new GridLength(EstimateColumnWidth(page, columnIndex))
-            });
+            RawGrid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(EstimateColumnWidth(page, columnIndex)) });
         }
 
-        AddGridRow(page, rowIndex: 0, isHeader: true, row: null);
-        for (var rowIndex = 0; rowIndex < page.Rows.Count; rowIndex++)
+        AddGridRow(page, 0, true, null);
+        for (int rowIndex = 0; rowIndex < page.Rows.Count; rowIndex++)
         {
-            AddGridRow(page, rowIndex + 1, isHeader: false, page.Rows[rowIndex]);
+            AddGridRow(page, rowIndex + 1, false, page.Rows[rowIndex]);
         }
     }
 
@@ -397,7 +415,7 @@ public sealed partial class CodexStateDbExplorerPage : Page
 
         if (isHeader)
         {
-            AddGridCell(CreateCellText("Select", isHeader: true), rowIndex, 0, isHeader: true);
+            AddGridCell(CreateCellText("Select", true), rowIndex, 0, true);
         }
         else
         {
@@ -406,16 +424,16 @@ public sealed partial class CodexStateDbExplorerPage : Page
                 Tag = row,
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
-                Padding = new Thickness(4)
+                Padding = new Thickness(4),
             };
             selector.Checked += OnRawRowSelectionChanged;
             selector.Unchecked += OnRawRowSelectionChanged;
-            AddGridCell(selector, rowIndex, 0, isHeader: false);
+            AddGridCell(selector, rowIndex, 0, false);
         }
 
-        for (var columnIndex = 0; columnIndex < page.Columns.Count; columnIndex++)
+        for (int columnIndex = 0; columnIndex < page.Columns.Count; columnIndex++)
         {
-            var value = isHeader
+            string value = isHeader
                 ? page.Columns[columnIndex]
                 : row is not null && columnIndex < row.Values.Count
                     ? CodexStateDbExplorerService.FormatRawValue(row.Values[columnIndex])
@@ -431,7 +449,7 @@ public sealed partial class CodexStateDbExplorerPage : Page
             Child = content,
             Padding = new Thickness(10, isHeader ? 8 : 7, 10, isHeader ? 8 : 7),
             BorderThickness = new Thickness(0, 0, 1, 1),
-            BorderBrush = ResolveBrush("CardStrokeColorDefaultBrush")
+            BorderBrush = ResolveBrush("CardStrokeColorDefaultBrush"),
         };
         if (isHeader)
         {
@@ -450,10 +468,10 @@ public sealed partial class CodexStateDbExplorerPage : Page
         {
             Text = value,
             FontFamily = new FontFamily("Consolas"),
-            FontWeight = isHeader ? Microsoft.UI.Text.FontWeights.SemiBold : Microsoft.UI.Text.FontWeights.Normal,
+            FontWeight = isHeader ? FontWeights.SemiBold : FontWeights.Normal,
             TextTrimming = TextTrimming.CharacterEllipsis,
             TextWrapping = TextWrapping.NoWrap,
-            VerticalAlignment = VerticalAlignment.Center
+            VerticalAlignment = VerticalAlignment.Center,
         };
         ToolTipService.SetToolTip(text, value);
         return text;
@@ -461,8 +479,8 @@ public sealed partial class CodexStateDbExplorerPage : Page
 
     private static double EstimateColumnWidth(CodexStateRawPage page, int columnIndex)
     {
-        var maxCharacters = page.Columns[columnIndex].Length;
-        foreach (var row in page.Rows)
+        int maxCharacters = page.Columns[columnIndex].Length;
+        foreach (CodexStateRawRow row in page.Rows)
         {
             if (columnIndex < row.Values.Count)
             {
@@ -475,8 +493,10 @@ public sealed partial class CodexStateDbExplorerPage : Page
         return Math.Clamp(maxCharacters * 8d + 28d, 120d, 360d);
     }
 
-    private static Brush? ResolveBrush(string key) =>
-        Application.Current.Resources.TryGetValue(key, out var resource) ? resource as Brush : null;
+    private static Brush? ResolveBrush(string key)
+    {
+        return Application.Current.Resources.TryGetValue(key, out object? resource) ? resource as Brush : null;
+    }
 
     private async void OnPreviousPageClicked(object sender, RoutedEventArgs e)
     {
@@ -511,7 +531,8 @@ public sealed partial class CodexStateDbExplorerPage : Page
 
         _baseline = _inspection.Snapshot;
         DiffList.ItemsSource = Array.Empty<CodexStateTableDiff>();
-        BaselineText.Text = $"Baseline captured {_baseline.CapturedAtUtc.ToLocalTime():g} · {_baseline.Tables.Count:N0} tables · schema {ShortFingerprint(_baseline.SchemaFingerprint)}. Refresh to compare table schemas and bounded row fingerprints.";
+        BaselineText.Text =
+            $"Baseline captured {_baseline.CapturedAtUtc.ToLocalTime():g} · {_baseline.Tables.Count:N0} tables · schema {ShortFingerprint(_baseline.SchemaFingerprint)}. Refresh to compare table schemas and bounded row fingerprints.";
         StatusText.Text = "Baseline captured in memory only; no inspection data was persisted.";
     }
 
@@ -534,7 +555,7 @@ public sealed partial class CodexStateDbExplorerPage : Page
 
     private void OnCopyClicked(object sender, RoutedEventArgs e)
     {
-        var export = BuildSelectedExport();
+        string? export = BuildSelectedExport();
         if (export is null)
         {
             return;
@@ -555,7 +576,7 @@ public sealed partial class CodexStateDbExplorerPage : Page
 
     private async void OnExportClicked(object sender, RoutedEventArgs e)
     {
-        var export = BuildSelectedExport();
+        string? export = BuildSelectedExport();
         if (export is null)
         {
             return;
@@ -563,11 +584,11 @@ public sealed partial class CodexStateDbExplorerPage : Page
 
         try
         {
-            var exportDirectory = Path.Combine(App.Services.DataFolder, "InspectionExports");
+            string exportDirectory = Path.Combine(App.Services.DataFolder, "InspectionExports");
             Directory.CreateDirectory(exportDirectory);
-            var table = _page?.TableName ?? "table";
-            var fileName = $"codex-state-{SanitizeFileName(table)}-{DateTimeOffset.Now:yyyyMMdd-HHmmss}.tsv";
-            var path = Path.Combine(exportDirectory, fileName);
+            string table = _page?.TableName ?? "table";
+            string fileName = $"codex-state-{SanitizeFileName(table)}-{DateTimeOffset.Now:yyyyMMdd-HHmmss}.tsv";
+            string path = Path.Combine(exportDirectory, fileName);
             await File.WriteAllTextAsync(path, export, Encoding.UTF8, _cancellation?.Token ?? default);
             StatusText.Text = $"Sanitized inspection export written to {path}";
         }
@@ -582,7 +603,7 @@ public sealed partial class CodexStateDbExplorerPage : Page
 
     private async void OnExportCombinedSchemaClicked(object sender, RoutedEventArgs e)
     {
-        var cancellation = _cancellation;
+        CancellationTokenSource? cancellation = _cancellation;
         if (!_loaded || cancellation is null || cancellation.IsCancellationRequested)
         {
             return;
@@ -591,24 +612,25 @@ public sealed partial class CodexStateDbExplorerPage : Page
         try
         {
             StatusText.Text = "Reading schemas from all discovered Codex databases…";
-            var candidates = await Task.Run(
+            IReadOnlyList<CodexStateDatabaseCandidate> candidates = await Task.Run(
                 () => App.Services.CodexStateExplorer.DiscoverCandidates(),
                 cancellation.Token);
             var inspections = new List<CodexStateInspectionResult>(candidates.Count);
             var failures = new List<string>();
-            foreach (var candidate in candidates)
+            foreach (CodexStateDatabaseCandidate candidate in candidates)
             {
                 cancellation.Token.ThrowIfCancellationRequested();
                 try
                 {
                     // Schema export does not need row fingerprints. This keeps large content-heavy
                     // snapshots useful without scanning their bodies.
-                    inspections.Add(await Task.Run(
-                        () => App.Services.CodexStateExplorer.InspectAsync(
-                            candidate.Path,
-                            includeRowFingerprints: false,
-                            cancellationToken: cancellation.Token),
-                        cancellation.Token));
+                    inspections.Add(
+                        await Task.Run(
+                            () => App.Services.CodexStateExplorer.InspectAsync(
+                                candidate.Path,
+                                false,
+                                cancellation.Token),
+                            cancellation.Token));
                 }
                 catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
                 {
@@ -624,15 +646,15 @@ public sealed partial class CodexStateDbExplorerPage : Page
             if (failures.Count > 0)
             {
                 schema.AppendLine("-- UNAVAILABLE SOURCES");
-                foreach (var failure in failures)
+                foreach (string failure in failures)
                 {
                     schema.Append("-- ").AppendLine(failure);
                 }
             }
 
-            var exportDirectory = Path.Combine(App.Services.DataFolder, "InspectionExports");
+            string exportDirectory = Path.Combine(App.Services.DataFolder, "InspectionExports");
             Directory.CreateDirectory(exportDirectory);
-            var path = Path.Combine(
+            string path = Path.Combine(
                 exportDirectory,
                 $"codex-combined-schema-{DateTimeOffset.Now:yyyyMMdd-HHmmss}.sql");
             await File.WriteAllTextAsync(path, schema.ToString(), Encoding.UTF8, cancellation.Token);
@@ -655,30 +677,31 @@ public sealed partial class CodexStateDbExplorerPage : Page
             return null;
         }
 
-        var selected = _page.Rows.Where(_selectedRawRows.Contains).ToArray();
+        CodexStateRawRow[] selected = _page.Rows.Where(_selectedRawRows.Contains).ToArray();
         if (selected.Length == 0)
         {
             return CodexStateDbExplorerService.BuildSanitizedExport(_page);
         }
 
-        var selectedPage = _page with { Rows = selected };
+        CodexStateRawPage selectedPage = _page with { Rows = selected };
         return CodexStateDbExplorerService.BuildSanitizedExport(selectedPage);
     }
 
     private void ApplyInspection(CodexStateInspectionResult inspection)
     {
         _inspection = inspection;
-        var selectedTableName = (TableList.SelectedItem as CodexStateTableInfo)?.Name;
+        string? selectedTableName = (TableList.SelectedItem as CodexStateTableInfo)?.Name;
         TableList.ItemsSource = inspection.Tables;
         FocusedTableComboBox.ItemsSource = inspection.FocusedTables;
-        TableCountText.Text = $"{inspection.Tables.Count:N0} tables/views · {inspection.SchemaObjects.Count:N0} schema objects · {inspection.Database.FileName}";
+        TableCountText.Text =
+            $"{inspection.Tables.Count:N0} tables/views · {inspection.SchemaObjects.Count:N0} schema objects · {inspection.Database.FileName}";
         DatabasePathText.Text = inspection.Database.Path;
         SchemaFingerprintText.Text = $"Schema fingerprint: {inspection.Snapshot.SchemaFingerprint}";
 
-        var selectedTable = inspection.Tables.FirstOrDefault(table =>
-            string.Equals(table.Name, selectedTableName, StringComparison.OrdinalIgnoreCase))
-            ?? inspection.FocusedTables.FirstOrDefault()
-            ?? inspection.Tables.FirstOrDefault();
+        CodexStateTableInfo? selectedTable = inspection.Tables.FirstOrDefault(table =>
+                                                 string.Equals(table.Name, selectedTableName, StringComparison.OrdinalIgnoreCase))
+                                             ?? inspection.FocusedTables.FirstOrDefault()
+                                             ?? inspection.Tables.FirstOrDefault();
         if (selectedTable is not null)
         {
             TableList.SelectedItem = selectedTable;
@@ -691,9 +714,9 @@ public sealed partial class CodexStateDbExplorerPage : Page
         if (_baseline is not null &&
             string.Equals(_baseline.DatabasePath, inspection.Database.Path, StringComparison.OrdinalIgnoreCase))
         {
-            var diff = CodexStateDbExplorerService.Compare(_baseline, inspection.Snapshot);
+            CodexStateInspectionDiff diff = CodexStateDbExplorerService.Compare(_baseline, inspection.Snapshot);
             DiffList.ItemsSource = diff.Tables;
-            var schemaSummary = diff.SchemaChanged
+            string schemaSummary = diff.SchemaChanged
                 ? $"schema changed ({ShortFingerprint(diff.BaselineSchemaFingerprint)} → {ShortFingerprint(diff.CurrentSchemaFingerprint)})"
                 : $"schema unchanged ({ShortFingerprint(diff.CurrentSchemaFingerprint)})";
             BaselineText.Text = diff.HasObservedChanges
@@ -701,7 +724,8 @@ public sealed partial class CodexStateDbExplorerPage : Page
                 : $"Compared with baseline from {diff.BaselineCapturedAtUtc.ToLocalTime():g}: {schemaSummary} · no table or row changes observed.";
             if (diff.HasIncompleteComparisons)
             {
-                BaselineText.Text += " Some row comparisons are incomplete or bounded/count-only; unchanged counts do not prove unchanged rows.";
+                BaselineText.Text +=
+                    " Some row comparisons are incomplete or bounded/count-only; unchanged counts do not prove unchanged rows.";
             }
         }
         else if (_baseline is not null)
@@ -710,7 +734,8 @@ public sealed partial class CodexStateDbExplorerPage : Page
             BaselineText.Text = $"A baseline exists for {Path.GetFileName(_baseline.DatabasePath)}, not this selected file.";
         }
 
-        StatusText.Text = $"Inspecting {inspection.Database.Path} · {inspection.Tables.Count:N0} tables/views · {inspection.SchemaObjects.Count:N0} schema objects · read-only/query_only · refreshed {inspection.Snapshot.CapturedAtUtc.ToLocalTime():g}.";
+        StatusText.Text =
+            $"Inspecting {inspection.Database.Path} · {inspection.Tables.Count:N0} tables/views · {inspection.SchemaObjects.Count:N0} schema objects · read-only/query_only · refreshed {inspection.Snapshot.CapturedAtUtc.ToLocalTime():g}.";
     }
 
     private void ClearInspection(string message)
@@ -742,24 +767,26 @@ public sealed partial class CodexStateDbExplorerPage : Page
         RawGrid.Children.Clear();
         RawGrid.RowDefinitions.Clear();
         RawGrid.ColumnDefinitions.Clear();
-        }
+    }
 
-    private bool CanApply(long generation, CancellationTokenSource cancellation) =>
-        _loaded && ReferenceEquals(_cancellation, cancellation) &&
-        !cancellation.IsCancellationRequested && generation == Volatile.Read(ref _loadGeneration);
+    private bool CanApply(long generation, CancellationTokenSource cancellation)
+    {
+        return _loaded && ReferenceEquals(_cancellation, cancellation) &&
+               !cancellation.IsCancellationRequested && generation == Volatile.Read(ref _loadGeneration);
+    }
 
     private void ReplaceCancellation(bool cancelOnly = false)
     {
-        var previous = Interlocked.Exchange(ref _cancellation, cancelOnly ? null : new CancellationTokenSource());
+        CancellationTokenSource? previous = Interlocked.Exchange(ref _cancellation, cancelOnly ? null : new CancellationTokenSource());
         previous?.Cancel();
         previous?.Dispose();
     }
 
     private static string SanitizeFileName(string value)
     {
-        var invalid = Path.GetInvalidFileNameChars();
+        char[] invalid = Path.GetInvalidFileNameChars();
         var builder = new StringBuilder(value.Length);
-        foreach (var character in value)
+        foreach (char character in value)
         {
             builder.Append(invalid.Contains(character) ? '_' : character);
         }
@@ -767,10 +794,17 @@ public sealed partial class CodexStateDbExplorerPage : Page
         return builder.Length == 0 ? "table" : builder.ToString();
     }
 
-    private static string Summarize(string message) => message.ReplaceLineEndings(" ").Trim();
+    private static string Summarize(string message)
+    {
+        return message.ReplaceLineEndings(" ").Trim();
+    }
 
-    private static string ShortFingerprint(string fingerprint) =>
-        string.IsNullOrWhiteSpace(fingerprint)
+    private static string ShortFingerprint(string fingerprint)
+    {
+        return string.IsNullOrWhiteSpace(fingerprint)
             ? "unavailable"
-            : fingerprint.Length <= 12 ? fingerprint : fingerprint[..12];
+            : fingerprint.Length <= 12
+                ? fingerprint
+                : fingerprint[..12];
+    }
 }

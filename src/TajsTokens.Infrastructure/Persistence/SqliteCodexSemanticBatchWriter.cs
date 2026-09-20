@@ -1,9 +1,18 @@
+// Taj's Tokens | SqliteCodexSemanticBatchWriter.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Interfaces;
+using TajsTokens.Core.Models;
 using TajsTokens.Infrastructure.Ingestion;
+
+#endregion
 
 namespace TajsTokens.Infrastructure.Persistence;
 
@@ -18,11 +27,11 @@ internal interface ICodexIngestionBatchWriter
 }
 
 /// <summary>
-/// Single high-volume writer lane for one Codex rollout batch. Semantic projections and rollout
-/// file/record metadata share one serialization gate, connection and transaction. Correctness-critical
-/// token-count observations remain ordered and are reduced by the dedicated Core accounting
-/// state machine after the projection transaction; the gate remains held until those writes complete,
-/// and the source checkpoint is advanced only after the entire batch succeeds.
+///     Single high-volume writer lane for one Codex rollout batch. Semantic projections and rollout
+///     file/record metadata share one serialization gate, connection and transaction. Correctness-critical
+///     token-count observations remain ordered and are reduced by the dedicated Core accounting
+///     state machine after the projection transaction; the gate remains held until those writes complete,
+///     and the source checkpoint is advanced only after the entire batch succeeds.
 /// </summary>
 internal sealed class SqliteCodexIngestionBatchWriter(
     string databasePath,
@@ -52,9 +61,9 @@ internal sealed class SqliteCodexIngestionBatchWriter(
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await EnsureRevisionStoreAsync(connection, cancellationToken);
-            using var transaction = connection.BeginTransaction();
+            using SqliteTransaction transaction = connection.BeginTransaction();
 
-            var safeFileLabel = BuildSafeFileLabel(filePath);
+            string safeFileLabel = BuildSafeFileLabel(filePath);
             await WriteProjectionAndStorageBatchAsync(
                 connection,
                 transaction,
@@ -64,7 +73,7 @@ internal sealed class SqliteCodexIngestionBatchWriter(
                 records,
                 cancellationToken);
 
-            var bumpRevision = connection.CreateCommand();
+            SqliteCommand bumpRevision = connection.CreateCommand();
             bumpRevision.Transaction = transaction;
             bumpRevision.CommandText = "UPDATE codex_native_accounting_revision SET revision = revision + 1 WHERE id = 1;";
             await bumpRevision.ExecuteNonQueryAsync(cancellationToken);
@@ -74,7 +83,7 @@ internal sealed class SqliteCodexIngestionBatchWriter(
             // persists each reducer decision and next state atomically. Replay is safe because every
             // projection/storage mutation above is idempotent and the byte checkpoint is not advanced
             // until these writes also succeed.
-            foreach (var record in records)
+            foreach (ParsedRolloutRecord record in records)
             {
                 cancellationToken.ThrowIfCancellationRequested();
                 if (record.TokenObservation is not null)
@@ -98,16 +107,16 @@ internal sealed class SqliteCodexIngestionBatchWriter(
             return;
         }
 
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-            CREATE TABLE IF NOT EXISTS codex_native_accounting_revision (
-                id INTEGER PRIMARY KEY CHECK(id = 1),
-                revision INTEGER NOT NULL
-            );
-            INSERT INTO codex_native_accounting_revision(id, revision)
-            VALUES(1, 0)
-            ON CONFLICT(id) DO NOTHING;
-            """;
+                              CREATE TABLE IF NOT EXISTS codex_native_accounting_revision (
+                                  id INTEGER PRIMARY KEY CHECK(id = 1),
+                                  revision INTEGER NOT NULL
+                              );
+                              INSERT INTO codex_native_accounting_revision(id, revision)
+                              VALUES(1, 0)
+                              ON CONFLICT(id) DO NOTHING;
+                              """;
         await command.ExecuteNonQueryAsync(cancellationToken);
         _revisionStoreInitialized = true;
     }
@@ -121,16 +130,16 @@ internal sealed class SqliteCodexIngestionBatchWriter(
         IReadOnlyList<ParsedRolloutRecord> records,
         CancellationToken cancellationToken)
     {
-        var sessionId = records
+        string? sessionId = records
             .Select(record => record.SessionId)
             .LastOrDefault(value => !string.IsNullOrWhiteSpace(value));
-        var lastSeen = records.Max(record => record.TimestampUtc);
+        DateTimeOffset lastSeen = records.Max(record => record.TimestampUtc);
 
         // A logical rollout path can be replaced with a new filesystem identity. The token-event and
         // counter tables predate source_identity columns, so the privacy-safe file label is their
         // generation owner. Retire the old generation in the same transaction that activates the new
         // rollout identity; otherwise a replacement replay leaves both generations in accounting.
-        using (var replaceGeneration = BuildCommand(
+        using (SqliteCommand replaceGeneration = BuildCommand(
                    connection,
                    transaction,
                    """
@@ -185,7 +194,7 @@ internal sealed class SqliteCodexIngestionBatchWriter(
             await replaceGeneration.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        using (var rolloutFile = BuildCommand(
+        using (SqliteCommand rolloutFile = BuildCommand(
                    connection,
                    transaction,
                    """
@@ -197,7 +206,11 @@ internal sealed class SqliteCodexIngestionBatchWriter(
                      size_bytes = excluded.size_bytes,
                      last_seen_at_utc = MAX(rollout_files.last_seen_at_utc, excluded.last_seen_at_utc);
                    """,
-                   "$identity", "$file", "$session", "$size", "$seen"))
+                   "$identity",
+                   "$file",
+                   "$session",
+                   "$size",
+                   "$seen"))
         {
             Set(rolloutFile, "$identity", sourceIdentity);
             Set(rolloutFile, "$file", safeFileLabel);
@@ -207,15 +220,15 @@ internal sealed class SqliteCodexIngestionBatchWriter(
             await rolloutFile.ExecuteNonQueryAsync(cancellationToken);
         }
 
-        using var rolloutRecord = BuildRolloutRecordCommand(connection, transaction);
-        using var session = BuildSessionCommand(connection, transaction);
-        using var agent = BuildAgentCommand(connection, transaction);
-        using var relationship = BuildRelationshipCommand(connection, transaction);
-        using var usage = BuildUsageCommand(connection, transaction);
-        using var quota = BuildQuotaCommand(connection, transaction);
-        using var context = BuildContextCommand(connection, transaction);
+        using SqliteCommand rolloutRecord = BuildRolloutRecordCommand(connection, transaction);
+        using SqliteCommand session = BuildSessionCommand(connection, transaction);
+        using SqliteCommand agent = BuildAgentCommand(connection, transaction);
+        using SqliteCommand relationship = BuildRelationshipCommand(connection, transaction);
+        using SqliteCommand usage = BuildUsageCommand(connection, transaction);
+        using SqliteCommand quota = BuildQuotaCommand(connection, transaction);
+        using SqliteCommand context = BuildContextCommand(connection, transaction);
 
-        foreach (var record in records)
+        foreach (ParsedRolloutRecord record in records)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
@@ -234,9 +247,12 @@ internal sealed class SqliteCodexIngestionBatchWriter(
                 Set(session, "$thread", DbValue(record.Session.ThreadId));
                 Set(session, "$repo", SafeRepositoryLabel(record.Session.Repository));
                 Set(session, "$start", SerializeUtc(record.Session.StartedAtUtc));
-                Set(session, "$last", record.Session.LastActivityAtUtc is null
-                    ? DBNull.Value
-                    : SerializeUtc(record.Session.LastActivityAtUtc.Value));
+                Set(
+                    session,
+                    "$last",
+                    record.Session.LastActivityAtUtc is null
+                        ? DBNull.Value
+                        : SerializeUtc(record.Session.LastActivityAtUtc.Value));
                 Set(session, "$status", record.Session.Status);
                 await session.ExecuteNonQueryAsync(cancellationToken);
             }
@@ -271,7 +287,7 @@ internal sealed class SqliteCodexIngestionBatchWriter(
                 await usage.ExecuteNonQueryAsync(cancellationToken);
             }
 
-            foreach (var snapshot in record.QuotaSnapshots)
+            foreach (QuotaSnapshot snapshot in record.QuotaSnapshots)
             {
                 SqliteQuotaEvidence.Bind(quota, snapshot);
                 await quota.ExecuteNonQueryAsync(cancellationToken);
@@ -293,25 +309,49 @@ internal sealed class SqliteCodexIngestionBatchWriter(
             }
             if (record.WorkloadObservation is not null)
             {
-                await SqliteCodexWorkloadEvidence.WriteAsync(connection, transaction,
-                    record.WorkloadObservation, safeFileLabel, cancellationToken);
+                await SqliteCodexWorkloadEvidence.WriteAsync(
+                    connection,
+                    transaction,
+                    record.WorkloadObservation,
+                    safeFileLabel,
+                    cancellationToken);
             }
             if (record.ResponseObservation is not null)
-                await SqliteCodexResponseEvidence.WriteAsync(connection, transaction,
-                    record.ResponseObservation, safeFileLabel, cancellationToken);
+                await SqliteCodexResponseEvidence.WriteAsync(
+                    connection,
+                    transaction,
+                    record.ResponseObservation,
+                    safeFileLabel,
+                    cancellationToken);
         }
     }
 
-    private static SqliteCommand BuildRolloutRecordCommand(SqliteConnection connection, SqliteTransaction transaction) =>
-        BuildCommand(connection, transaction, """
+    private static SqliteCommand BuildRolloutRecordCommand(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        return BuildCommand(
+            connection,
+            transaction,
+            """
             INSERT INTO rollout_records(
                 source_record_id, source_identity, file_path, session_id, event_class, record_bytes, observed_at_utc)
             VALUES($id, $identity, $file, $session, $class, $bytes, $observed)
             ON CONFLICT(source_record_id) DO NOTHING;
-            """, "$id", "$identity", "$file", "$session", "$class", "$bytes", "$observed");
+            """,
+            "$id",
+            "$identity",
+            "$file",
+            "$session",
+            "$class",
+            "$bytes",
+            "$observed");
+    }
 
-    private static SqliteCommand BuildSessionCommand(SqliteConnection connection, SqliteTransaction transaction) =>
-        BuildCommand(connection, transaction, """
+    private static SqliteCommand BuildSessionCommand(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        return BuildCommand(
+            connection,
+            transaction,
+            """
             INSERT INTO sessions(session_id, thread_id, repository, started_at_utc, last_activity_at_utc, status)
             VALUES($id, $thread, $repo, $start, $last, $status)
             ON CONFLICT(session_id) DO UPDATE SET
@@ -324,10 +364,21 @@ internal sealed class SqliteCodexIngestionBatchWriter(
                   ELSE MAX(sessions.last_activity_at_utc, excluded.last_activity_at_utc)
               END,
               status = excluded.status;
-            """, "$id", "$thread", "$repo", "$start", "$last", "$status");
+            """,
+            "$id",
+            "$thread",
+            "$repo",
+            "$start",
+            "$last",
+            "$status");
+    }
 
-    private static SqliteCommand BuildAgentCommand(SqliteConnection connection, SqliteTransaction transaction) =>
-        BuildCommand(connection, transaction, """
+    private static SqliteCommand BuildAgentCommand(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        return BuildCommand(
+            connection,
+            transaction,
+            """
             INSERT INTO agents(agent_id, session_id, name, state, last_seen_utc, model)
             VALUES($id, $session, $name, $state, $lastSeen, $model)
             ON CONFLICT(agent_id) DO UPDATE SET
@@ -341,34 +392,77 @@ internal sealed class SqliteCodexIngestionBatchWriter(
               state = excluded.state,
               last_seen_utc = MAX(agents.last_seen_utc, excluded.last_seen_utc),
               model = COALESCE(excluded.model, agents.model);
-            """, "$id", "$session", "$name", "$state", "$lastSeen", "$model");
+            """,
+            "$id",
+            "$session",
+            "$name",
+            "$state",
+            "$lastSeen",
+            "$model");
+    }
 
-    private static SqliteCommand BuildRelationshipCommand(SqliteConnection connection, SqliteTransaction transaction) =>
-        BuildCommand(connection, transaction, """
+    private static SqliteCommand BuildRelationshipCommand(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        return BuildCommand(
+            connection,
+            transaction,
+            """
             INSERT INTO agent_relationships(parent_agent_id, child_agent_id, linked_at_utc)
             VALUES($parent, $child, $linked)
             ON CONFLICT(parent_agent_id, child_agent_id) DO UPDATE SET
               linked_at_utc = MIN(agent_relationships.linked_at_utc, excluded.linked_at_utc);
-            """, "$parent", "$child", "$linked");
+            """,
+            "$parent",
+            "$child",
+            "$linked");
+    }
 
-    private static SqliteCommand BuildUsageCommand(SqliteConnection connection, SqliteTransaction transaction) =>
-        BuildCommand(connection, transaction, """
+    private static SqliteCommand BuildUsageCommand(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        return BuildCommand(
+            connection,
+            transaction,
+            """
             INSERT INTO usage_events(event_id, session_id, timestamp_utc, event_type, summary, token_delta)
             VALUES($id, $session, $time, $type, $summary, $delta)
             ON CONFLICT(event_id) DO NOTHING;
-            """, "$id", "$session", "$time", "$type", "$summary", "$delta");
+            """,
+            "$id",
+            "$session",
+            "$time",
+            "$type",
+            "$summary",
+            "$delta");
+    }
 
-    private static SqliteCommand BuildQuotaCommand(SqliteConnection connection, SqliteTransaction transaction) =>
-        BuildCommand(connection, transaction, SqliteQuotaEvidence.InsertSql);
+    private static SqliteCommand BuildQuotaCommand(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        return BuildCommand(connection, transaction, SqliteQuotaEvidence.InsertSql);
+    }
 
-    private static SqliteCommand BuildContextCommand(SqliteConnection connection, SqliteTransaction transaction) =>
-        BuildCommand(connection, transaction, """
+    private static SqliteCommand BuildContextCommand(SqliteConnection connection, SqliteTransaction transaction)
+    {
+        return BuildCommand(
+            connection,
+            transaction,
+            """
             INSERT INTO context_observations(
                 event_id, session_id, agent_id, observed_at_utc, model, input_tokens,
                 context_window_tokens, is_compaction, record_bytes, captured_at_utc)
             VALUES($event, $session, $agent, $observed, $model, $input, $window, $compaction, $bytes, $captured)
             ON CONFLICT(event_id) DO NOTHING;
-            """, "$event", "$session", "$agent", "$observed", "$model", "$input", "$window", "$compaction", "$bytes", "$captured");
+            """,
+            "$event",
+            "$session",
+            "$agent",
+            "$observed",
+            "$model",
+            "$input",
+            "$window",
+            "$compaction",
+            "$bytes",
+            "$captured");
+    }
 
     private static SqliteCommand BuildCommand(
         SqliteConnection connection,
@@ -376,10 +470,10 @@ internal sealed class SqliteCodexIngestionBatchWriter(
         string sql,
         params string[] parameterNames)
     {
-        var command = connection.CreateCommand();
+        SqliteCommand command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = sql;
-        foreach (var parameterName in parameterNames)
+        foreach (string parameterName in parameterNames)
         {
             command.Parameters.Add(new SqliteParameter(parameterName, DBNull.Value));
         }
@@ -387,12 +481,14 @@ internal sealed class SqliteCodexIngestionBatchWriter(
         return command;
     }
 
-    private static void Set(SqliteCommand command, string parameterName, object value) =>
+    private static void Set(SqliteCommand command, string parameterName, object value)
+    {
         command.Parameters[parameterName].Value = value;
+    }
 
     private static string BuildSafeFileLabel(string filePath)
     {
-        var fileName = Path.GetFileName(filePath);
+        string fileName = Path.GetFileName(filePath);
         if (string.IsNullOrWhiteSpace(fileName))
         {
             fileName = "rollout.jsonl";
@@ -413,7 +509,7 @@ internal sealed class SqliteCodexIngestionBatchWriter(
             normalized = normalized.ToUpperInvariant();
         }
 
-        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized))).ToLowerInvariant()[..12];
+        string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(normalized))).ToLowerInvariant()[..12];
         return $"{fileName} [{hash}]";
     }
 
@@ -424,9 +520,9 @@ internal sealed class SqliteCodexIngestionBatchWriter(
             return "(unknown)";
         }
 
-        var normalized = value.Replace('\\', '/').Trim().TrimEnd('/');
-        var separator = normalized.LastIndexOf('/');
-        var label = separator >= 0 ? normalized[(separator + 1)..] : normalized;
+        string normalized = value.Replace('\\', '/').Trim().TrimEnd('/');
+        int separator = normalized.LastIndexOf('/');
+        string label = separator >= 0 ? normalized[(separator + 1)..] : normalized;
         if (label.EndsWith(".git", StringComparison.OrdinalIgnoreCase))
         {
             label = label[..^4];
@@ -441,8 +537,13 @@ internal sealed class SqliteCodexIngestionBatchWriter(
         return label.Length <= 160 ? label : label[..160];
     }
 
-    private static object DbValue(object? value) => value ?? DBNull.Value;
+    private static object DbValue(object? value)
+    {
+        return value ?? DBNull.Value;
+    }
 
-    private static string SerializeUtc(DateTimeOffset value) =>
-        value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+    private static string SerializeUtc(DateTimeOffset value)
+    {
+        return value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+    }
 }

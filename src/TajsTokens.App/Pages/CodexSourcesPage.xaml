@@ -20,9 +20,11 @@
             </Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="Codex Sources" FontSize="28" FontWeight="SemiBold" />
-                <TextBlock Text="Provider-native, read-only views of Codex logs, memory, goals, queue, artifacts and Desktop stores. Content-bearing values stay local to this inspection session; choose the shown path in State DB Explorer for deliberate raw inspection."
-                           Opacity="0.72" TextWrapping="Wrap" Margin="0,4,0,0" />
-                <TextBlock x:Name="StatusText" Text="Loading Codex source capabilities…" Opacity="0.72" Margin="0,8,0,0" TextWrapping="Wrap" />
+                <TextBlock
+                    Text="Provider-native, read-only views of Codex logs, memory, goals, queue, artifacts and Desktop stores. Content-bearing values stay local to this inspection session; choose the shown path in State DB Explorer for deliberate raw inspection."
+                    Opacity="0.72" TextWrapping="Wrap" Margin="0,4,0,0" />
+                <TextBlock x:Name="StatusText" Text="Loading Codex source capabilities…" Opacity="0.72" Margin="0,8,0,0"
+                           TextWrapping="Wrap" />
             </StackPanel>
             <Button x:Name="RefreshButton" Grid.Column="1" Content="Refresh" Click="OnRefreshClicked" VerticalAlignment="Top" />
         </Grid>
@@ -32,7 +34,8 @@
                       HorizontalAlignment="Stretch" DisplayMemberPath="Label"
                       SelectionChanged="OnSourceInstanceChanged" />
             <TextBlock x:Name="SourceSelectionText" TextWrapping="Wrap" IsTextSelectionEnabled="True" Opacity="0.72" />
-            <Expander Header="Auxiliary source query · memory, goals, queue, artifacts and Desktop" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+            <Expander Header="Auxiliary source query · memory, goals, queue, artifacts and Desktop" HorizontalAlignment="Stretch"
+                      HorizontalContentAlignment="Stretch">
                 <StackPanel Spacing="8">
                     <TextBox x:Name="AuxiliaryThreadBox" Header="Exact thread ID · optional" />
                     <StackPanel Orientation="Horizontal" Spacing="8">
@@ -47,21 +50,21 @@
                      PlaceholderText="Filter loaded rows only by thread, status, id or host"
                      TextChanged="OnFilterChanged" />
             <ItemsControl x:Name="SourceStatusList">
-            <ItemsControl.ItemsPanel>
-                <ItemsPanelTemplate>
-                    <ItemsStackPanel Orientation="Horizontal" />
-                </ItemsPanelTemplate>
-            </ItemsControl.ItemsPanel>
-            <ItemsControl.ItemTemplate>
-                <DataTemplate>
-                    <Border Padding="10,8" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                        <StackPanel Spacing="2">
-                            <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
-                            <TextBlock Text="{Binding Status}" Opacity="0.72" />
-                        </StackPanel>
-                    </Border>
-                </DataTemplate>
-            </ItemsControl.ItemTemplate>
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <ItemsStackPanel Orientation="Horizontal" />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Padding="10,8" CornerRadius="8" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                            <StackPanel Spacing="2">
+                                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" />
+                                <TextBlock Text="{Binding Status}" Opacity="0.72" />
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
             </ItemsControl>
         </StackPanel>
 
@@ -96,117 +99,155 @@
             <Border Grid.Column="1" Padding="12" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                 <Grid x:Name="SourceDetailHost">
                     <Grid x:Name="LogsPane" Visibility="Collapsed">
-                <Grid RowSpacing="8">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
-                    <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
-                    <TextBlock IsTextSelectionEnabled="True" x:Name="LogsSourceText" TextWrapping="Wrap" Opacity="0.72" />
-                    </ScrollViewer>
-                    <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <TextBox x:Name="LogLevelsTextBox" Width="170" PlaceholderText="Levels: ERROR,WARN" />
-                            <TextBox x:Name="LogTargetTextBox" Width="220" PlaceholderText="Target contains" />
-                            <TextBox x:Name="LogModuleTextBox" Width="220" PlaceholderText="Module path contains" />
-                            <TextBox x:Name="LogThreadTextBox" Width="220" PlaceholderText="Thread ID" />
-                        </StackPanel>
-                    </ScrollViewer>
-                    <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-                        <StackPanel Orientation="Horizontal" Spacing="8">
-                            <TextBox x:Name="LogFromTextBox" Width="250" PlaceholderText="From UTC: ISO-8601 or Unix seconds" />
-                            <TextBox x:Name="LogToTextBox" Width="250" PlaceholderText="To UTC (exclusive)" />
-                            <TextBox x:Name="LogProcessTextBox" Width="250" PlaceholderText="Process UUID" />
-                            <CheckBox x:Name="LogIncludeThreadlessCheckBox" Content="Include threadless" IsChecked="True" VerticalAlignment="Center" />
-                            <CheckBox x:Name="LogIncludeMessagesCheckBox" Content="Show log bodies" VerticalAlignment="Center" />
-                            <Button Content="Apply" Click="OnLogApplyClicked" />
-                            <Button x:Name="LogPreviousButton" Content="Previous" Click="OnLogPreviousClicked" IsEnabled="False" />
-                            <Button x:Name="LogNextButton" Content="Next" Click="OnLogNextClicked" IsEnabled="False" />
-                        </StackPanel>
-                    </ScrollViewer>
-                    <Grid Grid.Row="3" RowSpacing="6">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto" />
-                            <RowDefinition Height="*" />
-                        </Grid.RowDefinitions>
-                        <TextBlock x:Name="LogsQueryStatus" TextWrapping="Wrap" Opacity="0.72" />
-                        <ListView x:Name="LogsList" Grid.Row="1" SelectionMode="None" ScrollViewer.IsDeferredScrollingEnabled="True">
-                            <ListView.ItemTemplate>
-                                <DataTemplate>
-                                    <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,4" />
-                                </DataTemplate>
-                            </ListView.ItemTemplate>
-                        </ListView>
-                    </Grid>
-                </Grid>
+                        <Grid RowSpacing="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                                <TextBlock IsTextSelectionEnabled="True" x:Name="LogsSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                            </ScrollViewer>
+                            <ScrollViewer Grid.Row="1" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBox x:Name="LogLevelsTextBox" Width="170" PlaceholderText="Levels: ERROR,WARN" />
+                                    <TextBox x:Name="LogTargetTextBox" Width="220" PlaceholderText="Target contains" />
+                                    <TextBox x:Name="LogModuleTextBox" Width="220" PlaceholderText="Module path contains" />
+                                    <TextBox x:Name="LogThreadTextBox" Width="220" PlaceholderText="Thread ID" />
+                                </StackPanel>
+                            </ScrollViewer>
+                            <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                                <StackPanel Orientation="Horizontal" Spacing="8">
+                                    <TextBox x:Name="LogFromTextBox" Width="250" PlaceholderText="From UTC: ISO-8601 or Unix seconds" />
+                                    <TextBox x:Name="LogToTextBox" Width="250" PlaceholderText="To UTC (exclusive)" />
+                                    <TextBox x:Name="LogProcessTextBox" Width="250" PlaceholderText="Process UUID" />
+                                    <CheckBox x:Name="LogIncludeThreadlessCheckBox" Content="Include threadless" IsChecked="True"
+                                              VerticalAlignment="Center" />
+                                    <CheckBox x:Name="LogIncludeMessagesCheckBox" Content="Show log bodies" VerticalAlignment="Center" />
+                                    <Button Content="Apply" Click="OnLogApplyClicked" />
+                                    <Button x:Name="LogPreviousButton" Content="Previous" Click="OnLogPreviousClicked" IsEnabled="False" />
+                                    <Button x:Name="LogNextButton" Content="Next" Click="OnLogNextClicked" IsEnabled="False" />
+                                </StackPanel>
+                            </ScrollViewer>
+                            <Grid Grid.Row="3" RowSpacing="6">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <TextBlock x:Name="LogsQueryStatus" TextWrapping="Wrap" Opacity="0.72" />
+                                <ListView x:Name="LogsList" Grid.Row="1" SelectionMode="None"
+                                          ScrollViewer.IsDeferredScrollingEnabled="True">
+                                    <ListView.ItemTemplate>
+                                        <DataTemplate>
+                                            <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,4" />
+                                        </DataTemplate>
+                                    </ListView.ItemTemplate>
+                                </ListView>
+                            </Grid>
+                        </Grid>
                     </Grid>
                     <Grid x:Name="MemoryPane" Visibility="Collapsed">
-                <Grid RowSpacing="8">
-                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                    <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
-                    <TextBlock IsTextSelectionEnabled="True" x:Name="MemorySourceText" TextWrapping="Wrap" Opacity="0.72" />
-                    </ScrollViewer>
-                    <ListView x:Name="MemoryList" Grid.Row="1" SelectionMode="None">
-                        <ListView.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,4" /></DataTemplate></ListView.ItemTemplate>
-                    </ListView>
-                </Grid>
+                        <Grid RowSpacing="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" /><RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                                <TextBlock IsTextSelectionEnabled="True" x:Name="MemorySourceText" TextWrapping="Wrap" Opacity="0.72" />
+                            </ScrollViewer>
+                            <ListView x:Name="MemoryList" Grid.Row="1" SelectionMode="None">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,4" />
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
                     </Grid>
                     <Grid x:Name="GoalsPane" Visibility="Collapsed">
-                <Grid RowSpacing="8">
-                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                    <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
-                    <TextBlock IsTextSelectionEnabled="True" x:Name="GoalsSourceText" TextWrapping="Wrap" Opacity="0.72" />
-                    </ScrollViewer>
-                    <ListView x:Name="GoalsList" Grid.Row="1" SelectionMode="None">
-                        <ListView.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,4" /></DataTemplate></ListView.ItemTemplate>
-                    </ListView>
-                </Grid>
+                        <Grid RowSpacing="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" /><RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                                <TextBlock IsTextSelectionEnabled="True" x:Name="GoalsSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                            </ScrollViewer>
+                            <ListView x:Name="GoalsList" Grid.Row="1" SelectionMode="None">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,4" />
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
                     </Grid>
                     <Grid x:Name="QueuePane" Visibility="Collapsed">
-                <Grid RowSpacing="8">
-                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                    <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
-                    <TextBlock IsTextSelectionEnabled="True" x:Name="QueueSourceText" TextWrapping="Wrap" Opacity="0.72" />
-                    </ScrollViewer>
-                    <ListView x:Name="QueueList" Grid.Row="1" SelectionMode="None">
-                        <ListView.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,4" /></DataTemplate></ListView.ItemTemplate>
-                    </ListView>
-                </Grid>
+                        <Grid RowSpacing="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" /><RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                                <TextBlock IsTextSelectionEnabled="True" x:Name="QueueSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                            </ScrollViewer>
+                            <ListView x:Name="QueueList" Grid.Row="1" SelectionMode="None">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,4" />
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
                     </Grid>
                     <Grid x:Name="ArtifactsPane" Visibility="Collapsed">
-                <Grid RowSpacing="8">
-                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                    <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
-                    <TextBlock IsTextSelectionEnabled="True" x:Name="ArtifactsSourceText" TextWrapping="Wrap" Opacity="0.72" />
-                    </ScrollViewer>
-                    <ListView x:Name="ArtifactsList" Grid.Row="1" SelectionMode="None">
-                        <ListView.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,4" /></DataTemplate></ListView.ItemTemplate>
-                    </ListView>
-                </Grid>
+                        <Grid RowSpacing="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" /><RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                                <TextBlock IsTextSelectionEnabled="True" x:Name="ArtifactsSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                            </ScrollViewer>
+                            <ListView x:Name="ArtifactsList" Grid.Row="1" SelectionMode="None">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,4" />
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
                     </Grid>
                     <Grid x:Name="CatalogPane" Visibility="Collapsed">
-                <Grid RowSpacing="8">
-                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                    <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
-                    <TextBlock IsTextSelectionEnabled="True" x:Name="CatalogSourceText" TextWrapping="Wrap" Opacity="0.72" />
-                    </ScrollViewer>
-                    <ListView x:Name="CatalogList" Grid.Row="1" SelectionMode="None">
-                        <ListView.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,4" /></DataTemplate></ListView.ItemTemplate>
-                    </ListView>
-                </Grid>
+                        <Grid RowSpacing="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" /><RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                                <TextBlock IsTextSelectionEnabled="True" x:Name="CatalogSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                            </ScrollViewer>
+                            <ListView x:Name="CatalogList" Grid.Row="1" SelectionMode="None">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,4" />
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
                     </Grid>
                     <Grid x:Name="SummariesPane" Visibility="Collapsed">
-                <Grid RowSpacing="8">
-                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
-                    <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
-                    <TextBlock IsTextSelectionEnabled="True" x:Name="SummariesSourceText" TextWrapping="Wrap" Opacity="0.72" />
-                    </ScrollViewer>
-                    <ListView x:Name="SummariesList" Grid.Row="1" SelectionMode="None">
-                        <ListView.ItemTemplate><DataTemplate><TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,4" /></DataTemplate></ListView.ItemTemplate>
-                    </ListView>
-                </Grid>
+                        <Grid RowSpacing="8">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" /><RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+                            <ScrollViewer MaxHeight="160" VerticalScrollBarVisibility="Auto">
+                                <TextBlock IsTextSelectionEnabled="True" x:Name="SummariesSourceText" TextWrapping="Wrap" Opacity="0.72" />
+                            </ScrollViewer>
+                            <ListView x:Name="SummariesList" Grid.Row="1" SelectionMode="None">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <TextBlock Text="{Binding}" TextWrapping="Wrap" Margin="0,4" />
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
+                            </ListView>
+                        </Grid>
                     </Grid>
                     <TextBlock x:Name="SourceDetailEmptyText"
                                Text="Select a source family."

@@ -20,8 +20,9 @@
             </Grid.ColumnDefinitions>
             <StackPanel Spacing="4">
                 <TextBlock Text="Codex State DB Explorer" FontSize="28" FontWeight="SemiBold" />
-                <TextBlock Text="Raw, read-only inspection of discovered Codex SQLite databases. Values stay source-shaped and are never imported into TajsTokens semantics."
-                           Opacity="0.72" TextWrapping="Wrap" />
+                <TextBlock
+                    Text="Raw, read-only inspection of discovered Codex SQLite databases. Values stay source-shaped and are never imported into TajsTokens semantics."
+                    Opacity="0.72" TextWrapping="Wrap" />
                 <TextBlock x:Name="StatusText" Text="Discovering state databases…" Opacity="0.78" TextWrapping="Wrap" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
@@ -48,7 +49,8 @@
                           DisplayMemberPath="DisplayName" PlaceholderText="No Codex SQLite files discovered" />
                 <StackPanel Grid.Row="1" Grid.ColumnSpan="3" Spacing="2">
                     <TextBlock x:Name="DatabasePathText" Text="No database selected" Opacity="0.72" TextWrapping="Wrap" />
-                    <TextBlock x:Name="SchemaFingerprintText" Text="Schema fingerprint: —" Opacity="0.62" FontFamily="Consolas" TextWrapping="Wrap" />
+                    <TextBlock x:Name="SchemaFingerprintText" Text="Schema fingerprint: —" Opacity="0.62" FontFamily="Consolas"
+                               TextWrapping="Wrap" />
                 </StackPanel>
                 <TextBlock Grid.Column="2" Text="Read-only · query_only" Opacity="0.72" VerticalAlignment="Center" />
                 <TextBlock Grid.Row="2" Text="Compare with:" VerticalAlignment="Center" FontWeight="SemiBold" />
@@ -114,7 +116,8 @@
                     </Grid.RowDefinitions>
                     <StackPanel Spacing="2">
                         <TextBlock x:Name="SelectedTableText" Text="Select a table or view" FontSize="18" FontWeight="SemiBold" />
-                        <TextBlock x:Name="SelectedTableSchemaText" Text="Schema, columns, indexes and raw rows appear here." Opacity="0.7" TextWrapping="Wrap" />
+                        <TextBlock x:Name="SelectedTableSchemaText" Text="Schema, columns, indexes and raw rows appear here." Opacity="0.7"
+                                   TextWrapping="Wrap" />
                     </StackPanel>
                     <Expander Grid.Row="1" Header="Columns and indexes" IsExpanded="False">
                         <StackPanel Padding="4,6" Spacing="4">
@@ -133,7 +136,8 @@
                         </Grid.ColumnDefinitions>
                         <Button Content="‹ Previous" Click="OnPreviousPageClicked" />
                         <Button Grid.Column="1" Content="Next ›" Click="OnNextPageClicked" />
-                        <TextBlock x:Name="PageSummaryText" Grid.Column="2" Text="No rows loaded" VerticalAlignment="Center" HorizontalAlignment="Center" />
+                        <TextBlock x:Name="PageSummaryText" Grid.Column="2" Text="No rows loaded" VerticalAlignment="Center"
+                                   HorizontalAlignment="Center" />
                         <Button Grid.Column="3" Content="Copy selected (sanitized)" Click="OnCopyClicked" />
                         <Button Grid.Column="4" Content="Export page (sanitized)" Click="OnExportClicked" />
                     </Grid>
@@ -152,7 +156,9 @@
                     <Border Grid.Row="4" Padding="8" CornerRadius="8" Background="{ThemeResource SubtleFillColorTransparentBrush}">
                         <StackPanel Spacing="3">
                             <TextBlock Text="Source comparison" FontWeight="SemiBold" />
-                            <TextBlock x:Name="ComparisonText" Text="Select another source instance or snapshot, then compare its raw schema and bounded row observations." Opacity="0.72" TextWrapping="Wrap" />
+                            <TextBlock x:Name="ComparisonText"
+                                       Text="Select another source instance or snapshot, then compare its raw schema and bounded row observations."
+                                       Opacity="0.72" TextWrapping="Wrap" />
                             <ListView x:Name="ComparisonDiffList" MaxHeight="120" SelectionMode="None">
                                 <ListView.ItemTemplate>
                                     <DataTemplate>
@@ -171,8 +177,10 @@
                                                     <DataTemplate>
                                                         <StackPanel Spacing="1">
                                                             <TextBlock Text="{Binding Summary}" FontFamily="Consolas" FontSize="11" />
-                                                            <TextBlock Text="{Binding PreviousRowHash}" Opacity="0.5" FontFamily="Consolas" FontSize="10" TextTrimming="CharacterEllipsis" />
-                                                            <TextBlock Text="{Binding CurrentRowHash}" Opacity="0.5" FontFamily="Consolas" FontSize="10" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Text="{Binding PreviousRowHash}" Opacity="0.5" FontFamily="Consolas"
+                                                                       FontSize="10" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Text="{Binding CurrentRowHash}" Opacity="0.5" FontFamily="Consolas"
+                                                                       FontSize="10" TextTrimming="CharacterEllipsis" />
                                                         </StackPanel>
                                                     </DataTemplate>
                                                 </ListView.ItemTemplate>
@@ -186,7 +194,9 @@
                     <Border Grid.Row="5" Padding="8" CornerRadius="8" Background="{ThemeResource SubtleFillColorTransparentBrush}">
                         <StackPanel Spacing="3">
                             <TextBlock Text="Baseline diff" FontWeight="SemiBold" />
-                            <TextBlock x:Name="BaselineText" Text="No baseline captured. Capture one, then refresh to compare source tables and bounded row fingerprints." Opacity="0.72" TextWrapping="Wrap" />
+                            <TextBlock x:Name="BaselineText"
+                                       Text="No baseline captured. Capture one, then refresh to compare source tables and bounded row fingerprints."
+                                       Opacity="0.72" TextWrapping="Wrap" />
                             <ListView x:Name="DiffList" MaxHeight="120" SelectionMode="None">
                                 <ListView.ItemTemplate>
                                     <DataTemplate>
@@ -205,8 +215,10 @@
                                                     <DataTemplate>
                                                         <StackPanel Spacing="1">
                                                             <TextBlock Text="{Binding Summary}" FontFamily="Consolas" FontSize="11" />
-                                                            <TextBlock Text="{Binding PreviousRowHash}" Opacity="0.5" FontFamily="Consolas" FontSize="10" TextTrimming="CharacterEllipsis" />
-                                                            <TextBlock Text="{Binding CurrentRowHash}" Opacity="0.5" FontFamily="Consolas" FontSize="10" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Text="{Binding PreviousRowHash}" Opacity="0.5" FontFamily="Consolas"
+                                                                       FontSize="10" TextTrimming="CharacterEllipsis" />
+                                                            <TextBlock Text="{Binding CurrentRowHash}" Opacity="0.5" FontFamily="Consolas"
+                                                                       FontSize="10" TextTrimming="CharacterEllipsis" />
                                                         </StackPanel>
                                                     </DataTemplate>
                                                 </ListView.ItemTemplate>
@@ -219,8 +231,9 @@
                     </Border>
                     <Expander Grid.Row="6" Header="Trace a source-native key across selected stores">
                         <StackPanel Padding="4,6" Spacing="6">
-                            <TextBlock Text="Exact column/value lookup only against the selected Inspecting and Compare-with sources. Results remain tied to each originating database object; no joins or semantic relationships are inferred."
-                                       Opacity="0.7" TextWrapping="Wrap" />
+                            <TextBlock
+                                Text="Exact column/value lookup only against the selected Inspecting and Compare-with sources. Results remain tied to each originating database object; no joins or semantic relationships are inferred."
+                                Opacity="0.7" TextWrapping="Wrap" />
                             <Grid ColumnSpacing="8">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="180" />
@@ -228,7 +241,8 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <TextBox x:Name="TraceColumnTextBox" Header="Column" Text="thread_id" />
-                                <TextBox x:Name="TraceValueTextBox" Grid.Column="1" Header="Exact value" PlaceholderText="Paste a source-native key value" />
+                                <TextBox x:Name="TraceValueTextBox" Grid.Column="1" Header="Exact value"
+                                         PlaceholderText="Paste a source-native key value" />
                                 <Button Grid.Column="2" Content="Trace across stores" Click="OnTraceClicked" VerticalAlignment="Bottom" />
                             </Grid>
                             <TextBlock x:Name="TraceStatusText" Text="No trace run yet." Opacity="0.72" TextWrapping="Wrap" />
@@ -239,8 +253,10 @@
                                             <TextBlock Text="{Binding SourceTableSummary}" FontWeight="SemiBold" />
                                             <TextBlock Text="{Binding SourceDescription}" Opacity="0.65" />
                                             <TextBlock Text="{Binding DatabasePath}" Opacity="0.58" TextTrimming="CharacterEllipsis" />
-                                            <TextBlock Text="{Binding ColumnSummary}" Opacity="0.58" FontFamily="Consolas" TextTrimming="CharacterEllipsis" />
-                                            <TextBlock Text="{Binding DisplayText}" FontFamily="Consolas" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap" />
+                                            <TextBlock Text="{Binding ColumnSummary}" Opacity="0.58" FontFamily="Consolas"
+                                                       TextTrimming="CharacterEllipsis" />
+                                            <TextBlock Text="{Binding DisplayText}" FontFamily="Consolas" TextTrimming="CharacterEllipsis"
+                                                       TextWrapping="NoWrap" />
                                         </StackPanel>
                                     </DataTemplate>
                                 </ListView.ItemTemplate>

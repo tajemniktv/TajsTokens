@@ -1,6 +1,14 @@
+// Taj's Tokens | CodexCliHarnessTests.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 using TajsTokens.Infrastructure.Services;
+
+#endregion
 
 namespace TajsTokens.Core.Tests;
 
@@ -9,7 +17,7 @@ public sealed class CodexCliHarnessTests
     [Fact]
     public void ParseLines_UsesOneExplicitArgumentPerLine()
     {
-        var arguments = CodexCliArguments.ParseLines(" exec \r\n\r\n--json\n --model=gpt-test ");
+        IReadOnlyList<string> arguments = CodexCliArguments.ParseLines(" exec \r\n\r\n--json\n --model=gpt-test ");
 
         Assert.Equal(["exec", "--json", "--model=gpt-test"], arguments);
     }
@@ -25,7 +33,7 @@ public sealed class CodexCliHarnessTests
             CodexCliPromptMode.LastArgument,
             TimeSpan.FromMinutes(1));
 
-        var arguments = CodexCliHarnessService.BuildArguments(request);
+        IReadOnlyList<string> arguments = CodexCliHarnessService.BuildArguments(request);
 
         Assert.Equal(["exec", "--json", "prompt with spaces & symbols"], arguments);
     }
@@ -34,8 +42,13 @@ public sealed class CodexCliHarnessTests
     public void BuildArguments_DoesNotAddPromptForStandardInputOrNone()
     {
         var standardInput = new CodexCliHarnessRequest(
-            "custom-codex", ["exec"], null, "prompt", CodexCliPromptMode.StandardInput, TimeSpan.FromMinutes(1));
-        var none = standardInput with { PromptMode = CodexCliPromptMode.None };
+            "custom-codex",
+            ["exec"],
+            null,
+            "prompt",
+            CodexCliPromptMode.StandardInput,
+            TimeSpan.FromMinutes(1));
+        CodexCliHarnessRequest none = standardInput with { PromptMode = CodexCliPromptMode.None };
 
         Assert.Equal(["exec"], CodexCliHarnessService.BuildArguments(standardInput));
         Assert.Equal(["exec"], CodexCliHarnessService.BuildArguments(none));

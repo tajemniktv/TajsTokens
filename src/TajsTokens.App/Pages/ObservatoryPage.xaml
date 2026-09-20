@@ -20,8 +20,9 @@
             </Grid.ColumnDefinitions>
             <StackPanel>
                 <TextBlock Text="Codex Observatory" FontSize="28" FontWeight="SemiBold" />
-                <TextBlock Text="Privacy-safe local session telemetry. Native Codex accounting is the default local-history source; Tokscale is optional reconciliation/fallback."
-                           Opacity="0.72" TextWrapping="Wrap" Margin="0,4,0,0" />
+                <TextBlock
+                    Text="Privacy-safe local session telemetry. Native Codex accounting is the default local-history source; Tokscale is optional reconciliation/fallback."
+                    Opacity="0.72" TextWrapping="Wrap" Margin="0,4,0,0" />
                 <TextBlock x:Name="StatusText" Text="Loading local Codex sessions…" Opacity="0.72" Margin="0,8,0,0" TextWrapping="Wrap" />
             </StackPanel>
             <Button Grid.Column="1" Content="Refresh" Click="OnRefreshClicked" VerticalAlignment="Top" />
@@ -98,7 +99,8 @@
                         <RowDefinition Height="*" />
                     </Grid.RowDefinitions>
                     <TextBlock x:Name="SelectedSessionTitle" Text="Select a session" FontSize="18" FontWeight="SemiBold" />
-                    <TextBlock x:Name="SelectedSessionSummary" Grid.Row="1" Text="Choose a session to load focused detail on demand." Opacity="0.7" TextWrapping="Wrap" />
+                    <TextBlock x:Name="SelectedSessionSummary" Grid.Row="1" Text="Choose a session to load focused detail on demand."
+                               Opacity="0.7" TextWrapping="Wrap" />
 
                     <TabView x:Name="DetailTabs"
                              Grid.Row="2"

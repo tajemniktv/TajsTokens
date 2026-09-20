@@ -1,4 +1,14 @@
+// Taj's Tokens | CodexDesktopFilenameTests.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
+using System.Text.Json;
+using TajsTokens.Core.Models;
 using TajsTokens.Infrastructure.Ingestion;
+
+#endregion
 
 namespace TajsTokens.Core.Tests;
 
@@ -22,13 +32,19 @@ public sealed class CodexDesktopFilenameTests
     {
         var parser = new CodexRolloutParser();
         var state = new RolloutParseState(Path, "source");
-        string Meta(string id) => System.Text.Json.JsonSerializer.Serialize(new { type = "session_meta", payload = new { id } });
-        const string tokens = """{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0,"total_tokens":10}}}}""";
-        parser.Parse(new(Path, 0, 1, Meta(Suffix)), state);
+
+        string Meta(string id)
+        {
+            return JsonSerializer.Serialize(new { type = "session_meta", payload = new { id } });
+        }
+
+        const string tokens =
+            """{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0,"total_tokens":10}}}}""";
+        parser.Parse(new RawSessionRecord(Path, 0, 1, Meta(Suffix)), state);
         Assert.False(state.OwnershipEstablished);
-        Assert.Null(parser.Parse(new(Path, 1, 2, tokens), state).TokenObservation);
-        parser.Parse(new(Path, 2, 3, Meta(Owner)), state);
-        var owned = parser.Parse(new(Path, 3, 4, tokens), state).TokenObservation;
+        Assert.Null(parser.Parse(new RawSessionRecord(Path, 1, 2, tokens), state).TokenObservation);
+        parser.Parse(new RawSessionRecord(Path, 2, 3, Meta(Owner)), state);
+        CodexTokenCountObservation? owned = parser.Parse(new RawSessionRecord(Path, 3, 4, tokens), state).TokenObservation;
         Assert.Equal(Owner, owned!.SessionId);
         Assert.Equal(10, owned.TotalTokens);
         Assert.Equal(Owner, new RolloutParseState(Path, "source", state.BuildResumeState(4)).OwnSessionId);

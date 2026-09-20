@@ -1,8 +1,18 @@
+// Taj's Tokens | CodexThreadModels.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
+using System.Collections;
+
+#endregion
+
 namespace TajsTokens.Core.Models;
 
 /// <summary>
-/// A source-native thread row read from Codex's local state catalog. Nullable fields preserve
-/// schema capability/absence instead of turning missing columns into product facts.
+///     A source-native thread row read from Codex's local state catalog. Nullable fields preserve
+///     schema capability/absence instead of turning missing columns into product facts.
 /// </summary>
 public sealed record CodexThreadCatalogEntry(
     string ThreadId,
@@ -51,7 +61,7 @@ public sealed record CodexThreadCatalogEntry(
             // Codex's source contract distinguishes legacy and paginated display behavior:
             // legacy rows prefer title, while paginated rows prefer name. Keep both native fields
             // available and only apply this presentation choice at the read-model boundary.
-            var preferred = string.Equals(HistoryMode, "legacy", StringComparison.OrdinalIgnoreCase)
+            string? preferred = string.Equals(HistoryMode, "legacy", StringComparison.OrdinalIgnoreCase)
                 ? FirstNonEmpty(Title, Name)
                 : string.Equals(HistoryMode, "paginated", StringComparison.OrdinalIgnoreCase)
                     ? FirstNonEmpty(Name, Title)
@@ -60,13 +70,15 @@ public sealed record CodexThreadCatalogEntry(
         }
     }
 
-    private static string? FirstNonEmpty(params string?[] values) =>
-        values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+    private static string? FirstNonEmpty(params string?[] values)
+    {
+        return values.FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
+    }
 }
 
 /// <summary>
-/// A reconciled catalog presentation entry. All source observations for the thread remain attached
-/// so callers can inspect conflicts and provenance instead of treating the preferred row as truth.
+///     A reconciled catalog presentation entry. All source observations for the thread remain attached
+///     so callers can inspect conflicts and provenance instead of treating the preferred row as truth.
 /// </summary>
 public sealed record CodexThreadCatalogSearchEntry(
     CodexThreadCatalogEntry Preferred,
@@ -74,9 +86,9 @@ public sealed record CodexThreadCatalogSearchEntry(
     string SelectionRationale);
 
 /// <summary>
-/// Result of searching Codex thread catalogs. <see cref="Entries"/> is the bounded presentation
-/// result; <see cref="SourceObservations"/> retains every matching row read from every source
-/// (with <see cref="SourceRowsTruncated"/> marking a source-level bound).
+///     Result of searching Codex thread catalogs. <see cref="Entries" /> is the bounded presentation
+///     result; <see cref="SourceObservations" /> retains every matching row read from every source
+///     (with <see cref="SourceRowsTruncated" /> marking a source-level bound).
 /// </summary>
 public sealed record CodexThreadSearchResult(
     IReadOnlyList<CodexThreadCatalogSearchEntry> Entries,
@@ -100,10 +112,15 @@ public sealed record CodexThreadSearchResult(
 
     public CodexThreadCatalogEntry this[int index] => Entries[index].Preferred;
 
-    public IEnumerator<CodexThreadCatalogEntry> GetEnumerator() =>
-        Entries.Select(entry => entry.Preferred).GetEnumerator();
+    public IEnumerator<CodexThreadCatalogEntry> GetEnumerator()
+    {
+        return Entries.Select(entry => entry.Preferred).GetEnumerator();
+    }
 
-    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
+    IEnumerator IEnumerable.GetEnumerator()
+    {
+        return GetEnumerator();
+    }
 }
 
 public sealed record CodexThreadProject(
@@ -159,8 +176,8 @@ public sealed record CodexThreadTurn(
 }
 
 /// <summary>
-/// History item content is source data and is returned only for local on-demand inspection. It is
-/// never copied into the TajsTokens durable evidence database by this read model.
+///     History item content is source data and is returned only for local on-demand inspection. It is
+///     never copied into the TajsTokens durable evidence database by this read model.
 /// </summary>
 public sealed record CodexThreadItem(
     string TurnId,
@@ -197,8 +214,8 @@ public sealed record CodexThreadRealtimeItem(
 }
 
 /// <summary>
-/// All history observations read from one source instance. Empty lanes remain meaningful when a
-/// source exposes a table but has no row for the selected thread.
+///     All history observations read from one source instance. Empty lanes remain meaningful when a
+///     source exposes a table but has no row for the selected thread.
 /// </summary>
 public sealed record CodexThreadHistorySourceObservation(
     string SourcePath,
@@ -221,9 +238,9 @@ public sealed record CodexThreadHistorySourceObservation(
 }
 
 /// <summary>
-/// Optional state observations read from one matching Codex state source. An observation is kept
-/// even when a related table is absent or has no row so capability boundaries and conflicts remain
-/// visible to the read-model policy.
+///     Optional state observations read from one matching Codex state source. An observation is kept
+///     even when a related table is absent or has no row so capability boundaries and conflicts remain
+///     visible to the read-model policy.
 /// </summary>
 public sealed record CodexThreadStateSourceObservation(
     string SourcePath,
@@ -252,9 +269,9 @@ public sealed record CodexThreadStateSourceObservation(
 }
 
 /// <summary>
-/// Deterministic presentation selected from all readable state observations. Alternatives and
-/// conflict flags are part of the provider-native read model; they are not discarded during
-/// source acquisition.
+///     Deterministic presentation selected from all readable state observations. Alternatives and
+///     conflict flags are part of the provider-native read model; they are not discarded during
+///     source acquisition.
 /// </summary>
 public sealed record CodexThreadStateReadModel(
     CodexThreadProject? PreferredProject,
@@ -274,8 +291,8 @@ public sealed record CodexThreadStateReadModel(
     string SelectionRationale);
 
 /// <summary>
-/// A provider-native, on-demand thread view assembled from the Codex state and thread-history
-/// stores. Source paths and warnings make capability/coverage boundaries visible to the caller.
+///     A provider-native, on-demand thread view assembled from the Codex state and thread-history
+///     stores. Source paths and warnings make capability/coverage boundaries visible to the caller.
 /// </summary>
 public sealed record CodexThreadReadResult(
     CodexThreadCatalogEntry? Thread,
@@ -337,8 +354,8 @@ public sealed record CodexThreadReadResult(
     public string? HistorySourceDescription { get; init; }
 
     /// <summary>
-    /// Every readable history source is retained. The flat lanes are a deterministic union keyed
-    /// by source path; no source silently overrides another source's observation.
+    ///     Every readable history source is retained. The flat lanes are a deterministic union keyed
+    ///     by source path; no source silently overrides another source's observation.
     /// </summary>
     public IReadOnlyList<CodexThreadHistorySourceObservation> HistorySources { get; init; } =
         Array.Empty<CodexThreadHistorySourceObservation>();

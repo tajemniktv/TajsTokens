@@ -1,4 +1,12 @@
+// Taj's Tokens | ApiPriceWorkload.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using TajsTokens.Core.Models;
+
+#endregion
 
 namespace TajsTokens.Core.Services;
 
@@ -7,10 +15,12 @@ public static class ApiPriceWorkload
 {
     public const string Version = "openai-api-standard-short-2026-09-19/v1";
     public const string Source = "https://developers.openai.com/api/docs/pricing";
-    public const string Assumptions = "Retrospective fixed standard/short-context API-price weights, not actual charges or provider credits. " +
+
+    public const string Assumptions =
+        "Retrospective fixed standard/short-context API-price weights, not actual charges or provider credits. " +
         "No inference of execution tier, request context length, regional uplift, tools or historical prices. " +
         "Exact supported model names only; unknown models and unsupported cache-write rates stay unpriced.";
-    private sealed record Rate(decimal Input, decimal Cached, decimal? CacheWrite, decimal Output);
+
     // Official rate-card/model pages inspected 2026-09-19; provenance and caveats in the repo review.
     private static readonly IReadOnlyDictionary<string, Rate> Rates = new Dictionary<string, Rate>(StringComparer.Ordinal)
     {
@@ -21,20 +31,31 @@ public static class ApiPriceWorkload
         ["gpt-5.5"] = new(5, .5m, null, 30),
         ["gpt-5.4"] = new(2.5m, .25m, null, 15),
         ["gpt-5.3-codex"] = new(1.75m, .175m, null, 14),
-        ["gpt-5.2-codex"] = new(1.75m, .175m, null, 14)
+        ["gpt-5.2-codex"] = new(1.75m, .175m, null, 14),
     };
 
     public static ApiPriceWeight Calculate(IEnumerable<CodexPredictiveTokenEvent> events)
     {
         decimal amount = 0, priced = 0, unpriced = 0;
-        var pricedEvents = 0;
-        var unpricedEvents = 0;
-        foreach (var row in events)
+        int pricedEvents = 0;
+        int unpricedEvents = 0;
+        foreach (CodexPredictiveTokenEvent row in events)
         {
-            var counters = new[] { row.UncachedInputTokens, row.CacheReadTokens, row.CacheWriteTokens,
-                row.NonReasoningOutputTokens, row.ReasoningOutputTokens, row.ReportedTotalTokens };
-            if (counters.All(x => x == 0)) { pricedEvents++; continue; }
-            if (counters.Any(x => x < 0) || row.Model is null || !Rates.TryGetValue(row.Model, out var rate) ||
+            long[] counters = new[]
+            {
+                row.UncachedInputTokens,
+                row.CacheReadTokens,
+                row.CacheWriteTokens,
+                row.NonReasoningOutputTokens,
+                row.ReasoningOutputTokens,
+                row.ReportedTotalTokens,
+            };
+            if (counters.All(x => x == 0))
+            {
+                pricedEvents++;
+                continue;
+            }
+            if (counters.Any(x => x < 0) || row.Model is null || !Rates.TryGetValue(row.Model, out Rate? rate) ||
                 row.CacheWriteTokens > 0 && rate.CacheWrite is null)
             {
                 unpriced += Math.Max(0, row.ReportedTotalTokens);
@@ -43,11 +64,13 @@ public static class ApiPriceWorkload
             }
             // Canonical categories are disjoint: reasoning output is added exactly once.
             amount += (row.UncachedInputTokens * rate.Input + row.CacheReadTokens * rate.Cached +
-                row.CacheWriteTokens * (rate.CacheWrite ?? 0) +
-                ((decimal)row.NonReasoningOutputTokens + row.ReasoningOutputTokens) * rate.Output) / 1_000_000m;
+                       row.CacheWriteTokens * (rate.CacheWrite ?? 0) +
+                       ((decimal)row.NonReasoningOutputTokens + row.ReasoningOutputTokens) * rate.Output) / 1_000_000m;
             priced += row.ReportedTotalTokens;
             pricedEvents++;
         }
-        return new(Version, amount, priced, unpriced, pricedEvents, unpricedEvents);
+        return new ApiPriceWeight(Version, amount, priced, unpriced, pricedEvents, unpricedEvents);
     }
+
+    private sealed record Rate(decimal Input, decimal Cached, decimal? CacheWrite, decimal Output);
 }

@@ -1,3 +1,9 @@
+// Taj's Tokens | TelemetryCoordinatorNativeAccountingTests.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Interfaces;
@@ -6,6 +12,8 @@ using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Providers;
 using TajsTokens.Infrastructure.Services;
 
+#endregion
+
 namespace TajsTokens.Core.Tests;
 
 public sealed class TelemetryCoordinatorNativeAccountingTests
@@ -13,8 +21,8 @@ public sealed class TelemetryCoordinatorNativeAccountingTests
     [Fact]
     public async Task Refresh_ProjectsTokenGenerationAfterObservatoryCommitsIt()
     {
-        var directory = Directory.CreateTempSubdirectory("tajstokens-native-refresh-order-");
-        var databasePath = Path.Combine(directory.FullName, "telemetry.db");
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-native-refresh-order-");
+        string databasePath = Path.Combine(directory.FullName, "telemetry.db");
         try
         {
             var store = new SqliteCodexObservatoryStore(databasePath);
@@ -25,7 +33,7 @@ public sealed class TelemetryCoordinatorNativeAccountingTests
                 new SqliteTelemetryRepository(databasePath),
                 observatory);
 
-            var snapshot = await coordinator.RefreshAsync(RefreshTrigger.Manual, CancellationToken.None);
+            TelemetrySnapshot snapshot = await coordinator.RefreshAsync(RefreshTrigger.Manual, CancellationToken.None);
 
             Assert.True(observatory.Completed);
             Assert.True(snapshot.TokenDataFresh);
@@ -36,7 +44,7 @@ public sealed class TelemetryCoordinatorNativeAccountingTests
         finally
         {
             SqliteConnection.ClearAllPools();
-            directory.Delete(recursive: true);
+            directory.Delete(true);
         }
     }
 
@@ -45,12 +53,12 @@ public sealed class TelemetryCoordinatorNativeAccountingTests
     [InlineData(true)]
     public async Task ObservatoryIncompletePass_PreservesLastCompleteTokenGenerationAndMarksItStale(bool deferred)
     {
-        var directory = Directory.CreateTempSubdirectory("tajstokens-native-refresh-errors-");
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-native-refresh-errors-");
         try
         {
             var observatory = new SequencedObservatoryService(
-                _ => Task.FromResult(Result(errors: 0)),
-                _ => Task.FromResult(Result(errors: deferred ? 0 : 1) with { DeferredFiles = deferred ? 24 : 0 }));
+                _ => Task.FromResult(Result(0)),
+                _ => Task.FromResult(Result(deferred ? 0 : 1) with { DeferredFiles = deferred ? 24 : 0 }));
             var tokens = new SequencedTokenProvider(42, 99);
             var coordinator = new TelemetryCoordinator(
                 tokens,
@@ -58,8 +66,8 @@ public sealed class TelemetryCoordinatorNativeAccountingTests
                 new SqliteTelemetryRepository(Path.Combine(directory.FullName, "telemetry.db")),
                 observatory);
 
-            var first = await coordinator.RefreshAsync(RefreshTrigger.Startup, CancellationToken.None);
-            var second = await coordinator.RefreshAsync(RefreshTrigger.Interval, CancellationToken.None);
+            TelemetrySnapshot first = await coordinator.RefreshAsync(RefreshTrigger.Startup, CancellationToken.None);
+            TelemetrySnapshot second = await coordinator.RefreshAsync(RefreshTrigger.Interval, CancellationToken.None);
 
             Assert.True(first.TokenDataFresh);
             Assert.Equal(42, Assert.Single(first.TokenUsages).Breakdown.Total);
@@ -69,23 +77,26 @@ public sealed class TelemetryCoordinatorNativeAccountingTests
             Assert.Contains(second.Sources, source => source.Provider == "Codex rollouts" && source.State == TelemetryHealthState.Stale);
             Assert.Contains(second.Sources, source => source.Provider == "Native Codex" && source.State == TelemetryHealthState.Stale);
             Assert.Contains(second.Events, item => item.Type == "Token generation stale");
-            if (deferred) Assert.Contains(second.Sources, source => source.Provider == "Codex rollouts" && source.Detail.Contains("24 changed indexed file(s) remain queued"));
+            if (deferred)
+                Assert.Contains(
+                    second.Sources,
+                    source => source.Provider == "Codex rollouts" && source.Detail.Contains("24 changed indexed file(s) remain queued"));
         }
         finally
         {
             SqliteConnection.ClearAllPools();
-            directory.Delete(recursive: true);
+            directory.Delete(true);
         }
     }
 
     [Fact]
     public async Task ObservatoryException_PreservesLastCompleteTokenGenerationAndMarksItStale()
     {
-        var directory = Directory.CreateTempSubdirectory("tajstokens-native-refresh-exception-");
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-native-refresh-exception-");
         try
         {
             var observatory = new SequencedObservatoryService(
-                _ => Task.FromResult(Result(errors: 0)),
+                _ => Task.FromResult(Result(0)),
                 _ => Task.FromException<CodexObservatoryRefreshResult>(new InvalidOperationException("rollout failed")));
             var tokens = new SequencedTokenProvider(42, 123);
             var coordinator = new TelemetryCoordinator(
@@ -95,33 +106,35 @@ public sealed class TelemetryCoordinatorNativeAccountingTests
                 observatory);
 
             await coordinator.RefreshAsync(RefreshTrigger.Startup, CancellationToken.None);
-            var second = await coordinator.RefreshAsync(RefreshTrigger.Interval, CancellationToken.None);
+            TelemetrySnapshot second = await coordinator.RefreshAsync(RefreshTrigger.Interval, CancellationToken.None);
 
             Assert.False(second.TokenDataFresh);
             Assert.Equal(42, Assert.Single(second.TokenUsages).Breakdown.Total);
             Assert.Equal(2, tokens.Calls);
-            Assert.Contains(second.Sources, source =>
-                source.Provider == "Codex rollouts" &&
-                source.State == TelemetryHealthState.Stale &&
-                source.Detail.Contains("rollout failed", StringComparison.OrdinalIgnoreCase));
+            Assert.Contains(
+                second.Sources,
+                source =>
+                    source.Provider == "Codex rollouts" &&
+                    source.State == TelemetryHealthState.Stale &&
+                    source.Detail.Contains("rollout failed", StringComparison.OrdinalIgnoreCase));
             Assert.Contains(second.Sources, source => source.Provider == "Native Codex" && source.State == TelemetryHealthState.Stale);
         }
         finally
         {
             SqliteConnection.ClearAllPools();
-            directory.Delete(recursive: true);
+            directory.Delete(true);
         }
     }
 
     [Fact]
     public async Task ZeroDiscoveredRollouts_PreservesHistoryButCannotBeLive()
     {
-        var directory = Directory.CreateTempSubdirectory("tajstokens-native-refresh-empty-source-");
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-native-refresh-empty-source-");
         try
         {
             var observatory = new SequencedObservatoryService(
-                _ => Task.FromResult(Result(errors: 0)),
-                _ => Task.FromResult(Result(errors: 0, filesDiscovered: 0)));
+                _ => Task.FromResult(Result(0)),
+                _ => Task.FromResult(Result(0, 0)));
             var tokens = new SequencedTokenProvider(42, 99);
             var coordinator = new TelemetryCoordinator(
                 tokens,
@@ -130,34 +143,36 @@ public sealed class TelemetryCoordinatorNativeAccountingTests
                 observatory);
 
             await coordinator.RefreshAsync(RefreshTrigger.Startup, CancellationToken.None);
-            var second = await coordinator.RefreshAsync(RefreshTrigger.Interval, CancellationToken.None);
+            TelemetrySnapshot second = await coordinator.RefreshAsync(RefreshTrigger.Interval, CancellationToken.None);
 
             Assert.False(second.TokenDataFresh);
             Assert.Equal(42, Assert.Single(second.TokenUsages).Breakdown.Total);
             Assert.Equal(TelemetryHealthState.Stale, second.TokenGeneration!.State);
-            Assert.Contains(second.Sources, source =>
-                source.Provider == "Codex rollouts" && source.State == TelemetryHealthState.Unavailable);
+            Assert.Contains(
+                second.Sources,
+                source =>
+                    source.Provider == "Codex rollouts" && source.State == TelemetryHealthState.Unavailable);
         }
         finally
         {
             SqliteConnection.ClearAllPools();
-            directory.Delete(recursive: true);
+            directory.Delete(true);
         }
     }
 
     [Fact]
     public async Task FreshFallback_RemainsFreshButCarriesFallbackQuality()
     {
-        var directory = Directory.CreateTempSubdirectory("tajstokens-token-fallback-quality-");
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-token-fallback-quality-");
         try
         {
             var coordinator = new TelemetryCoordinator(
                 new FallbackTokenProvider(77),
                 new EmptyQuotaProvider(),
                 new SqliteTelemetryRepository(Path.Combine(directory.FullName, "telemetry.db")),
-                new SequencedObservatoryService(_ => Task.FromResult(Result(errors: 1))));
+                new SequencedObservatoryService(_ => Task.FromResult(Result(1))));
 
-            var snapshot = await coordinator.RefreshAsync(RefreshTrigger.Manual, CancellationToken.None);
+            TelemetrySnapshot snapshot = await coordinator.RefreshAsync(RefreshTrigger.Manual, CancellationToken.None);
 
             Assert.True(snapshot.TokenDataFresh);
             Assert.Equal(77, Assert.Single(snapshot.TokenUsages).Breakdown.Total);
@@ -165,20 +180,24 @@ public sealed class TelemetryCoordinatorNativeAccountingTests
             Assert.True(snapshot.TokenGeneration!.IsFresh);
             Assert.True(snapshot.TokenGeneration.IsFallback);
             Assert.Equal(TelemetryDataQuality.Fallback, snapshot.TokenGeneration.Quality);
-            Assert.Contains(snapshot.Sources, source =>
-                source.Provider == "Tokscale fallback" && source.State == TelemetryHealthState.Live);
+            Assert.Contains(
+                snapshot.Sources,
+                source =>
+                    source.Provider == "Tokscale fallback" && source.State == TelemetryHealthState.Live);
         }
         finally
         {
             SqliteConnection.ClearAllPools();
-            directory.Delete(recursive: true);
+            directory.Delete(true);
         }
     }
 
-    private static CodexObservatoryRefreshResult Result(int errors, int filesDiscovered = 1) =>
-        filesDiscovered == 0
-            ? new(0, 0, 0, 0, 0, errors, 0)
-            : new(1, 1, 1, 1, 1, errors, 100);
+    private static CodexObservatoryRefreshResult Result(int errors, int filesDiscovered = 1)
+    {
+        return filesDiscovered == 0
+            ? new CodexObservatoryRefreshResult(0, 0, 0, 0, 0, errors, 0)
+            : new CodexObservatoryRefreshResult(1, 1, 1, 1, 1, errors, 100);
+    }
 
     private static CodexTokenAccountingSnapshot TokenSnapshot(long total)
     {
@@ -214,7 +233,7 @@ public sealed class TelemetryCoordinatorNativeAccountingTests
                     42),
                 cancellationToken);
             Completed = true;
-            return Result(errors: 0);
+            return Result(0);
         }
     }
 
@@ -223,8 +242,10 @@ public sealed class TelemetryCoordinatorNativeAccountingTests
     {
         private readonly Queue<Func<CancellationToken, Task<CodexObservatoryRefreshResult>>> _responses = new(responses);
 
-        public Task<CodexObservatoryRefreshResult> RefreshAsync(CancellationToken cancellationToken) =>
-            _responses.Dequeue()(cancellationToken);
+        public Task<CodexObservatoryRefreshResult> RefreshAsync(CancellationToken cancellationToken)
+        {
+            return _responses.Dequeue()(cancellationToken);
+        }
     }
 
     private sealed class SequencedTokenProvider(params long[] totals) : ICodexTokenAccountingProvider
@@ -241,18 +262,18 @@ public sealed class TelemetryCoordinatorNativeAccountingTests
 
     private sealed class FallbackTokenProvider(long total) : ICodexTokenAccountingProvider
     {
-        public Task<CodexTokenAccountingSnapshot> GetSnapshotAsync(CancellationToken cancellationToken) =>
-            Task.FromResult(TokenSnapshot(total) with
-            {
-                Source = "Tokscale fallback",
-                IsFallback = true,
-                Diagnostic = "native unavailable"
-            });
+        public Task<CodexTokenAccountingSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
+        {
+            return Task.FromResult(
+                TokenSnapshot(total) with { Source = "Tokscale fallback", IsFallback = true, Diagnostic = "native unavailable" });
+        }
     }
 
     private sealed class EmptyQuotaProvider : ICodexQuotaProvider
     {
-        public Task<IReadOnlyList<QuotaSnapshot>> GetQuotaSnapshotsAsync(CancellationToken cancellationToken) =>
-            Task.FromResult<IReadOnlyList<QuotaSnapshot>>([]);
+        public Task<IReadOnlyList<QuotaSnapshot>> GetQuotaSnapshotsAsync(CancellationToken cancellationToken)
+        {
+            return Task.FromResult<IReadOnlyList<QuotaSnapshot>>([]);
+        }
     }
 }

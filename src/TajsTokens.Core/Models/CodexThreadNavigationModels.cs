@@ -1,8 +1,12 @@
+// Taj's Tokens | CodexThreadNavigationModels.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
 namespace TajsTokens.Core.Models;
 
 /// <summary>
-/// Bounded query for the provider-native Codex navigation tree. Search is applied to the
-/// source-native catalog before ancestors are retained for a readable hierarchy.
+///     Bounded query for the provider-native Codex navigation tree. Search is applied to the
+///     source-native catalog before ancestors are retained for a readable hierarchy.
 /// </summary>
 public sealed record CodexThreadNavigationQuery(
     string? Search = null,
@@ -13,12 +17,12 @@ public enum CodexThreadNavigationGroupKind
 {
     Project,
     Workspace,
-    Unassigned
+    Unassigned,
 }
 
 /// <summary>
-/// A source-native thread node projected into a navigable parent/child tree. The catalog entry
-/// remains attached so native identity, alternatives, and provenance are not lost in the UI.
+///     A source-native thread node projected into a navigable parent/child tree. The catalog entry
+///     remains attached so native identity, alternatives, and provenance are not lost in the UI.
 /// </summary>
 public sealed record CodexThreadNavigationNode(
     CodexThreadCatalogSearchEntry Thread,
@@ -40,9 +44,9 @@ public sealed record CodexThreadNavigationGroup(
     DateTimeOffset? LatestActivityAtUtc);
 
 /// <summary>
-/// A spawn-edge observation retaining the source that produced it. The preferred edge used to
-/// construct the tree is a presentation choice; all observations remain available to evidence
-/// views and conflict diagnostics.
+///     A spawn-edge observation retaining the source that produced it. The preferred edge used to
+///     construct the tree is a presentation choice; all observations remain available to evidence
+///     views and conflict diagnostics.
 /// </summary>
 public sealed record CodexThreadSpawnEdgeObservation(
     string SourcePath,
@@ -83,12 +87,12 @@ public enum CodexThreadItemPresentationKind
     Collaboration,
     Plan,
     SystemEvent,
-    Unknown
+    Unknown,
 }
 
 /// <summary>
-/// Local-only readable projection of a raw Codex history item. <see cref="Source"/> remains the
-/// complete source observation; extracted text is presentation data and is never persisted.
+///     Local-only readable projection of a raw Codex history item. <see cref="Source" /> remains the
+///     complete source observation; extracted text is presentation data and is never persisted.
 /// </summary>
 public sealed record CodexThreadItemPresentation(
     CodexThreadItem Source,

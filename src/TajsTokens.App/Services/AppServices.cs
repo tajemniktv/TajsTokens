@@ -1,3 +1,10 @@
+// Taj's Tokens | AppServices.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
+using System.Diagnostics;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
 using TajsTokens.Core.Services;
@@ -5,22 +12,24 @@ using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Providers;
 using TajsTokens.Infrastructure.Services;
 
+#endregion
+
 namespace TajsTokens.App.Services;
 
 /// <summary>
-/// Process-lifetime application composition root. Codex rollout reader/parser construction remains
-/// behind the Infrastructure observatory factory; UI surfaces consume normalized/query boundaries.
+///     Process-lifetime application composition root. Codex rollout reader/parser construction remains
+///     behind the Infrastructure observatory factory; UI surfaces consume normalized/query boundaries.
 /// </summary>
 public sealed class AppServices
 {
     public AppServices()
     {
-        var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (!Directory.Exists(AppDataLocation.GetDataFolder(appDataPath)) && HasOtherInstanceInSession())
             throw new InvalidOperationException("Exit other TajsTokens instances before migrating application data.");
         DataFolder = AppDataLocation.EnsureMigrated(appDataPath);
         DatabasePath = Path.Combine(DataFolder, "telemetry.db");
-        var settingsPath = Path.Combine(DataFolder, "settings.json");
+        string settingsPath = Path.Combine(DataFolder, "settings.json");
 
         try
         {
@@ -48,11 +57,14 @@ public sealed class AppServices
             () => Settings.TokscaleReconciliationEnabled,
             () => Settings.TokscaleFallbackEnabled);
         CodexQuotaProvider = new CodexAppServerQuotaProvider();
-        ServerEvidence = new CodexServerEvidenceService(DatabasePath, Repository, new CodexAppServerEvidenceProvider(),
+        ServerEvidence = new CodexServerEvidenceService(
+            DatabasePath,
+            Repository,
+            new CodexAppServerEvidenceProvider(),
             () => Settings.RolloutAccountAssociations,
             new CodexBackendDailyEvidenceProvider(() => Settings.ExperimentalCodexBackendEnabled));
 
-        var observatory = CodexObservatoryRuntimeFactory.Create(DatabasePath, Repository);
+        CodexObservatoryRuntime observatory = CodexObservatoryRuntimeFactory.Create(DatabasePath, Repository);
         ObservatoryStore = observatory.Store;
         CodexSessionIngestion = observatory.Ingestion;
         CodexObservatory = observatory.Service;
@@ -64,9 +76,13 @@ public sealed class AppServices
             CodexQuotaProvider,
             Repository,
             CodexObservatory,
-            Intelligence, ServerEvidence);
-        CodexIntelligence = new CodexIntelligenceEngine(() => new SqliteForecastDatasetReader(DatabasePath, Settings.RolloutAccountAssociations),
-            ServerEvidence, Intelligence, () => Telemetry.Latest);
+            Intelligence,
+            ServerEvidence);
+        CodexIntelligence = new CodexIntelligenceEngine(
+            () => new SqliteForecastDatasetReader(DatabasePath, Settings.RolloutAccountAssociations),
+            ServerEvidence,
+            Intelligence,
+            () => Telemetry.Latest);
         AlertEngine = new QuotaAlertEngine(Settings.LowQuotaThresholds);
     }
 
@@ -79,11 +95,13 @@ public sealed class AppServices
     public SqliteCodexObservatoryReadModel ObservatoryReadModel { get; }
     public CodexStateDbExplorerService CodexStateExplorer { get; }
     public ICodexNativeSourcesReadModel CodexNativeSources { get; }
+
     /// <summary>Source-reader access retained for compatibility with existing integrations.</summary>
     public CodexThreadObservabilityService CodexThreadObservability { get; }
 
     /// <summary>Product-facing provider-native Codex thread query boundary.</summary>
     public ICodexThreadReadModel CodexThreadReadModel { get; }
+
     public ICodexCliHarness CodexCliHarness { get; }
     public ITokscaleProvider TokscaleProvider { get; }
     public ICodexTokenAccountingProvider NativeCodexAccountingProvider { get; }
@@ -95,46 +113,54 @@ public sealed class AppServices
     public ICodexRolloutInspection CodexRolloutInspection { get; }
     public IIntelligenceService Intelligence { get; }
     public ICodexIntelligence CodexIntelligence { get; }
-    public async Task<RolloutAccountAssociation[]> PrepareRolloutAccountAssociationsAsync(string accountKey,
-        CancellationToken cancellationToken)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var data = await new SqliteForecastDatasetReader(DatabasePath).ReadAsync("codex", "default",
-            DateTimeOffset.UnixEpoch.AddDays(1), now, cancellationToken);
-        return RolloutAccountAssociationPolicy.Create(data, accountKey, now).ToArray();
-    }
     public TelemetryCoordinator Telemetry { get; }
     public QuotaAlertEngine AlertEngine { get; }
     public Exception? StartupPersistenceError { get; }
+
+    public async Task<RolloutAccountAssociation[]> PrepareRolloutAccountAssociationsAsync(
+        string accountKey,
+        CancellationToken cancellationToken)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        CodexForecastDataset data = await new SqliteForecastDatasetReader(DatabasePath).ReadAsync(
+            "codex",
+            "default",
+            DateTimeOffset.UnixEpoch.AddDays(1),
+            now,
+            cancellationToken);
+        return RolloutAccountAssociationPolicy.Create(data, accountKey, now).ToArray();
+    }
 
     public event Action<RuntimeSettings, RuntimeSettings>? SettingsChanged;
 
     private static bool HasOtherInstanceInSession()
     {
-        using var current = System.Diagnostics.Process.GetCurrentProcess();
-        var processes = System.Diagnostics.Process.GetProcessesByName("TajsTokens.App");
+        using var current = Process.GetCurrentProcess();
+        Process[] processes = Process.GetProcessesByName("TajsTokens.App");
         try
         {
-            foreach (var process in processes)
+            foreach (Process process in processes)
             {
                 try
                 {
                     if (process.Id != Environment.ProcessId && process.SessionId == current.SessionId)
                         return true;
                 }
-                catch (InvalidOperationException) { } // Exited after enumeration; it is absent.
+                catch (InvalidOperationException)
+                {
+                } // Exited after enumeration; it is absent.
             }
             return false;
         }
         finally
         {
-            foreach (var process in processes) process.Dispose();
+            foreach (Process process in processes) process.Dispose();
         }
     }
 
     public void SaveSettings(RuntimeSettings settings)
     {
-        var previous = Settings;
+        RuntimeSettings previous = Settings;
         SettingsStore.Save(settings);
         Settings = SettingsStore.Load();
         AlertEngine.UpdateThresholds(Settings.LowQuotaThresholds);

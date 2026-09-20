@@ -9,100 +9,145 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
         <Grid ColumnSpacing="16">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
             <StackPanel Spacing="4">
                 <TextBlock x:Name="PageTitle" Text="Forecasts" Style="{StaticResource PageTitleStyle}" />
-                <TextBlock Text="Quota outlooks, usage predictions and workload planning." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                <TextBlock Text="Quota outlooks, usage predictions and workload planning." TextWrapping="Wrap"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
             </StackPanel>
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Top">
-                <ComboBox x:Name="HistoryRangeCombo" Width="120" SelectedIndex="1" SelectionChanged="OnHistoryRangeChanged" AutomationProperties.Name="History range">
+                <ComboBox x:Name="HistoryRangeCombo" Width="120" SelectedIndex="1" SelectionChanged="OnHistoryRangeChanged"
+                          AutomationProperties.Name="History range">
                     <ComboBoxItem Content="7 days" Tag="7" /><ComboBoxItem Content="30 days" Tag="30" />
                     <ComboBoxItem Content="90 days" Tag="90" /><ComboBoxItem Content="180 days" Tag="180" />
                 </ComboBox>
                 <Button Content="Refresh" Click="OnRefreshClicked" />
             </StackPanel>
         </Grid>
-        <Expander x:Name="HistorySummary" Grid.Row="1" Header="Latest saved outlooks and historical evidence" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-        <StackPanel Spacing="12">
-        <Grid ColumnSpacing="12">
-            <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="*" /></Grid.ColumnDefinitions>
-            <Border Padding="16" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                <StackPanel Spacing="6">
-                    <TextBlock Text="5-hour · latest saved outlook" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <TextBlock x:Name="FiveHourSafeText" Text="—" FontSize="22" FontWeight="SemiBold" TextWrapping="Wrap" />
-                    <TextBlock x:Name="FiveHourSamplesText" Text="—" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
-                </StackPanel>
-            </Border>
-            <Border Grid.Column="1" Padding="16" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                <StackPanel Spacing="6">
-                    <TextBlock Text="Weekly · latest saved outlook" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    <TextBlock x:Name="WeeklySafeText" Text="—" FontSize="22" FontWeight="SemiBold" TextWrapping="Wrap" />
-                    <TextBlock x:Name="WeeklySamplesText" Text="—" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
-                </StackPanel>
-            </Border>
-        </Grid>
-        <TextBlock x:Name="QuotaHistoryText" TextWrapping="Wrap" IsTextSelectionEnabled="True" MaxWidth="1000" HorizontalAlignment="Left" />
-        </StackPanel>
+        <Expander x:Name="HistorySummary" Grid.Row="1" Header="Latest saved outlooks and historical evidence" HorizontalAlignment="Stretch"
+                  HorizontalContentAlignment="Stretch">
+            <StackPanel Spacing="12">
+                <Grid ColumnSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" /><ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <Border Padding="16" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="5-hour · latest saved outlook" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <TextBlock x:Name="FiveHourSafeText" Text="—" FontSize="22" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <TextBlock x:Name="FiveHourSamplesText" Text="—" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+                    <Border Grid.Column="1" Padding="16" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                        <StackPanel Spacing="6">
+                            <TextBlock Text="Weekly · latest saved outlook" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                            <TextBlock x:Name="WeeklySafeText" Text="—" FontSize="22" FontWeight="SemiBold" TextWrapping="Wrap" />
+                            <TextBlock x:Name="WeeklySamplesText" Text="—" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                       TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Border>
+                </Grid>
+                <TextBlock x:Name="QuotaHistoryText" TextWrapping="Wrap" IsTextSelectionEnabled="True" MaxWidth="1000"
+                           HorizontalAlignment="Left" />
+            </StackPanel>
         </Expander>
         <Pivot x:Name="ForecastTabs" Grid.Row="2" SelectionChanged="OnTabChanged">
             <PivotItem x:Name="OutlookTab" Header="Quota outlook">
-                <ScrollViewer><StackPanel Spacing="16" Margin="0,12,0,20" MaxWidth="900" HorizontalAlignment="Left">
-                    <TextBlock Text="Will your quota last?" Style="{StaticResource SectionTitleStyle}" />
-                    <ItemsControl x:Name="CurrentOutlooks"><ItemsControl.ItemTemplate><DataTemplate>
-                        <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12"><StackPanel Spacing="10">
-                            <TextBlock Text="{Binding Title}" Style="{StaticResource SectionTitleStyle}" />
-                            <Border Style="{StaticResource StatusBadgeStyle}"><TextBlock Text="{Binding Status}" FontWeight="SemiBold" /></Border>
-                            <TextBlock Text="{Binding PredictedExhaustion}" FontSize="24" TextWrapping="Wrap" />
-                            <TextBlock Text="{Binding ResetTimestamp}" Style="{StaticResource SubtitleStyle}" />
-                            <Expander Header="Evidence and limitations" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"><StackPanel Spacing="8">
-                                <TextBlock Text="{Binding SurvivalMessage}" TextWrapping="Wrap" />
-                                <TextBlock Text="{Binding GaugeText}" Style="{StaticResource TechnicalTextStyle}" />
-                            </StackPanel></Expander>
-                        </StackPanel></Border>
-                    </DataTemplate></ItemsControl.ItemTemplate></ItemsControl>
-                    <Border Style="{StaticResource CardStyle}"><StackPanel Spacing="10">
-                        <TextBlock Text="Model health" Style="{StaticResource SectionTitleStyle}" />
-                        <TextBlock x:Name="ModelHealthText" Text="Waiting for a current quota outlook." TextWrapping="Wrap" />
-                        <Button Content="View model lab" Click="OnModelLabClicked" />
-                    </StackPanel></Border>
-                </StackPanel></ScrollViewer>
+                <ScrollViewer>
+                    <StackPanel Spacing="16" Margin="0,12,0,20" MaxWidth="900" HorizontalAlignment="Left">
+                        <TextBlock Text="Will your quota last?" Style="{StaticResource SectionTitleStyle}" />
+                        <ItemsControl x:Name="CurrentOutlooks">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                    <Border Style="{StaticResource CardStyle}" Margin="0,0,0,12">
+                                        <StackPanel Spacing="10">
+                                            <TextBlock Text="{Binding Title}" Style="{StaticResource SectionTitleStyle}" />
+                                            <Border Style="{StaticResource StatusBadgeStyle}">
+                                                <TextBlock Text="{Binding Status}" FontWeight="SemiBold" />
+                                            </Border>
+                                            <TextBlock Text="{Binding PredictedExhaustion}" FontSize="24" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding ResetTimestamp}" Style="{StaticResource SubtitleStyle}" />
+                                            <Expander Header="Evidence and limitations" HorizontalAlignment="Stretch"
+                                                      HorizontalContentAlignment="Stretch">
+                                                <StackPanel Spacing="8">
+                                                    <TextBlock Text="{Binding SurvivalMessage}" TextWrapping="Wrap" />
+                                                    <TextBlock Text="{Binding GaugeText}" Style="{StaticResource TechnicalTextStyle}" />
+                                                </StackPanel>
+                                            </Expander>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                        <Border Style="{StaticResource CardStyle}">
+                            <StackPanel Spacing="10">
+                                <TextBlock Text="Model health" Style="{StaticResource SectionTitleStyle}" />
+                                <TextBlock x:Name="ModelHealthText" Text="Waiting for a current quota outlook." TextWrapping="Wrap" />
+                                <Button Content="View model lab" Click="OnModelLabClicked" />
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
             </PivotItem>
             <PivotItem x:Name="HistoryTab" Header="History">
                 <Grid RowSpacing="12">
-                    <Grid.RowDefinitions><RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" /></Grid.RowDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" /><RowDefinition Height="Auto" /><RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
                     <StackPanel Orientation="Horizontal" Spacing="8">
-                        <ComboBox x:Name="WindowFilter" SelectedIndex="0" SelectionChanged="OnHistoryFilterChanged" AutomationProperties.Name="Quota window">
+                        <ComboBox x:Name="WindowFilter" SelectedIndex="0" SelectionChanged="OnHistoryFilterChanged"
+                                  AutomationProperties.Name="Quota window">
                             <ComboBoxItem Content="All windows" /><ComboBoxItem Content="5-hour" /><ComboBoxItem Content="Weekly" />
                         </ComboBox>
-                        <ComboBox x:Name="HistoryDensity" SelectedIndex="0" SelectionChanged="OnHistoryFilterChanged" AutomationProperties.Name="History detail">
+                        <ComboBox x:Name="HistoryDensity" SelectedIndex="0" SelectionChanged="OnHistoryFilterChanged"
+                                  AutomationProperties.Name="History detail">
                             <ComboBoxItem Content="Hourly samples" /><ComboBoxItem Content="Every sample" />
                         </ComboBox>
                     </StackPanel>
-                    <TextBlock x:Name="StatusText" Grid.Row="1" Text="Loading history…" TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                    <TextBlock x:Name="StatusText" Grid.Row="1" Text="Loading history…" TextWrapping="Wrap"
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                     <Grid Grid.Row="2" x:Name="HistoryLayout" ColumnSpacing="12" RowSpacing="12">
-                        <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition x:Name="HistoryDetailColumn" Width="0" /></Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions><RowDefinition Height="*" /><RowDefinition x:Name="HistoryDetailRow" Height="*" /></Grid.RowDefinitions>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" /><ColumnDefinition x:Name="HistoryDetailColumn" Width="0" />
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="*" /><RowDefinition x:Name="HistoryDetailRow" Height="*" />
+                        </Grid.RowDefinitions>
 
                         <Border Padding="8" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                            <ListView x:Name="ForecastList" SelectionMode="Single" SelectionChanged="OnForecastSelectionChanged" ScrollViewer.IsDeferredScrollingEnabled="True" AutomationProperties.Name="Saved forecasts">
-                                <ListView.ItemTemplate><DataTemplate>
-                                    <StackPanel Padding="8" Spacing="4">
-                                        <TextBlock Text="{Binding Header}" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
-                                        <TextBlock Text="{Binding Detail}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                        <TextBlock Text="{Binding Scope}" FontSize="13" Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
-                                    </StackPanel>
-                                </DataTemplate></ListView.ItemTemplate>
+                            <ListView x:Name="ForecastList" SelectionMode="Single" SelectionChanged="OnForecastSelectionChanged"
+                                      ScrollViewer.IsDeferredScrollingEnabled="True" AutomationProperties.Name="Saved forecasts">
+                                <ListView.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Padding="8" Spacing="4">
+                                            <TextBlock Text="{Binding Header}" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                       TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding Detail}" FontSize="16" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                            <TextBlock Text="{Binding Scope}" FontSize="13"
+                                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ListView.ItemTemplate>
                             </ListView>
                         </Border>
-                        <Border x:Name="HistoryDetails" Grid.Row="1" Padding="20" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                        <Border x:Name="HistoryDetails" Grid.Row="1" Padding="20" CornerRadius="12"
+                                Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                             <ScrollViewer>
                                 <StackPanel Spacing="12">
-                                    <TextBlock x:Name="SelectedForecastTitle" Text="Select a saved forecast" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                    <TextBlock x:Name="SelectedForecastTitle" Text="Select a saved forecast" FontSize="18"
+                                               FontWeight="SemiBold" TextWrapping="Wrap" />
                                     <TextBlock x:Name="SelectedForecastOutcome" FontSize="26" FontWeight="SemiBold" TextWrapping="Wrap" />
-                                    <TextBlock Text="A historical projection, not a measured outcome or your current quota." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                                    <TextBlock Text="A historical projection, not a measured outcome or your current quota."
+                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                                     <TextBlock x:Name="SelectedForecastSummary" FontSize="16" TextWrapping="Wrap" />
-                                    <Expander Header="Uncertainty, model and source" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                                        <TextBlock x:Name="SelectedForecastDetails" Text="Select a row to inspect its pace, uncertainty and source." TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                    <Expander Header="Uncertainty, model and source" HorizontalAlignment="Stretch"
+                                              HorizontalContentAlignment="Stretch">
+                                        <TextBlock x:Name="SelectedForecastDetails"
+                                                   Text="Select a row to inspect its pace, uncertainty and source." TextWrapping="Wrap"
+                                                   IsTextSelectionEnabled="True" />
                                     </Expander>
                                 </StackPanel>
                             </ScrollViewer>
@@ -114,18 +159,24 @@
                 <ScrollViewer>
                     <StackPanel Spacing="20" MaxWidth="960" HorizontalAlignment="Left" Margin="0,12,0,24">
                         <TextBlock Text="Next 5 / 15 minutes" FontSize="24" FontWeight="SemiBold" />
-                        <TextBlock Text="Recorded tokens in local rollouts, including cached input. Not an account-wide total or a subscription-quota estimate." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        <TextBlock
+                            Text="Recorded tokens in local rollouts, including cached input. Not an account-wide total or a subscription-quota estimate."
+                            TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
                         <Border Padding="24" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                             <StackPanel Spacing="16">
-                                <TextBlock x:Name="TokenPredictionText" Text="Waiting for local token history." FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap" />
+                                <TextBlock x:Name="TokenPredictionText" Text="Waiting for local token history." FontSize="28"
+                                           FontWeight="SemiBold" TextWrapping="Wrap" />
                                 <TextBlock x:Name="TokenPredictionRange" TextWrapping="Wrap" FontSize="16" />
                             </StackPanel>
                         </Border>
-                        <Expander Header="Prediction evidence and limitations" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                        <Expander Header="Prediction evidence and limitations" HorizontalAlignment="Stretch"
+                                  HorizontalContentAlignment="Stretch">
                             <TextBlock x:Name="TokenPredictionEvidence" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
                         </Expander>
                         <TextBlock Text="Session outlook · conditional scenario" FontSize="22" FontWeight="SemiBold" />
-                        <TextBlock Text="If any positive local token usage is recorded in the next interval. This does not mean continuous activity or predict whether you personally keep working. No quota conversion is implied." TextWrapping="Wrap" />
+                        <TextBlock
+                            Text="If any positive local token usage is recorded in the next interval. This does not mean continuous activity or predict whether you personally keep working. No quota conversion is implied."
+                            TextWrapping="Wrap" />
                         <TextBlock x:Name="SessionOutlookText" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
                     </StackPanel>
                 </ScrollViewer>
@@ -134,52 +185,86 @@
                 <ScrollViewer>
                     <StackPanel MaxWidth="760" HorizontalAlignment="Left" Spacing="16" Padding="4,12,4,20">
                         <TextBlock Text="Explore a workload" FontSize="22" FontWeight="SemiBold" />
-                        <TextBlock Text="Estimate quota use from comparable activity in your own history. If there is not enough evidence, no estimate is shown." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
-                        <NumberBox x:Name="DurationBox" Header="How long will you work? · hours" Value="0.5" Minimum="0.1" Maximum="168" SpinButtonPlacementMode="Compact" />
+                        <TextBlock
+                            Text="Estimate quota use from comparable activity in your own history. If there is not enough evidence, no estimate is shown."
+                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                        <NumberBox x:Name="DurationBox" Header="How long will you work? · hours" Value="0.5" Minimum="0.1" Maximum="168"
+                                   SpinButtonPlacementMode="Compact" />
                         <Button x:Name="RecentPatternButton" Content="Use recent local work pattern" Click="OnRecentPatternClicked" />
-                        <TextBlock x:Name="RecentPatternText" Text="Optional: fill editable session counts and exclusive model/effort from recent local activity. This does not predict that you will continue working." TextWrapping="Wrap" Style="{StaticResource CaptionStyle}" />
-                        <Expander Header="Advanced workload shape" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"><StackPanel Spacing="12">
-                            <TextBlock Text="Default: one active chat, no subagents. Adjust only when you expect a different work pattern." Style="{StaticResource SubtitleStyle}" />
-                            <NumberBox x:Name="RootAgentsBox" Header="Active chats (root sessions)" Value="1" Minimum="0" Maximum="32" SpinButtonPlacementMode="Compact" />
-                            <NumberBox x:Name="SubagentsBox" Header="Active subagents" Value="0" Minimum="0" Maximum="64" SpinButtonPlacementMode="Compact" />
-                            <TextBlock Text="Counts mean recently token-active sessions, not simultaneous model computation." Style="{StaticResource CaptionStyle}" />
-                        </StackPanel></Expander>
-                        <Expander Header="Match a model or reasoning effort" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                        <TextBlock x:Name="RecentPatternText"
+                                   Text="Optional: fill editable session counts and exclusive model/effort from recent local activity. This does not predict that you will continue working."
+                                   Style="{StaticResource CaptionStyle}" />
+                        <Expander Header="Advanced workload shape" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                            <StackPanel Spacing="12">
+                                <TextBlock
+                                    Text="Default: one active chat, no subagents. Adjust only when you expect a different work pattern."
+                                    Style="{StaticResource SubtitleStyle}" />
+                                <NumberBox x:Name="RootAgentsBox" Header="Active chats (root sessions)" Value="1" Minimum="0" Maximum="32"
+                                           SpinButtonPlacementMode="Compact" />
+                                <NumberBox x:Name="SubagentsBox" Header="Active subagents" Value="0" Minimum="0" Maximum="64"
+                                           SpinButtonPlacementMode="Compact" />
+                                <TextBlock Text="Counts mean recently token-active sessions, not simultaneous model computation."
+                                           Style="{StaticResource CaptionStyle}" />
+                            </StackPanel>
+                        </Expander>
+                        <Expander Header="Match a model or reasoning effort" HorizontalAlignment="Stretch"
+                                  HorizontalContentAlignment="Stretch">
                             <StackPanel Spacing="12">
                                 <TextBox x:Name="ModelBox" Header="Model · optional" PlaceholderText="Exact model name" />
                                 <TextBox x:Name="ReasoningBox" Header="Reasoning effort · optional" PlaceholderText="For example, high" />
                             </StackPanel>
                         </Expander>
                         <Button Content="Estimate quota use" Click="OnEstimateClicked" Style="{StaticResource AccentButtonStyle}" />
-                        <InfoBar x:Name="ScenarioInfo" IsOpen="True" IsClosable="False" Title="Ready to estimate" Message="Choose the workload above, then estimate quota use. Unsupported requests will show what evidence is missing instead of a guessed number." />
+                        <InfoBar x:Name="ScenarioInfo" IsOpen="True" IsClosable="False" Title="Ready to estimate"
+                                 Message="Choose the workload above, then estimate quota use. Unsupported requests will show what evidence is missing instead of a guessed number." />
                         <Expander Header="How this estimate works" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                            <TextBlock x:Name="ScenarioMethodText" Text="Estimates use source-isolated authoritative intervals and historical workload support. Unsupported intensity scaling is not applied." Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                            <TextBlock x:Name="ScenarioMethodText"
+                                       Text="Estimates use source-isolated authoritative intervals and historical workload support. Unsupported intensity scaling is not applied."
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                         </Expander>
                     </StackPanel>
                 </ScrollViewer>
             </PivotItem>
             <PivotItem x:Name="EvaluationTab" Header="Model evaluation">
-                <ListView x:Name="EvaluationList" Padding="4,12,4,0" SelectionMode="None" HorizontalContentAlignment="Stretch" AutomationProperties.Name="Models in selected evaluation cohort">
+                <ListView x:Name="EvaluationList" Padding="4,12,4,0" SelectionMode="None" HorizontalContentAlignment="Stretch"
+                          AutomationProperties.Name="Models in selected evaluation cohort">
                     <ListView.Header>
-                    <StackPanel Spacing="12" Margin="0,0,0,12">
-                    <Button x:Name="EvaluateButton" Content="Evaluate against recorded outcomes" Click="OnEvaluateClicked" HorizontalAlignment="Left" />
-                    <StackPanel Spacing="8" MaxWidth="1000" HorizontalAlignment="Stretch">
-                        <TextBlock x:Name="EvaluationStatusText" Text="Compare predicted quota and tokens with later recorded outcomes. Choose a history range above, then run the local evaluation. Nothing is exported." TextWrapping="Wrap" />
-                        <Expander Header="Saved TT research results — original, not restated" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                            <StackPanel Spacing="8">
-                                <Button Content="Load saved TT results" Click="OnLoadTtHistoryClicked" />
-                                <ScrollViewer MaxHeight="220"><TextBlock x:Name="TtHistoryText" Text="Local evaluations save immutable TT research snapshots. Loading history does not rerun scoring. These are original aggregate research outputs, not per-task TT history." TextWrapping="Wrap" IsTextSelectionEnabled="True" /></ScrollViewer>
+                        <StackPanel Spacing="12" Margin="0,0,0,12">
+                            <Button x:Name="EvaluateButton" Content="Evaluate against recorded outcomes" Click="OnEvaluateClicked"
+                                    HorizontalAlignment="Left" />
+                            <StackPanel Spacing="8" MaxWidth="1000" HorizontalAlignment="Stretch">
+                                <TextBlock x:Name="EvaluationStatusText"
+                                           Text="Compare predicted quota and tokens with later recorded outcomes. Choose a history range above, then run the local evaluation. Nothing is exported."
+                                           TextWrapping="Wrap" />
+                                <Expander Header="Saved TT research results — original, not restated" HorizontalAlignment="Stretch"
+                                          HorizontalContentAlignment="Stretch">
+                                    <StackPanel Spacing="8">
+                                        <Button Content="Load saved TT results" Click="OnLoadTtHistoryClicked" />
+                                        <ScrollViewer MaxHeight="220">
+                                            <TextBlock x:Name="TtHistoryText"
+                                                       Text="Local evaluations save immutable TT research snapshots. Loading history does not rerun scoring. These are original aggregate research outputs, not per-task TT history."
+                                                       TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                        </ScrollViewer>
+                                    </StackPanel>
+                                </Expander>
+                                <Expander Header="Evidence and evaluation method" HorizontalAlignment="Stretch"
+                                          HorizontalContentAlignment="Stretch">
+                                    <ScrollViewer MaxHeight="220">
+                                        <TextBlock x:Name="EvaluationMethodText"
+                                                   Text="Quota comparisons keep source, account, plan and reset histories separate. Token errors use a different unit; neither is an exhaustion probability."
+                                                   TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                                    </ScrollViewer>
+                                </Expander>
                             </StackPanel>
-                        </Expander>
-                        <Expander Header="Evidence and evaluation method" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                            <ScrollViewer MaxHeight="220"><TextBlock x:Name="EvaluationMethodText" Text="Quota comparisons keep source, account, plan and reset histories separate. Token errors use a different unit; neither is an exhaustion probability." TextWrapping="Wrap" IsTextSelectionEnabled="True" /></ScrollViewer>
-                        </Expander>
-                    </StackPanel>
-                    <ComboBox x:Name="EvaluationGroup" Header="Compare within one source, history cohort and target" MaxWidth="1000" HorizontalAlignment="Stretch" SelectionChanged="OnEvaluationGroupChanged" AutomationProperties.Name="Evaluation cohort and target" />
-                    <TextBlock x:Name="EvaluationSelectionText" Text="No evaluation results yet." TextWrapping="Wrap" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                    </StackPanel>
+                            <ComboBox x:Name="EvaluationGroup" Header="Compare within one source, history cohort and target"
+                                      MaxWidth="1000" HorizontalAlignment="Stretch" SelectionChanged="OnEvaluationGroupChanged"
+                                      AutomationProperties.Name="Evaluation cohort and target" />
+                            <TextBlock x:Name="EvaluationSelectionText" Text="No evaluation results yet." TextWrapping="Wrap"
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                        </StackPanel>
                     </ListView.Header>
-                        <ListView.ItemTemplate><DataTemplate>
+                    <ListView.ItemTemplate>
+                        <DataTemplate>
                             <Expander HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Margin="0,4">
                                 <Expander.Header>
                                     <StackPanel Spacing="6">
@@ -189,8 +274,9 @@
                                 </Expander.Header>
                                 <TextBlock Text="{Binding Detail}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
                             </Expander>
-                        </DataTemplate></ListView.ItemTemplate>
-                    </ListView>
+                        </DataTemplate>
+                    </ListView.ItemTemplate>
+                </ListView>
             </PivotItem>
         </Pivot>
     </Grid>

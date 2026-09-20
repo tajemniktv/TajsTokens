@@ -1,9 +1,25 @@
+// Taj's Tokens | TtEvaluation.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
 namespace TajsTokens.Core.Models;
 
-public sealed record TtEvaluationScore(QuotaHistoryCohort Cohort, double HorizonHours, TtWorkloadBasis? Basis,
-    string Status, int BasisIntervals, int CalibrationIntervals, int HeldOutIntervals, int UnsupportedIntervals,
-    double UnsupportedTokens, int ResetGenerations, double? QuotaPointsPerTt, double? HeldOutTt,
-    double? ScalarLoss, double? FullVectorLoss, double? RawTokenLoss)
+public sealed record TtEvaluationScore(
+    QuotaHistoryCohort Cohort,
+    double HorizonHours,
+    TtWorkloadBasis? Basis,
+    string Status,
+    int BasisIntervals,
+    int CalibrationIntervals,
+    int HeldOutIntervals,
+    int UnsupportedIntervals,
+    double UnsupportedTokens,
+    int ResetGenerations,
+    double? QuotaPointsPerTt,
+    double? HeldOutTt,
+    double? ScalarLoss,
+    double? FullVectorLoss,
+    double? RawTokenLoss)
 {
     public QuotaHistoryCohort? BasisCohort { get; init; }
     public bool IsTransfer { get; init; }

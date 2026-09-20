@@ -1,4 +1,5 @@
-// SQLite integration fixtures clear process-wide pools during cleanup. Running collections
-// concurrently races those global clears with other fixtures' live native handles on Windows.
-// Keep the suite deterministic; this changes test scheduling, not application concurrency.
-[assembly: Xunit.CollectionBehavior(DisableTestParallelization = true)]
+// Taj's Tokens | SqliteTestIsolation.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+[assembly: CollectionBehavior(DisableTestParallelization = true)]

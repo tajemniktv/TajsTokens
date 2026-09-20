@@ -1,8 +1,12 @@
+// Taj's Tokens | RawSessionRecord.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
 namespace TajsTokens.Core.Models;
 
 /// <summary>
-/// A complete JSONL record read from a source file. Payload is transient ingestion input and must
-/// not be persisted wholesale by the telemetry repository.
+///     A complete JSONL record read from a source file. Payload is transient ingestion input and must
+///     not be persisted wholesale by the telemetry repository.
 /// </summary>
 public sealed record RawSessionRecord(
     string FilePath,

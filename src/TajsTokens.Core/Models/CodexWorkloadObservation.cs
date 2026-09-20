@@ -1,3 +1,7 @@
+// Taj's Tokens | CodexWorkloadObservation.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
 namespace TajsTokens.Core.Models;
 
 /// <summary>Content-free source-native rollout metadata; activity features are derived later.</summary>

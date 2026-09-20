@@ -1,5 +1,13 @@
+// Taj's Tokens | CodexThreadPresentationTests.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using TajsTokens.Core.Models;
 using TajsTokens.Core.Services;
+
+#endregion
 
 namespace TajsTokens.Core.Tests;
 
@@ -8,9 +16,11 @@ public sealed class CodexThreadPresentationTests
     [Fact]
     public void Present_UserContentArrayPreservesNonTextPartsAndSource()
     {
-        var item = Item("userMessage", "{\"type\":\"userMessage\",\"content\":[{\"type\":\"text\",\"text\":\"hello\"},{\"type\":\"image\"}]}");
+        CodexThreadItem item = Item(
+            "userMessage",
+            "{\"type\":\"userMessage\",\"content\":[{\"type\":\"text\",\"text\":\"hello\"},{\"type\":\"image\"}]}");
 
-        var presentation = CodexThreadItemPresenter.Present(item);
+        CodexThreadItemPresentation presentation = CodexThreadItemPresenter.Present(item);
 
         Assert.Equal(CodexThreadItemPresentationKind.Message, presentation.Kind);
         Assert.Equal("You", presentation.Heading);
@@ -22,9 +32,9 @@ public sealed class CodexThreadPresentationTests
     [Fact]
     public void Present_ReasoningUsesSummaryAndRemainsCollapsed()
     {
-        var item = Item("reasoning", "{\"type\":\"reasoning\",\"summary\":[\"first\",\"second\"],\"content\":[\"raw\"]}");
+        CodexThreadItem item = Item("reasoning", "{\"type\":\"reasoning\",\"summary\":[\"first\",\"second\"],\"content\":[\"raw\"]}");
 
-        var presentation = CodexThreadItemPresenter.Present(item);
+        CodexThreadItemPresentation presentation = CodexThreadItemPresenter.Present(item);
 
         Assert.Equal(CodexThreadItemPresentationKind.Reasoning, presentation.Kind);
         Assert.Equal($"first{Environment.NewLine}second", presentation.Body);
@@ -35,12 +45,14 @@ public sealed class CodexThreadPresentationTests
     [Fact]
     public void Present_CommandAndCollaborationExposeFactsAndLinkedThread()
     {
-        var command = CodexThreadItemPresenter.Present(Item(
-            "commandExecution",
-            "{\"type\":\"commandExecution\",\"command\":\"dotnet test\",\"aggregatedOutput\":\"passed\",\"cwd\":\"C:/repo\",\"exitCode\":0,\"durationMs\":12}"));
-        var collaboration = CodexThreadItemPresenter.Present(Item(
-            "collabAgentToolCall",
-            "{\"type\":\"collabAgentToolCall\",\"agentThreadId\":\"child-1\",\"prompt\":\"Inspect tests\"}"));
+        CodexThreadItemPresentation command = CodexThreadItemPresenter.Present(
+            Item(
+                "commandExecution",
+                "{\"type\":\"commandExecution\",\"command\":\"dotnet test\",\"aggregatedOutput\":\"passed\",\"cwd\":\"C:/repo\",\"exitCode\":0,\"durationMs\":12}"));
+        CodexThreadItemPresentation collaboration = CodexThreadItemPresenter.Present(
+            Item(
+                "collabAgentToolCall",
+                "{\"type\":\"collabAgentToolCall\",\"agentThreadId\":\"child-1\",\"prompt\":\"Inspect tests\"}"));
 
         Assert.Equal(CodexThreadItemPresentationKind.CommandExecution, command.Kind);
         Assert.Contains("dotnet test", command.Body);
@@ -52,18 +64,31 @@ public sealed class CodexThreadPresentationTests
     [Fact]
     public void Present_AcceptsSnakeCaseNativeTypeTags()
     {
-        var presentation = CodexThreadItemPresenter.Present(Item(
-            "command_execution",
-            "{\"type\":\"command_execution\",\"command\":\"echo ok\"}"));
+        CodexThreadItemPresentation presentation = CodexThreadItemPresenter.Present(
+            Item(
+                "command_execution",
+                "{\"type\":\"command_execution\",\"command\":\"echo ok\"}"));
 
         Assert.Equal(CodexThreadItemPresentationKind.CommandExecution, presentation.Kind);
     }
 
     [Theory]
-    [InlineData("fileChange", "{\"type\":\"fileChange\",\"changes\":[{\"path\":\"README.md\"}]}", CodexThreadItemPresentationKind.FileChange)]
-    [InlineData("mcpToolCall", "{\"type\":\"mcpToolCall\",\"server\":\"local\",\"tool\":\"search\",\"arguments\":{\"q\":\"x\"},\"result\":{\"ok\":true}}", CodexThreadItemPresentationKind.ToolCall)]
-    [InlineData("dynamicToolCall", "{\"type\":\"dynamicToolCall\",\"namespace\":\"fs\",\"tool\":\"list\"}", CodexThreadItemPresentationKind.ToolCall)]
-    [InlineData("functionCallOutput", "{\"type\":\"functionCallOutput\",\"name\":\"lookup\",\"output\":\"done\"}", CodexThreadItemPresentationKind.ToolCall)]
+    [InlineData(
+        "fileChange",
+        "{\"type\":\"fileChange\",\"changes\":[{\"path\":\"README.md\"}]}",
+        CodexThreadItemPresentationKind.FileChange)]
+    [InlineData(
+        "mcpToolCall",
+        "{\"type\":\"mcpToolCall\",\"server\":\"local\",\"tool\":\"search\",\"arguments\":{\"q\":\"x\"},\"result\":{\"ok\":true}}",
+        CodexThreadItemPresentationKind.ToolCall)]
+    [InlineData(
+        "dynamicToolCall",
+        "{\"type\":\"dynamicToolCall\",\"namespace\":\"fs\",\"tool\":\"list\"}",
+        CodexThreadItemPresentationKind.ToolCall)]
+    [InlineData(
+        "functionCallOutput",
+        "{\"type\":\"functionCallOutput\",\"name\":\"lookup\",\"output\":\"done\"}",
+        CodexThreadItemPresentationKind.ToolCall)]
     [InlineData("plan", "{\"type\":\"plan\",\"text\":\"Do the work\"}", CodexThreadItemPresentationKind.Plan)]
     [InlineData("webSearch", "{\"type\":\"webSearch\"}", CodexThreadItemPresentationKind.SystemEvent)]
     [InlineData("contextCompaction", "{\"type\":\"contextCompaction\"}", CodexThreadItemPresentationKind.SystemEvent)]
@@ -72,8 +97,8 @@ public sealed class CodexThreadPresentationTests
         string json,
         CodexThreadItemPresentationKind expectedKind)
     {
-        var item = Item(type, json);
-        var presentation = CodexThreadItemPresenter.Present(item);
+        CodexThreadItem item = Item(type, json);
+        CodexThreadItemPresentation presentation = CodexThreadItemPresenter.Present(item);
 
         Assert.Equal(expectedKind, presentation.Kind);
         Assert.Same(item, presentation.Source);
@@ -82,11 +107,11 @@ public sealed class CodexThreadPresentationTests
     [Fact]
     public void Present_MalformedAndUnknownItemsRemainInspectable()
     {
-        var malformed = Item("agentMessage", "{not-json");
-        var unknown = Item("futureType", "{\"type\":\"futureType\",\"newField\":true}");
+        CodexThreadItem malformed = Item("agentMessage", "{not-json");
+        CodexThreadItem unknown = Item("futureType", "{\"type\":\"futureType\",\"newField\":true}");
 
-        var malformedPresentation = CodexThreadItemPresenter.Present(malformed);
-        var unknownPresentation = CodexThreadItemPresenter.Present(unknown);
+        CodexThreadItemPresentation malformedPresentation = CodexThreadItemPresenter.Present(malformed);
+        CodexThreadItemPresentation unknownPresentation = CodexThreadItemPresenter.Present(unknown);
 
         Assert.Equal(CodexThreadItemPresentationKind.Unknown, malformedPresentation.Kind);
         Assert.Contains("malformed JSON", malformedPresentation.Body, StringComparison.OrdinalIgnoreCase);
@@ -96,10 +121,11 @@ public sealed class CodexThreadPresentationTests
         Assert.Same(unknown, unknownPresentation.Source);
     }
 
-    private static CodexThreadItem Item(string type, string json) =>
-        new("turn-1", "item-1", 1, null, type, json, null)
+    private static CodexThreadItem Item(string type, string json)
+    {
+        return new CodexThreadItem("turn-1", "item-1", 1, null, type, json, null)
         {
-            SourcePath = "history.sqlite",
-            SourceDescription = "Test history"
+            SourcePath = "history.sqlite", SourceDescription = "Test history",
         };
+    }
 }

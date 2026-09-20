@@ -1,3 +1,7 @@
+// Taj's Tokens | AgentRuntimeState.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
 namespace TajsTokens.Core.Enums;
 
 public enum AgentRuntimeState
@@ -7,5 +11,5 @@ public enum AgentRuntimeState
     Running,
     Waiting,
     Completed,
-    Failed
+    Failed,
 }

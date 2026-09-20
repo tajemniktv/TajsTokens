@@ -13,8 +13,9 @@
         </Grid.RowDefinitions>
         <StackPanel Spacing="3">
             <TextBlock Text="Codex Data Explorer" FontSize="28" FontWeight="SemiBold" />
-            <TextBlock Text="Developer fallback for source health, auxiliary Codex stores and raw read-only SQLite inspection. This surface preserves source shape and does not create product semantics."
-                       Opacity="0.72" TextWrapping="Wrap" />
+            <TextBlock
+                Text="Developer fallback for source health, auxiliary Codex stores and raw read-only SQLite inspection. This surface preserves source shape and does not create product semantics."
+                Opacity="0.72" TextWrapping="Wrap" />
         </StackPanel>
         <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8">
             <Button x:Name="SourcesButton" Content="Source workbench" Click="OnSourcesClicked" />

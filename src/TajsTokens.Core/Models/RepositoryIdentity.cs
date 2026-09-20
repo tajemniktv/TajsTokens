@@ -1,8 +1,12 @@
+// Taj's Tokens | RepositoryIdentity.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
 namespace TajsTokens.Core.Models;
 
 /// <summary>
-/// Stable, content-free repository identity observed by telemetry providers. Remote URLs are reduced
-/// to credential-free identity metadata before they can reach durable persistence.
+///     Stable, content-free repository identity observed by telemetry providers. Remote URLs are reduced
+///     to credential-free identity metadata before they can reach durable persistence.
 /// </summary>
 public sealed record RepositoryIdentity
 {
@@ -36,7 +40,7 @@ public sealed record RepositoryIdentity
             return null;
         }
 
-        var trimmed = remoteUrl.Trim();
+        string trimmed = remoteUrl.Trim();
 
         // Git accepts SCP-style remotes such as user@host:path. Handle these before generic URI
         // parsing because a credential-like prefix such as oauth2:token@host:path can otherwise be
@@ -44,28 +48,25 @@ public sealed record RepositoryIdentity
         // identity, and queries/fragments are discarded as well.
         if (!trimmed.Contains("://", StringComparison.Ordinal))
         {
-            var suffixStart = trimmed.IndexOfAny(['?', '#']);
+            int suffixStart = trimmed.IndexOfAny(['?', '#']);
             if (suffixStart >= 0)
             {
                 trimmed = trimmed[..suffixStart];
             }
 
-            var at = trimmed.IndexOf('@');
-            var pathSeparator = at >= 0 ? trimmed.IndexOf(':', at + 1) : -1;
+            int at = trimmed.IndexOf('@');
+            int pathSeparator = at >= 0 ? trimmed.IndexOf(':', at + 1) : -1;
             if (at >= 0 && pathSeparator > at)
             {
                 return trimmed[(at + 1)..];
             }
         }
 
-        if (Uri.TryCreate(trimmed, UriKind.Absolute, out var uri) && !string.IsNullOrWhiteSpace(uri.Scheme))
+        if (Uri.TryCreate(trimmed, UriKind.Absolute, out Uri? uri) && !string.IsNullOrWhiteSpace(uri.Scheme))
         {
             var sanitized = new UriBuilder(uri)
             {
-                UserName = string.Empty,
-                Password = string.Empty,
-                Query = string.Empty,
-                Fragment = string.Empty
+                UserName = string.Empty, Password = string.Empty, Query = string.Empty, Fragment = string.Empty,
             };
             return sanitized.Uri.AbsoluteUri;
         }

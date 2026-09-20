@@ -1,7 +1,15 @@
+// Taj's Tokens | RuntimeSettingsStoreTests.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Text.Json;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 using TajsTokens.Infrastructure.Persistence;
+
+#endregion
 
 namespace TajsTokens.Core.Tests;
 
@@ -10,13 +18,13 @@ public sealed class RuntimeSettingsStoreTests
     [Fact]
     public void Load_MissingFileCreatesAndReturnsSafeDefaults()
     {
-        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-        var path = Path.Combine(directory, "settings.json");
+        string directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        string path = Path.Combine(directory, "settings.json");
         var store = new RuntimeSettingsStore(path);
 
         try
         {
-            var settings = store.Load();
+            RuntimeSettings settings = store.Load();
 
             Assert.True(settings.RunInBackground);
             Assert.True(settings.NotificationsEnabled);
@@ -31,14 +39,14 @@ public sealed class RuntimeSettingsStoreTests
             Assert.Equal(RuntimeSettings.CurrentSchemaVersion, settings.SchemaVersion);
             Assert.True(File.Exists(path));
 
-            using var document = JsonDocument.Parse(File.ReadAllText(path));
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(path));
             Assert.Equal(RuntimeSettings.CurrentSchemaVersion, document.RootElement.GetProperty("SchemaVersion").GetInt32());
         }
         finally
         {
             if (Directory.Exists(directory))
             {
-                Directory.Delete(directory, recursive: true);
+                Directory.Delete(directory, true);
             }
         }
     }
@@ -46,14 +54,14 @@ public sealed class RuntimeSettingsStoreTests
     [Fact]
     public void Load_CorruptFileReturnsSafeDefaults()
     {
-        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, "settings.json");
+        string path = Path.Combine(directory, "settings.json");
         File.WriteAllText(path, "{ nope");
 
         try
         {
-            var settings = new RuntimeSettingsStore(path).Load();
+            RuntimeSettings settings = new RuntimeSettingsStore(path).Load();
             Assert.Equal(60, settings.PollIntervalSeconds);
             Assert.True(settings.RunInBackground);
             Assert.False(settings.TokscaleReconciliationEnabled);
@@ -64,17 +72,19 @@ public sealed class RuntimeSettingsStoreTests
         }
         finally
         {
-            Directory.Delete(directory, recursive: true);
+            Directory.Delete(directory, true);
         }
     }
 
     [Fact]
     public void Load_VersionlessFileNormalizesToCurrentSchemaAndKeepsTokscaleOptional()
     {
-        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, "settings.json");
-        File.WriteAllText(path, """
+        string path = Path.Combine(directory, "settings.json");
+        File.WriteAllText(
+            path,
+            """
             {
               "RunInBackground": false,
               "PollIntervalSeconds": 120,
@@ -86,7 +96,7 @@ public sealed class RuntimeSettingsStoreTests
 
         try
         {
-            var settings = new RuntimeSettingsStore(path).Load();
+            RuntimeSettings settings = new RuntimeSettingsStore(path).Load();
             Assert.Equal(RuntimeSettings.CurrentSchemaVersion, settings.SchemaVersion);
             Assert.False(settings.RunInBackground);
             Assert.Equal(120, settings.PollIntervalSeconds);
@@ -98,29 +108,29 @@ public sealed class RuntimeSettingsStoreTests
         }
         finally
         {
-            Directory.Delete(directory, recursive: true);
+            Directory.Delete(directory, true);
         }
     }
 
     [Fact]
     public void Load_NewerSchemaReturnsDefaultsAndBlocksOrdinaryOverwrite()
     {
-        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        string directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(directory);
-        var path = Path.Combine(directory, "settings.json");
-        var original = """
-            {
-              "SchemaVersion": 999,
-              "RunInBackground": false,
-              "PollIntervalSeconds": 777
-            }
-            """;
+        string path = Path.Combine(directory, "settings.json");
+        string original = """
+                          {
+                            "SchemaVersion": 999,
+                            "RunInBackground": false,
+                            "PollIntervalSeconds": 777
+                          }
+                          """;
         File.WriteAllText(path, original);
         var store = new RuntimeSettingsStore(path);
 
         try
         {
-            var settings = store.Load();
+            RuntimeSettings settings = store.Load();
             Assert.Equal(RuntimeSettings.CurrentSchemaVersion, settings.SchemaVersion);
             Assert.True(settings.RunInBackground);
             Assert.Equal(60, settings.PollIntervalSeconds);
@@ -133,34 +143,35 @@ public sealed class RuntimeSettingsStoreTests
         }
         finally
         {
-            Directory.Delete(directory, recursive: true);
+            Directory.Delete(directory, true);
         }
     }
 
     [Fact]
     public void Save_NormalizesAndRoundTripsOptionalTokscaleSettings()
     {
-        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-        var path = Path.Combine(directory, "settings.json");
+        string directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        string path = Path.Combine(directory, "settings.json");
         var store = new RuntimeSettingsStore(path);
 
         try
         {
-            store.Save(new RuntimeSettings
-            {
-                PollIntervalSeconds = 1,
-                LowQuotaThresholds = [10, 30, 10, -1, 500],
-                NotificationsEnabled = false,
-                TokscaleReconciliationEnabled = true,
-                TokscaleFallbackEnabled = true,
-                CodexCliCommand = "  custom-codex  ",
-                CodexCliArguments = " exec \r\n\r\n --json ",
-                CodexCliWorkingDirectory = "  C:\\repo  ",
-                CodexCliPromptMode = CodexCliPromptMode.LastArgument,
-                CodexCliTimeoutSeconds = 99999
-            });
+            store.Save(
+                new RuntimeSettings
+                {
+                    PollIntervalSeconds = 1,
+                    LowQuotaThresholds = [10, 30, 10, -1, 500],
+                    NotificationsEnabled = false,
+                    TokscaleReconciliationEnabled = true,
+                    TokscaleFallbackEnabled = true,
+                    CodexCliCommand = "  custom-codex  ",
+                    CodexCliArguments = " exec \r\n\r\n --json ",
+                    CodexCliWorkingDirectory = "  C:\\repo  ",
+                    CodexCliPromptMode = CodexCliPromptMode.LastArgument,
+                    CodexCliTimeoutSeconds = 99999,
+                });
 
-            var settings = store.Load();
+            RuntimeSettings settings = store.Load();
             Assert.Equal(RuntimeSettings.CurrentSchemaVersion, settings.SchemaVersion);
             Assert.Equal(15, settings.PollIntervalSeconds);
             Assert.Equal([30, 10], settings.LowQuotaThresholds);
@@ -177,7 +188,7 @@ public sealed class RuntimeSettingsStoreTests
         {
             if (Directory.Exists(directory))
             {
-                Directory.Delete(directory, recursive: true);
+                Directory.Delete(directory, true);
             }
         }
     }
@@ -185,8 +196,8 @@ public sealed class RuntimeSettingsStoreTests
     [Fact]
     public void Save_RejectsNewerSchema()
     {
-        var directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
-        var path = Path.Combine(directory, "settings.json");
+        string directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        string path = Path.Combine(directory, "settings.json");
         var store = new RuntimeSettingsStore(path);
 
         try
@@ -200,7 +211,7 @@ public sealed class RuntimeSettingsStoreTests
         {
             if (Directory.Exists(directory))
             {
-                Directory.Delete(directory, recursive: true);
+                Directory.Delete(directory, true);
             }
         }
     }

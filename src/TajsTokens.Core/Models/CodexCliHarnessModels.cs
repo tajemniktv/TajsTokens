@@ -1,9 +1,17 @@
+// Taj's Tokens | CodexCliHarnessModels.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using TajsTokens.Core.Enums;
+
+#endregion
 
 namespace TajsTokens.Core.Models;
 
 /// <summary>
-/// A single user-requested local invocation of a custom Codex CLI.
+///     A single user-requested local invocation of a custom Codex CLI.
 /// </summary>
 public sealed record CodexCliHarnessRequest(
     string Command,
@@ -13,14 +21,16 @@ public sealed record CodexCliHarnessRequest(
     CodexCliPromptMode PromptMode,
     TimeSpan Timeout)
 {
-    public static CodexCliHarnessRequest FromSettings(RuntimeSettings settings, string prompt) =>
-        new(
+    public static CodexCliHarnessRequest FromSettings(RuntimeSettings settings, string prompt)
+    {
+        return new CodexCliHarnessRequest(
             settings.CodexCliCommand,
             CodexCliArguments.ParseLines(settings.CodexCliArguments),
             settings.CodexCliWorkingDirectory,
             prompt,
             settings.CodexCliPromptMode,
             TimeSpan.FromSeconds(settings.CodexCliTimeoutSeconds));
+    }
 }
 
 public sealed record CodexCliOutputLine(
@@ -31,7 +41,7 @@ public sealed record CodexCliOutputLine(
 public enum CodexCliOutputStream
 {
     StandardOutput,
-    StandardError
+    StandardError,
 }
 
 public sealed record CodexCliRunResult(
@@ -46,16 +56,20 @@ public sealed record CodexCliRunResult(
 }
 
 /// <summary>
-/// The harness stores one argument per line. This avoids shell parsing and keeps each argument an
-/// explicit value when it crosses the process boundary.
+///     The harness stores one argument per line. This avoids shell parsing and keeps each argument an
+///     explicit value when it crosses the process boundary.
 /// </summary>
 public static class CodexCliArguments
 {
-    public static IReadOnlyList<string> ParseLines(string? text) =>
-        (text ?? string.Empty)
+    public static IReadOnlyList<string> ParseLines(string? text)
+    {
+        return (text ?? string.Empty)
             .Split(["\r\n", "\n", "\r"], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .ToArray();
+    }
 
-    public static string ToLines(IEnumerable<string>? arguments) =>
-        string.Join(Environment.NewLine, arguments ?? []);
+    public static string ToLines(IEnumerable<string>? arguments)
+    {
+        return string.Join(Environment.NewLine, arguments ?? []);
+    }
 }

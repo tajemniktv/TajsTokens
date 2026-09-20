@@ -1,5 +1,13 @@
+// Taj's Tokens | RuntimeSettingsStore.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Text.Json;
 using TajsTokens.Core.Models;
+
+#endregion
 
 namespace TajsTokens.Infrastructure.Persistence;
 
@@ -19,12 +27,12 @@ public sealed class RuntimeSettingsStore
         {
             if (!File.Exists(_path))
             {
-                var defaults = Normalize(new RuntimeSettings());
+                RuntimeSettings defaults = Normalize(new RuntimeSettings());
                 Save(defaults);
                 return defaults;
             }
 
-            var json = File.ReadAllText(_path);
+            string json = File.ReadAllText(_path);
             return Normalize(JsonSerializer.Deserialize<RuntimeSettings>(json) ?? new RuntimeSettings());
         }
         catch
@@ -38,23 +46,23 @@ public sealed class RuntimeSettingsStore
 
     public void Save(RuntimeSettings settings)
     {
-        var persistedVersion = ReadPersistedSchemaVersion();
+        int? persistedVersion = ReadPersistedSchemaVersion();
         if (persistedVersion > RuntimeSettings.CurrentSchemaVersion)
         {
             throw new InvalidOperationException(
                 $"Persisted runtime settings schema {persistedVersion} is newer than supported version {RuntimeSettings.CurrentSchemaVersion}; refusing to overwrite it.");
         }
 
-        var normalized = Normalize(settings);
-        var directory = Path.GetDirectoryName(_path);
+        RuntimeSettings normalized = Normalize(settings);
+        string? directory = Path.GetDirectoryName(_path);
         if (!string.IsNullOrWhiteSpace(directory))
         {
             Directory.CreateDirectory(directory);
         }
 
-        var temp = _path + ".tmp";
+        string temp = _path + ".tmp";
         File.WriteAllText(temp, JsonSerializer.Serialize(normalized, s_jsonOptions));
-        File.Move(temp, _path, overwrite: true);
+        File.Move(temp, _path, true);
     }
 
     private int? ReadPersistedSchemaVersion()
@@ -66,13 +74,13 @@ public sealed class RuntimeSettingsStore
 
         try
         {
-            using var document = JsonDocument.Parse(File.ReadAllText(_path));
-            if (!document.RootElement.TryGetProperty(nameof(RuntimeSettings.SchemaVersion), out var property))
+            using JsonDocument document = JsonDocument.Parse(File.ReadAllText(_path));
+            if (!document.RootElement.TryGetProperty(nameof(RuntimeSettings.SchemaVersion), out JsonElement property))
             {
                 return 0;
             }
 
-            return property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out var version)
+            return property.ValueKind == JsonValueKind.Number && property.TryGetInt32(out int version)
                 ? version
                 : 0;
         }
@@ -95,16 +103,17 @@ public sealed class RuntimeSettingsStore
         return settings with
         {
             SchemaVersion = RuntimeSettings.CurrentSchemaVersion,
-            RolloutAccountAssociations = (settings.RolloutAccountAssociations ?? []).Where(x => x is not null && x.IsValid).Distinct().ToArray(),
+            RolloutAccountAssociations =
+            (settings.RolloutAccountAssociations ?? []).Where(x => x is not null && x.IsValid).Distinct().ToArray(),
             PollIntervalSeconds = Math.Clamp(settings.PollIntervalSeconds, 15, 3600),
             LowQuotaThresholds = RuntimeSettings.NormalizeLowQuotaThresholds(settings.LowQuotaThresholds),
             CodexCliCommand = string.IsNullOrWhiteSpace(settings.CodexCliCommand)
                 ? "codex"
                 : settings.CodexCliCommand.Trim(),
-            CodexCliArguments = TajsTokens.Core.Models.CodexCliArguments.ToLines(
-                TajsTokens.Core.Models.CodexCliArguments.ParseLines(settings.CodexCliArguments)),
+            CodexCliArguments = CodexCliArguments.ToLines(
+                CodexCliArguments.ParseLines(settings.CodexCliArguments)),
             CodexCliWorkingDirectory = settings.CodexCliWorkingDirectory?.Trim() ?? string.Empty,
-            CodexCliTimeoutSeconds = Math.Clamp(settings.CodexCliTimeoutSeconds, 5, 3600)
+            CodexCliTimeoutSeconds = Math.Clamp(settings.CodexCliTimeoutSeconds, 5, 3600),
         };
     }
 }

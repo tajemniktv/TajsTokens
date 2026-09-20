@@ -1,6 +1,14 @@
+// Taj's Tokens | CodexThreadsPage.xaml.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using TajsTokens.Core.Models;
+
+#endregion
 
 namespace TajsTokens.App.Pages;
 
@@ -25,7 +33,7 @@ public sealed partial class CodexThreadsPage : Page
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         _loaded = true;
-        var previous = Interlocked.Exchange(ref _cancellation, new CancellationTokenSource());
+        CancellationTokenSource? previous = Interlocked.Exchange(ref _cancellation, new CancellationTokenSource());
         previous?.Cancel();
         previous?.Dispose();
 
@@ -45,14 +53,14 @@ public sealed partial class CodexThreadsPage : Page
         _reloadRequested = false;
         Interlocked.Increment(ref _searchGeneration);
         Interlocked.Increment(ref _selectionGeneration);
-        var cancellation = Interlocked.Exchange(ref _cancellation, null);
+        CancellationTokenSource? cancellation = Interlocked.Exchange(ref _cancellation, null);
         cancellation?.Cancel();
         cancellation?.Dispose();
     }
 
     private async void OnRefreshClicked(object sender, RoutedEventArgs e)
     {
-        var cancellation = _cancellation;
+        CancellationTokenSource? cancellation = _cancellation;
         if (!_loaded || cancellation is null || cancellation.IsCancellationRequested)
         {
             return;
@@ -63,14 +71,14 @@ public sealed partial class CodexThreadsPage : Page
 
     private async void OnSearchChanged(object sender, TextChangedEventArgs e)
     {
-        var cancellation = _cancellation;
+        CancellationTokenSource? cancellation = _cancellation;
         if (!_loaded || cancellation is null || cancellation.IsCancellationRequested)
         {
             return;
         }
 
-        var generation = Interlocked.Increment(ref _searchGeneration);
-        var search = SearchTextBox.Text.Trim();
+        long generation = Interlocked.Increment(ref _searchGeneration);
+        string search = SearchTextBox.Text.Trim();
         try
         {
             await Task.Delay(150, cancellation.Token);
@@ -107,7 +115,7 @@ public sealed partial class CodexThreadsPage : Page
             return;
         }
 
-        var search = requestedSearch ?? SearchTextBox.Text.Trim();
+        string search = requestedSearch ?? SearchTextBox.Text.Trim();
         _loading = true;
         try
         {
@@ -118,7 +126,7 @@ public sealed partial class CodexThreadsPage : Page
                 // current box value for the queued pass so the latest query is not lost.
                 search = SearchTextBox.Text.Trim();
                 StatusText.Text = "Reading discovered Codex thread sources…";
-                var result = await Task.Run(
+                CodexThreadSearchResult result = await Task.Run(
                     () => App.Services.CodexThreadReadModel.SearchThreadsAsync(
                         search,
                         search.Length == 0 ? 750 : 250,
@@ -131,8 +139,8 @@ public sealed partial class CodexThreadsPage : Page
                     return;
                 }
 
-                if ((searchGeneration is not null &&
-                     searchGeneration.Value != Volatile.Read(ref _searchGeneration)) ||
+                if (searchGeneration is not null &&
+                    searchGeneration.Value != Volatile.Read(ref _searchGeneration) ||
                     !string.Equals(SearchTextBox.Text.Trim(), search, StringComparison.Ordinal))
                 {
                     // The result is stale, but the active source read has completed. Consume the
@@ -143,7 +151,7 @@ public sealed partial class CodexThreadsPage : Page
                     continue;
                 }
 
-                var selectedId = (ThreadList.SelectedItem as CodexThreadCatalogSearchEntry)?.Preferred.ThreadId;
+                string? selectedId = (ThreadList.SelectedItem as CodexThreadCatalogSearchEntry)?.Preferred.ThreadId;
                 ThreadList.ItemsSource = result.Entries;
                 if (selectedId is not null)
                 {
@@ -158,19 +166,22 @@ public sealed partial class CodexThreadsPage : Page
 
                 if (result.Entries.Count == 0)
                 {
-                    SetDetailMessage(search.Length == 0
-                        ? "No source-native Codex thread is available to inspect."
-                        : "No matching source-native Codex thread is available to inspect.");
+                    SetDetailMessage(
+                        search.Length == 0
+                            ? "No source-native Codex thread is available to inspect."
+                            : "No matching source-native Codex thread is available to inspect.");
                 }
 
-                var diagnostics = result.Warnings.Count == 0
+                string diagnostics = result.Warnings.Count == 0
                     ? string.Empty
                     : $" · {result.Warnings.Count:N0} source warning(s)";
-                var coverage = result.CoverageWarnings.Count == 0
+                string coverage = result.CoverageWarnings.Count == 0
                     ? string.Empty
                     : $" · bounded coverage reached ({result.CoverageWarnings.Count:N0} warning(s))";
                 StatusText.Text = result.Entries.Count == 0
-                    ? (search.Length == 0 ? "No source-native Codex threads were found." : "No matching source-native Codex threads were found.")
+                    ? search.Length == 0
+                        ? "No source-native Codex threads were found."
+                        : "No matching source-native Codex threads were found."
                     : $"{result.Entries.Count:N0} thread(s) · {result.SourceObservations.Count:N0} source observation(s){diagnostics}{coverage}.";
             }
             while (_reloadRequested && _loaded && !cancellationToken.IsCancellationRequested);
@@ -194,8 +205,8 @@ public sealed partial class CodexThreadsPage : Page
     private async void OnThreadSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         var entry = ThreadList.SelectedItem as CodexThreadCatalogSearchEntry;
-        var cancellation = _cancellation;
-        var generation = Interlocked.Increment(ref _selectionGeneration);
+        CancellationTokenSource? cancellation = _cancellation;
+        long generation = Interlocked.Increment(ref _selectionGeneration);
         if (!_loaded || cancellation is null || cancellation.IsCancellationRequested || entry is null)
         {
             if (entry is null)
@@ -209,7 +220,7 @@ public sealed partial class CodexThreadsPage : Page
         SetDetailMessage("Loading source-native thread metadata and history…");
         try
         {
-            var result = await Task.Run(
+            CodexThreadReadResult result = await Task.Run(
                 () => App.Services.CodexThreadReadModel.ReadThreadAsync(
                     entry.Preferred.ThreadId,
                     cancellation.Token),
@@ -240,15 +251,22 @@ public sealed partial class CodexThreadsPage : Page
         DetailPanel.Children.Clear();
         if (!result.HasThread && result.Turns.Count == 0 && result.Items.Count == 0 && result.RealtimeItems.Count == 0)
         {
-            AddNotice(DetailPanel, string.Join("\n", result.Warnings.DefaultIfEmpty(
-                "No source-native state/history row is available for this thread.")));
+            AddNotice(
+                DetailPanel,
+                string.Join(
+                    "\n",
+                    result.Warnings.DefaultIfEmpty(
+                        "No source-native state/history row is available for this thread.")));
             return;
         }
 
-        var thread = result.Thread;
-        var overview = AddSection(DetailPanel, "Thread overview",
+        CodexThreadCatalogEntry? thread = result.Thread;
+        StackPanel overview = AddSection(
+            DetailPanel,
+            "Thread overview",
             "Source-native values are shown as observed. Missing fields remain unavailable.");
-        AddFields(overview,
+        AddFields(
+            overview,
             ("Captured", FormatDate(result.CapturedAtUtc)),
             ("Thread ID", Value(thread?.ThreadId)),
             ("Display name", Value(thread?.DisplayName)),
@@ -267,8 +285,9 @@ public sealed partial class CodexThreadsPage : Page
             ("Archived", FormatBool(thread?.Archived)),
             ("Pinned", FormatBool(thread?.IsPinned)));
 
-        var workspace = AddSection(DetailPanel, "Workspace, policies and agent");
-        AddFields(workspace,
+        StackPanel workspace = AddSection(DetailPanel, "Workspace, policies and agent");
+        AddFields(
+            workspace,
             ("Working directory", Value(thread?.Cwd)),
             ("Git branch", Value(thread?.GitBranch)),
             ("Git SHA", Value(thread?.GitSha)),
@@ -285,8 +304,9 @@ public sealed partial class CodexThreadsPage : Page
             ("Source generation", FormatInt(thread?.SourceGeneration)),
             ("Source last write", FormatDate(thread?.SourceLastWriteTimeUtc)));
 
-        var provenance = AddSection(DetailPanel, "Source provenance and read-model policy");
-        AddFields(provenance,
+        StackPanel provenance = AddSection(DetailPanel, "Source provenance and read-model policy");
+        AddFields(
+            provenance,
             ("State source", Value(result.StateSourcePath)),
             ("State source description", Value(result.StateSourceDescription)),
             ("History source", Value(result.HistorySourcePath)),
@@ -299,8 +319,9 @@ public sealed partial class CodexThreadsPage : Page
             ("History reconciliation", Value(result.HistoryReconciliationPolicy)),
             ("History selection rationale", Value(result.HistorySourceSelectionRationale)));
 
-        var coverage = AddSection(DetailPanel, "Capabilities and coverage");
-        AddFields(coverage,
+        StackPanel coverage = AddSection(DetailPanel, "Capabilities and coverage");
+        AddFields(
+            coverage,
             ("Project capability", FormatCapability(result.ProjectCapabilityAvailable)),
             ("Project roots capability", FormatCapability(result.ProjectRootsCapabilityAvailable)),
             ("Section capability", FormatCapability(result.SectionCapabilityAvailable)),
@@ -316,22 +337,24 @@ public sealed partial class CodexThreadsPage : Page
             ("Normal items coverage", FormatTruncation(result.ItemsTruncated)),
             ("Realtime coverage", FormatTruncation(result.RealtimeItemsTruncated)));
 
-        var projectSection = AddSection(DetailPanel, "Project");
+        StackPanel projectSection = AddSection(DetailPanel, "Project");
         if (result.Project is { } project)
         {
             AddProjectFields(projectSection, project, result);
         }
         else
         {
-            AddFields(projectSection,
+            AddFields(
+                projectSection,
                 ("Value", "unavailable"),
                 ("Capability", FormatCapability(result.ProjectCapabilityAvailable)));
         }
 
-        var sectionSection = AddSection(DetailPanel, "Section");
+        StackPanel sectionSection = AddSection(DetailPanel, "Section");
         if (result.Section is { } section)
         {
-            AddFields(sectionSection,
+            AddFields(
+                sectionSection,
                 ("Section ID", Value(section.SectionId)),
                 ("Name", Value(section.Name)),
                 ("Position", FormatInt(thread?.SectionPosition)),
@@ -340,25 +363,28 @@ public sealed partial class CodexThreadsPage : Page
         }
         else
         {
-            AddFields(sectionSection,
+            AddFields(
+                sectionSection,
                 ("Value", "unavailable"),
                 ("Capability", FormatCapability(result.SectionCapabilityAvailable)));
         }
 
-        var stateObservations = AddSection(DetailPanel,
+        StackPanel stateObservations = AddSection(
+            DetailPanel,
             $"State observations ({result.StateSources.Count:N0})",
             "Each readable state database is retained separately; expand a row to inspect its source-qualified metadata.",
-            expanded: false);
+            false);
         if (result.StateSources.Count == 0)
         {
             AddNotice(stateObservations, "No matching state-source observation was available.");
         }
         else
         {
-            for (var index = 0; index < result.StateSources.Count; index++)
+            for (int index = 0; index < result.StateSources.Count; index++)
             {
-                var source = result.StateSources[index];
-                var sourceBody = AddRecord(stateObservations,
+                CodexThreadStateSourceObservation source = result.StateSources[index];
+                StackPanel sourceBody = AddRecord(
+                    stateObservations,
                     $"{index + 1}. {source.SourceDescription}",
                     ("Source path", Value(source.SourcePath)),
                     ("Project capability", FormatCapability(source.ProjectCapabilityAvailable)),
@@ -376,37 +402,47 @@ public sealed partial class CodexThreadsPage : Page
 
         if (result.StateReadModel is { } stateReadModel)
         {
-            var reconciliation = AddSection(DetailPanel, "Retained alternatives and conflicts",
+            StackPanel reconciliation = AddSection(
+                DetailPanel,
+                "Retained alternatives and conflicts",
                 "The preferred value is a presentation choice. Alternatives remain visible so conflicting source observations are not silently lost.",
-                expanded: false);
-            AddFields(reconciliation,
+                false);
+            AddFields(
+                reconciliation,
                 ("Selection rationale", Value(stateReadModel.SelectionRationale)),
                 ("Project alternatives", stateReadModel.ProjectAlternatives.Count.ToString("N0") +
-                 $" · conflict={FormatBool(stateReadModel.ProjectConflict)}"),
+                                         $" · conflict={FormatBool(stateReadModel.ProjectConflict)}"),
                 ("Project-roots alternatives", stateReadModel.ProjectRootsAlternatives.Count.ToString("N0") +
-                 $" · conflict={FormatBool(stateReadModel.ProjectRootsConflict)}"),
+                                               $" · conflict={FormatBool(stateReadModel.ProjectRootsConflict)}"),
                 ("Section alternatives", stateReadModel.SectionAlternatives.Count.ToString("N0") +
-                 $" · conflict={FormatBool(stateReadModel.SectionConflict)}"),
+                                         $" · conflict={FormatBool(stateReadModel.SectionConflict)}"),
                 ("Dynamic-tool alternatives", stateReadModel.DynamicToolsAlternatives.Count.ToString("N0") +
-                 $" · conflict={FormatBool(stateReadModel.DynamicToolsConflict)}"),
+                                              $" · conflict={FormatBool(stateReadModel.DynamicToolsConflict)}"),
                 ("Spawn-edge alternatives", stateReadModel.SpawnEdgesAlternatives.Count.ToString("N0") +
-                 $" · conflict={FormatBool(stateReadModel.SpawnEdgesConflict)}"));
+                                            $" · conflict={FormatBool(stateReadModel.SpawnEdgesConflict)}"));
 
-            foreach (var (alternative, index) in stateReadModel.ProjectAlternatives.Select((value, index) => (value, index)))
+            foreach ((CodexThreadProject alternative, int index) in stateReadModel.ProjectAlternatives.Select((value, index) =>
+                         (value, index)))
             {
-                var alternativeBody = AddRecord(reconciliation, $"Project alternative {index + 1}");
+                StackPanel alternativeBody = AddRecord(reconciliation, $"Project alternative {index + 1}");
                 AddProjectFields(alternativeBody, alternative, result);
             }
 
-            foreach (var (roots, index) in stateReadModel.ProjectRootsAlternatives.Select((value, index) => (value, index)))
+            foreach ((IReadOnlyList<string> roots, int index) in stateReadModel.ProjectRootsAlternatives.Select((value, index) =>
+                         (value, index)))
             {
-                AddRecord(reconciliation, $"Project roots alternative {index + 1}",
+                AddRecord(
+                    reconciliation,
+                    $"Project roots alternative {index + 1}",
                     ("Roots", roots.Count == 0 ? "empty" : string.Join(Environment.NewLine, roots)));
             }
 
-            foreach (var (alternative, index) in stateReadModel.SectionAlternatives.Select((value, index) => (value, index)))
+            foreach ((CodexThreadSection alternative, int index) in stateReadModel.SectionAlternatives.Select((value, index) =>
+                         (value, index)))
             {
-                AddRecord(reconciliation, $"Section alternative {index + 1}",
+                AddRecord(
+                    reconciliation,
+                    $"Section alternative {index + 1}",
                     ("Section ID", Value(alternative.SectionId)),
                     ("Name", Value(alternative.Name)),
                     ("Appearance", Value(alternative.Appearance)));
@@ -416,15 +452,20 @@ public sealed partial class CodexThreadsPage : Page
             AddAlternativeEdges(reconciliation, stateReadModel.SpawnEdgesAlternatives);
         }
 
-        var topology = AddSection(DetailPanel, $"Spawn edges ({result.SpawnEdges.Count:N0})",
+        StackPanel topology = AddSection(
+            DetailPanel,
+            $"Spawn edges ({result.SpawnEdges.Count:N0})",
             "Directional parent → child relationships from the source-native topology table.",
-            expanded: false);
-        AddFields(topology,
+            false);
+        AddFields(
+            topology,
             ("Capability", FormatCapability(result.SpawnEdgesCapabilityAvailable)),
             ("Coverage", FormatTruncation(result.SpawnEdgesTruncated)));
-        foreach (var edge in result.SpawnEdges.Take(160))
+        foreach (CodexThreadSpawnEdge edge in result.SpawnEdges.Take(160))
         {
-            AddRecord(topology, $"{edge.ParentThreadId} → {edge.ChildThreadId}",
+            AddRecord(
+                topology,
+                $"{edge.ParentThreadId} → {edge.ChildThreadId}",
                 ("Parent thread ID", edge.ParentThreadId),
                 ("Child thread ID", edge.ChildThreadId),
                 ("Status", Value(edge.Status)),
@@ -432,15 +473,20 @@ public sealed partial class CodexThreadsPage : Page
         }
         AddLimitNotice(topology, result.SpawnEdges.Count, 160);
 
-        var tools = AddSection(DetailPanel, $"Dynamic tools ({result.DynamicTools.Count:N0})",
+        StackPanel tools = AddSection(
+            DetailPanel,
+            $"Dynamic tools ({result.DynamicTools.Count:N0})",
             "Tool definitions are source metadata; input schemas are shown locally and are not persisted by TajsTokens.",
-            expanded: false);
-        AddFields(tools,
+            false);
+        AddFields(
+            tools,
             ("Capability", FormatCapability(result.DynamicToolsCapabilityAvailable)),
             ("Coverage", FormatTruncation(result.DynamicToolsTruncated)));
-        foreach (var tool in result.DynamicTools.Take(160))
+        foreach (CodexThreadDynamicTool tool in result.DynamicTools.Take(160))
         {
-            AddRecord(tools, $"[{tool.Position}] {Value(tool.Name)}",
+            AddRecord(
+                tools,
+                $"[{tool.Position}] {Value(tool.Name)}",
                 ("Position", tool.Position.ToString()),
                 ("Name", Value(tool.Name)),
                 ("Namespace", Value(tool.Namespace)),
@@ -450,19 +496,23 @@ public sealed partial class CodexThreadsPage : Page
         }
         AddLimitNotice(tools, result.DynamicTools.Count, 160);
 
-        var historySources = AddSection(DetailPanel, $"History sources ({result.HistorySources.Count:N0})",
+        StackPanel historySources = AddSection(
+            DetailPanel,
+            $"History sources ({result.HistorySources.Count:N0})",
             "History stores remain separate observations. The flat lanes below are a deterministic union for reading.",
-            expanded: false);
+            false);
         if (result.HistorySources.Count == 0)
         {
             AddNotice(historySources, "No history-source observation was available.");
         }
         else
         {
-            for (var index = 0; index < result.HistorySources.Count; index++)
+            for (int index = 0; index < result.HistorySources.Count; index++)
             {
-                var source = result.HistorySources[index];
-                AddRecord(historySources, $"{index + 1}. {source.SourceDescription}",
+                CodexThreadHistorySourceObservation source = result.HistorySources[index];
+                AddRecord(
+                    historySources,
+                    $"{index + 1}. {source.SourceDescription}",
                     ("Source path", Value(source.SourcePath)),
                     ("Turns", source.Turns.Count.ToString("N0")),
                     ("Turns capability", FormatCapability(source.TurnsCapabilityAvailable)),
@@ -476,15 +526,20 @@ public sealed partial class CodexThreadsPage : Page
             }
         }
 
-        var turns = AddSection(DetailPanel, $"Turns ({result.Turns.Count:N0})",
+        StackPanel turns = AddSection(
+            DetailPanel,
+            $"Turns ({result.Turns.Count:N0})",
             "Materialized turn metadata in rollout order. Error payloads are represented as presence so the detail view does not become a transcript dump.",
-            expanded: false);
-        AddFields(turns,
+            false);
+        AddFields(
+            turns,
             ("Capability", FormatCapability(result.TurnsCapabilityAvailable)),
             ("Coverage", FormatTruncation(result.TurnsTruncated)));
-        foreach (var turn in result.Turns.Take(160))
+        foreach (CodexThreadTurn turn in result.Turns.Take(160))
         {
-            AddRecord(turns, $"[{FormatOrdinal(turn.RolloutOrdinal, turn.RolloutOrdinalAvailable)}] {turn.TurnId}",
+            AddRecord(
+                turns,
+                $"[{FormatOrdinal(turn.RolloutOrdinal, turn.RolloutOrdinalAvailable)}] {turn.TurnId}",
                 ("Turn ID", turn.TurnId),
                 ("Rollout ordinal", FormatOrdinal(turn.RolloutOrdinal, turn.RolloutOrdinalAvailable)),
                 ("Status", Value(turn.Status)),
@@ -502,15 +557,20 @@ public sealed partial class CodexThreadsPage : Page
         }
         AddLimitNotice(turns, result.Turns.Count, 160);
 
-        var items = AddSection(DetailPanel, $"Normal history items ({result.Items.Count:N0})",
+        StackPanel items = AddSection(
+            DetailPanel,
+            $"Normal history items ({result.Items.Count:N0})",
             "Item metadata is readable here. Content-bearing item JSON remains outside the summary and is not copied into TajsTokens storage.",
-            expanded: false);
-        AddFields(items,
+            false);
+        AddFields(
+            items,
             ("Capability", FormatCapability(result.ItemsCapabilityAvailable)),
             ("Coverage", FormatTruncation(result.ItemsTruncated)));
-        foreach (var item in result.Items.Take(200))
+        foreach (CodexThreadItem item in result.Items.Take(200))
         {
-            AddRecord(items, $"[{FormatOrdinal(item.RolloutOrdinal, item.RolloutOrdinalAvailable)}] {Value(item.ItemType)} · {item.ItemId}",
+            AddRecord(
+                items,
+                $"[{FormatOrdinal(item.RolloutOrdinal, item.RolloutOrdinalAvailable)}] {Value(item.ItemType)} · {item.ItemId}",
                 ("Item ID", item.ItemId),
                 ("Item type", Value(item.ItemType)),
                 ("Turn ID", Value(item.TurnId)),
@@ -523,15 +583,20 @@ public sealed partial class CodexThreadsPage : Page
         }
         AddLimitNotice(items, result.Items.Count, 200);
 
-        var realtime = AddSection(DetailPanel, $"Realtime timeline ({result.RealtimeItems.Count:N0})",
+        StackPanel realtime = AddSection(
+            DetailPanel,
+            $"Realtime timeline ({result.RealtimeItems.Count:N0})",
             "Realtime items remain a separate source-native lane rather than being merged into normal history.",
-            expanded: false);
-        AddFields(realtime,
+            false);
+        AddFields(
+            realtime,
             ("Capability", FormatCapability(result.RealtimeCapabilityAvailable)),
             ("Coverage", FormatTruncation(result.RealtimeItemsTruncated)));
-        foreach (var item in result.RealtimeItems.Take(200))
+        foreach (CodexThreadRealtimeItem item in result.RealtimeItems.Take(200))
         {
-            AddRecord(realtime, $"[{FormatOrdinal(item.RolloutOrdinal, item.RolloutOrdinalAvailable)}] {Value(item.ItemType)} · {item.ItemId}",
+            AddRecord(
+                realtime,
+                $"[{FormatOrdinal(item.RolloutOrdinal, item.RolloutOrdinalAvailable)}] {Value(item.ItemType)} · {item.ItemId}",
                 ("Item ID", item.ItemId),
                 ("Item type", Value(item.ItemType)),
                 ("Rollout ordinal", FormatOrdinal(item.RolloutOrdinal, item.RolloutOrdinalAvailable)),
@@ -558,24 +623,21 @@ public sealed partial class CodexThreadsPage : Page
         string? description = null,
         bool expanded = true)
     {
-        var body = new StackPanel
-        {
-            Spacing = 8,
-            Margin = new Thickness(4, 0, 4, 4)
-        };
+        var body = new StackPanel { Spacing = 8, Margin = new Thickness(4, 0, 4, 4) };
         if (!string.IsNullOrWhiteSpace(description))
         {
             AddNotice(body, description);
         }
 
-        parent.Children.Add(new Expander
-        {
-            Header = title,
-            IsExpanded = expanded,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Content = body
-        });
+        parent.Children.Add(
+            new Expander
+            {
+                Header = title,
+                IsExpanded = expanded,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Content = body,
+            });
         return body;
     }
 
@@ -586,14 +648,15 @@ public sealed partial class CodexThreadsPage : Page
     {
         var body = new StackPanel { Spacing = 8, Margin = new Thickness(4, 0, 0, 4) };
         AddFields(body, fields);
-        parent.Children.Add(new Expander
-        {
-            Header = title,
-            IsExpanded = false,
-            HorizontalAlignment = HorizontalAlignment.Stretch,
-            HorizontalContentAlignment = HorizontalAlignment.Stretch,
-            Content = body
-        });
+        parent.Children.Add(
+            new Expander
+            {
+                Header = title,
+                IsExpanded = false,
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Stretch,
+                Content = body,
+            });
         return body;
     }
 
@@ -603,22 +666,19 @@ public sealed partial class CodexThreadsPage : Page
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(150) });
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
-        for (var index = 0; index < fields.Length; index++)
+        for (int index = 0; index < fields.Length; index++)
         {
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             var label = new TextBlock
             {
-                Text = fields[index].Label,
-                Opacity = 0.66,
-                TextWrapping = TextWrapping.Wrap,
-                VerticalAlignment = VerticalAlignment.Top
+                Text = fields[index].Label, Opacity = 0.66, TextWrapping = TextWrapping.Wrap, VerticalAlignment = VerticalAlignment.Top,
             };
             var value = new TextBlock
             {
                 Text = fields[index].Value,
                 TextWrapping = TextWrapping.Wrap,
                 IsTextSelectionEnabled = true,
-                VerticalAlignment = VerticalAlignment.Top
+                VerticalAlignment = VerticalAlignment.Top,
             };
             Grid.SetRow(label, index);
             Grid.SetColumn(label, 0);
@@ -633,7 +693,8 @@ public sealed partial class CodexThreadsPage : Page
 
     private static void AddCatalogFields(StackPanel parent, CodexThreadCatalogEntry entry)
     {
-        AddFields(parent,
+        AddFields(
+            parent,
             ("Thread ID", Value(entry.ThreadId)),
             ("Display name", Value(entry.DisplayName)),
             ("Title", Value(entry.Title)),
@@ -676,7 +737,8 @@ public sealed partial class CodexThreadsPage : Page
         CodexThreadProject project,
         CodexThreadReadResult result)
     {
-        AddFields(parent,
+        AddFields(
+            parent,
             ("Project ID", Value(project.ProjectId)),
             ("Name", Value(project.Name)),
             ("Metadata", Value(project.Metadata)),
@@ -699,13 +761,17 @@ public sealed partial class CodexThreadsPage : Page
         StackPanel parent,
         IReadOnlyList<IReadOnlyList<CodexThreadDynamicTool>> alternatives)
     {
-        foreach (var (alternative, index) in alternatives.Select((value, index) => (value, index)))
+        foreach ((IReadOnlyList<CodexThreadDynamicTool> alternative, int index) in alternatives.Select((value, index) => (value, index)))
         {
-            var body = AddRecord(parent, $"Dynamic-tool set alternative {index + 1}",
+            StackPanel body = AddRecord(
+                parent,
+                $"Dynamic-tool set alternative {index + 1}",
                 ("Tool count", alternative.Count.ToString("N0")));
-            foreach (var tool in alternative)
+            foreach (CodexThreadDynamicTool tool in alternative)
             {
-                AddRecord(body, $"[{tool.Position}] {Value(tool.Name)}",
+                AddRecord(
+                    body,
+                    $"[{tool.Position}] {Value(tool.Name)}",
                     ("Position", tool.Position.ToString()),
                     ("Name", Value(tool.Name)),
                     ("Namespace", Value(tool.Namespace)),
@@ -720,13 +786,17 @@ public sealed partial class CodexThreadsPage : Page
         StackPanel parent,
         IReadOnlyList<IReadOnlyList<CodexThreadSpawnEdge>> alternatives)
     {
-        foreach (var (alternative, index) in alternatives.Select((value, index) => (value, index)))
+        foreach ((IReadOnlyList<CodexThreadSpawnEdge> alternative, int index) in alternatives.Select((value, index) => (value, index)))
         {
-            var body = AddRecord(parent, $"Spawn-edge set alternative {index + 1}",
+            StackPanel body = AddRecord(
+                parent,
+                $"Spawn-edge set alternative {index + 1}",
                 ("Edge count", alternative.Count.ToString("N0")));
-            foreach (var edge in alternative)
+            foreach (CodexThreadSpawnEdge edge in alternative)
             {
-                AddRecord(body, $"{edge.ParentThreadId} → {edge.ChildThreadId}",
+                AddRecord(
+                    body,
+                    $"{edge.ParentThreadId} → {edge.ChildThreadId}",
                     ("Parent thread ID", edge.ParentThreadId),
                     ("Child thread ID", edge.ChildThreadId),
                     ("Status", Value(edge.Status)),
@@ -742,8 +812,8 @@ public sealed partial class CodexThreadsPage : Page
             return;
         }
 
-        var section = AddSection(parent, $"{title} ({warnings.Count:N0})", expanded: false);
-        foreach (var warning in warnings)
+        StackPanel section = AddSection(parent, $"{title} ({warnings.Count:N0})", expanded: false);
+        foreach (string warning in warnings)
         {
             AddNotice(section, warning);
         }
@@ -753,54 +823,74 @@ public sealed partial class CodexThreadsPage : Page
     {
         if (total > shown)
         {
-            AddNotice(parent, $"Showing the first {shown:N0} of {total:N0} rows in this lane. Source coverage is reported above; item payloads remain available only through deliberate local inspection.");
+            AddNotice(
+                parent,
+                $"Showing the first {shown:N0} of {total:N0} rows in this lane. Source coverage is reported above; item payloads remain available only through deliberate local inspection.");
         }
     }
 
     private static void AddNotice(StackPanel parent, string message)
     {
-        parent.Children.Add(new TextBlock
-        {
-            Text = message,
-            Opacity = 0.68,
-            TextWrapping = TextWrapping.Wrap,
-            IsTextSelectionEnabled = true
-        });
+        parent.Children.Add(
+            new TextBlock
+            {
+                Text = message, Opacity = 0.68, TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true,
+            });
     }
 
-    private static string Value(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? "unavailable" : value;
+    private static string Value(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "unavailable" : value;
+    }
 
-    private static string FormatDate(DateTimeOffset? value) =>
-        value?.ToLocalTime().ToString("g") ?? "unavailable";
+    private static string FormatDate(DateTimeOffset? value)
+    {
+        return value?.ToLocalTime().ToString("g") ?? "unavailable";
+    }
 
-    private static string FormatBool(bool? value) =>
-        value is null ? "unavailable" : value.Value ? "yes" : "no";
+    private static string FormatBool(bool? value)
+    {
+        return value is null ? "unavailable" : value.Value ? "yes" : "no";
+    }
 
-    private static string FormatCapability(bool? value) =>
-        value is null ? "unknown" : value.Value ? "present" : "absent";
+    private static string FormatCapability(bool? value)
+    {
+        return value is null ? "unknown" : value.Value ? "present" : "absent";
+    }
 
-    private static string FormatTruncation(bool? value) =>
-        value is null ? "coverage unknown" : value.Value ? "truncated" : "complete";
+    private static string FormatTruncation(bool? value)
+    {
+        return value is null ? "coverage unknown" : value.Value ? "truncated" : "complete";
+    }
 
-    private static string FormatInt(int? value) =>
-        value?.ToString() ?? "unavailable";
+    private static string FormatInt(int? value)
+    {
+        return value?.ToString() ?? "unavailable";
+    }
 
-    private static string FormatLong(long? value) =>
-        value?.ToString("N0") ?? "unavailable";
+    private static string FormatLong(long? value)
+    {
+        return value?.ToString("N0") ?? "unavailable";
+    }
 
-    private static string FormatOrdinal(long value, bool available) =>
-        available ? value.ToString() : "unknown";
+    private static string FormatOrdinal(long value, bool available)
+    {
+        return available ? value.ToString() : "unknown";
+    }
 
-    private static string FormatDuration(long? value) =>
-        value is long milliseconds ? $"{milliseconds:N0} ms" : "unavailable";
+    private static string FormatDuration(long? value)
+    {
+        return value is long milliseconds ? $"{milliseconds:N0} ms" : "unavailable";
+    }
 
-    private static string FormatPayloadPresence(string? value) =>
-        string.IsNullOrWhiteSpace(value) ? "absent" : "present · content not rendered here";
+    private static string FormatPayloadPresence(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value) ? "absent" : "present · content not rendered here";
+    }
 
     private static string Summarize(string message)
     {
-        var compact = message.ReplaceLineEndings(" ").Trim();
+        string compact = message.ReplaceLineEndings(" ").Trim();
         return compact.Length <= 260 ? compact : compact[..260] + "…";
     }
 }

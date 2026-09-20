@@ -1,7 +1,11 @@
+// Taj's Tokens | ForecastSnapshot.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
 namespace TajsTokens.Core.Models;
 
 /// <summary>
-/// Persistable forecast result scoped to one provider/profile quota stream.
+///     Persistable forecast result scoped to one provider/profile quota stream.
 /// </summary>
 public sealed record ForecastSnapshot(
     string Provider,

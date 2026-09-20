@@ -1,12 +1,20 @@
+// Taj's Tokens | RuntimeSettings.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using TajsTokens.Core.Enums;
+
+#endregion
 
 namespace TajsTokens.Core.Models;
 
 public sealed record RuntimeSettings
 {
-    private static readonly int[] s_defaultThresholdValues = [30, 20, 10, 5];
 
     public const int CurrentSchemaVersion = 4;
+    private static readonly int[] s_defaultThresholdValues = [30, 20, 10, 5];
     public RolloutAccountAssociation[] RolloutAccountAssociations { get; init; } = [];
     public static IReadOnlyList<int> DefaultLowQuotaThresholds { get; } = Array.AsReadOnly(s_defaultThresholdValues);
 
@@ -18,26 +26,26 @@ public sealed record RuntimeSettings
     public bool LaunchAtLogin { get; init; }
 
     /// <summary>
-    /// Runs the optional Tokscale CLI beside the native projection and reports aggregate parity.
-    /// Disabled by default so ordinary collection never launches Tokscale/npx.
+    ///     Runs the optional Tokscale CLI beside the native projection and reports aggregate parity.
+    ///     Disabled by default so ordinary collection never launches Tokscale/npx.
     /// </summary>
     public bool TokscaleReconciliationEnabled { get; init; }
 
     /// <summary>
-    /// Allows Tokscale to provide the displayed token generation only when native accounting fails.
-    /// This is explicitly opt-in because Tokscale is no longer a mandatory runtime dependency.
+    ///     Allows Tokscale to provide the displayed token generation only when native accounting fails.
+    ///     This is explicitly opt-in because Tokscale is no longer a mandatory runtime dependency.
     /// </summary>
     public bool TokscaleFallbackEnabled { get; init; }
 
     public bool ExperimentalCodexBackendEnabled { get; init; }
 
     /// <summary>
-    /// User-configured executable or PATH command used only when the Codex CLI harness is run.
+    ///     User-configured executable or PATH command used only when the Codex CLI harness is run.
     /// </summary>
     public string CodexCliCommand { get; init; } = "codex";
 
     /// <summary>
-    /// One argument per line. Arguments are passed as values, never as a shell command string.
+    ///     One argument per line. Arguments are passed as values, never as a shell command string.
     /// </summary>
     public string CodexCliArguments { get; init; } = "exec\n--json";
 
@@ -49,7 +57,7 @@ public sealed record RuntimeSettings
 
     public static int[] NormalizeLowQuotaThresholds(IEnumerable<int>? thresholds)
     {
-        var normalized = (thresholds ?? [])
+        int[] normalized = (thresholds ?? [])
             .Where(value => value is > 0 and < 100)
             .Distinct()
             .OrderByDescending(value => value)

@@ -19,8 +19,9 @@
             </Grid.ColumnDefinitions>
             <StackPanel Spacing="4">
                 <TextBlock Text="Codex Threads" FontSize="28" FontWeight="SemiBold" />
-                <TextBlock Text="Provider-native, read-only thread metadata, projects, spawned-thread topology and materialized history from the local Codex sources. Source paths and capability boundaries stay visible; transcript payloads are not copied into TajsTokens storage."
-                           Opacity="0.72" TextWrapping="Wrap" />
+                <TextBlock
+                    Text="Provider-native, read-only thread metadata, projects, spawned-thread topology and materialized history from the local Codex sources. Source paths and capability boundaries stay visible; transcript payloads are not copied into TajsTokens storage."
+                    Opacity="0.72" TextWrapping="Wrap" />
                 <TextBlock x:Name="StatusText" Text="Discovering Codex threads…" Opacity="0.72" Margin="0,8,0,0" TextWrapping="Wrap" />
             </StackPanel>
             <Button Grid.Column="1" Content="Refresh" Click="OnRefreshClicked" VerticalAlignment="Top" />
@@ -48,8 +49,9 @@
                         </Grid.RowDefinitions>
                         <StackPanel Spacing="2">
                             <TextBlock Text="Thread catalog" FontSize="18" FontWeight="SemiBold" />
-                            <TextBlock Text="Searches discovered state sources; duplicate source observations remain attached to each result."
-                                       Opacity="0.68" TextWrapping="Wrap" />
+                            <TextBlock
+                                Text="Searches discovered state sources; duplicate source observations remain attached to each result."
+                                Opacity="0.68" TextWrapping="Wrap" />
                         </StackPanel>
                         <TextBox x:Name="SearchTextBox"
                                  Grid.Row="1"

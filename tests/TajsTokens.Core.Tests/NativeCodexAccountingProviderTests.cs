@@ -1,8 +1,16 @@
+// Taj's Tokens | NativeCodexAccountingProviderTests.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Providers;
+
+#endregion
 
 namespace TajsTokens.Core.Tests;
 
@@ -11,8 +19,8 @@ public sealed class NativeCodexAccountingProviderTests
     [Fact]
     public async Task SqliteProjection_ProducesDisjointModelAndHourlyGenerations()
     {
-        var directory = Directory.CreateTempSubdirectory("tajstokens-native-accounting-");
-        var databasePath = Path.Combine(directory.FullName, "telemetry.db");
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-native-accounting-");
+        string databasePath = Path.Combine(directory.FullName, "telemetry.db");
         var start = new DateTimeOffset(2026, 9, 1, 10, 5, 0, TimeSpan.Zero);
 
         try
@@ -32,14 +40,14 @@ public sealed class NativeCodexAccountingProviderTests
                 Token("b1", "session-b", start.AddHours(1).AddMinutes(10), "model-b", 120, 20, 0, 30, 5, 150),
                 CancellationToken.None);
 
-            var snapshot = await new SqliteNativeCodexAccountingProvider(databasePath)
+            CodexTokenAccountingSnapshot snapshot = await new SqliteNativeCodexAccountingProvider(databasePath)
                 .GetSnapshotAsync(CancellationToken.None);
 
             Assert.Equal("Native Codex", snapshot.Source);
             Assert.Contains("Local normalized", snapshot.Coverage, StringComparison.OrdinalIgnoreCase);
             Assert.Equal(2, snapshot.Usage.Count);
 
-            var modelA = snapshot.Usage.Single(item => item.Model == "model-a").Breakdown;
+            TokenBreakdown modelA = snapshot.Usage.Single(item => item.Model == "model-a").Breakdown;
             Assert.Equal(50, modelA.UncachedInput);
             Assert.Equal(100, modelA.CacheRead);
             Assert.Equal(0, modelA.CacheWrite);
@@ -47,7 +55,7 @@ public sealed class NativeCodexAccountingProviderTests
             Assert.Equal(5, modelA.ReasoningOutput);
             Assert.Equal(170, modelA.Total);
 
-            var modelB = snapshot.Usage.Single(item => item.Model == "model-b").Breakdown;
+            TokenBreakdown modelB = snapshot.Usage.Single(item => item.Model == "model-b").Breakdown;
             Assert.Equal(100, modelB.UncachedInput);
             Assert.Equal(20, modelB.CacheRead);
             Assert.Equal(25, modelB.NonReasoningOutput);
@@ -55,24 +63,24 @@ public sealed class NativeCodexAccountingProviderTests
             Assert.Equal(150, modelB.Total);
 
             Assert.Equal(2, snapshot.Hourly.Count);
-            var firstHour = snapshot.Hourly.Single(item => item.StartUtc == start.AddMinutes(-5));
+            TokenTimeBucket firstHour = snapshot.Hourly.Single(item => item.StartUtc == start.AddMinutes(-5));
             Assert.Equal(110, firstHour.Breakdown.Total);
-            var secondHour = snapshot.Hourly.Single(item => item.StartUtc == start.AddMinutes(-5).AddHours(1));
+            TokenTimeBucket secondHour = snapshot.Hourly.Single(item => item.StartUtc == start.AddMinutes(-5).AddHours(1));
             Assert.Equal(210, secondHour.Breakdown.Total);
             Assert.All(snapshot.Hourly, item => Assert.Equal("codex-native", item.Provider));
         }
         finally
         {
             SqliteConnection.ClearAllPools();
-            directory.Delete(recursive: true);
+            directory.Delete(true);
         }
     }
 
     [Fact]
     public async Task SqliteProjection_KeepsReportedTotalOnlyObservationsVisible()
     {
-        var directory = Directory.CreateTempSubdirectory("tajstokens-native-reported-only-");
-        var databasePath = Path.Combine(directory.FullName, "telemetry.db");
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-native-reported-only-");
+        string databasePath = Path.Combine(directory.FullName, "telemetry.db");
         var observed = new DateTimeOffset(2026, 9, 1, 10, 5, 0, TimeSpan.Zero);
 
         try
@@ -85,7 +93,7 @@ public sealed class NativeCodexAccountingProviderTests
                 Token("reported-only", "session-a", observed, "model-a", 0, 0, 0, 0, 0, 77),
                 CancellationToken.None);
 
-            var snapshot = await new SqliteNativeCodexAccountingProvider(databasePath)
+            CodexTokenAccountingSnapshot snapshot = await new SqliteNativeCodexAccountingProvider(databasePath)
                 .GetSnapshotAsync(CancellationToken.None);
 
             Assert.Equal(77, Assert.Single(snapshot.Usage).Breakdown.Total);
@@ -94,15 +102,15 @@ public sealed class NativeCodexAccountingProviderTests
         finally
         {
             SqliteConnection.ClearAllPools();
-            directory.Delete(recursive: true);
+            directory.Delete(true);
         }
     }
 
     [Fact]
     public async Task SqliteProjection_CacheInvalidatesWhenTokenTableChanges()
     {
-        var directory = Directory.CreateTempSubdirectory("tajstokens-native-cache-");
-        var databasePath = Path.Combine(directory.FullName, "telemetry.db");
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-native-cache-");
+        string databasePath = Path.Combine(directory.FullName, "telemetry.db");
         var observed = new DateTimeOffset(2026, 9, 1, 10, 5, 0, TimeSpan.Zero);
 
         try
@@ -116,38 +124,38 @@ public sealed class NativeCodexAccountingProviderTests
                 CancellationToken.None);
 
             var provider = new SqliteNativeCodexAccountingProvider(databasePath);
-            var first = await provider.GetSnapshotAsync(CancellationToken.None);
-            var cached = await provider.GetSnapshotAsync(CancellationToken.None);
+            CodexTokenAccountingSnapshot first = await provider.GetSnapshotAsync(CancellationToken.None);
+            CodexTokenAccountingSnapshot cached = await provider.GetSnapshotAsync(CancellationToken.None);
             Assert.Same(first, cached);
 
             await store.ApplyCumulativeTokenObservationAsync(
                 Token("a2", "session-a", observed.AddMinutes(1), "model-a", 150, 30, 0, 20, 4, 170),
                 CancellationToken.None);
 
-            var updated = await provider.GetSnapshotAsync(CancellationToken.None);
+            CodexTokenAccountingSnapshot updated = await provider.GetSnapshotAsync(CancellationToken.None);
             Assert.NotSame(first, updated);
             Assert.Equal(170, Assert.Single(updated.Usage).Breakdown.Total);
         }
         finally
         {
             SqliteConnection.ClearAllPools();
-            directory.Delete(recursive: true);
+            directory.Delete(true);
         }
     }
 
     [Fact]
     public async Task NativeFirst_DefaultPath_DoesNotInvokeTokscale()
     {
-        var nativeSnapshot = Snapshot("Native Codex", "codex-native", 123);
+        CodexTokenAccountingSnapshot nativeSnapshot = Snapshot("Native Codex", "codex-native", 123);
         var native = new StaticProvider(nativeSnapshot);
         var tokscale = new CountingTokscaleProvider(Snapshot("Tokscale", "tokscale", 123));
         var provider = new NativeFirstCodexAccountingProvider(
             native,
             tokscale,
-            reconciliationEnabled: () => false,
-            fallbackEnabled: () => false);
+            () => false,
+            () => false);
 
-        var actual = await provider.GetSnapshotAsync(CancellationToken.None);
+        CodexTokenAccountingSnapshot actual = await provider.GetSnapshotAsync(CancellationToken.None);
 
         Assert.Same(nativeSnapshot, actual);
         Assert.Equal(1, native.Calls);
@@ -163,15 +171,15 @@ public sealed class NativeCodexAccountingProviderTests
         var provider = new NativeFirstCodexAccountingProvider(
             native,
             tokscale,
-            reconciliationEnabled: () => true,
-            fallbackEnabled: () => false);
+            () => true,
+            () => false);
 
-        var actual = await provider.GetSnapshotAsync(CancellationToken.None);
+        CodexTokenAccountingSnapshot actual = await provider.GetSnapshotAsync(CancellationToken.None);
 
         Assert.Equal("Native Codex", actual.Source);
         Assert.NotNull(actual.Reconciliation);
         Assert.Equal(20, actual.Reconciliation!.TotalDifference);
-        Assert.Equal(20d, actual.Reconciliation.TotalDifferencePercent, precision: 6);
+        Assert.Equal(20d, actual.Reconciliation.TotalDifferencePercent, 6);
         Assert.False(actual.Reconciliation.Exact);
         Assert.Contains("total Δ", actual.Diagnostic, StringComparison.Ordinal);
         Assert.Equal(1, tokscale.UsageCalls);
@@ -181,14 +189,14 @@ public sealed class NativeCodexAccountingProviderTests
     [Fact]
     public async Task NativeFirst_ReconciliationFailureKeepsHealthyNativeGeneration()
     {
-        var nativeSnapshot = Snapshot("Native Codex", "codex-native", 120);
+        CodexTokenAccountingSnapshot nativeSnapshot = Snapshot("Native Codex", "codex-native", 120);
         var provider = new NativeFirstCodexAccountingProvider(
             new StaticProvider(nativeSnapshot),
             new ThrowingTokscaleProvider(new InvalidOperationException("oracle unavailable")),
-            reconciliationEnabled: () => true,
-            fallbackEnabled: () => false);
+            () => true,
+            () => false);
 
-        var actual = await provider.GetSnapshotAsync(CancellationToken.None);
+        CodexTokenAccountingSnapshot actual = await provider.GetSnapshotAsync(CancellationToken.None);
 
         Assert.Equal("Native Codex", actual.Source);
         Assert.Equal(nativeSnapshot.Usage, actual.Usage);
@@ -214,7 +222,7 @@ public sealed class NativeCodexAccountingProviderTests
             [new TokenUsage("tokscale", "codex", "model", DateTimeOffset.UnixEpoch, breakdown)],
             [new TokenTimeBucket("tokscale", "2026-09-01 13:00", null, breakdown)]);
 
-        var reconciliation = NativeFirstCodexAccountingProvider.Reconcile(native, reference);
+        CodexAccountingReconciliation reconciliation = NativeFirstCodexAccountingProvider.Reconcile(native, reference);
 
         Assert.True(reconciliation.Exact);
         Assert.Equal(1, reconciliation.HourBucketsCompared);
@@ -229,10 +237,10 @@ public sealed class NativeCodexAccountingProviderTests
         var provider = new NativeFirstCodexAccountingProvider(
             native,
             tokscale,
-            reconciliationEnabled: () => false,
-            fallbackEnabled: () => true);
+            () => false,
+            () => true);
 
-        var actual = await provider.GetSnapshotAsync(CancellationToken.None);
+        CodexTokenAccountingSnapshot actual = await provider.GetSnapshotAsync(CancellationToken.None);
 
         Assert.True(actual.IsFallback);
         Assert.Equal("Tokscale fallback", actual.Source);
@@ -251,20 +259,23 @@ public sealed class NativeCodexAccountingProviderTests
         long cacheWrite,
         long output,
         long reasoning,
-        long total) => new(
-        eventId,
-        $"{sessionId}.jsonl",
-        sessionId,
-        sessionId,
-        observed,
-        model,
-        "high",
-        input,
-        cached,
-        cacheWrite,
-        output,
-        reasoning,
-        total);
+        long total)
+    {
+        return new CodexCumulativeTokenObservation(
+            eventId,
+            $"{sessionId}.jsonl",
+            sessionId,
+            sessionId,
+            observed,
+            model,
+            "high",
+            input,
+            cached,
+            cacheWrite,
+            output,
+            reasoning,
+            total);
+    }
 
     private static CodexTokenAccountingSnapshot Snapshot(string source, string provider, long tokens)
     {
@@ -289,8 +300,10 @@ public sealed class NativeCodexAccountingProviderTests
 
     private sealed class ThrowingProvider(Exception exception) : ICodexTokenAccountingProvider
     {
-        public Task<CodexTokenAccountingSnapshot> GetSnapshotAsync(CancellationToken cancellationToken) =>
-            Task.FromException<CodexTokenAccountingSnapshot>(exception);
+        public Task<CodexTokenAccountingSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
+        {
+            return Task.FromException<CodexTokenAccountingSnapshot>(exception);
+        }
     }
 
     private sealed class CountingTokscaleProvider(CodexTokenAccountingSnapshot snapshot) : ITokscaleProvider
@@ -313,10 +326,14 @@ public sealed class NativeCodexAccountingProviderTests
 
     private sealed class ThrowingTokscaleProvider(Exception exception) : ITokscaleProvider
     {
-        public Task<IReadOnlyList<TokenUsage>> GetUsageObservationsAsync(CancellationToken cancellationToken) =>
-            Task.FromException<IReadOnlyList<TokenUsage>>(exception);
+        public Task<IReadOnlyList<TokenUsage>> GetUsageObservationsAsync(CancellationToken cancellationToken)
+        {
+            return Task.FromException<IReadOnlyList<TokenUsage>>(exception);
+        }
 
-        public Task<IReadOnlyList<TokenTimeBucket>> GetHourlyUsageAsync(CancellationToken cancellationToken) =>
-            Task.FromException<IReadOnlyList<TokenTimeBucket>>(exception);
+        public Task<IReadOnlyList<TokenTimeBucket>> GetHourlyUsageAsync(CancellationToken cancellationToken)
+        {
+            return Task.FromException<IReadOnlyList<TokenTimeBucket>>(exception);
+        }
     }
 }

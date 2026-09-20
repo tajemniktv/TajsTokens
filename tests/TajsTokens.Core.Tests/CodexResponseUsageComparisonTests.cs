@@ -1,5 +1,13 @@
+// Taj's Tokens | CodexResponseUsageComparisonTests.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using System.Text.Json;
 using TajsTokens.Infrastructure.Ingestion;
+
+#endregion
 
 namespace TajsTokens.Core.Tests;
 
@@ -43,8 +51,14 @@ public sealed class CodexResponseUsageComparisonTests
     public void RepeatedConflictingMissingAndWrongOwnerIdentityRemainIneligible()
     {
         var audit = new CodexResponseUsageComparison();
-        foreach (var response in new[] { Response("one", 100), Response("one", 100),
-                     Response("one", 200), Response(null, 100), Response("other", 100, "wrong-owner") })
+        foreach (string response in new[]
+                 {
+                     Response("one", 100),
+                     Response("one", 100),
+                     Response("one", 200),
+                     Response(null, 100),
+                     Response("other", 100, "wrong-owner"),
+                 })
         {
             audit.Observe(response, "private-thread");
             audit.Observe(Token(100), "private-thread");
@@ -63,7 +77,9 @@ public sealed class CodexResponseUsageComparisonTests
         var audit = new CodexResponseUsageComparison();
         audit.Observe(Response("one", 100), "private-thread");
         audit.Observe(Token(100).Replace("\"output_tokens\":0", "\"cache_write_input_tokens\":0,\"output_tokens\":0"), "private-thread");
-        audit.Observe(Response("two", 100).Replace("\"output_tokens\":0", "\"cache_write_input_tokens\":null,\"output_tokens\":0"), "private-thread");
+        audit.Observe(
+            Response("two", 100).Replace("\"output_tokens\":0", "\"cache_write_input_tokens\":null,\"output_tokens\":0"),
+            "private-thread");
         audit.Observe(Token(100), "private-thread");
         audit.Observe(Response("three", 100), "private-thread");
         audit.Observe(Token(100).Replace("\"output_tokens\":0,", ""), "private-thread");
@@ -72,12 +88,39 @@ public sealed class CodexResponseUsageComparisonTests
         Assert.Equal(1, audit.Counts["invalid-legacy-vector-pair"]);
     }
 
-    private static object Usage(long total) => new { input_tokens = total, cached_input_tokens = 0,
-        output_tokens = 0, reasoning_output_tokens = 0, total_tokens = total };
-    private static string Response(string? id, long total, string owner = "private-thread") =>
-        JsonSerializer.Serialize(new { type = "token_usage_record", payload = new { thread_id = owner,
-            response_id = id, turn_id = "private-turn", session_id = "private-session", root_turn_id = "private-root",
-            usage = Usage(total) } });
-    private static string Token(long total) => JsonSerializer.Serialize(new { type = "event_msg",
-        payload = new { type = "token_count", info = new { last_token_usage = Usage(total) } } });
+    private static object Usage(long total)
+    {
+        return new
+        {
+            input_tokens = total,
+            cached_input_tokens = 0,
+            output_tokens = 0,
+            reasoning_output_tokens = 0,
+            total_tokens = total,
+        };
+    }
+
+    private static string Response(string? id, long total, string owner = "private-thread")
+    {
+        return JsonSerializer.Serialize(
+            new
+            {
+                type = "token_usage_record",
+                payload = new
+                {
+                    thread_id = owner,
+                    response_id = id,
+                    turn_id = "private-turn",
+                    session_id = "private-session",
+                    root_turn_id = "private-root",
+                    usage = Usage(total),
+                },
+            });
+    }
+
+    private static string Token(long total)
+    {
+        return JsonSerializer.Serialize(
+            new { type = "event_msg", payload = new { type = "token_count", info = new { last_token_usage = Usage(total) } } });
+    }
 }

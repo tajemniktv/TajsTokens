@@ -1,3 +1,7 @@
+// Taj's Tokens | QuotaEvenBurn.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
 namespace TajsTokens.Core.Models;
 
 /// <summary>A descriptive comparison at capture time, not a prediction of future consumption.</summary>
@@ -12,7 +16,7 @@ public sealed record QuotaEvenBurn(double UsedPercent, double ElapsedPercent)
             return null;
 
         // Infer the start from this observation's own reset and duration, never another lane/history.
-        var remainingMinutes = (reset - snapshot.CapturedAtUtc).TotalMinutes;
+        double remainingMinutes = (reset - snapshot.CapturedAtUtc).TotalMinutes;
         if (remainingMinutes <= 0 || remainingMinutes > minutes)
             return null;
 

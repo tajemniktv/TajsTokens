@@ -1,4 +1,12 @@
+// Taj's Tokens | QuotaForecastGeneration.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using TajsTokens.Core.Enums;
+
+#endregion
 
 namespace TajsTokens.Core.Models;
 
@@ -6,13 +14,13 @@ public enum QuotaObservationAuthority
 {
     Unknown = 0,
     EmbeddedObservation = 1,
-    ProviderAuthoritative = 2
+    ProviderAuthoritative = 2,
 }
 
 /// <summary>
-/// The current forecast for one quota lane, explicitly anchored to the quota observation that
-/// defines the current provider meter. Historical observations may inform the slope but cannot
-/// silently replace this anchor merely because they have a later timestamp.
+///     The current forecast for one quota lane, explicitly anchored to the quota observation that
+///     defines the current provider meter. Historical observations may inform the slope but cannot
+///     silently replace this anchor merely because they have a later timestamp.
 /// </summary>
 public sealed record CurrentQuotaForecast(
     QuotaSnapshot Current,

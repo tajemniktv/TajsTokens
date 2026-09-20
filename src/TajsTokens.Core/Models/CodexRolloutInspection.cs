@@ -1,3 +1,7 @@
+// Taj's Tokens | CodexRolloutInspection.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
 namespace TajsTokens.Core.Models;
 
 public enum CodexRolloutComparisonKind
@@ -6,7 +10,7 @@ public enum CodexRolloutComparisonKind
     IdenticalBytes,
     IdenticalOwnedRecords,
     PrefixOverlap,
-    DifferentRecords
+    DifferentRecords,
 }
 
 /// <summary>Inspection-only comparison. Equality is not permission to merge or import evidence.</summary>

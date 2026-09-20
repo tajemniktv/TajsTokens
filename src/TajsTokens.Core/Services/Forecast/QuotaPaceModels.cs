@@ -1,25 +1,37 @@
+// Taj's Tokens | QuotaPaceModels.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
+
+#endregion
 
 namespace TajsTokens.Core.Services;
 
 /// <summary>
-/// Point estimates of observed meter movement, shared by production and walk-forward evaluation.
-/// Zero is not a measurement of exact physical consumption: the production forecast explicitly
-/// censors an all-flat epoch, and horizon bands include meter-resolution uncertainty when calibrated.
+///     Point estimates of observed meter movement, shared by production and walk-forward evaluation.
+///     Zero is not a measurement of exact physical consumption: the production forecast explicitly
+///     censors an all-flat epoch, and horizon bands include meter-resolution uncertainty when calibrated.
 /// </summary>
 public static class QuotaPaceModels
 {
-    public static readonly string[] Candidates = ["persistence", "legacy-ewma", "time-ewma-2h", "time-ewma-6h", "epoch", "recent-30m", "recent-2h", "recent-6h", "recent-24h", "damped-2h", "damped-6h"];
+    public static readonly string[] Candidates =
+    [
+        "persistence", "legacy-ewma", "time-ewma-2h", "time-ewma-6h", "epoch", "recent-30m", "recent-2h", "recent-6h", "recent-24h",
+        "damped-2h", "damped-6h",
+    ];
 
     public static double ProjectRemaining(IReadOnlyList<QuotaSnapshot> epoch, string model, double leadHours)
     {
-        var rate = Estimate(epoch, model);
-        var effectiveHours = model switch
+        double rate = Estimate(epoch, model);
+        double effectiveHours = model switch
         {
             "damped-2h" => 2 * (1 - Math.Exp(-leadHours / 2)),
             "damped-6h" => 6 * (1 - Math.Exp(-leadHours / 6)),
-            _ => leadHours
+            _ => leadHours,
         };
         return Math.Clamp(epoch[^1].RemainingPercent!.Value - rate * effectiveHours, 0, 100);
     }
@@ -27,20 +39,20 @@ public static class QuotaPaceModels
     public static double Estimate(IReadOnlyList<QuotaSnapshot> epoch, string model)
     {
         if (epoch.Count < 2 || model == "persistence") return 0;
-        var latest = epoch[^1];
+        QuotaSnapshot latest = epoch[^1];
         if (model is "time-ewma-2h" or "time-ewma-6h")
         {
             // Integrate interval rates against elapsed-time weights. Flat polling does not apply
             // a fixed per-poll decay, and minute-scale rounded-meter jumps do not get a full vote.
-            var tau = model == "time-ewma-2h" ? 2d : 6d;
-            var weightedMovement = 0d;
-            var exposure = 0d;
-            for (var i = 1; i < epoch.Count; i++)
+            double tau = model == "time-ewma-2h" ? 2d : 6d;
+            double weightedMovement = 0d;
+            double exposure = 0d;
+            for (int i = 1; i < epoch.Count; i++)
             {
-                var hours = (epoch[i].CapturedAtUtc - epoch[i - 1].CapturedAtUtc).TotalHours;
+                double hours = (epoch[i].CapturedAtUtc - epoch[i - 1].CapturedAtUtc).TotalHours;
                 if (hours <= 0) continue;
-                var age = (latest.CapturedAtUtc - epoch[i].CapturedAtUtc).TotalHours;
-                var weight = Math.Exp(-age / tau) * tau * (1 - Math.Exp(-hours / tau));
+                double age = (latest.CapturedAtUtc - epoch[i].CapturedAtUtc).TotalHours;
+                double weight = Math.Exp(-age / tau) * tau * (1 - Math.Exp(-hours / tau));
                 weightedMovement += Math.Max(0, epoch[i].UsedPercent!.Value - epoch[i - 1].UsedPercent!.Value) / hours * weight;
                 exposure += weight;
             }
@@ -49,34 +61,34 @@ public static class QuotaPaceModels
         if (model == "legacy-ewma")
         {
             double? rate = null;
-            var alpha = latest.Kind == QuotaWindowKind.Weekly ? 0.25 : 0.45;
-            for (var i = 1; i < epoch.Count; i++)
+            double alpha = latest.Kind == QuotaWindowKind.Weekly ? 0.25 : 0.45;
+            for (int i = 1; i < epoch.Count; i++)
             {
-                var hours = (epoch[i].CapturedAtUtc - epoch[i - 1].CapturedAtUtc).TotalHours;
+                double hours = (epoch[i].CapturedAtUtc - epoch[i - 1].CapturedAtUtc).TotalHours;
                 if (hours <= 0) continue;
-                var next = Math.Max(0, (epoch[i].UsedPercent!.Value - epoch[i - 1].UsedPercent!.Value) / hours);
+                double next = Math.Max(0, (epoch[i].UsedPercent!.Value - epoch[i - 1].UsedPercent!.Value) / hours);
                 rate = rate is null ? next : alpha * next + (1 - alpha) * rate;
             }
             return rate ?? 0;
         }
-        var lookback = model switch
+        double lookback = model switch
         {
             "recent-30m" => 0.5,
             "recent-2h" or "damped-2h" or "damped-6h" => 2,
             "recent-6h" => 6,
             "recent-24h" => 24,
             "epoch" => double.PositiveInfinity,
-            _ => throw new ArgumentException("Unknown pace model", nameof(model))
+            _ => throw new ArgumentException("Unknown pace model", nameof(model)),
         };
-        var first = epoch[0];
+        QuotaSnapshot first = epoch[0];
         // Include the observation bracketing the lookback, rather than interpolating a
         // fictitious meter observation or dividing a full delta by a truncated duration.
-        foreach (var point in epoch.Take(epoch.Count - 1))
+        foreach (QuotaSnapshot point in epoch.Take(epoch.Count - 1))
         {
             if ((latest.CapturedAtUtc - point.CapturedAtUtc).TotalHours >= lookback) first = point;
             else break;
         }
-        var elapsed = (latest.CapturedAtUtc - first.CapturedAtUtc).TotalHours;
+        double elapsed = (latest.CapturedAtUtc - first.CapturedAtUtc).TotalHours;
         return elapsed > 0 ? Math.Max(0, (latest.UsedPercent!.Value - first.UsedPercent!.Value) / elapsed) : 0;
     }
 }

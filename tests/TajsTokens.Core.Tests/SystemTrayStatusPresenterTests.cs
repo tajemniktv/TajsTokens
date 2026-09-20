@@ -1,6 +1,14 @@
+// Taj's Tokens | SystemTrayStatusPresenterTests.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 using TajsTokens.Core.Services;
+
+#endregion
 
 namespace TajsTokens.Core.Tests;
 
@@ -11,8 +19,8 @@ public sealed class SystemTrayStatusPresenterTests
     [InlineData(false)]
     public void OmittedWindowIsHealthyAndDoesNotConstrainReportedQuota(bool hasHistory)
     {
-        var snapshot = CreateSnapshot(hasHistory, true);
-        var status = SystemTrayStatusPresenter.Build(snapshot);
+        TelemetrySnapshot snapshot = CreateSnapshot(hasHistory, true);
+        SystemTrayStatus status = SystemTrayStatusPresenter.Build(snapshot);
 
         Assert.True(status.IsFresh);
         Assert.Equal("live", status.HealthLabel);
@@ -25,7 +33,7 @@ public sealed class SystemTrayStatusPresenterTests
     [Fact]
     public void StaleWindowWithoutOmissionRemainsPartial()
     {
-        var status = SystemTrayStatusPresenter.Build(CreateSnapshot(true, false));
+        SystemTrayStatus status = SystemTrayStatusPresenter.Build(CreateSnapshot(true, false));
         Assert.False(status.IsFresh);
         Assert.Equal("partial", status.HealthLabel);
         Assert.Equal(1, status.ConstrainedRemainingPercent);
@@ -35,16 +43,15 @@ public sealed class SystemTrayStatusPresenterTests
     [Fact]
     public void ReportedWindowResumesNormalDisplay()
     {
-        var snapshot = CreateSnapshot(true, true);
+        TelemetrySnapshot snapshot = CreateSnapshot(true, true);
         snapshot = snapshot with
         {
             QuotaLanes = snapshot.QuotaLanes.Select(lane => lane with
             {
-                NotReportedByProvider = false,
-                State = TelemetryHealthState.Live
-            }).ToArray()
+                NotReportedByProvider = false, State = TelemetryHealthState.Live,
+            }).ToArray(),
         };
-        var status = SystemTrayStatusPresenter.Build(snapshot);
+        SystemTrayStatus status = SystemTrayStatusPresenter.Build(snapshot);
         Assert.True(status.IsFresh);
         Assert.Equal(1, status.ConstrainedRemainingPercent);
         Assert.DoesNotContain("not reported", status.Tooltip);
@@ -52,22 +59,40 @@ public sealed class SystemTrayStatusPresenterTests
 
     private static TelemetrySnapshot CreateSnapshot(bool hasHistory, bool omitted)
     {
-        var now = DateTimeOffset.UtcNow;
-        var fiveHour = new QuotaSnapshot(QuotaWindowKind.FiveHour, now.AddMinutes(-5), 99, 300,
-            now.AddHours(1), "codex", "default", "app-server");
-        var weekly = new QuotaSnapshot(QuotaWindowKind.Weekly, now, 30, 10080,
-            now.AddDays(1), "codex", "default", "app-server");
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        var fiveHour = new QuotaSnapshot(
+            QuotaWindowKind.FiveHour,
+            now.AddMinutes(-5),
+            99,
+            300,
+            now.AddHours(1),
+            "codex",
+            "default",
+            "app-server");
+        var weekly = new QuotaSnapshot(
+            QuotaWindowKind.Weekly,
+            now,
+            30,
+            10080,
+            now.AddDays(1),
+            "codex",
+            "default",
+            "app-server");
         return TelemetrySnapshot.Empty with
         {
             QuotaSnapshots = hasHistory ? [fiveHour, weekly] : [weekly],
             QuotaDataFresh = omitted,
             QuotaLanes =
             [
-                new(QuotaWindowKind.FiveHour, "codex", "default", hasHistory ? fiveHour : null,
+                new QuotaLaneState(
+                    QuotaWindowKind.FiveHour,
+                    "codex",
+                    "default",
+                    hasHistory ? fiveHour : null,
                     hasHistory ? TelemetryHealthState.Stale : TelemetryHealthState.Unavailable,
                     NotReportedByProvider: omitted),
-                new(QuotaWindowKind.Weekly, "codex", "default", weekly, TelemetryHealthState.Live)
-            ]
+                new QuotaLaneState(QuotaWindowKind.Weekly, "codex", "default", weekly, TelemetryHealthState.Live),
+            ],
         };
     }
 }

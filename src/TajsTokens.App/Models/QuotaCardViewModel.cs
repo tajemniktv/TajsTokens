@@ -1,4 +1,12 @@
+// Taj's Tokens | QuotaCardViewModel.cs
+// Copyright (C) 2026 - 2026 Grzegorz Kaczmarski (TajemnikTV)
+// All Rights Reserved.
+
+#region
+
 using Microsoft.UI.Xaml.Controls;
+
+#endregion
 
 namespace TajsTokens.App.Models;
 
