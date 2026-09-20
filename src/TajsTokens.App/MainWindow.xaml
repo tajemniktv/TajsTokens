@@ -20,10 +20,10 @@
                         IsPaneOpen="True"
                         SelectionChanged="OnNavigationSelectionChanged">
             <NavigationView.MenuItems>
-                <NavigationViewItem Content="Codex" Tag="codex-intelligence" Icon="View" IsSelected="True" />
+                <NavigationViewItem Content="Overview" Tag="codex-intelligence" Icon="View" IsSelected="True" />
+                <NavigationViewItem Content="Chats and work" Tag="codex" Icon="Library" />
                 <NavigationViewItem Content="Advanced" Icon="Repair" SelectsOnInvoked="False">
                     <NavigationViewItem.MenuItems>
-                        <NavigationViewItem Content="Chats and agents" Tag="codex" />
                         <NavigationViewItem Content="Workload planner" Tag="forecasts" />
                         <NavigationViewItem Content="Quota history details" Tag="analytics" />
                         <NavigationViewItem Content="Diagnostics" Tag="diagnostics" />

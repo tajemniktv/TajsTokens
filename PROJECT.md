@@ -92,6 +92,11 @@ The screenshots show provider UI availability, not proof of a reachable app-serv
 
 `ICodexIntelligence` is the product query/current/scenario boundary. The Codex page, tray and alerts
 consume its typed snapshot; existing source collection and alert transition state remain the owners.
+The default experience is a dashboard, not a serialized evidence report: allowance cards, a concise
+conditional outlook and selected workload history. Overview, Work history, Planning and Evidence are
+separate views of the same snapshot/selection. Detailed provenance and manifests belong in Evidence;
+chats/work remain a primary navigation destination. Architecture consolidation does not require one
+long scrolling page or restoring the old collector-bound Overview implementation.
 The main page has UTC selection, workload/token-category/model/effort/project/chat breakdowns,
 source-qualified quota and reset markers, conditional scenarios, current horizon forecasts,
 retrospective regime overlays and typed provider details. Unsupported filtered quota is withheld,
@@ -160,7 +165,7 @@ across separate cohorts/horizons, producing 3,290 candidate rows (120 with held-
 These are not 2,035 independent samples. The inspected history had no single-cycle score with
 multiple six-hour blocks; synthetic tests establish that within-cycle learning is allowed, not that
 this corpus already demonstrates it. No new model promotion or calibrated-coverage claim is made.
-Native visual acceptance remains open.
+Native visual acceptance remains a separate check from builds and model tests.
 
 **Evidence-visibility progress:** Model Lab and cost CLI now expose dataset-local token-weighted
 model/effort coverage, category mismatch/invalid counts, unknown/after-event collection times,

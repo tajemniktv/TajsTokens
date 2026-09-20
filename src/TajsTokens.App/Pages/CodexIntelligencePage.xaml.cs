@@ -19,13 +19,14 @@ public sealed partial class CodexIntelligencePage : Page
     {
         public string Label => Source.Key;
         public string Detail => $"{Source.Tokens:N0} observed tokens · {Source.Threads:N0} chats";
+        public override string ToString() => Label;
     }
 
     public CodexIntelligencePage()
     {
         InitializeComponent();
         NavigationCacheMode = Microsoft.UI.Xaml.Navigation.NavigationCacheMode.Enabled;
-        FromDate.Date = DateTimeOffset.UtcNow.AddDays(-7);
+        FromDate.Date = DateTimeOffset.UtcNow.AddDays(-6);
         ToDate.Date = DateTimeOffset.UtcNow.AddDays(1);
         Loaded += async (_, _) => { _loaded = true; App.Services.Telemetry.SnapshotUpdated += OnTelemetry; PopulateAccounts(); await LoadAsync(); };
         Unloaded += (_, _) => { _loaded = false; App.Services.Telemetry.SnapshotUpdated -= OnTelemetry; _request?.Cancel(); };
@@ -69,6 +70,7 @@ public sealed partial class CodexIntelligencePage : Page
             (x.Forecast?.Evidence?.HorizonPredictions is { } horizons ? "\n" + string.Join("\n", horizons.Select(h => $"{h.HorizonHours * 60:g} min: {h.ExpectedUsagePercent:0.##} pp · {h.Model} · {h.ValidationSamples} validation samples")) : "")));
         if (snapshot.Workload is { } work) ForecastText.Text += "\n" + string.Join("\n", work.Predictions.Select(x => $"LOCAL NOWCAST {x.HorizonHours * 60:g} min: {x.ExpectedTokens:N0} tokens · {x.Explanation}"));
         if (string.IsNullOrWhiteSpace(ForecastText.Text)) ForecastText.Text = "No compatible forecast for this scope. Historical selections are not live predictions.";
+        RenderDashboard();
         RenderManifest();
     }
     private void RenderManifest()
@@ -86,6 +88,13 @@ public sealed partial class CodexIntelligencePage : Page
         var request = new CancellationTokenSource();
         _request = request;
         _snapshot = null;
+        QuotaTiles.ItemsSource = null;
+        QuotaEmpty.Visibility = Visibility.Visible;
+        QuotaEmpty.Text = "Updating selected evidence…";
+        WorkValue.Text = "Loading…";
+        WorkDetail.Text = WorkRange.Text = NowcastSummary.Text = "";
+        OutlookValue.Text = "Updating…";
+        OutlookDetail.Text = "";
         Groups.ItemsSource = null;
         Timeline.Children.Clear();
         SummaryText.Text = CurrentText.Text = ForecastText.Text = ProviderText.Text = EvidenceText.Text = ManifestText.Text = TimelineText.Text = TimelineLegend.Text = "";
@@ -239,40 +248,40 @@ public sealed partial class CodexIntelligencePage : Page
         var rows = _snapshot.Timeline;
         var maximum = rows.Select(x => x.Tokens).DefaultIfEmpty(0).Max();
         var span = (_snapshot.Selection.ToUtc - _snapshot.Selection.FromUtc).TotalSeconds;
-        double X(DateTimeOffset at) => Math.Clamp((at - _snapshot.Selection.FromUtc).TotalSeconds / span, 0, 1) * Timeline.ActualWidth;
-        foreach (var candidate in _snapshot.Regime?.Candidates ?? [])
-        {
-            var shade = new Rectangle { Width = Math.Max(2, X(candidate.BoundaryUpperUtc) - X(candidate.BoundaryLowerUtc)), Height = 175,
-                Fill = new SolidColorBrush(Colors.MediumPurple), Opacity = .25 };
-            Canvas.SetLeft(shade, X(candidate.BoundaryLowerUtc)); Timeline.Children.Add(shade);
-            ToolTipService.SetToolTip(shade, $"Retrospective candidate: {candidate.Explanation}");
-        }
-        foreach (var reset in _snapshot.QuotaTimeline.Select(x => x.ResetsAtUtc).Where(x => x >= _snapshot.Selection.FromUtc && x < _snapshot.Selection.ToUtc).Distinct())
-        {
-            var line = new Line { X1 = X(reset!.Value), X2 = X(reset.Value), Y1 = 0, Y2 = 175, Stroke = new SolidColorBrush(Colors.Gray), StrokeThickness = 1 };
-            Timeline.Children.Add(line); ToolTipService.SetToolTip(line, $"Reported reset boundary {reset:O}; not a measured consumption event");
-        }
+        var width = Math.Max(1, Timeline.ActualWidth - 8);
+        double X(DateTimeOffset at) => Math.Clamp((at - _snapshot.Selection.FromUtc).TotalSeconds / span, 0, 1) * width;
         foreach (var row in rows)
         {
-            var height = maximum > 0 ? 150.0 * row.Tokens / maximum : 0;
-            var bar = new Rectangle { Width = Math.Max(1, Math.Min(18, Timeline.ActualWidth / Math.Max(1, rows.Count) - 1)), Height = height,
-                Fill = new SolidColorBrush(Colors.SteelBlue) };
-            Canvas.SetLeft(bar, X(row.StartUtc)); Canvas.SetTop(bar, 175 - height); Timeline.Children.Add(bar);
-            ToolTipService.SetToolTip(bar, $"{row.StartUtc:O}: {row.Tokens:N0} observed tokens");
+            var height = maximum > 0 ? 90.0 * row.Tokens / maximum : 0;
+            var barWidth = Math.Max(1, Math.Min(64, width / Math.Max(1, rows.Count) * .7));
+            var bar = new Rectangle { Width = barWidth, Height = height,
+                Fill = new SolidColorBrush(Colors.SteelBlue), RadiusX = 2, RadiusY = 2 };
+            Canvas.SetLeft(bar, Math.Min(width - barWidth, X(row.StartUtc)));
+            Canvas.SetTop(bar, 94 - height); Timeline.Children.Add(bar);
+            ToolTipService.SetToolTip(bar, $"{row.StartUtc:dd MMM HH:mm} UTC · {row.Tokens:N0} observed tokens");
         }
-        // Points, not interpolated lines: never connect incompatible sources or bridge resets/gaps.
-        foreach (var row in _snapshot.QuotaTimeline.Where(x => x.UsedPercent is >= 0 and <= 100).TakeLast(1000))
+        // A separate band and one compatible lane: never superimpose token and quota scales,
+        // connect sources, or interpret a reset drop as negative consumption.
+        var anchor = _snapshot.Current.FirstOrDefault()?.Current ??
+            _snapshot.QuotaTimeline.Where(x => x.Authority == QuotaObservationAuthority.ProviderAuthoritative)
+                .MaxBy(x => x.CapturedAtUtc);
+        var quota = anchor is null ? [] : _snapshot.QuotaTimeline.Where(x =>
+            QuotaHistoryPolicy.Cohort(x) == QuotaHistoryPolicy.Cohort(anchor) &&
+            x.UsedPercent is >= 0 and <= 100).TakeLast(1000).ToArray();
+        foreach (var row in quota)
         {
             var dot = new Ellipse { Width = 4, Height = 4, Fill = new SolidColorBrush(Colors.DarkOrange) };
-            Canvas.SetLeft(dot, X(row.CapturedAtUtc)); Canvas.SetTop(dot, 175 - row.UsedPercent!.Value * 1.5);
-            Timeline.Children.Add(dot); ToolTipService.SetToolTip(dot, $"{row.Kind} {row.UsedPercent:0.##}% used · {row.Source} · {row.CapturedAtUtc:O}");
+            Canvas.SetLeft(dot, X(row.CapturedAtUtc));
+            Canvas.SetTop(dot, 151 - row.UsedPercent!.Value * .4);
+            Timeline.Children.Add(dot);
+            ToolTipService.SetToolTip(dot, $"{row.Kind} · {row.UsedPercent:0.##}% used · {row.CapturedAtUtc:dd MMM HH:mm} UTC");
         }
-        foreach (var period in _snapshot.HistoricalPeriods.Where(x => x.DataAsOfUtc >= _snapshot.Selection.FromUtc && x.DataAsOfUtc < _snapshot.Selection.ToUtc && x.ReportedPercent is >= 0 and <= 100))
-        {
-            var point = new Rectangle { Width = 7, Height = 7, Fill = new SolidColorBrush(Colors.MediumSeaGreen) };
-            Canvas.SetLeft(point, X(period.DataAsOfUtc!.Value)); Canvas.SetTop(point, 175 - (double)period.ReportedPercent!.Value * 1.5); Timeline.Children.Add(point);
-            ToolTipService.SetToolTip(point, $"Historical period {period.PeriodId}: {period.ReportedPercent}% at report as-of; {string.Join(", ", period.States)}");
-        }
-        TimelineLegend.Text = $"Blue: 0–{maximum:N0} tokens/bucket. Orange: 0–100% quota (last 1,000 observations, independent lanes). Gray: reported reset boundaries. Green: historical allowance report as-of. Purple: retrospective boundary range, not proven policy change. Values above 100% remain in details.";
+        var first = new TextBlock { Text = _snapshot.Selection.FromUtc.ToString("dd MMM"), FontSize = 12 };
+        Canvas.SetTop(first, 160); Timeline.Children.Add(first);
+        var last = new TextBlock { Text = _snapshot.Selection.ToUtc.AddTicks(-1).ToString("dd MMM"), FontSize = 12 };
+        Canvas.SetTop(last, 160); Canvas.SetLeft(last, Math.Max(0, width - 55)); Timeline.Children.Add(last);
+        TimelineLegend.Text = $"Blue · local tokens, 0–{Compact(maximum)} per bucket. " +
+            (quota.Length == 0 ? "No compatible quota history for this selection." :
+            $"Orange · {anchor!.Kind} quota used, 0–100%, separate lower band. Same dates; not attributed token cost.");
     }
 }

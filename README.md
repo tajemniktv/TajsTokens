@@ -7,15 +7,16 @@ outlooks and usage predictions—with freshness and uncertainty kept visible.
 
 ## What you can do
 
-- **Codex:** one shared UTC date/account/model/project/chat selection drives recorded workload,
+- **Overview:** a dashboard leads with remaining allowance, a conditional outlook and the work
+  behind your usage. Work history, Planning and Evidence share one UTC date/account/model/project/chat selection for recorded workload,
   breakdowns, quota observations, API-reference estimates and provider evidence. Account-wide quota
   is explicitly unavailable under narrower work filters, not allocated in proportion to tokens.
   The same screen includes current outlooks, scenario planning, evidence health and an inference manifest.
   Retrospective accounting analysis is an explicit action, not a new background model.
-- **Codex current outlook:** reported quota, resets, local-token nowcasts and an even-burn comparison
+- **Current outlook:** reported quota, resets, local-token nowcasts and an even-burn comparison
   against elapsed time at the reading. Its window start is explicitly inferred; even-burn is not a forecast.
   Collection controls and failures stay in Diagnostics rather than a second overview page.
-- **Codex → Inspect chats and agents:** navigate workspaces, threads and subagents; inspect turns, tools,
+- **Chats and work:** navigate workspaces, threads and subagents; inspect turns, tools,
   context and supported native source details. Jump from a thread to its token usage.
   Thread Storage also shows bounded supplemental response-evidence coverage, selected counter snapshots and identity conflicts;
   these records stay separate from token totals and forecasts.

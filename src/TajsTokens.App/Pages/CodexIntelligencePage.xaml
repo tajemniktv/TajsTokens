@@ -3,75 +3,153 @@
  xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
  <Grid Padding="24" RowSpacing="12">
   <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
-  <StackPanel Spacing="6">
-   <TextBlock Text="Codex" Style="{StaticResource PageTitleStyle}"/>
-   <TextBlock Text="What happened, what your quota reports, and what happens next." TextWrapping="Wrap"/>
-   <TextBlock x:Name="StatusText" TextWrapping="Wrap"/>
-  </StackPanel>
-  <Expander Grid.Row="1" Header="Shared selection · UTC dates, end date exclusive" HorizontalContentAlignment="Stretch">
-   <StackPanel Spacing="8">
+  <Grid ColumnSpacing="16">
+   <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+   <StackPanel Spacing="4">
+    <TextBlock Text="Codex overview" Style="{StaticResource PageTitleStyle}"/>
+    <TextBlock Text="Your allowance, the work behind it, and what comes next." Style="{StaticResource SubtitleStyle}"/>
+    <TextBlock x:Name="StatusText" Style="{StaticResource CaptionStyle}"/>
+   </StackPanel>
+   <Button Grid.Column="1" Content="Refresh view" Click="OnApply" VerticalAlignment="Center"/>
+  </Grid>
+  <Expander x:Name="SelectionExpander" Grid.Row="1" Header="History range and filters" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+   <StackPanel Spacing="10">
     <StackPanel Orientation="Horizontal" Spacing="8">
-     <CalendarDatePicker x:Name="FromDate" Header="From (UTC)"/>
-     <CalendarDatePicker x:Name="ToDate" Header="Until (UTC)"/>
-     <Button Content="Apply" Click="OnApply" VerticalAlignment="Bottom"/>
+     <Button Content="Today" Tag="1" Click="OnQuickRange"/>
+     <Button Content="Last 7 days" Tag="7" Click="OnQuickRange"/>
+     <Button Content="Last 30 days" Tag="30" Click="OnQuickRange"/>
+     <Button Content="Clear work filters" Click="OnClearFilters"/>
+    </StackPanel>
+    <TextBlock Text="UTC dates · end date exclusive. Filters are shared across these views; they never allocate account quota to individual work." Style="{StaticResource CaptionStyle}"/>
+    <StackPanel Orientation="Horizontal" Spacing="8">
+     <CalendarDatePicker x:Name="FromDate" Header="From"/><CalendarDatePicker x:Name="ToDate" Header="Until"/>
+     <Button Content="Apply selection" Click="OnApply" VerticalAlignment="Bottom"/>
     </StackPanel>
     <ComboBox x:Name="Account" Header="Account scope" HorizontalAlignment="Stretch"/>
-    <TextBox x:Name="Model" Header="Exact model (blank = all)" PlaceholderText="All models"/>
-    <TextBox x:Name="Project" Header="Exact project path (blank = all)" PlaceholderText="All projects"/>
-    <TextBox x:Name="Thread" Header="Chat ID (blank = all)" PlaceholderText="All chats"/>
+    <TextBox x:Name="Model" Header="Model" PlaceholderText="All models"/>
+    <TextBox x:Name="Project" Header="Project" PlaceholderText="All projects — exact path to filter"/>
+    <TextBox x:Name="Thread" Header="Chat" PlaceholderText="All chats — ID to filter"/>
    </StackPanel>
   </Expander>
-  <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Disabled">
-   <StackPanel Spacing="16">
-    <TextBlock x:Name="SummaryText" FontSize="22" TextWrapping="Wrap"/>
-    <TextBlock x:Name="CurrentText" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
-    <TextBlock Text="Usage and quota timeline" FontSize="20"/>
-    <TextBlock Text="UTC workload buckets and source-qualified quota observations. These are separate quantities, not additive usage." TextWrapping="Wrap"/>
-    <Canvas x:Name="Timeline" Height="180" SizeChanged="OnTimelineSizeChanged"/>
-    <TextBlock x:Name="TimelineLegend" TextWrapping="Wrap"/>
-    <Expander Header="Timeline values and quota lanes" HorizontalContentAlignment="Stretch">
-     <TextBlock x:Name="TimelineText" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
-    </Expander>
-    <TextBlock Text="Breakdown and chats" FontSize="20"/>
-    <ComboBox x:Name="Dimension" SelectedIndex="0" SelectionChanged="OnDimensionChanged">
-     <x:String>Model</x:String><x:String>Effort</x:String><x:String>Token type</x:String><x:String>Project</x:String><x:String>Chat</x:String>
-    </ComboBox>
-    <ListView x:Name="Groups" MaxHeight="400">
-     <ListView.ItemTemplate><DataTemplate><StackPanel Padding="4" Spacing="3">
-      <TextBlock Text="{Binding Label}" TextWrapping="Wrap"/><TextBlock Text="{Binding Detail}" Opacity="0.7"/>
-     </StackPanel></DataTemplate></ListView.ItemTemplate>
-    </ListView>
-    <StackPanel Orientation="Horizontal" Spacing="8">
-     <Button Content="Filter to selected row" Click="OnFilterGroup"/>
-     <Button Content="Inspect chats and agents" Click="OnBrowse"/>
-    </StackPanel>
-    <TextBlock Text="Forecast and accounting" FontSize="20"/>
-    <TextBlock x:Name="ForecastText" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
-    <Expander Header="Plan hypothetical work" HorizontalContentAlignment="Stretch">
-     <StackPanel Spacing="8">
-      <TextBlock Text="Uses this selection's account, model and history start. Project/chat attribution is unavailable. Duration is your assumption, not an activity prediction." TextWrapping="Wrap"/>
-      <NumberBox x:Name="PlanHours" Header="Duration (hours)" Value="0.5" Minimum="0.05" Maximum="24"/>
-      <NumberBox x:Name="PlanRoots" Header="Root agents" Value="1" Minimum="1" Maximum="32"/>
-      <NumberBox x:Name="PlanChildren" Header="Subagents" Value="0" Minimum="0" Maximum="100"/>
-      <Button Content="Estimate scenario" Click="OnSimulate"/>
-      <TextBlock x:Name="ScenarioText" TextWrapping="Wrap"/>
+  <TabView Grid.Row="2" x:Name="Views" IsAddTabButtonVisible="False" TabWidthMode="SizeToContent" SelectionChanged="OnViewChanged">
+   <TabViewItem Header="Overview" IsClosable="False">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+     <StackPanel Spacing="18" Padding="0,16,12,20">
+      <Grid x:Name="DashboardCards" ColumnSpacing="16" RowSpacing="16" SizeChanged="OnDashboardSizeChanged">
+       <Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition x:Name="OutlookColumn" Width="*"/></Grid.ColumnDefinitions>
+       <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+       <Border Style="{StaticResource CardStyle}">
+        <StackPanel Spacing="12">
+         <TextBlock Text="Allowance now" Style="{StaticResource SectionTitleStyle}"/>
+         <TextBlock x:Name="QuotaEmpty" Text="Waiting for a reported quota reading." Style="{StaticResource CaptionStyle}"/>
+         <ItemsControl x:Name="QuotaTiles">
+          <ItemsControl.ItemTemplate><DataTemplate>
+           <StackPanel Spacing="8" Margin="0,0,0,10">
+            <TextBlock Text="{Binding Title}" Style="{StaticResource SubtitleStyle}"/>
+            <TextBlock Text="{Binding Remaining}" Style="{StaticResource HeroMetricStyle}"/>
+            <ProgressBar Value="{Binding Value}" Minimum="0" Maximum="100" AutomationProperties.Name="Quota remaining percent"/>
+            <TextBlock Text="{Binding Reset}" TextWrapping="Wrap"/>
+            <TextBlock Text="{Binding Pace}" Style="{StaticResource CaptionStyle}"/>
+            <TextBlock Text="{Binding Freshness}" Style="{StaticResource CaptionStyle}"/>
+           </StackPanel>
+          </DataTemplate></ItemsControl.ItemTemplate>
+         </ItemsControl>
+         <HyperlinkButton Content="See quota evidence" Click="OnEvidence" HorizontalAlignment="Left" Padding="0"/>
+        </StackPanel>
+       </Border>
+       <Border x:Name="OutlookCard" Grid.Column="1" Style="{StaticResource CardStyle}">
+        <StackPanel Spacing="12">
+         <TextBlock Text="What comes next" Style="{StaticResource SectionTitleStyle}"/>
+         <TextBlock x:Name="OutlookValue" Text="Learning your pace" FontSize="28" FontWeight="SemiBold" TextWrapping="Wrap"/>
+         <TextBlock x:Name="OutlookDetail" Text="A current, compatible forecast will appear here." TextWrapping="Wrap"/>
+         <TextBlock x:Name="NowcastSummary" Style="{StaticResource SubtitleStyle}"/>
+         <Button Content="Plan another work session" Click="OnPlan" HorizontalAlignment="Left"/>
+         <HyperlinkButton Content="Forecast details and uncertainty" Click="OnPlan" HorizontalAlignment="Left" Padding="0"/>
+        </StackPanel>
+       </Border>
+      </Grid>
+      <Border Style="{StaticResource CardStyle}">
+       <StackPanel Spacing="12">
+        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+         <StackPanel><TextBlock Text="The work behind your usage" Style="{StaticResource SectionTitleStyle}"/>
+          <TextBlock x:Name="WorkRange" Style="{StaticResource CaptionStyle}"/></StackPanel>
+         <HyperlinkButton Grid.Column="1" Content="Explore work" Click="OnHistory"/>
+        </Grid>
+        <TextBlock x:Name="WorkValue" Style="{StaticResource HeroMetricStyle}"/>
+        <TextBlock x:Name="WorkDetail" Style="{StaticResource SubtitleStyle}"/>
+        <Canvas x:Name="Timeline" Height="180" SizeChanged="OnTimelineSizeChanged" AutomationProperties.Name="Observed workload over the selected UTC range"/>
+        <TextBlock x:Name="TimelineLegend" Style="{StaticResource CaptionStyle}"/>
+        <TextBlock Text="Workload and account quota are connected, but tokens are not a quota currency. Forecasts use the compatible evidence available." Style="{StaticResource CaptionStyle}"/>
+       </StackPanel>
+      </Border>
      </StackPanel>
-    </Expander>
-    <Button x:Name="AnalyzeButton" Content="Analyze accounting and historical regimes" Click="OnAnalyze" HorizontalAlignment="Left"/>
-    <TextBlock x:Name="AccountingText" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
-    <TextBlock Text="Provider evidence · shadow accounting" FontSize="20"/>
-    <Button Content="Check historical analytics capability" Click="OnCollectHistorical" HorizontalAlignment="Left"/>
-    <Expander Header="Source capabilities and capture details" HorizontalContentAlignment="Stretch">
-     <TextBlock x:Name="ProviderText" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
-    </Expander>
-    <TextBlock x:Name="PeriodsText" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
-    <Expander Header="Evidence health and provenance" HorizontalContentAlignment="Stretch">
-     <TextBlock x:Name="EvidenceText" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
-    </Expander>
-    <Expander Header="Inference manifest" HorizontalContentAlignment="Stretch">
-     <TextBlock x:Name="ManifestText" FontFamily="Consolas" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
-    </Expander>
-   </StackPanel>
-  </ScrollViewer>
+    </ScrollViewer>
+   </TabViewItem>
+   <TabViewItem Header="Work history" IsClosable="False">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+     <StackPanel Spacing="16" Padding="0,16,12,20">
+      <TextBlock Text="Where the work went" Style="{StaticResource SectionTitleStyle}"/>
+      <TextBlock x:Name="SummaryText" Style="{StaticResource SubtitleStyle}"/>
+      <ComboBox x:Name="Dimension" Header="Break down by" SelectedIndex="0" SelectionChanged="OnDimensionChanged">
+       <x:String>Model</x:String><x:String>Effort</x:String><x:String>Token type</x:String><x:String>Project</x:String><x:String>Chat</x:String>
+      </ComboBox>
+      <ListView x:Name="Groups" MaxHeight="480">
+       <ListView.ItemTemplate><DataTemplate><StackPanel Padding="8" Spacing="4">
+        <TextBlock Text="{Binding Label}" FontWeight="SemiBold" TextWrapping="Wrap"/><TextBlock Text="{Binding Detail}" Style="{StaticResource CaptionStyle}"/>
+       </StackPanel></DataTemplate></ListView.ItemTemplate>
+      </ListView>
+      <StackPanel Orientation="Horizontal" Spacing="8">
+       <Button Content="Filter to selected row" Click="OnFilterGroup"/>
+       <Button Content="Open chats and agents" Click="OnBrowse"/>
+      </StackPanel>
+      <Expander Header="Timeline values and quota observations" HorizontalContentAlignment="Stretch" HorizontalAlignment="Stretch">
+       <TextBlock x:Name="TimelineText" Style="{StaticResource TechnicalTextStyle}"/>
+      </Expander>
+     </StackPanel>
+    </ScrollViewer>
+   </TabViewItem>
+   <TabViewItem Header="Planning" IsClosable="False">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+     <StackPanel Spacing="16" Padding="0,16,12,20" MaxWidth="1000" HorizontalAlignment="Left">
+      <TextBlock Text="If this work continues" Style="{StaticResource SectionTitleStyle}"/>
+      <TextBlock Text="A scenario is your assumption about future work, not a prediction that you will keep working." Style="{StaticResource SubtitleStyle}"/>
+      <Border Style="{StaticResource CardStyle}"><StackPanel Spacing="12">
+       <TextBlock Text="Plan a session" Style="{StaticResource SectionTitleStyle}"/>
+       <TextBlock Text="Uses the selected account, model and history. Project/chat-specific quota estimates are not available." Style="{StaticResource CaptionStyle}"/>
+       <NumberBox x:Name="PlanHours" Header="Duration (hours)" Value="0.5" Minimum="0.05" Maximum="24"/>
+       <NumberBox x:Name="PlanRoots" Header="Root agents" Value="1" Minimum="1" Maximum="32"/>
+       <NumberBox x:Name="PlanChildren" Header="Subagents" Value="0" Minimum="0" Maximum="100"/>
+       <Button Content="Estimate quota usage" Click="OnSimulate"/>
+       <TextBlock x:Name="ScenarioText" TextWrapping="Wrap"/>
+      </StackPanel></Border>
+      <Expander Header="Current forecasts and uncertainty" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" IsExpanded="True">
+       <TextBlock x:Name="ForecastText" Style="{StaticResource TechnicalTextStyle}"/>
+      </Expander>
+     </StackPanel>
+    </ScrollViewer>
+   </TabViewItem>
+   <TabViewItem Header="Evidence" IsClosable="False">
+    <ScrollViewer HorizontalScrollBarVisibility="Disabled">
+     <StackPanel Spacing="16" Padding="0,16,12,20">
+      <TextBlock Text="Why these numbers?" Style="{StaticResource SectionTitleStyle}"/>
+      <TextBlock Text="Sources, coverage and model details for the same selection. Research here does not replace live forecasts." Style="{StaticResource SubtitleStyle}"/>
+      <Expander x:Name="QuotaEvidence" Header="Current quota readings" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"><TextBlock x:Name="CurrentText" Style="{StaticResource TechnicalTextStyle}"/></Expander>
+      <Expander Header="Coverage and source health" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"><TextBlock x:Name="EvidenceText" Style="{StaticResource TechnicalTextStyle}"/></Expander>
+      <Expander Header="Provider reports and historical periods" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"><StackPanel Spacing="12">
+       <Button Content="Check historical analytics capability" Click="OnCollectHistorical"/>
+       <TextBlock x:Name="ProviderText" Style="{StaticResource TechnicalTextStyle}"/>
+       <TextBlock x:Name="PeriodsText" Style="{StaticResource TechnicalTextStyle}"/>
+      </StackPanel></Expander>
+      <Expander Header="Accounting and regime research" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch"><StackPanel Spacing="12">
+       <Button x:Name="AnalyzeButton" Content="Analyze selected history" Click="OnAnalyze"/>
+       <TextBlock x:Name="AccountingText" Style="{StaticResource TechnicalTextStyle}"/>
+      </StackPanel></Expander>
+      <Expander Header="Reproducibility manifest" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+       <TextBlock x:Name="ManifestText" FontFamily="Consolas" Style="{StaticResource TechnicalTextStyle}"/>
+      </Expander>
+     </StackPanel>
+    </ScrollViewer>
+   </TabViewItem>
+  </TabView>
  </Grid>
 </Page>
