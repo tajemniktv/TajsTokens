@@ -1,6 +1,7 @@
 # Codex evidence acquisition repository review
 
-Consolidated 2026-09-19 from the pinned review and subsequent local experiments.
+Consolidated 2026-09-19 from the pinned review and subsequent local experiments;
+five-monitor comparative follow-up added 2026-09-20 (section 9).
 [PROJECT.md](../../PROJECT.md#current-work) owns product scope; this document owns source findings
 and proof boundaries. The [layered statistical design](TT_LAYERED_STATISTICAL_DESIGN.md) owns
 modeling rationale, including the superseded local roadmap.
@@ -476,6 +477,161 @@ as-of fields and errors; unknown methods stay unsupported; notifications cannot 
 for replies; lifecycle/cancellation must not orphan processes. Preserve TajsTokens' account
 brackets, bounded response handling, immutable provenance and no-credential-retention rules.
 SDK convenience does not replace those evidence guarantees.
+
+## 9. Five usage monitors — comparative follow-up, 2026-09-20
+
+**The useful additions are presentation and explanation patterns, not a demonstrated
+quota-nerf detector or a better validated forecasting model.** History, reset diagnostics,
+local token breakdowns, quota outlooks and tray alerts already exist in TajsTokens. The
+opportunities below are optional candidates, not newly accepted implementation work or a
+replacement for PROJECT.md's evidence gates.
+
+Reviewed GitHub repository metadata and fresh shallow source checkouts under ignored
+`.codex/temp/codex-repo-review/<owner>-<repository>/`. TajsTokens comparison baseline:
+`d00c770e21aca2d8b00917eb83e96a12110ed70d` (clean worktree before this documentation edit).
+These are focused static implementation reviews, not exhaustive audits. No third-party
+application, installer, dependency install or test was run; no Codex credentials or account
+endpoints were accessed. Pins identify source, not installed/released binary equivalence.
+
+| Repository / reviewed pin | Principal inspected implementation |
+| --- | --- |
+| [VictorZakharov/codex-usage](https://github.com/VictorZakharov/codex-usage/tree/75cf1eaad84c5794fdf733157bd443f8d1103800) | `src/CodexUsage.Core/History/UsageHistory.cs`, `UsageHistoryStore.cs`; `Tokens/CodexTokenUsageReader.cs`; README |
+| [manuelsh/codex-monitor](https://github.com/manuelsh/codex-monitor/tree/8990788f79e759b3c51015e548e09b6627d4b4ca) | `server/src/quota-attribution.ts`, `history-jobs.ts`, `__tests__/quota-attribution.test.ts` |
+| [capisoft-lib/codex_usage](https://github.com/capisoft-lib/codex_usage/tree/8f281d7a2bb5d510cc33929548624218c1c1fff7) | `src/quota-history.mjs`; `public/quota-periods.js`, `quota-forecast.js`, `usage-pricing.js`; README |
+| [upstream-ray/codex-usage-monitor](https://github.com/upstream-ray/codex-usage-monitor/tree/5cbe8d7ae9e0a8b15571999d48e656e07f960faf) | `src/window.rs` settings and low-quota notification handling; README |
+| [Kaltorre/codex-usage](https://github.com/Kaltorre/codex-usage/tree/1d6cf565e13c0e52dca43e79f08acba33769fb4d) | `scripts/context_limit_status.py`: file selection, bounded tail/full-scan fallback, context and quota summaries |
+
+### VictorZakharov: approachable history and activity-aware pace
+
+The 90-day claim is confirmed, with a second cap of **50,000 samples** and compression of
+flat duplicate readings. The README describes 24-hour/7-day/30-day/90-day charts, hover details,
+reset markers, local token totals for the selected period, and either depletion lead time or
+remaining quota at reset. This is a useful compact presentation reference, not proof of a
+historically matched workload comparison or a policy-change detector.
+
+`ForecastDepletion` derives the start as reset minus duration, assumes a full opening allowance,
+and divides consumed percentage by elapsed (or learned active) hours. `InferActivitySchedule`
+requires coverage of all 24 clock hours before using the schedule; equal endpoints across a
+polling gap are treated as flat. Its active-time display can collapse off hours.
+
+- **Worth adapting:** put observed quota, aligned local workload, reset markers and a plainly
+  labelled pace line together; show depletion relative to reset rather than only a timestamp.
+  Offer an activity overlay before considering a time-axis transformation that hides gaps.
+- **Do not transplant the inference:** equal quantized/cached endpoints do not establish zero
+  consumption or human absence. Reset-minus-duration need not be an observed full opening.
+  Activity schedules require held-out evaluation against existing `QuotaPaceModels` and
+  workload baselines, including stale gaps and timezone/DST behavior.
+- **Accounting/retention limits:** `UsageHistorySample` has no account identity. The token reader
+  uses nonnegative differences of cumulative totals at period boundaries per physical file;
+  this does not solve copies, resets or interleaved counters. TajsTokens already has richer
+  source/account provenance and reconciliation diagnostics. Keep its no-automatic-age-deletion
+  policy; a 90-day chart range is not permission to delete unique evidence.
+- **Acquisition difference:** its documented refresh workflow writes refreshed credentials to
+  Codex's auth file. That is incompatible with TajsTokens' read-only credential boundary.
+
+### manuelsh: explicit unallocated consumption, with a crucial limitation
+
+`QuotaAttribution.observe` initializes existing used quota as unattributed, retains workload
+weights through flat meter readings, and on a positive meter delta allocates by each task's
+increase in API-equivalent USD. Missing/partially unpriced work leaves the entire delta
+unattributed. Baseline maxima prevent a disappearing/reappearing task from being counted anew;
+the ledger is persisted using temporary-file replacement. The inspected tests exercise flat
+readings, missing/unpriced work, disappearing tasks and restart behavior; they were not run here.
+
+**This is allocation, not independent explanation of quota burn.** When all visible weights
+are priced and their sum is positive, the algorithm distributes **100% of the meter delta**.
+Concurrent invisible-device consumption can therefore be assigned to visible local tasks,
+leaving no residual. A larger burn simply produces larger allocations. Its unattributed total
+also includes consumption before observation, not just newly suspicious consumption.
+
+`history-jobs.ts` consolidates task/subagent usage before allocation. Its ledger key comprises
+limit name, window label, start and reset, but no account identity; a changed key or a downward
+meter reading starts a new ledger. Do not copy this as account-switch or reset classification.
+
+**Worth adapting:** an interval explanation with observed quota delta, observed local workload,
+estimated contributors and separate unavailable/unallocated reasons. Reuse
+`QuotaCostObservationBuilder`, `QuotaCostEvaluation` and existing cohort/coverage diagnostics.
+Keep proportional shares as an optional allocation view, distinct from the independently
+predicted cost residual. Do not label either as provider-reported per-task usage. Missing
+coverage cannot be quantified merely by forcing visible shares to sum to the observed delta.
+Unknown-account work stays unassigned; initial pre-observation consumption must remain separate.
+
+### capisoft-lib: cycle navigation and rate provenance, not native credit proof
+
+The project combines a local Node dashboard with optional distributed/hosted components; its
+README documents Windows/macOS/Linux operation. It offers historical weekly periods, hourly
+activity and projected cumulative usage. `quota-history.mjs` retains first/latest observations,
+peak usage and plan labels, and clips a period at the next inferred start for early resets.
+
+- **Worth adapting:** comparable-cycle navigation and an explicit observed-versus-reconstructed
+  chart legend. Preserve original deadlines, first observation, partial-cycle status and reset
+  classification rather than displaying every cycle as a complete week. TajsTokens already owns
+  `QuotaHistoryPolicy`, `QuotaResetDetector` and `QuotaResetGenerationPolicy`; extend their views.
+- **Concrete caution:** server history clustering compares adjacent reset timestamps within five
+  minutes, allowing a chain to span more than five minutes. Browser `normalizeQuotaPeriods`
+  instead bounds against the cluster's first reset. Neither timestamp tolerance alone establishes
+  account identity; preserve TajsTokens' bounded, source/account-aware generation policy.
+- **Useful pricing pattern:** `usage-pricing.js` uses a versioned rate resolver and records
+  rates used, unrated reasons and boundary/estimated-call counts. This is a good inspectability
+  reference for `ApiPriceWorkload`, not evidence that its credit rates apply to our account.
+  Its Fast classification accepts requested `priority`/`fast` tiers; requested tier is not proof
+  of actual billed execution or a universal quota multiplier.
+- **Forecast caveat:** `estimateQuotaCapacityCredits` estimates capacity as local credit-valued
+  samples × 100 / observed used percentage, with exponential weighting across periods.
+  `cumulativePoints` rescales local sample shares to the current meter. Those intermediate chart
+  points are reconstructed, not observed historical quota. Missing remote work, partial opening
+  coverage and changed regimes invalidate a simple capacity interpretation. Plan/node comparison
+  is not sufficient account/seat compatibility. No superior held-out accuracy was established.
+- **Scope/reuse:** do not adopt its mesh/upload architecture for this local-first question.
+  GitHub reports AGPL-3.0 for this pin; this review copied no code. Treat implementation reuse
+  as a separate licensing decision, not an implied dependency recommendation.
+
+### upstream-ray: persistent alert deduplication is a concrete improvement candidate
+
+The taskbar widget is a more continuously visible surface than a conventional tray icon;
+README features include multi-monitor placement and row visibility controls. Those are optional
+Windows UX ideas, not analytics improvements, and were not visually/runtime validated here.
+
+`window.rs` saves `notified_quota_windows` in settings, restores it at startup and suppresses
+repeat low-quota notifications for the provider/window/reset key. TajsTokens'
+`QuotaAlertEngine._emittedKeys` is in memory and `AppServices` constructs a new engine on startup.
+**Persisting bounded alert deduplication state is therefore a specific incremental candidate**,
+not a request to rebuild alerts. Preserve TajsTokens' account/source/threshold scope and fresh-only
+notification rule; the other project's key lacks account scope and treats exact deadline changes
+as new identities. Reuse the bounded generation policy so deadline jitter cannot create alert spam.
+If selected, verify restart, real replenishment, account change, missing reset and threshold edits.
+
+### Kaltorre: small read-only diagnostic, not a stronger source contract
+
+The Python status reader takes an 8 MiB tail first and falls back to a full scan if it finds no
+token event. It supports explicit thread selection and a latest-global-event search over up to
+200 recently modified session files. This is useful bounded inspection ergonomics, not complete
+history or fresh whole-account quota acquisition.
+
+Its context percentage is `last_token_usage.input_tokens / model_context_window × 100`:
+label that as a last-request input/window ratio, not guaranteed current context occupancy.
+It maps primary/secondary to fixed 5-hour/weekly labels, and its filename fallback takes the last
+UUID. That fallback conflicts with the Desktop suffix-UUID ownership case TajsTokens already
+handles; its explicit-thread filename glob can also miss such suffixed files. Do not replace
+TajsTokens' native context observations, duration-based windows or current-anchor freshness rules.
+No new durable source or forecast method is justified by this repository.
+
+### Candidate ranking and acceptance boundaries
+
+| Candidate | Assessment against current TajsTokens | Gate before implementation/promotion |
+| --- | --- | --- |
+| Restart-safe low-quota alert deduplication | Clearest small functional improvement; current engine is process-local | Bounded owned settings state; source/account/generation identity; meaningful restart and jitter checks |
+| Cycle comparison with aligned local workload and visible observation gaps | Strongest presentation idea for investigating changed burn; history/reset owners already exist | Compatible bucket/account/regime, partial coverage labels, observed vs reconstructed curves; user visual acceptance |
+| Interval allocation plus independently modelled residual | Useful explanation, but proportional allocation alone masks invisible usage | Distinguish pre-observation/unpriced/missing coverage from residual; no forced causal attribution; reuse current cost diagnostics |
+| Rate-version and unrated-reason drilldown | Useful auditability reference; versioned counterfactual pricing already exists | Identify an actual missing display before adding storage; never promote estimates into native credits |
+| Activity-hour forecast or taskbar widget | Optional, lower priority; forecasting/tray foundations already exist | Forecast needs chronological baseline comparison; widget needs separate Windows UX/lifecycle acceptance |
+
+A credible “quota accounting may have changed” view should show compatible historical intervals,
+workload composition, meter precision/lag, coverage, sample and independent-cycle counts, and
+the existing frozen-reference residual diagnostics. Account switches, model/effort/cache mix,
+requested-versus-billed tier, remote work and revised/reset observations remain competing
+explanations. None of these five reviewed implementations establishes provider nerf causality.
+No model, retention, acquisition or product-priority decision is changed by this review.
 
 ## Current implementation
 
