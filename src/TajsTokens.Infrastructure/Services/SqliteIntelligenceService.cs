@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Interfaces;
@@ -20,7 +21,6 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
     private readonly string _connectionString;
     private readonly string _databasePath;
     private readonly SqliteTelemetryRepository _telemetryRepository;
-    private readonly ForecastingService _forecasting = new();
     private readonly ScenarioPlannerService _scenarioPlanner = new();
     private readonly Func<string, CancellationToken, Task>? _queryStageObserver;
     private readonly Func<IReadOnlyList<RolloutAccountAssociation>> _accountAssociations = () => [];
@@ -127,7 +127,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
 
             try
             {
-                var forecast = _forecasting.BuildForecast(anchored, nowUtc);
+                var forecast = QuotaPredictionService.BuildResetOutlook(anchored, nowUtc);
                 if (forecast.Evidence is { } evidence)
                 {
                     IReadOnlyList<QuotaHorizonPrediction> predictions = [];
@@ -161,6 +161,12 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                         WorkloadStatus = workloadStatus,
                         PolicyVersion = $"{evidence.PolicyVersion};{QuotaPredictionService.PolicyVersion}"
                     } };
+                }
+                if (forecast.Evidence is { } capturedEvidence)
+                {
+                    var fingerprint = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new { current, forecast }))));
+                    forecast = forecast with { Evidence = capturedEvidence with { InferenceManifest =
+                        CodexIntelligenceProjection.Manifest(new(current.CapturedAtUtc, current.ResetsAtUtc ?? nowUtc, current.AccountKey), fingerprint) } };
                 }
                 var persisted = new ForecastSnapshot(
                     current.Provider, current.Profile, forecast,

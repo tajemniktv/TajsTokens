@@ -7,20 +7,25 @@ outlooks and usage predictions—with freshness and uncertainty kept visible.
 
 ## What you can do
 
-- **Overview:** check prominent remaining-quota values, resets, labelled hourly token usage,
+- **Codex:** one shared UTC date/account/model/project/chat selection drives recorded workload,
+  breakdowns, quota observations, API-reference estimates and provider evidence. Account-wide quota
+  is explicitly unavailable under narrower work filters, not allocated in proportion to tokens.
+  The same screen includes current outlooks, scenario planning, evidence health and an inference manifest.
+  Retrospective accounting analysis is an explicit action, not a new background model.
+- **Advanced → Collector overview:** check prominent remaining-quota values, resets, labelled hourly token usage,
   quota outlooks and 5/15-minute local-token nowcasts, paused after ten minutes without observed
   activity (quiet open turns are not treated as confirmed idle sessions). A separate even-burn comparison shows usage
   against elapsed time at the reading, with an explicitly inferred window start—not a forecast.
   Collection details stay available on demand.
-- **Codex → Work & threads:** navigate workspaces, threads and subagents; inspect turns, tools,
+- **Codex → Inspect chats and agents:** navigate workspaces, threads and subagents; inspect turns, tools,
   context and supported native source details. Jump from a thread to its token usage.
   Thread Storage also shows bounded supplemental response-evidence coverage, selected counter snapshots and identity conflicts;
   these records stay separate from token totals and forecasts.
-- **Codex → Usage breakdown:** compare models, projects, sessions, hours, days and months in consistent token
+- **Chats and agents → Usage breakdown:** compare models, projects, sessions, hours, days and months in consistent token
   tables. Search/sort rows, inspect exact counts and filter a selected row across breakdowns.
   A timeline and removable filter chips sit above the breakdown; detailed token columns are optional.
   Times display locally; daily/monthly groups retain UTC boundaries. Totals are not inferred billing or quota cost.
-- **Forecasts:** start with current quota outlooks, see token nowcasts and conditional 30/60-minute
+- **Advanced → Workload planner:** start with current quota outlooks, see token nowcasts and conditional 30/60-minute
   session outlooks (recorded local work, not a prediction of human presence), estimate
   supported workload scenarios, and browse saved outlooks. The planner can fill editable session counts
   and model/effort from recent local activity while leaving your planned duration unchanged; this is a
@@ -32,7 +37,7 @@ outlooks and usage predictions—with freshness and uncertainty kept visible.
   is visible; a learned quota outlook replaces the incumbent only after independent validation gates pass.
   Explicit Model Lab evaluations with workload-score results save an original local research report for later inspection;
   these reports are experimental diagnostics, not a subscription balance or per-task accounting.
-- **Quota history:** select points on a quota-used timeline alongside optional local token activity and filter
+- **Advanced → Quota history details:** select points on a quota-used timeline alongside optional local token activity and filter
   quota drops separately from reset-time shifts. Account readings are the default; rollout
   observations remain separate diagnostics, with explicit observation times and detailed deadlines.
 - **Advanced → Diagnostics / Model lab:** check source health, collection coverage and prediction evidence.

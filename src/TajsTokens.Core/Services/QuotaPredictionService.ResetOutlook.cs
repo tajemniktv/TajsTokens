@@ -1,14 +1,14 @@
 using TajsTokens.Core.Enums;
-using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
 
 namespace TajsTokens.Core.Services;
 
-public sealed class ForecastingService : IForecastingService
+// Reset-horizon head of the forecast owner; short-horizon competition remains in the other partial.
+public static partial class QuotaPredictionService
 {
-    public const string PolicyVersion = "quota-walk-forward/v4";
+    public const string ResetOutlookPolicyVersion = "quota-walk-forward/v4";
 
-    public Forecast BuildForecast(IReadOnlyList<QuotaSnapshot> snapshots, DateTimeOffset nowUtc)
+    public static Forecast BuildResetOutlook(IReadOnlyList<QuotaSnapshot> snapshots, DateTimeOffset nowUtc)
     {
         ArgumentNullException.ThrowIfNull(snapshots);
         var eligible = snapshots.Where(x => x.CapturedAtUtc <= nowUtc).OrderBy(x => x.CapturedAtUtc).ToArray();
@@ -18,7 +18,7 @@ public sealed class ForecastingService : IForecastingService
         if (eligible.Any(x => x.Kind != latest.Kind || x.Provider != latest.Provider || x.Profile != latest.Profile))
             throw new ArgumentException("Forecast snapshots must belong to one quota window/provider/profile.", nameof(snapshots));
         var model = QuotaForecastBacktester.DefaultModel(latest);
-        ForecastEvidence Evidence(int count, double hours, string description) => new(PolicyVersion, "not-estimated",
+        ForecastEvidence Evidence(int count, double hours, string description) => new(ResetOutlookPolicyVersion, "not-estimated",
             latest.Source, count, hours, 0, null, null, null, null, description)
         {
             AnchorLimitId = QuotaHistoryPolicy.Cohort(latest).LimitId,

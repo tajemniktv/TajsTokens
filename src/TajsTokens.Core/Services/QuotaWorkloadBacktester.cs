@@ -8,7 +8,10 @@ public sealed record QuotaWorkloadTrial(QuotaForecastTrial Baseline, string Cand
     CodexForecastFeatures Features);
 
 public sealed record QuotaWorkloadPrediction(double Remaining, int TrainingSamples, bool Fitted,
-    CodexForecastFeatures Features);
+    CodexForecastFeatures Features)
+{
+    public CodexNumericInference? Inference { get; init; }
+}
 
 /// <summary>Authoritative-target walk-forward feature ablations. Future workloads never enter a training prefix.</summary>
 public static class QuotaWorkloadBacktester
@@ -96,9 +99,14 @@ public static class QuotaWorkloadBacktester
         var fit = AccountLocalRidge.Fit(training.Select(Row).ToArray(),
             training.Select(x => x.ObservedRemaining - x.PredictedRemaining).ToArray(), penalty: 10);
         if (fit is null) return Fallback();
-        var prediction = baselinePrediction + fit.Predict(Vector(horizonHours, anchor.RemainingPercent!.Value,
-            baselinePrediction, features, "model-effort-ridge", models, efforts));
-        return new(Math.Clamp(prediction, 0, anchor.RemainingPercent.Value), training.Length, true, features);
+        var input = Vector(horizonHours, anchor.RemainingPercent!.Value, baselinePrediction, features, "model-effort-ridge", models, efforts);
+        var prediction = baselinePrediction + fit.Predict(input);
+        var normalized = input.Select((x, i) => (x - fit.Means[i]) / fit.Scales[i]).ToArray();
+        return new(Math.Clamp(prediction, 0, anchor.RemainingPercent.Value), training.Length, true, features)
+        {
+            Inference = new("remaining=pace+standardized-ridge/v1", baselinePrediction + fit.Coefficients[0],
+                normalized, fit.Coefficients.Skip(1).ToArray(), 0, anchor.RemainingPercent.Value)
+        };
     }
 
     private static double[] Vector(QuotaForecastTrial trial, double anchorRemaining, CodexForecastFeatures features,

@@ -188,8 +188,8 @@ public sealed class QuotaAccountScopeTests : IDisposable
         Assert.Empty(new QuotaResetDetector().Detect([first, second]));
         Assert.Throws<ArgumentException>(() => QuotaForecastBacktester.SplitEpochs([first, second]));
         var own = new[] { Point(Now.AddHours(-1), 10, "B"), Point(Now, 20, "B") };
-        var forecast = new ForecastingService();
-        Assert.Equal(forecast.BuildForecast(own, Now), forecast.BuildForecast([first, .. own], Now));
+
+        Assert.Equal(QuotaPredictionService.BuildResetOutlook(own, Now), QuotaPredictionService.BuildResetOutlook([first, .. own], Now));
         var resets = new QuotaResetDetector().Detect([first, second, first with { CapturedAtUtc = Now, UsedPercent = 5 }]);
         Assert.Equal("A", Assert.Single(resets).AccountKey);
     }

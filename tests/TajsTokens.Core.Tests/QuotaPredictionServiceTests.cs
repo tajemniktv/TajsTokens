@@ -65,6 +65,7 @@ public sealed class QuotaPredictionServiceTests
         Assert.NotEmpty(prediction);
         Assert.All(prediction, x =>
         {
+            Assert.Equal(x.RemainingPercent, x.Inference!.Reconstruct(), 8);
             Assert.False(x.UsesWorkload);
             Assert.Null(x.LowerRemainingPercent);
             Assert.Contains("Uncertainty is learning", x.Explanation);
@@ -78,6 +79,7 @@ public sealed class QuotaPredictionServiceTests
         var data = Episodes(32);
         var anchor = data.Quota[^2];
         var before = QuotaPredictionService.Predict(data, anchor, anchor.CapturedAtUtc);
+        Assert.All(before, x => Assert.Equal(x.RemainingPercent, x.Inference!.Reconstruct(), 8));
         var polluted = data with
         {
             Quota = data.Quota.Append(Point(0.1, 90) with { AccountKey = "other" })

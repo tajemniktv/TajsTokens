@@ -9,7 +9,7 @@ public sealed record QuotaPredictionTrial(QuotaForecastTrial Observation, QuotaH
 /// Shared live/replay policy: horizon-specific pace selection and an earned workload correction.
 /// Model choice needs matured non-overlapping outcomes, not eight completed weekly resets.
 /// </summary>
-public static class QuotaPredictionService
+public static partial class QuotaPredictionService
 {
     public const string PolicyVersion = "quota-workload/v4";
     public const string FallbackModel = "time-ewma-2h";
@@ -152,7 +152,11 @@ public static class QuotaPredictionService
                 useWorkload ? workloadError : matured.Length > 0 ? Error(selected, matured) : null,
                 radius is { } r ? Math.Max(0, prediction - r) : null,
                 radius is { } upper ? Math.Min(anchor.RemainingPercent.Value, prediction + upper) : null,
-                errors.Length, explanation);
+                errors.Length, explanation)
+            {
+                Inference = useWorkload ? workload.Inference : new("selected-pace-output/v1:" + selected,
+                    baseline, [], [], 0, anchor.RemainingPercent.Value)
+            };
             return new(label, result, baseline, workload);
         }
     }

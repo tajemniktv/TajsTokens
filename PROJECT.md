@@ -71,19 +71,70 @@ work are in [Current work](#current-work); dated audits below describe captured 
 
 ## Current work
 
-This is the single delivery-status and remaining-work record, updated 2026-09-19. The architecture and source contracts
+This is the single delivery-status and remaining-work record, updated 2026-09-20. The architecture and source contracts
 below remain authoritative. [Historical milestones](docs/archive/PROJECT_CURRENT_WORK_2026-09-19.md)
 preserve the previous chronological log, metrics and validation results; they are not current tasks.
 The [evidence review](docs/source-notes/CODEX_EVIDENCE_REPO_REVIEW.md) maps source findings and
 remaining proof boundaries. The [layered design](docs/source-notes/TT_LAYERED_STATISTICAL_DESIGN.md)
 defines model/TT rationale. Neither is a competing delivery plan.
 
-**Current status: implementation milestone delivered; continuation is evidence-blocked, not complete.**
+**Current status (2026-09-20): Codex intelligence and presentation consolidation delivered; provider capability and visual acceptance remain open.**
+The user adopted the "Define TajsTokens Features" discussion: one Codex product surface, a shared
+time/account/model/project/chat selection and typed intelligence snapshot, retaining workload,
+accounting, regime and forecast responsibilities internally. This supersedes the previous blanket
+evidence-blocked implementation status; empirical promotion gates still apply.
+The analytical ledger projects existing canonical increments and source-qualified observations;
+it does not replace ingestion, merge provider quantities or rewrite source history. Current runtime
+forecasts remain owned by the existing telemetry/intelligence services. Research is explicitly invoked.
+New provider analytics are shadow evidence: immutable captures, historical-period basis points separate
+from task percentages valued against current full allowance, and no automatic training-label promotion.
+The screenshots show provider UI availability, not proof of a reachable app-server or backend contract.
+
+`ICodexIntelligence` is the product query/current/scenario boundary. The Codex page, tray and alerts
+consume its typed snapshot; existing source collection and alert transition state remain the owners.
+The main page has UTC selection, workload/token-category/model/effort/project/chat breakdowns,
+source-qualified quota and reset markers, conditional scenarios, current horizon forecasts,
+retrospective regime overlays and typed provider details. Unsupported filtered quota is withheld,
+not prorated. Advanced explorers remain accessible; full-chat inspection deliberately opens the
+existing native thread view rather than creating a second thread reader.
+
+The old `ForecastingService` reset head is folded into `QuotaPredictionService.BuildResetOutlook`;
+its unused interface and redundant presentation helpers were removed after tracing callers.
+Workload activity/composition heads, accounting candidates and chronological evaluators still have
+live or research consumers and are not dead code. Their policies and promotion thresholds remain intact.
+New persisted forecast diagnostics include component/input/output identity and the selected numeric
+calculation (pace output or frozen ridge/cost inputs and weights). This reconstructs that calculation,
+not missing historical training data or predictions created before artifact capture was introduced.
+
+The preceding implementation milestone was delivered, with evidence-dependent promotion unfinished.
 The implemented baseline below is shipped through `4b7faf3`. Do not treat the former priority list
 as seven unimplemented features or keep extending evaluation merely to keep development running.
 The next model/accounting promotions require new compatible evidence. Native negative-state UI
 acceptance remains separately open; automated recovery tests do not close that acceptance item.
-Ordinary collection can continue without an active implementation task.
+Ordinary collection continues. New provider-history collection is an explicit experimental capability
+check, followed by the existing cadence only after all requested reports succeed in this process.
+Failures stop automatic history retries; they do not silently resurrect earlier successful reports.
+
+Consolidation acceptance: shared filters and explicit unsupported scopes; retained advanced tools and
+thread drilldowns; source-qualified timeline, API-reference coverage, forecast/scenario explanations;
+policy/input/result manifest identity; shadow period/task capture and revision/conservation diagnostics;
+retrospective within-cycle residual candidates with time-ablation controls, distinct from production
+promotion; batched regression/build and native UI validation. Unknown ownership never becomes the
+currently signed-in account. A filtered project/model/chat cannot borrow an account-wide quota total.
+Bounded user ownership assertions remain labelled as assertions. TT stays research-only until a runtime
+basis is explicitly selected; a policy manifest is not a promise that missing historical artifacts can
+be reconstructed. No manufactured TT, credit conversion or calibrated regime probability is permitted.
+
+**Observed integration boundaries:** the live seven-day ledger read and frozen cost analysis succeed;
+the latest audit inspected 5,987 canonical increments, 10,336 quota observations and 130 cost-score
+rows, with no supported retrospective boundary candidate. This is a dated sample, not proof of
+unchanging accounting. The new backend check timed out at its initial `/wham/usage` account bracket,
+before requesting plan/task reports, so their availability remains unverified on this runtime.
+Native accessibility inspection confirmed the primary page loads. Interactive/visual acceptance is
+still open; foreground gameplay was not interrupted for UI automation.
+Automated validation: 540 Core tests passed; the evaluation CLI and Windows app build passed with
+zero warnings/errors. The app build dogfooded/restarted `20260920T153704243Z-e90aefc2`, preserving
+the existing data directory and current/previous/one-backup deployment policy.
 
 **Evidence-visibility progress:** Model Lab and cost CLI now expose dataset-local token-weighted
 model/effort coverage, category mismatch/invalid counts, unknown/after-event collection times,
@@ -1249,7 +1300,7 @@ and 639 ms for the larger historical weekly cohort, excluding database loading.
 
 The current production baseline is deliberately simple:
 
-- `ForecastingService` isolates the active source/reset epoch and retains EWMA as the incumbent until comparable matured outcomes support another candidate. Model selection is chronological; empirical uncertainty requires sufficient prior reset generations. Outputs are conditional projections or explicit learning states, not heuristic confidence probabilities.
+- `QuotaPredictionService.BuildResetOutlook` isolates the active source/reset epoch and retains EWMA as the incumbent until comparable matured outcomes support another candidate. Model selection is chronological; empirical uncertainty requires sufficient prior reset generations. Outputs are conditional projections or explicit learning states, not heuristic confidence probabilities.
 - Flat quantized histories produce `IdleWithinMeterPrecision` rather than a confident zero-burn forecast.
 - `SqliteIntelligenceService.BuildAndPersistCurrentForecastsAsync` owns current forecast generation, requires a fresh provider-authoritative anchor, excludes history newer than it, persists the exact forecast shown to the app, and prevents stale/non-authoritative lanes from borrowing a competing forecast.
 - `ScenarioPlannerService` uses non-overlapping, source-isolated authoritative intervals (including unchanged meters), with reconstructed workload evidence bounded at interval start. It compares an elapsed-time baseline with account-local ridge on matured chronological outcomes. Recent token-active session counts are not simultaneous compute or agent-hours. Exact requested model/effort cohorts require support; unsupported intensity scaling and extrapolation return unavailable. Uncertainty requires eight comparable held-out reset generations, never training residuals or heuristic confidence percentages. Reconstruction is not proof the app had collected those inputs at the historical origin.

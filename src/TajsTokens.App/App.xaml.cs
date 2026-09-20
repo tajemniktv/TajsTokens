@@ -149,11 +149,12 @@ public partial class App : Application
     {
         _dispatcher?.TryEnqueue(() =>
         {
-            _trayService.UpdateStatus(BuildTrayStatus(snapshot));
+            var intelligence = Services.CodexIntelligence.Current;
+            _trayService.UpdateStatus(TajsTokens.Core.Services.SystemTrayStatusPresenter.Build(intelligence));
 
             // Advance alert state even while notifications are muted. Otherwise re-enabling them can
             // replay stale threshold/provider transitions that happened while the user opted out.
-            var alerts = Services.AlertEngine.Evaluate(snapshot);
+            var alerts = Services.AlertEngine.Evaluate(intelligence);
             if (!Services.Settings.NotificationsEnabled)
             {
                 return;
@@ -341,6 +342,4 @@ public partial class App : Application
         Exit();
     }
 
-    private static SystemTrayStatus BuildTrayStatus(TelemetrySnapshot snapshot) =>
-        TajsTokens.Core.Services.SystemTrayStatusPresenter.Build(snapshot);
 }

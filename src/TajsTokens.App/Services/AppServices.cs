@@ -65,6 +65,8 @@ public sealed class AppServices
             Repository,
             CodexObservatory,
             Intelligence, ServerEvidence);
+        CodexIntelligence = new CodexIntelligenceEngine(DatabasePath, Intelligence, () => Telemetry.Latest,
+            () => Settings.RolloutAccountAssociations);
         AlertEngine = new QuotaAlertEngine(Settings.LowQuotaThresholds);
     }
 
@@ -92,6 +94,7 @@ public sealed class AppServices
     public ICodexObservatoryService CodexObservatory { get; }
     public ICodexRolloutInspection CodexRolloutInspection { get; }
     public IIntelligenceService Intelligence { get; }
+    public ICodexIntelligence CodexIntelligence { get; }
     public async Task<RolloutAccountAssociation[]> PrepareRolloutAccountAssociationsAsync(string accountKey,
         CancellationToken cancellationToken)
     {

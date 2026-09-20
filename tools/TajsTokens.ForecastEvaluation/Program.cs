@@ -227,7 +227,7 @@ if (args.Length == 2 && args[0] is "--evaluate" or "--quota")
     {
         var productionRows = stream.OrderBy(x => x.CapturedAtUtc).ToArray();
         var timer = System.Diagnostics.Stopwatch.StartNew();
-        var forecast = new ForecastingService().BuildForecast(productionRows, productionRows[^1].CapturedAtUtc);
+        var forecast = QuotaPredictionService.BuildResetOutlook(productionRows, productionRows[^1].CapturedAtUtc);
         var predictions = QuotaPredictionService.Predict(data with { Quota = productionRows }, productionRows[^1], productionRows[^1].CapturedAtUtc);
         Console.WriteLine($"Production {stream.Key.Kind} {(stream.Key.AccountKey is null ? "unknown" : $"cohort-{accounts.IndexOf(stream.Key.AccountKey) + 1}")}: {forecast.State}; model={forecast.Evidence?.Model}; calibration={forecast.Evidence?.CalibrationEpochs}; elapsed_ms={timer.ElapsedMilliseconds}");
         foreach (var prediction in predictions)

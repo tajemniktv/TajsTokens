@@ -16,6 +16,7 @@ public sealed class CodexServerEvidenceService(string databasePath, SqliteTeleme
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private DateTimeOffset _nextAttempt;
+    private bool _historicalAvailable;
     public string Status { get; private set; } = "Server evidence has not been collected in this process.";
 
     public async Task CollectAsync(bool force, CancellationToken token)
@@ -33,12 +34,35 @@ public sealed class CodexServerEvidenceService(string databasePath, SqliteTeleme
             await repository.SaveServerEvidenceAsync(collection, token);
             if (backendProvider is not null)
                 await repository.SaveServerEvidenceAsync(await backendProvider.CollectAsync([], token), token);
+            if (_historicalAvailable && backendProvider is CodexBackendDailyEvidenceProvider historical)
+            {
+                var history = await historical.CollectHistoricalAsync(threads, token);
+                await repository.SaveServerEvidenceAsync(history, token);
+                _historicalAvailable = history.Observations.Count > 0 && history.Observations.All(x => x.State is ServerEvidenceState.Available or ServerEvidenceState.Empty);
+            }
             Status = $"Last server-evidence fetch {DateTimeOffset.Now:g}; {collection.Observations.Count} surface/thread results retained.";
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
         catch (Exception e) when (e is not OutOfMemoryException)
         {
             Status = "Server-evidence collection/storage failed; prior observations remain historical, not fresh. See capability results and retry.";
+        }
+        finally { _gate.Release(); }
+    }
+
+    /// <summary>Explicit capability check. A denied source is not repeatedly polled in the background.</summary>
+    public async Task CollectHistoricalAsync(CancellationToken token)
+    {
+        await _gate.WaitAsync(token);
+        try
+        {
+            if (backendProvider is not CodexBackendDailyEvidenceProvider provider) return;
+            await repository.InitializeAsync(token);
+            var history = await provider.CollectHistoricalAsync(await SelectThreadsAsync(token), token);
+            await repository.SaveServerEvidenceAsync(history, token);
+            _historicalAvailable = history.Observations.Count > 0 && history.Observations.All(x => x.State is ServerEvidenceState.Available or ServerEvidenceState.Empty);
+            Status = history.Observations.Count == 0 ? "Experimental backend adapter is disabled; no credentials read." :
+                "Historical capability check completed. Successful capabilities can refresh on the existing cadence this process; denied capabilities are not automatically retried.";
         }
         finally { _gate.Release(); }
     }
@@ -203,7 +227,8 @@ public sealed class CodexServerEvidenceService(string databasePath, SqliteTeleme
         }
         history = history.Concat(transient ?? []).OrderByDescending(x => x.CollectedAtUtc).ToList();
         // Correlation is an outcome of an attempt, not part of the request identity.
-        var latest = history.GroupBy(x => (x.Surface, x.ThreadId)).Select(g => g.First()).ToArray();
+        var latest = history.GroupBy(x => (x.Surface, x.ThreadId,
+            BackendAnalytics: x.ClientVersion == CodexHistoricalAnalyticsParser.Contract)).Select(g => g.First()).ToArray();
         var comparisons = new List<CodexServerComparisonRow>();
         async Task<long?> LocalTotal(string predicate, params (string Name, object Value)[] parameters)
         {

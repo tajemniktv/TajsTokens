@@ -52,14 +52,14 @@ public static class ComposedQuotaPolicy
                 training.Any(x => !x.HasCompleteTokenCategories)) return baseline;
             if (workload.ModelShares.Keys.Except(training.SelectMany(x => x.Features.ModelTokenShares.Keys)).Any() ||
                 workload.EffortShares.Keys.Except(training.SelectMany(x => x.Features.EffortTokenShares.Keys)).Any()) return baseline;
-            var fit = QuotaCostEvaluation.FitFrozen(training, selected.CostModel.Replace("asserted-", "", StringComparison.Ordinal), cancellationToken);
-            var predicted = fit(ComposedQuotaEvaluator.Project(training[0], workload));
+            var inference = QuotaCostEvaluation.CaptureFrozenInference(training, selected.CostModel.Replace("asserted-", "", StringComparison.Ordinal),
+                ComposedQuotaEvaluator.Project(training[0], workload), anchor.RemainingPercent!.Value, cancellationToken);
             var calibration = CalibrateUncertainty(liveEvidence.Trials, anchor.CapturedAtUtc);
             if (calibration.Radius is not { } radius) return baseline;
-            var remaining = Math.Clamp(anchor.RemainingPercent!.Value - predicted, 0, anchor.RemainingPercent.Value);
+            var remaining = inference.Reconstruct();
             return baseline with
             {
-                RemainingPercent = remaining, ExpectedUsagePercent = anchor.RemainingPercent.Value - remaining,
+                RemainingPercent = remaining, ExpectedUsagePercent = anchor.RemainingPercent.Value - remaining, Inference = inference,
                 Model = ComposedQuotaEvaluator.Version + "/" + selected.CostModel, UsesWorkload = true,
                 TrainingSamples = training.Length, ValidationSamples = selected.HeldOutIntervals,
                 ValidationMeanAbsoluteError = selected.DisplayedDeltaMae,

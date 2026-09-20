@@ -163,6 +163,15 @@ public static class QuotaCostEvaluation
         return fit.Weights.Select((weight, i) => weight / fit.Scales[i] / 1e6).ToArray();
     }
 
+    internal static CodexNumericInference CaptureFrozenInference(IReadOnlyList<QuotaCostObservation> training,
+        string candidate, QuotaCostObservation projected, double remaining, CancellationToken token)
+    {
+        var vector = new CostVector(training, candidate);
+        var fit = IntervalRidge.Fit(training.Select(vector.Values).ToArray(), training, token);
+        return new("remaining=anchor-frozen-cost/v1:" + candidate, remaining, vector.Values(projected),
+            fit.Weights.Select((w, i) => -w / fit.Scales[i]).ToArray(), 0, remaining);
+    }
+
     private static IReadOnlyList<DateTimeOffset> DetectShifts(IReadOnlyList<IReadOnlyList<QuotaCostTrial>> epochs)
     {
         // Freeze the reference after three held-out generations; require two later generations

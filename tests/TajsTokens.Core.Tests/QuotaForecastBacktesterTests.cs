@@ -14,7 +14,7 @@ public sealed class QuotaForecastBacktesterTests
         var steady = Enumerable.Range(0, 49).Select(i => Point(i / 12d, 10 + i)).ToArray();
         var jitter = steady.Select((row, i) => row with { ResetsAtUtc = row.ResetsAtUtc!.Value.AddSeconds(i % 2) }).ToArray();
         Assert.Single(QuotaForecastBacktester.SplitEpochs(jitter));
-        var forecast = new ForecastingService().BuildForecast(jitter, jitter[^1].CapturedAtUtc);
+        var forecast = QuotaPredictionService.BuildResetOutlook(jitter, jitter[^1].CapturedAtUtc);
         Assert.NotEqual(ForecastState.Learning, forecast.State);
         Assert.Equal(49, forecast.Evidence!.ObservationCount);
         Assert.Equal(4, forecast.Evidence.ObservedHours);
@@ -68,7 +68,7 @@ public sealed class QuotaForecastBacktesterTests
         var epochs = QuotaForecastBacktester.SplitEpochs(rows);
         Assert.Equal(2, epochs.Count);
         Assert.Equal(10, QuotaPaceModels.Estimate(epochs[1], "epoch"));
-        var forecast = new ForecastingService().BuildForecast(rows, Start.AddHours(3));
+        var forecast = QuotaPredictionService.BuildResetOutlook(rows, Start.AddHours(3));
         Assert.Equal(10, forecast.BurnRatePercentPerHour);
     }
 
@@ -110,7 +110,7 @@ public sealed class QuotaForecastBacktesterTests
     [Fact]
     public void DifferentSourcesNeverSupplyCurrentSlope()
     {
-        var forecast = new ForecastingService().BuildForecast([Point(0, 10) with { Source = "embedded" }, Point(1, 50)], Start.AddHours(1));
+        var forecast = QuotaPredictionService.BuildResetOutlook([Point(0, 10) with { Source = "embedded" }, Point(1, 50)], Start.AddHours(1));
         Assert.Null(forecast.BurnRatePercentPerHour);
         Assert.Null(forecast.ProjectedRemainingAtResetPercent);
     }

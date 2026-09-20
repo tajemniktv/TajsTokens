@@ -50,7 +50,7 @@ public sealed partial class MainWindow : Window
             _saveWindowTimer.Stop();
             _saveWindowTimer.Start();
         };
-        Navigate(typeof(OverviewPage));
+        Navigate(typeof(CodexIntelligencePage));
     }
 
     private void SaveWindowSize()
@@ -88,7 +88,8 @@ public sealed partial class MainWindow : Window
         {
             ContentFrame.Tag = e.Parameter;
             AppNavigation.IsBackEnabled = ContentFrame.CanGoBack;
-            var tag = e.SourcePageType == typeof(ForecastsPage) && Equals(e.Parameter, "model-lab") ? "model-lab" :
+            var tag = e.SourcePageType == typeof(CodexIntelligencePage) ? "codex-intelligence" :
+                e.SourcePageType == typeof(ForecastsPage) && Equals(e.Parameter, "model-lab") ? "model-lab" :
                 e.SourcePageType == typeof(ForecastsPage) ? "forecasts" :
                 e.SourcePageType == typeof(OverviewPage) ? "overview" : e.SourcePageType == typeof(CodexPage) ? "codex" :
                 e.SourcePageType == typeof(AnalyticsPage) ? "analytics" : e.SourcePageType == typeof(DiagnosticsPage) ? "diagnostics" :
@@ -119,6 +120,7 @@ public sealed partial class MainWindow : Window
 
         var pageType = page switch
         {
+            "codex-intelligence" => typeof(CodexIntelligencePage),
             "overview" => typeof(OverviewPage),
             "codex-cli" => typeof(CodexCliHarnessPage),
             "codex" => typeof(CodexPage),

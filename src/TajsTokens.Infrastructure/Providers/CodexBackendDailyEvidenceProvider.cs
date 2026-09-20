@@ -44,12 +44,25 @@ public sealed class CodexBackendDailyEvidenceProvider : ICodexServerEvidenceProv
     }
 
     /// <summary>Explicit bounded research range; dates are sent verbatim, without assuming endpoint inclusivity.</summary>
-    public async Task<CodexServerCollection> CollectRangeAsync(DateOnly startDate, DateOnly endDate,
+    public Task<CodexServerCollection> CollectRangeAsync(DateOnly startDate, DateOnly endDate,
         CancellationToken cancellationToken)
     {
         if (endDate < startDate || endDate.DayNumber - startDate.DayNumber > 30 ||
             endDate > DateOnly.FromDateTime(DateTime.UtcNow))
             throw new ArgumentOutOfRangeException(nameof(endDate), "Range must be ordered, at most 30 days apart, and not future-dated.");
+        return CollectCoreAsync(startDate, endDate, null, cancellationToken);
+    }
+
+    public Task<CodexServerCollection> CollectHistoricalAsync(IReadOnlyList<string> threadIds, CancellationToken token)
+    {
+        if (threadIds.Count > 100 || threadIds.Any(x => !Guid.TryParse(x, out _)) || threadIds.Distinct().Count() != threadIds.Count)
+            throw new ArgumentException("At most 100 distinct native thread IDs are supported.", nameof(threadIds));
+        return CollectCoreAsync(default, default, threadIds, token);
+    }
+
+    private async Task<CodexServerCollection> CollectCoreAsync(DateOnly startDate, DateOnly endDate,
+        IReadOnlyList<string>? threads, CancellationToken cancellationToken)
+    {
         if (!_enabled()) return new([]);
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(TimeSpan.FromSeconds(90));
@@ -58,8 +71,14 @@ public sealed class CodexBackendDailyEvidenceProvider : ICodexServerEvidenceProv
         var start = startDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
         var end = endDate.ToString("yyyy-MM-dd", System.Globalization.CultureInfo.InvariantCulture);
         var query = $"?start_date={start}&end_date={end}&group_by=day";
-        var routes = new[] { "wham/analytics/daily-workspace-usage-counts", "wham/usage/daily-token-usage-breakdown" };
-        var rows = routes.Select((_, index) => New(index == 1, started)).ToArray();
+        var routes = threads is null ? new[] { "wham/analytics/daily-workspace-usage-counts", "wham/usage/daily-token-usage-breakdown" }
+            : threads.Count == 0 ? ["wham/usage/plan_limit_history?days=7"]
+            : new[] { "wham/usage/plan_limit_history?days=7", "wham/usage/thread_usage/query_v2" };
+        var rows = routes.Select((_, index) => threads is null ? New(index == 1, started) :
+            new CodexServerObservation(Guid.NewGuid().ToString("N"), index == 0 ? CodexServerSurface.PlanHistory : CodexServerSurface.TaskUsage,
+                null, started, started, CodexServerEvidenceParser.Contract, CodexHistoricalAnalyticsParser.Contract,
+                ServerEvidenceState.Unavailable, "Not collected.")).ToArray();
+        var stage = "reading Codex credentials";
         try
         {
             using var auth = JsonDocument.Parse(await _readAuth(token));
@@ -67,18 +86,37 @@ public sealed class CodexBackendDailyEvidenceProvider : ICodexServerEvidenceProv
             var bearer = credentials.GetProperty("access_token").GetString();
             var account = credentials.GetProperty("account_id").GetString();
             if (string.IsNullOrWhiteSpace(bearer) || string.IsNullOrWhiteSpace(account)) throw new InvalidDataException();
+            stage = "verifying initial backend account bracket";
             var before = await ReadIdentityAsync(bearer, account, token);
             if (before.Account != account) return Failure(rows, ServerEvidenceState.Conflict, "Backend account does not match selected Codex credentials.");
             for (var i = 0; i < routes.Length; i++)
             {
                 var fetch = DateTimeOffset.UtcNow;
+                stage = "reading bounded report " + rows[i].Surface;
                 try
                 {
-                    var json = await GetAsync(routes[i] + query + (i == 0 ? "&workspace_user=true" : ""), bearer, account, token);
-                    var report = CodexDailyReportParser.Parse(json, i == 1, routes[i], start, end);
-                    rows[i] = rows[i] with { FetchStartedAtUtc = fetch, CollectedAtUtc = DateTimeOffset.UtcNow,
-                        State = report.Days.Count == 0 ? ServerEvidenceState.Empty : ServerEvidenceState.Available,
-                        Detail = "Experimental backend daily snapshot; not live quota or billing-cycle consumption.", DailyReport = report };
+                    var body = threads is not null && i == 1 ? JsonSerializer.Serialize(new { threads = threads.Select(id =>
+                        new { thread_id = id, created_at = (string?)null, descendant_thread_ids = Array.Empty<string>() }) }) : null;
+                    var json = await SendAsync(routes[i] + (threads is null ? query + (i == 0 ? "&workspace_user=true" : "") : ""), bearer, account, token, body);
+                    if (threads is null)
+                    {
+                        var report = CodexDailyReportParser.Parse(json, i == 1, routes[i], start, end);
+                        rows[i] = rows[i] with { State = report.Days.Count == 0 ? ServerEvidenceState.Empty : ServerEvidenceState.Available,
+                            Detail = "Experimental backend daily snapshot; not live quota or billing-cycle consumption.", DailyReport = report };
+                    }
+                    else if (i == 0)
+                    {
+                        var report = CodexHistoricalAnalyticsParser.ParsePlan(json);
+                        rows[i] = rows[i] with { State = report.Periods.Count == 0 ? ServerEvidenceState.Empty : ServerEvidenceState.Available,
+                            Detail = "Shadow historical allowance report; basis points refer to each historical period. No production calibration.", PlanHistory = report };
+                    }
+                    else
+                    {
+                        var report = CodexHistoricalAnalyticsParser.ParseTasks(json, threads);
+                        rows[i] = rows[i] with { State = report.Threads.Count == 0 ? ServerEvidenceState.Empty : ServerEvidenceState.Available,
+                            Detail = "Shadow task report valued against current full allowance, not historical period shares. Descendant coverage is not assumed; task rows are not summed.", TaskUsage = report };
+                    }
+                    rows[i] = rows[i] with { FetchStartedAtUtc = fetch, CollectedAtUtc = DateTimeOffset.UtcNow };
                 }
                 catch (HttpRequestException e)
                 {
@@ -87,16 +125,18 @@ public sealed class CodexBackendDailyEvidenceProvider : ICodexServerEvidenceProv
                         Detail = e.StatusCode is null ? "Backend transport failed." : $"Backend HTTP {(int)e.StatusCode}." };
                     if (e.StatusCode == HttpStatusCode.Unauthorized) return Failure(rows, ServerEvidenceState.AuthenticationRequired, "Codex sign-in required; no automatic auth refresh attempted.");
                 }
-                catch (Exception e) when (e is JsonException or InvalidOperationException or KeyNotFoundException or InvalidDataException)
+                catch (Exception e) when (e is JsonException or InvalidOperationException or KeyNotFoundException or InvalidDataException or FormatException or OverflowException)
                 {
                     rows[i] = rows[i] with { FetchStartedAtUtc = fetch, CollectedAtUtc = DateTimeOffset.UtcNow,
-                        State = ServerEvidenceState.Invalid, Detail = "Daily report failed bounded schema validation." };
+                        State = ServerEvidenceState.Invalid, Detail = "Backend report failed bounded schema validation." };
                 }
             }
+            stage = "verifying final backend account bracket";
             var after = await ReadIdentityAsync(bearer, account, token);
             if (after.Account != account) return Failure(rows, ServerEvidenceState.Conflict, "Backend account changed across collection; reports discarded.");
             // Backend brackets use the captured bearer. Also detect a different local account
             // selected during the fetch; two successful old-account replies cannot detect that race.
+            stage = "rechecking locally selected account";
             using var selectedAfter = JsonDocument.Parse(await _readAuth(token));
             if (selectedAfter.RootElement.GetProperty("tokens").GetProperty("account_id").GetString() != account)
                 return Failure(rows, ServerEvidenceState.Conflict, "Selected Codex account changed during collection; reports discarded.");
@@ -113,7 +153,7 @@ public sealed class CodexBackendDailyEvidenceProvider : ICodexServerEvidenceProv
         catch (Exception e) when (e is not OutOfMemoryException)
         {
             return Failure(rows, e is FileNotFoundException or DirectoryNotFoundException ? ServerEvidenceState.AuthenticationRequired : ServerEvidenceState.Error,
-                "Backend collection could not verify credentials/account or complete within bounds; no raw error retained.");
+                $"Backend collection failed while {stage}: {(e is OperationCanceledException ? "timeout" : e is HttpRequestException ? "transport failure" : e is FileNotFoundException or DirectoryNotFoundException ? "credentials missing" : "unavailable or invalid data")}. Reports discarded; no raw error retained.");
         }
     }
 
@@ -122,7 +162,8 @@ public sealed class CodexBackendDailyEvidenceProvider : ICodexServerEvidenceProv
         started, started, CodexServerEvidenceParser.Contract, CodexDailyReportParser.Contract, ServerEvidenceState.Unavailable, "Not collected.");
 
     private static CodexServerCollection Failure(IEnumerable<CodexServerObservation> rows, ServerEvidenceState state, string detail) =>
-        new(rows.Select(row => row with { State = state, Detail = detail, CollectedAtUtc = DateTimeOffset.UtcNow, DailyReport = null }).ToArray());
+        new(rows.Select(row => row with { State = state, Detail = detail, CollectedAtUtc = DateTimeOffset.UtcNow,
+            DailyReport = null, PlanHistory = null, TaskUsage = null }).ToArray());
 
     private async Task<(string? Account, string? Plan, string Policy, DateTimeOffset At)> ReadIdentityAsync(string bearer, string account, CancellationToken token)
     {
@@ -142,9 +183,13 @@ public sealed class CodexBackendDailyEvidenceProvider : ICodexServerEvidenceProv
         return (CodexDailyReportParser.Text(root, "account_id"), plan, $"{plan}|{string.Join('|', windows)}", DateTimeOffset.UtcNow);
     }
 
-    private async Task<string> GetAsync(string route, string bearer, string account, CancellationToken token)
+    private Task<string> GetAsync(string route, string bearer, string account, CancellationToken token) =>
+        SendAsync(route, bearer, account, token);
+
+    private async Task<string> SendAsync(string route, string bearer, string account, CancellationToken token, string? body = null)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Get, "https://chatgpt.com/backend-api/" + route);
+        using var request = new HttpRequestMessage(body is null ? HttpMethod.Get : HttpMethod.Post, "https://chatgpt.com/backend-api/" + route);
+        if (body is not null) request.Content = new StringContent(body, Encoding.UTF8, "application/json");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearer);
         request.Headers.Add("ChatGPT-Account-ID", account);
         request.Headers.Add("originator", "codex_cli_rs");

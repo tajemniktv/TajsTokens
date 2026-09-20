@@ -8,6 +8,17 @@ modeling rationale, including the superseded local roadmap.
 
 ## Findings at a glance
 
+**2026-09-20 integration follow-up:** The consolidated Codex intelligence layer now accepts typed
+plan-history and task-v2 captures through the explicitly enabled, read-only backend adapter. Contracts
+were corroborated against local Codex source `7498521d288b9b3b96ffba4eedf089d8d6e06a84`
+(not asserted to match installed Desktop). Historical basis points, current-allowance task percentages,
+daily range-relative percentages and balance credits remain separate. Captures are immutable shadow
+evidence, with revisions, partition checks and exact thread joins; no new production training labels.
+The live recheck timed out on the initial `/wham/usage` account bracket, before either new report
+could be requested, and yielded no period/task payload.
+That is not evidence of zero usage, a nonexistent route, or a permanently unavailable capability.
+The primary product surface and remaining acceptance boundaries are in PROJECT.md, not another roadmap.
+
 - Personal daily counts and relative reports are available through the implemented explicit
   opt-in backend adapter. Sampled native daily credits were zero despite nonzero tokens:
   no usable credit-to-allowance scale has been established on this account.
@@ -23,7 +34,7 @@ modeling rationale, including the superseded local roadmap.
 
 The [archived investigation record](../archive/CODEX_EVIDENCE_REPO_REVIEW_2026-09-19.md)
 preserves all original 31 sections, source details, probe outcomes, tests and dated deployments.
-It is historical evidence, not a second roadmap. This consolidation did not refresh upstream
+It is historical evidence, not a second roadmap. The original 2026-09-19 consolidation did not refresh upstream
 repositories, probe endpoints or rerun models. Version-sensitive claims remain limited to the
 recorded pins and installed snapshots.
 

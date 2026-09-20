@@ -30,6 +30,8 @@ public sealed class QuotaAlertEngine
         return alerts;
     }
 
+    public IReadOnlyList<AlertNotification> Evaluate(CodexIntelligenceSnapshot current) => Evaluate(current.RuntimeEvidence);
+
     private void EvaluateQuotaAlerts(TelemetrySnapshot current, ICollection<AlertNotification> alerts)
     {
         foreach (var quota in current.QuotaSnapshots.Where(snapshot =>

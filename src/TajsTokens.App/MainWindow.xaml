@@ -20,12 +20,13 @@
                         IsPaneOpen="True"
                         SelectionChanged="OnNavigationSelectionChanged">
             <NavigationView.MenuItems>
-                <NavigationViewItem Content="Overview" Tag="overview" Icon="View" IsSelected="True" />
-                <NavigationViewItem Content="Codex" Tag="codex" Icon="People" />
-                <NavigationViewItem Content="Forecasts" Tag="forecasts" Icon="Preview" />
-                <NavigationViewItem Content="Quota history" Tag="analytics" Icon="Document" />
+                <NavigationViewItem Content="Codex" Tag="codex-intelligence" Icon="View" IsSelected="True" />
                 <NavigationViewItem Content="Advanced" Icon="Repair" SelectsOnInvoked="False">
                     <NavigationViewItem.MenuItems>
+                        <NavigationViewItem Content="Chats and agents" Tag="codex" />
+                        <NavigationViewItem Content="Workload planner" Tag="forecasts" />
+                        <NavigationViewItem Content="Quota history details" Tag="analytics" />
+                        <NavigationViewItem Content="Collector overview" Tag="overview" />
                         <NavigationViewItem Content="Diagnostics" Tag="diagnostics" />
                         <NavigationViewItem Content="Model lab" Tag="model-lab" />
                         <NavigationViewItem Content="Rollout coverage" Tag="coverage" />

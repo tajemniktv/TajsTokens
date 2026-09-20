@@ -5,6 +5,7 @@ namespace TajsTokens.Core.Services;
 
 public static class SystemTrayStatusPresenter
 {
+    public static SystemTrayStatus Build(CodexIntelligenceSnapshot snapshot) => Build(snapshot.RuntimeEvidence);
     public static SystemTrayStatus Build(TelemetrySnapshot snapshot)
     {
         var fiveHour = LatestQuota(snapshot, QuotaWindowKind.FiveHour);

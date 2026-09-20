@@ -67,12 +67,23 @@ public sealed partial class CodexPage : Page
     }
 
     private App App => (App)Application.Current;
+    private string? _requestedThread;
+    protected override void OnNavigatedTo(Microsoft.UI.Xaml.Navigation.NavigationEventArgs e)
+    {
+        base.OnNavigatedTo(e);
+        _requestedThread = e.Parameter as string;
+    }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         _loaded = true;
         ReplaceCancellation();
         await LoadAsync(_cancellation!.Token, Interlocked.Increment(ref _loadGeneration));
+        if (_loaded && _requestedThread is { } thread)
+        {
+            _requestedThread = null;
+            await LoadThreadAsync(thread);
+        }
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)

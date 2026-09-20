@@ -184,6 +184,25 @@ dotnet run --project src/TajsTokens.App/TajsTokens.App.csproj -p:DogfoodEnabled=
 ```
 ## Provider-native evidence diagnostics
 
+The primary Codex screen, tray and alerts consume `ICodexIntelligence` / `CodexIntelligenceSnapshot`; existing
+collectors and forecast generation remain authoritative. The ledger is a bounded read projection,
+not a new durable accounting store. Its manifest includes selection and input/result fingerprints;
+it does not claim absent historical artifacts can be recreated from a hash.
+New saved forecast evidence carries the selected numeric calculation and its component manifest.
+The reset-outlook head now lives in `QuotaPredictionService.ResetOutlook.cs`, alongside the
+short-horizon owner rather than in a separate `ForecastingService`. Backtests and research candidates
+remain active consumers, not obsolete implementations. No database schema migration is needed for
+these optional typed JSON diagnostics; old captures remain readable with absent artifacts.
+
+With the experimental backend adapter enabled, **Check historical analytics capability** performs
+a bounded, account-bracketed plan-history/task-v2 request. Credentials remain read-only, with no
+OAuth refresh or silent app-server fallback. If all requested historical surfaces succeed, the
+existing 30-minute evidence cadence refreshes them for this process; any failed surface stops
+automatic historical retries until another explicit check. Restart requires a new capability check.
+Reports are immutable shadow evidence. Historical basis points, current-allowance task percentages,
+daily range-relative percentages and balance credits are distinct. No new report trains production
+models. Retrospective regime analysis uses frozen held-out trials and retains live promotion gates.
+
 `dotnet run --project tools/TajsTokens.ForecastEvaluation -- --tt <telemetry.db>`
 reconstructs the experimental TT basis and scalar-cost comparison from 30 days of owned evidence.
 It prints exact basis semantics, weights, reference basket, supported model/effort dimensions,

@@ -1,0 +1,77 @@
+<Page x:Class="TajsTokens.App.Pages.CodexIntelligencePage"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+ <Grid Padding="24" RowSpacing="12">
+  <Grid.RowDefinitions><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="*"/></Grid.RowDefinitions>
+  <StackPanel Spacing="6">
+   <TextBlock Text="Codex" Style="{StaticResource PageTitleStyle}"/>
+   <TextBlock Text="What happened, what your quota reports, and what happens next." TextWrapping="Wrap"/>
+   <TextBlock x:Name="StatusText" TextWrapping="Wrap"/>
+  </StackPanel>
+  <Expander Grid.Row="1" Header="Shared selection · UTC dates, end date exclusive" HorizontalContentAlignment="Stretch">
+   <StackPanel Spacing="8">
+    <StackPanel Orientation="Horizontal" Spacing="8">
+     <CalendarDatePicker x:Name="FromDate" Header="From (UTC)"/>
+     <CalendarDatePicker x:Name="ToDate" Header="Until (UTC)"/>
+     <Button Content="Apply" Click="OnApply" VerticalAlignment="Bottom"/>
+    </StackPanel>
+    <ComboBox x:Name="Account" Header="Account scope" HorizontalAlignment="Stretch"/>
+    <TextBox x:Name="Model" Header="Exact model (blank = all)" PlaceholderText="All models"/>
+    <TextBox x:Name="Project" Header="Exact project path (blank = all)" PlaceholderText="All projects"/>
+    <TextBox x:Name="Thread" Header="Chat ID (blank = all)" PlaceholderText="All chats"/>
+   </StackPanel>
+  </Expander>
+  <ScrollViewer Grid.Row="2" HorizontalScrollBarVisibility="Disabled">
+   <StackPanel Spacing="16">
+    <TextBlock x:Name="SummaryText" FontSize="22" TextWrapping="Wrap"/>
+    <TextBlock x:Name="CurrentText" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
+    <TextBlock Text="Usage and quota timeline" FontSize="20"/>
+    <TextBlock Text="UTC workload buckets and source-qualified quota observations. These are separate quantities, not additive usage." TextWrapping="Wrap"/>
+    <Canvas x:Name="Timeline" Height="180" SizeChanged="OnTimelineSizeChanged"/>
+    <TextBlock x:Name="TimelineLegend" TextWrapping="Wrap"/>
+    <Expander Header="Timeline values and quota lanes" HorizontalContentAlignment="Stretch">
+     <TextBlock x:Name="TimelineText" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
+    </Expander>
+    <TextBlock Text="Breakdown and chats" FontSize="20"/>
+    <ComboBox x:Name="Dimension" SelectedIndex="0" SelectionChanged="OnDimensionChanged">
+     <x:String>Model</x:String><x:String>Effort</x:String><x:String>Token type</x:String><x:String>Project</x:String><x:String>Chat</x:String>
+    </ComboBox>
+    <ListView x:Name="Groups" MaxHeight="400">
+     <ListView.ItemTemplate><DataTemplate><StackPanel Padding="4" Spacing="3">
+      <TextBlock Text="{Binding Label}" TextWrapping="Wrap"/><TextBlock Text="{Binding Detail}" Opacity="0.7"/>
+     </StackPanel></DataTemplate></ListView.ItemTemplate>
+    </ListView>
+    <StackPanel Orientation="Horizontal" Spacing="8">
+     <Button Content="Filter to selected row" Click="OnFilterGroup"/>
+     <Button Content="Inspect chats and agents" Click="OnBrowse"/>
+    </StackPanel>
+    <TextBlock Text="Forecast and accounting" FontSize="20"/>
+    <TextBlock x:Name="ForecastText" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
+    <Expander Header="Plan hypothetical work" HorizontalContentAlignment="Stretch">
+     <StackPanel Spacing="8">
+      <TextBlock Text="Uses this selection's account, model and history start. Project/chat attribution is unavailable. Duration is your assumption, not an activity prediction." TextWrapping="Wrap"/>
+      <NumberBox x:Name="PlanHours" Header="Duration (hours)" Value="0.5" Minimum="0.05" Maximum="24"/>
+      <NumberBox x:Name="PlanRoots" Header="Root agents" Value="1" Minimum="1" Maximum="32"/>
+      <NumberBox x:Name="PlanChildren" Header="Subagents" Value="0" Minimum="0" Maximum="100"/>
+      <Button Content="Estimate scenario" Click="OnSimulate"/>
+      <TextBlock x:Name="ScenarioText" TextWrapping="Wrap"/>
+     </StackPanel>
+    </Expander>
+    <Button x:Name="AnalyzeButton" Content="Analyze accounting and historical regimes" Click="OnAnalyze" HorizontalAlignment="Left"/>
+    <TextBlock x:Name="AccountingText" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
+    <TextBlock Text="Provider evidence · shadow accounting" FontSize="20"/>
+    <Button Content="Check historical analytics capability" Click="OnCollectHistorical" HorizontalAlignment="Left"/>
+    <Expander Header="Source capabilities and capture details" HorizontalContentAlignment="Stretch">
+     <TextBlock x:Name="ProviderText" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
+    </Expander>
+    <TextBlock x:Name="PeriodsText" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
+    <Expander Header="Evidence health and provenance" HorizontalContentAlignment="Stretch">
+     <TextBlock x:Name="EvidenceText" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
+    </Expander>
+    <Expander Header="Inference manifest" HorizontalContentAlignment="Stretch">
+     <TextBlock x:Name="ManifestText" FontFamily="Consolas" TextWrapping="Wrap" IsTextSelectionEnabled="True"/>
+    </Expander>
+   </StackPanel>
+  </ScrollViewer>
+ </Grid>
+</Page>

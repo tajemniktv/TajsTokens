@@ -98,26 +98,55 @@ public sealed class CodexBackendDailyEvidenceProviderTests
         var provider = new CodexBackendDailyEvidenceProvider(() => false, client,
             _ => throw new InvalidOperationException("Credentials must not be read"));
         Assert.Empty((await provider.CollectAsync([], default)).Observations);
+        Assert.Empty((await provider.CollectHistoricalAsync([], default)).Observations);
         Assert.Equal(0, handler.Calls);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task HistoricalReportsUseFixedReadRoutesAndDiscardOnAccountSwitch(bool change)
+    {
+        var reads = 0;
+        var thread = Guid.NewGuid().ToString();
+        using var handler = new Responses([Identity, """{"periods":[]}""", """{"threads":[]}""", Identity]);
+        using var client = new HttpClient(handler);
+        var provider = new CodexBackendDailyEvidenceProvider(() => true, client,
+            _ => Task.FromResult(Auth(++reads > 1 && change ? "other" : "test-account")));
+        var result = await provider.CollectHistoricalAsync([thread], default);
+        Assert.Equal(4, handler.Calls);
+        Assert.All(result.Observations, x => Assert.Equal(change ? ServerEvidenceState.Conflict : ServerEvidenceState.Empty, x.State));
+        Assert.Equal(change, result.Observations[0].PlanHistory is null);
+        Assert.Equal(change, result.Observations[1].TaskUsage is null);
+        Assert.DoesNotContain("fake-token", JsonSerializer.Serialize(result));
+        Assert.DoesNotContain("test-account", JsonSerializer.Serialize(result));
+        using var body = JsonDocument.Parse(Assert.Single(handler.Bodies));
+        var requested = Assert.Single(body.RootElement.GetProperty("threads").EnumerateArray());
+        Assert.Equal(thread, requested.GetProperty("thread_id").GetString());
+        Assert.Empty(requested.GetProperty("descendant_thread_ids").EnumerateArray());
+        Assert.Equal(JsonValueKind.Null, requested.GetProperty("created_at").ValueKind);
     }
 
     private sealed class Responses(string[] responses, int unauthorizedAt = -1) : HttpMessageHandler
     {
         public int Calls { get; private set; }
         public List<string> Queries { get; } = [];
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        public List<string> Bodies { get; } = [];
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Assert.Equal("https", request.RequestUri!.Scheme);
             Assert.Equal("chatgpt.com", request.RequestUri.Host);
-            Assert.Equal(HttpMethod.Get, request.Method);
+            Assert.Equal(request.RequestUri.AbsolutePath.EndsWith("query_v2") ? HttpMethod.Post : HttpMethod.Get, request.Method);
             Assert.Contains(request.RequestUri.AbsolutePath, new[] { "/backend-api/wham/usage",
-                "/backend-api/wham/analytics/daily-workspace-usage-counts", "/backend-api/wham/usage/daily-token-usage-breakdown" });
+                "/backend-api/wham/analytics/daily-workspace-usage-counts", "/backend-api/wham/usage/daily-token-usage-breakdown",
+                "/backend-api/wham/usage/plan_limit_history", "/backend-api/wham/usage/thread_usage/query_v2" });
             Assert.Equal("Bearer", request.Headers.Authorization!.Scheme);
             Assert.Equal("test-account", Assert.Single(request.Headers.GetValues("ChatGPT-Account-ID")));
             var index = Calls++;
             Queries.Add(request.RequestUri.Query);
-            return Task.FromResult(new HttpResponseMessage(index == unauthorizedAt ? HttpStatusCode.Unauthorized : HttpStatusCode.OK)
-            { Content = new StringContent(responses[index]) });
+            if (request.Content is not null) Bodies.Add(await request.Content.ReadAsStringAsync(cancellationToken));
+            return new HttpResponseMessage(index == unauthorizedAt ? HttpStatusCode.Unauthorized : HttpStatusCode.OK)
+            { Content = new StringContent(responses[index]) };
         }
     }
 }
