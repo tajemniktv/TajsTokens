@@ -1903,8 +1903,13 @@ public sealed class CodexStateDbExplorerService
 
         if (value is string text && IsPathColumn(columnName))
         {
-            string portablePath = text.Replace('\\', '/');
-            return $"<path:{Path.GetFileName(portablePath)}>";
+            // Recognize foreign Windows paths without treating a Unix filename's backslash
+            // as a directory separator, even when this inspection runs on Windows.
+            bool windowsPath = text.StartsWith(@"\\", StringComparison.Ordinal) ||
+                (text.Length >= 3 && char.IsAsciiLetter(text[0]) && text[1] == ':' && text[2] is '\\' or '/') ||
+                (OperatingSystem.IsWindows() && !text.StartsWith('/'));
+            string portablePath = windowsPath ? text.Replace('\\', '/') : text;
+            return $"<path:{portablePath[(portablePath.LastIndexOf('/') + 1)..]}>";
         }
 
         return Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;

@@ -1143,6 +1143,8 @@ are eligible for chronology; a valid root timestamp precedes a nested payload ti
 Missing/malformed time remains unknown. Its token increments still contribute to all-time totals,
 but cannot enter hourly, dated Intelligence, canonical replay, TT, cost or forecast inputs.
 Mixed model aggregates have no single source timestamp; accounting freshness uses capture time.
+Tokscale lifetime model aggregates expose capture time only, not a source event date. Server thread
+selection excludes source dates after their capture or the current selection time while retaining amounts.
 Untimed lifecycle/context/compaction records retain typed evidence without creating dated timeline
 events or updating session/agent chronology.
 

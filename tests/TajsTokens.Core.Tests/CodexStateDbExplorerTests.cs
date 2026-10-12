@@ -362,6 +362,21 @@ public sealed class CodexStateDbExplorerTests
         Assert.DoesNotContain("private prompt", export);
     }
 
+    [Theory]
+    [InlineData(@"C:\Users\tester\rollout.jsonl", "rollout.jsonl")]
+    [InlineData(@"\\server\share\rollout.jsonl", "rollout.jsonl")]
+    [InlineData(@"/home/tester/back\ups/session.json", "session.json")]
+    [InlineData(@"/home/tester/config\file.json", @"config\file.json")]
+    public void SanitizedExport_PreservesBasenamesAcrossPathSyntax(string path, string basename)
+    {
+        var page = new CodexStateRawPage("source", "threads", 0, 50, 1,
+            ["rollout_path"], [new CodexStateRawRow([path], "")]);
+        string export = CodexStateDbExplorerService.BuildSanitizedExport(page);
+        Assert.Contains("<path:" + basename + ">", export);
+        Assert.DoesNotContain("tester", export);
+        Assert.DoesNotContain("server", export);
+    }
+
     [Fact]
     public async Task CombinedSchemaExport_LabelsEachDatabaseWithoutExportingRows()
     {

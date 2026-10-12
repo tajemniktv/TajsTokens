@@ -174,8 +174,14 @@ public sealed class SqliteCodexObservatoryReadModelTests
             Assert.Equal(9L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
 
             SqliteCommand indexCommand = verify.CreateCommand();
-            indexCommand.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_native_tokens_observed_time';";
-            Assert.Equal(1L, (long)(await indexCommand.ExecuteScalarAsync(CancellationToken.None))!);
+            indexCommand.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = $name;";
+            indexCommand.Parameters.AddWithValue("$name", "");
+            foreach (string name in new[] { "idx_native_tokens_observed_time", "idx_native_token_source_time",
+                         "idx_native_token_session_source_time", "idx_context_source_time" })
+            {
+                indexCommand.Parameters["$name"].Value = name;
+                Assert.Equal(1L, (long)(await indexCommand.ExecuteScalarAsync(CancellationToken.None))!);
+            }
         }
         finally
         {

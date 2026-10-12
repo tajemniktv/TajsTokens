@@ -44,6 +44,10 @@ public sealed class ProviderParsingTests
         Assert.Equal(40, usage.Breakdown.NonReasoningOutput);
         Assert.Equal(30, usage.Breakdown.ReasoningOutput);
         Assert.Equal(1100, usage.Breakdown.Total);
+        Assert.Null(usage.ObservedAtUtc);
+        Assert.Null(usage.SourceEventAtUtc);
+        Assert.Equal(CodexSourceTimestampQuality.Missing, usage.SourceTimestampQuality);
+        Assert.Equal(DateTimeOffset.UnixEpoch, usage.CapturedAtUtc);
     }
 
     [Fact]

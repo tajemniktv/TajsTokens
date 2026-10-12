@@ -202,13 +202,16 @@ public sealed class CodexServerEvidenceService(
         string rotation = hasEvidence
             ? "COALESCE((SELECT MAX(e.collected_at_utc) FROM codex_server_evidence e WHERE e.surface='ThreadUsage' AND e.thread_id=n.session_id),'') ASC,"
             : "";
+        DateTimeOffset selectedAtUtc = DateTimeOffset.UtcNow;
         command.CommandText = $"""
                                SELECT n.session_id FROM codex_native_token_events n
                                WHERE n.source_timestamp_quality = 'Valid' AND n.source_event_at_utc >= $from
+                                 AND n.source_event_at_utc <= $to AND n.source_event_at_utc <= n.captured_at_utc
                                GROUP BY n.session_id
                                ORDER BY {rotation} MAX(n.source_event_at_utc) DESC LIMIT 100;
                                """;
-        command.Parameters.AddWithValue("$from", Utc(DateTimeOffset.UtcNow.AddDays(-30)));
+        command.Parameters.AddWithValue("$from", Utc(selectedAtUtc.AddDays(-30)));
+        command.Parameters.AddWithValue("$to", Utc(selectedAtUtc));
         var threads = new List<string>();
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(token);
         while (await reader.ReadAsync(token))

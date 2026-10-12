@@ -69,6 +69,33 @@ public sealed class CodexServerEvidenceTests : IDisposable
     }
 
     [Fact]
+    public async Task ThreadSelectionExcludesSourceTimeAfterCaptureOrSelectionWithoutDroppingAmounts()
+    {
+        var repository = new SqliteTelemetryRepository(Database);
+        await repository.InitializeAsync(default);
+        using var store = new SqliteCodexObservatoryStore(Database);
+        await store.InitializeAsync(default);
+        DateTimeOffset captured = DateTimeOffset.UtcNow;
+        async Task Add(string id, DateTimeOffset sourceAt, DateTimeOffset collectedAt)
+        {
+            await store.ApplyCumulativeTokenObservationAsync(new CodexTokenCountObservation(
+                id, "synthetic-" + id, id, null, sourceAt, "model", null,
+                new CodexTokenUsageSnapshot(100, 0, 0, 0, 0, 100),
+                new CodexTokenUsageSnapshot(100, 0, 0, 0, 0, 100))
+                { CapturedAtUtc = collectedAt }, default);
+        }
+        await Add(Thread, captured.AddMinutes(-10), captured);
+        for (int i = 2; i <= 7; i++)
+            await Add($"019a0000-0000-7000-8000-{i:D12}", captured.AddDays(i), captured);
+        // A source time already in the past can still postdate its actual capture.
+        await Add("019a0000-0000-7000-8000-000000000008", captured.AddMinutes(-1), captured.AddMinutes(-2));
+        // A future capture value must not admit a future event at selection time.
+        await Add("019a0000-0000-7000-8000-000000000009", captured.AddDays(1), captured.AddDays(2));
+        Assert.Equal(Thread, Assert.Single(await Service(repository).SelectThreadsAsync(default)));
+        Assert.Equal(900L, await Scalar("SELECT SUM(reported_total_tokens) FROM codex_native_token_events"));
+    }
+
+    [Fact]
     public async Task QuotaMetadataRetainsRevisionsWithoutWindowsAndShowsLatestMissingState()
     {
         var repository = new SqliteTelemetryRepository(Database);
