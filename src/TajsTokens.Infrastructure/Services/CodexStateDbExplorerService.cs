@@ -1903,7 +1903,8 @@ public sealed class CodexStateDbExplorerService
 
         if (value is string text && IsPathColumn(columnName))
         {
-            return $"<path:{Path.GetFileName(text)}>";
+            string portablePath = text.Replace('\\', '/');
+            return $"<path:{Path.GetFileName(portablePath)}>";
         }
 
         return Convert.ToString(value, CultureInfo.InvariantCulture) ?? string.Empty;

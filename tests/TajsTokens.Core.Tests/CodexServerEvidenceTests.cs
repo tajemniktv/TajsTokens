@@ -40,6 +40,7 @@ public sealed class CodexServerEvidenceTests : IDisposable
     [Theory]
     [InlineData(3, 4)]
     [InlineData(4, 5)]
+    [InlineData(6, 7)]
     public async Task ParserUpgradeInvalidatesOnlySelectionCacheAtomicallyAndCanRetry(int prior, int next)
     {
         var repository = new SqliteTelemetryRepository(Database);
@@ -259,9 +260,9 @@ public sealed class CodexServerEvidenceTests : IDisposable
         await store.InitializeAsync(default);
         await Execute(
             $"""
-             INSERT INTO codex_native_token_events(source_event_id,source_file,session_id,observed_at_utc,counter_epoch,
+             INSERT INTO codex_native_token_events(source_event_id,source_file,session_id,observed_at_utc,source_event_at_utc,source_timestamp_quality,counter_epoch,
                  uncached_input_tokens,cache_read_tokens,cache_write_tokens,non_reasoning_output_tokens,reasoning_output_tokens,reported_total_tokens)
-             VALUES('fixture','fixture','{Thread}','2026-09-17T10:00:00.0000000+00:00',0,80,0,0,0,0,80);
+             VALUES('fixture','fixture','{Thread}','2026-09-17T10:00:00.0000000+00:00','2026-09-17T10:00:00.0000000+00:00','Valid',0,80,0,0,0,0,80);
              """);
         CodexServerObservation row = CodexAppServerEvidenceProvider.Correlate(ThreadRow(), "A", "A");
         await repository.SaveServerEvidenceAsync(new CodexServerCollection([row]), default);

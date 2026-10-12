@@ -44,6 +44,9 @@ internal sealed class CodexRolloutComparisonReader(Action? afterRead = null)
             cancellationToken.ThrowIfCancellationRequested();
             (long Length, DateTime Modified, DateTime Created, string Identity) alternateStamp = Stamp(alternatePath);
             (long Length, DateTime Modified, DateTime Created, string Identity) indexedStamp = Stamp(indexedPath);
+            if (alternateStamp.Identity.StartsWith("fallback-path:", StringComparison.Ordinal) ||
+                indexedStamp.Identity.StartsWith("fallback-path:", StringComparison.Ordinal))
+                return Unknown("Stable filesystem identity is unavailable, so physical replacement cannot be ruled out.");
             if (alternateStamp.Length > MaximumFileBytes || indexedStamp.Length > MaximumFileBytes)
                 return Unknown("Not compared: a file exceeds the 2 MiB inspection limit. Size equality is not byte equality.");
 

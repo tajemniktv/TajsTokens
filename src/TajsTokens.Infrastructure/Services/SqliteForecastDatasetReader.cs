@@ -131,7 +131,7 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
                                                                                    FROM codex_workload_observations w
                                                                                    WHERE w.observed_at_utc <= $to
                                                                                      AND w.session_id IN (
-                                                                                         SELECT session_id FROM codex_native_token_events WHERE observed_at_utc > $lookback AND observed_at_utc <= $to
+                                                                                         SELECT session_id FROM codex_native_token_events WHERE source_timestamp_quality = 'Valid' AND source_event_at_utc > $lookback AND source_event_at_utc <= $to
                                                                                          UNION SELECT session_id FROM codex_workload_observations WHERE observed_at_utc > $lookback AND observed_at_utc <= $to)
                                                                                      AND EXISTS(SELECT 1 FROM rollout_files f WHERE f.source_identity=w.source_identity)
                                                                                    ORDER BY w.observed_at_utc,w.start_byte_offset LIMIT 100001;
@@ -168,7 +168,7 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
         if (workload.Count > 100000)
             throw new InvalidOperationException("Workload metadata exceeds the supported replay bound; a paged evidence read is required.");
         command.CommandText = """
-                              SELECT e.session_id,e.observed_at_utc,e.captured_at_utc,e.model,e.reasoning_effort,e.uncached_input_tokens,
+                              SELECT e.session_id,e.source_event_at_utc,e.captured_at_utc,e.model,e.reasoning_effort,e.uncached_input_tokens,
                                      e.cache_read_tokens,e.cache_write_tokens,e.non_reasoning_output_tokens,e.reasoning_output_tokens,e.reported_total_tokens
                               """ + (includeLedger
                                   ? """
@@ -178,8 +178,8 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
                                     """
                                   : "") + " FROM codex_native_token_events e " +
                               (includeLedger ? "LEFT JOIN sessions s ON s.session_id=e.session_id " : "") + """
-                                  WHERE e.observed_at_utc > $lookback AND e.observed_at_utc <= $to
-                                  ORDER BY e.observed_at_utc LIMIT 500001;
+                                  WHERE e.source_timestamp_quality = 'Valid' AND e.source_event_at_utc > $lookback AND e.source_event_at_utc <= $to
+                                  ORDER BY e.source_event_at_utc LIMIT 500001;
                                   """;
         var tokens = new List<CodexPredictiveTokenEvent>();
         var ledger = new List<CodexLedgerEntry>();
@@ -226,9 +226,9 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
         }
         if (tokens.Count > 500000) throw new InvalidOperationException("Token replay exceeds 500,000 rows; narrow the range.");
         command.CommandText = """
-                              SELECT event_id,session_id,agent_id,observed_at_utc,model,input_tokens,context_window_tokens,is_compaction,record_bytes,captured_at_utc
-                              FROM context_observations WHERE observed_at_utc > $lookback AND observed_at_utc <= $to
-                              ORDER BY observed_at_utc LIMIT 500001;
+                              SELECT event_id,session_id,agent_id,source_event_at_utc,model,input_tokens,context_window_tokens,is_compaction,record_bytes,captured_at_utc
+                              FROM context_observations WHERE source_timestamp_quality = 'Valid' AND source_event_at_utc > $lookback AND source_event_at_utc <= $to
+                              ORDER BY source_event_at_utc LIMIT 500001;
                               """;
         var context = new List<CodexContextObservation>();
         await using (SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken))

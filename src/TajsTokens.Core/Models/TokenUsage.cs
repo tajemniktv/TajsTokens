@@ -8,10 +8,16 @@ public sealed record TokenUsage(
     string Provider,
     string Client,
     string Model,
-    DateTimeOffset ObservedAtUtc,
+    DateTimeOffset? ObservedAtUtc,
     TokenBreakdown Breakdown,
     string? Profile = null,
     string? SessionId = null,
     string? ThreadId = null,
     string? Repository = null,
-    string? AgentId = null);
+    string? AgentId = null)
+{
+    public DateTimeOffset? SourceEventAtUtc { get; init; } = ObservedAtUtc;
+    public DateTimeOffset? CapturedAtUtc { get; init; }
+    public CodexSourceTimestampQuality SourceTimestampQuality { get; init; } =
+        ObservedAtUtc is null ? CodexSourceTimestampQuality.Missing : CodexSourceTimestampQuality.Valid;
+}

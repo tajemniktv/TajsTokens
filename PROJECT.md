@@ -404,12 +404,14 @@ Supported improvements should reach the product after validation, not remain per
 
 ### TT basis and original research-output contract
 
-`tt-lab/v3` freezes nonnegative category weights on the first 20 compatible known-account intervals.
+The current evaluator is `tt-lab/v4-blocks`: it freezes nonnegative category weights on the first 20
+compatible known-account intervals and scores matched supported outcomes with block-balanced loss.
 One million tokens in the first positive interval's category mix defines its reference basket; the next
-20 intervals calibrate quota/TT and competitors. Exact coefficients, reference, support, pooled observed
-model/effort dimensions and input semantics define the immutable basis ID. Unknown/incomplete categories
-or unsupported mixtures are withheld, never zero. Tier/context are unmodelled. TT may summarize local
-work without universal transfer; quota prediction retains the full vector when a scalar loses accuracy.
+20 intervals calibrate quota/TT and competitors. The embedded basis semantics remain
+`tt-category-basis/v1`: exact coefficients, reference, support, pooled observed model/effort dimensions
+and input semantics define the immutable basis ID. Unknown/incomplete categories or unsupported mixtures
+are withheld, never zero. Tier/context are unmodelled. TT may summarize local work without universal
+transfer; quota prediction retains the full vector when a scalar loses accuracy.
 
 Transfer uses the exact earlier basis and destination-local calibration only, requiring the same
 account/provider/profile/source/session lineage and horizon, with source context ending before
@@ -428,7 +430,7 @@ or native raw payloads are stored. These are aggregate research records, not ori
 history, subscription balances or live forecast promotion.
 
 **Product decision, 2026-09-19:** keep TT in Model Lab; do not introduce per-task scoring or a public
-quota unit yet. The 30-day `tt-lab/v3` replay produced one supported local prolite half-hour basis:
+quota unit yet. The historical 30-day `tt-lab/v3` replay produced one supported local prolite half-hour basis:
 20 basis intervals, 20 calibration intervals and 31 matched held-out intervals across two reset groups.
 Reset-balanced envelope losses were TT 0.0846pp, full vector 0.2205pp, raw tokens 0.3745pp and zero
 2.3929pp. Signed TT bias was -0.3133pp; eligible-interval cumulative error was -1.7029pp with summed
@@ -1133,6 +1135,28 @@ replay, and state-index schema 2 invalidates the derived fast-path fingerprints 
 historical rollouts are not skipped. The normalized store does not replace token increments during
 that metadata repair. Retired source generations remain provenance but are not mixed into the
 active-source forecasting feature query. No source-owned SQLite database is modified or mirrored.
+
+**Source-time correctness (2026-10-11):** Observatory component schema 9 separates nullable
+source event time, first capture time and timestamp quality for token/context observations.
+Complete source timestamps with an explicit timezone (or supported numeric Unix timestamps)
+are eligible for chronology; a valid root timestamp precedes a nested payload timestamp.
+Missing/malformed time remains unknown. Its token increments still contribute to all-time totals,
+but cannot enter hourly, dated Intelligence, canonical replay, TT, cost or forecast inputs.
+Mixed model aggregates have no single source timestamp; accounting freshness uses capture time.
+Untimed lifecycle/context/compaction records retain typed evidence without creating dated timeline
+events or updating session/agent chronology.
+
+Migration preserves old observed/capture values and counters, marking legacy source time
+`LegacyUnverified` instead of backfilling it. State-index component schema 7 clears disposable
+fingerprints/cursor once so unchanged catalog-selected rollouts are revisited through the existing
+bounded refresh scheduler; it retains token evidence and source checkpoints.
+`typed-v8-source-timestamp-provenance` replays verified
+v6/v7 prefixes under their original occurrence identities (including historical fallback IDs),
+enriching only unverified source-time metadata and removing same-record untimed timeline
+projections. Original amounts and first capture times remain unchanged. Changed prefixes retain
+the existing generation-replacement policy on both storage paths. Earlier session/agent aggregate
+dates cannot be verified by this migration and remain legacy projections; canonical accounting and
+evaluation do not use them as token/context event times. No bulk history restamp is performed.
 
 ### Selected response-evidence contract
 

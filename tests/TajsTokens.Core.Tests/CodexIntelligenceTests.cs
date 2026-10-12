@@ -42,9 +42,9 @@ public sealed class CodexIntelligenceTests
                 command.CommandText = """
                                       INSERT INTO sessions(session_id,thread_id,repository,started_at_utc,status) VALUES('session','native-thread','project',$at,'complete');
                                       INSERT INTO rollout_files(source_identity,file_path,session_id,size_bytes,last_seen_at_utc) VALUES('source','file','session',100,$at);
-                                      INSERT INTO codex_native_token_events(source_event_id,source_file,session_id,observed_at_utc,captured_at_utc,model,counter_epoch,
+                                      INSERT INTO codex_native_token_events(source_event_id,source_file,session_id,observed_at_utc,captured_at_utc,source_event_at_utc,source_timestamp_quality,model,counter_epoch,
                                         uncached_input_tokens,cache_read_tokens,cache_write_tokens,non_reasoning_output_tokens,reasoning_output_tokens,reported_total_tokens)
-                                        VALUES('event','file','session',$at,$at,'gpt-6-astra',0,10,20,0,3,2,35);
+                                        VALUES('event','file','session',$at,$at,$at,'Valid','gpt-6-astra',0,10,20,0,3,2,35);
                                       """;
                 command.Parameters.AddWithValue("$at", Start.ToString("O"));
                 await command.ExecuteNonQueryAsync();

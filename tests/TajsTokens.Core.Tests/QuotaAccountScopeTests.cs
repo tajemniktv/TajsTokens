@@ -360,10 +360,10 @@ public sealed class QuotaAccountScopeTests : IDisposable
             using SqliteCommand command = connection.CreateCommand();
             command.Transaction = transaction;
             command.CommandText = """
-                                  INSERT INTO codex_native_token_events(source_event_id,source_file,session_id,observed_at_utc,
+                                  INSERT INTO codex_native_token_events(source_event_id,source_file,session_id,observed_at_utc,source_event_at_utc,source_timestamp_quality,
                                       model,reasoning_effort,counter_epoch,uncached_input_tokens,cache_read_tokens,cache_write_tokens,
                                       non_reasoning_output_tokens,reasoning_output_tokens,reported_total_tokens,captured_at_utc)
-                                  VALUES($id,'fixture.jsonl','fixture-session',$at,'fixture-model','high',0,1000,0,0,0,0,1000,$captured);
+                                  VALUES($id,'fixture.jsonl','fixture-session',$at,$at,'Valid','fixture-model','high',0,1000,0,0,0,0,1000,$captured);
                                   """;
             command.Parameters.AddWithValue("$id", "");
             command.Parameters.AddWithValue("$at", "");

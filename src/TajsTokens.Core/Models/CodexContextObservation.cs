@@ -16,6 +16,10 @@ public sealed record CodexContextObservation(
     long? RecordBytes = null,
     DateTimeOffset? CapturedAtUtc = null)
 {
+    /// <summary>Source event time; null means chronology is unknown.</summary>
+    public DateTimeOffset? SourceEventAtUtc { get; init; } = ObservedAtUtc;
+    public CodexSourceTimestampQuality SourceTimestampQuality { get; init; } = CodexSourceTimestampQuality.Valid;
+
     public double? UtilizationPercent => InputTokens is > 0 && ContextWindowTokens is > 0
         ? Math.Clamp(InputTokens.Value * 100d / ContextWindowTokens.Value, 0d, 100d)
         : null;
