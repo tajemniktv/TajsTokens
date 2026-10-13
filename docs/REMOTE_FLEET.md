@@ -1,6 +1,8 @@
 # Remote Codex fleet status
 
-The **Live fleet** page can check any configured SSH host alias that can run the read-only Codex history probe. Add aliases under **Settings → Sources**, then select **Check SSH hosts**. No SSH connection is opened by normal local refreshes or by starting TajsTokens. Hardware-backed SSH keys may ask for a touch when you explicitly check hosts.
+The Codex subscription quota shown on **Overview** is account-wide provider evidence read from the PC. It does **not** require an SSH connection or a TajsTokens installation on another machine. Local token/session files and live turn status are different sources: a PC-only scanner, including Tokscale's local Codex scanner, cannot infer another machine's private local history from that quota reading. This SSH feature is optional and only for remote thread-status metadata; it is not needed for the core quota workflow.
+
+The **Live fleet** page can check any configured SSH host alias that can run the read-only Codex history probe. Add aliases under **Settings → Sources**, then select **Optional: check remote status via SSH**. No SSH connection is opened by normal local refreshes or by starting TajsTokens. Hardware-backed SSH keys may ask for a touch when you explicitly check hosts.
 
 The probe sends a small Python script over the existing SSH connection. It reads only Codex thread-turn history metadata on the remote user account. TajsTokens accepts bounded, validated thread IDs, native turn status and timestamps; it discards arbitrary status text. No prompts, command bodies, credentials, quota readings or raw rollout files are copied. SSH host-key verification stays enabled. The current probe requires Python 3 and compatible Codex SQLite history on the SSH host; an unavailable host is not treated as having zero activity.
 
