@@ -1580,6 +1580,8 @@ reads the consumed prefix once per changed-file ingestion pass (linear I/O); che
 incremental within the pass. A process-local cache skips rehashing when identity, checkpoint, size
 and write time are unchanged. This is not an atomic snapshot of a concurrently rewritten external file. Empty
 replacement files cannot activate a new parsed generation until a complete record arrives.
+For path-only fallback identities (including macOS), a changed file still requires a full
+consumed-prefix hash: skipping it could treat an in-place rewrite or replacement as an append.
 
 Token forecasts target the sum of recorded native token increments (including cached input) in
 the next interval, conditional on recent installation-local activity. Zero means no tokens were
