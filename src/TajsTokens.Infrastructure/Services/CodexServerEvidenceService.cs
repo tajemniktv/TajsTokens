@@ -202,13 +202,16 @@ public sealed class CodexServerEvidenceService(
         string rotation = hasEvidence
             ? "COALESCE((SELECT MAX(e.collected_at_utc) FROM codex_server_evidence e WHERE e.surface='ThreadUsage' AND e.thread_id=n.session_id),'') ASC,"
             : "";
+        DateTimeOffset selectedAtUtc = DateTimeOffset.UtcNow;
         command.CommandText = $"""
                                SELECT n.session_id FROM codex_native_token_events n
-                               WHERE n.observed_at_utc >= $from
+                               WHERE n.source_timestamp_quality = 'Valid' AND n.source_event_at_utc >= $from
+                                 AND n.source_event_at_utc <= $to AND n.source_event_at_utc <= n.captured_at_utc
                                GROUP BY n.session_id
-                               ORDER BY {rotation} MAX(n.observed_at_utc) DESC LIMIT 100;
+                               ORDER BY {rotation} MAX(n.source_event_at_utc) DESC LIMIT 100;
                                """;
-        command.Parameters.AddWithValue("$from", Utc(DateTimeOffset.UtcNow.AddDays(-30)));
+        command.Parameters.AddWithValue("$from", Utc(selectedAtUtc.AddDays(-30)));
+        command.Parameters.AddWithValue("$to", Utc(selectedAtUtc));
         var threads = new List<string>();
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(token);
         while (await reader.ReadAsync(token))
@@ -379,7 +382,11 @@ public sealed class CodexServerEvidenceService(
                                   SELECT COUNT(*),SUM(extra_tokens) FROM (
                                       SELECT reported_total_tokens * (COUNT(*)-1) AS extra_tokens
                                       FROM codex_native_token_events
-                                      GROUP BY session_id,observed_at_utc,model,reasoning_effort,uncached_input_tokens,cache_read_tokens,
+                                      WHERE (source_timestamp_quality = 'Valid' AND source_event_at_utc IS NOT NULL)
+                                         OR (source_timestamp_quality = 'LegacyUnverified' AND observed_at_utc IS NOT NULL)
+                                      GROUP BY session_id,
+                                          CASE WHEN source_timestamp_quality = 'Valid' THEN source_event_at_utc ELSE observed_at_utc END,
+                                          model,reasoning_effort,uncached_input_tokens,cache_read_tokens,
                                           cache_write_tokens,non_reasoning_output_tokens,reasoning_output_tokens,reported_total_tokens
                                       HAVING COUNT(DISTINCT source_file)>1);
                                   """;
@@ -393,7 +400,7 @@ public sealed class CodexServerEvidenceService(
                         duplicateReader.GetInt64(1),
                         null,
                         AccountEvidenceClass.Unattributed,
-                        $"{duplicateReader.GetInt64(0):N0} identical session/time/model/effort/token fingerprints occur in multiple physical sources. Extra retained tokens shown, not automatically deduplicated or proven independent usage."));
+                        $"{duplicateReader.GetInt64(0):N0} identical session/time/model/effort/token fingerprints occur in multiple physical sources. Legacy timestamps are unverified; extra retained tokens are shown, not automatically deduplicated or proven independent usage."));
         }
         foreach (IGrouping<(string? CorrelatedAccountKey, AccountEvidenceClass AccountEvidence), CodexServerObservation> cohort in history
                      .Where(x => x.Activity is not null && x.State is ServerEvidenceState.Available or ServerEvidenceState.Empty)
@@ -415,7 +422,7 @@ public sealed class CodexServerEvidenceService(
                     new CodexServerComparisonRow(
                         label + " day " + day.StartDate,
                         day.Tokens,
-                        await LocalTotal("substr(observed_at_utc,1,10)=$date", ("$date", day.StartDate)),
+                        await LocalTotal("source_timestamp_quality = 'Valid' AND substr(source_event_at_utc,1,10)=$date", ("$date", day.StartDate)),
                         null,
                         row.AccountEvidence,
                         "Date-label comparison using local event UTC dates. Backend bucket timezone is unspecified; not a validated interval coverage fraction."));
@@ -429,7 +436,7 @@ public sealed class CodexServerEvidenceService(
                         label + " lifetime change",
                         current >= earlier ? current - earlier : null,
                         await LocalTotal(
-                            "observed_at_utc > $from AND observed_at_utc <= $to",
+                            "source_timestamp_quality = 'Valid' AND source_event_at_utc > $from AND source_event_at_utc <= $to",
                             ("$from", Utc(prior.CollectedAtUtc)),
                             ("$to", Utc(row.CollectedAtUtc))),
                         null,

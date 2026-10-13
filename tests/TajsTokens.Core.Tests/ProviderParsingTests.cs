@@ -17,6 +17,16 @@ namespace TajsTokens.Core.Tests;
 public sealed class ProviderParsingTests
 {
     [Fact]
+    public void TokenUsage_DoesNotAssumeObservedTimeIsSourceTime()
+    {
+        var usage = new TokenUsage("fixture", "codex", "model", DateTimeOffset.UnixEpoch,
+            new TokenBreakdown(1, 0, 0, 0, 0, 1));
+
+        Assert.Null(usage.SourceEventAtUtc);
+        Assert.Equal(CodexSourceTimestampQuality.Missing, usage.SourceTimestampQuality);
+    }
+
+    [Fact]
     public void TokscaleModels_ParsesDisjointBucketsWithoutDoubleCounting()
     {
         const string json = """
@@ -44,6 +54,10 @@ public sealed class ProviderParsingTests
         Assert.Equal(40, usage.Breakdown.NonReasoningOutput);
         Assert.Equal(30, usage.Breakdown.ReasoningOutput);
         Assert.Equal(1100, usage.Breakdown.Total);
+        Assert.Null(usage.ObservedAtUtc);
+        Assert.Null(usage.SourceEventAtUtc);
+        Assert.Equal(CodexSourceTimestampQuality.Missing, usage.SourceTimestampQuality);
+        Assert.Equal(DateTimeOffset.UnixEpoch, usage.CapturedAtUtc);
     }
 
     [Fact]

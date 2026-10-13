@@ -88,6 +88,11 @@ public sealed partial class SqliteTelemetryRepository(string databasePath) : ITe
 
     public Task AddTokenUsageAsync(TokenUsage usage, CancellationToken cancellationToken)
     {
+        if (usage.ObservedAtUtc is not { } observedAtUtc)
+        {
+            throw new ArgumentException("Token usage without a source event time cannot be persisted in the timestamped token_usage table.", nameof(usage));
+        }
+
         return ExecutePreparedCommandAsync(
             """
             INSERT INTO token_usage(
@@ -103,7 +108,7 @@ public sealed partial class SqliteTelemetryRepository(string databasePath) : ITe
                 cmd.Parameters.AddWithValue("$provider", usage.Provider);
                 cmd.Parameters.AddWithValue("$client", usage.Client);
                 cmd.Parameters.AddWithValue("$profile", DbValue(usage.Profile));
-                cmd.Parameters.AddWithValue("$observed", SerializeUtc(usage.ObservedAtUtc));
+                cmd.Parameters.AddWithValue("$observed", SerializeUtc(observedAtUtc));
                 cmd.Parameters.AddWithValue("$model", usage.Model);
                 cmd.Parameters.AddWithValue("$session", DbValue(usage.SessionId));
                 cmd.Parameters.AddWithValue("$thread", DbValue(usage.ThreadId));

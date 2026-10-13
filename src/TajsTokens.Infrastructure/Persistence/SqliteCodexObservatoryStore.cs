@@ -22,7 +22,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 /// </summary>
 public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObservatoryStore, IDisposable
 {
-    private const int ObservatorySchemaVersion = 8;
+    private const int ObservatorySchemaVersion = 9;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _initializeGate = new(1, 1);
     private volatile bool _initialized;
@@ -372,6 +372,25 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                 version = 8;
             }
 
+            if (version == 8)
+            {
+                await ExecuteMigrationAsync(
+                    connection,
+                    """
+                    ALTER TABLE codex_native_token_events ADD COLUMN source_event_at_utc TEXT;
+                    ALTER TABLE codex_native_token_events ADD COLUMN source_timestamp_quality TEXT NOT NULL DEFAULT 'LegacyUnverified';
+                    ALTER TABLE codex_counter_state ADD COLUMN last_source_event_at_utc TEXT;
+                    ALTER TABLE context_observations ADD COLUMN source_event_at_utc TEXT;
+                    ALTER TABLE context_observations ADD COLUMN source_timestamp_quality TEXT NOT NULL DEFAULT 'LegacyUnverified';
+                    CREATE INDEX IF NOT EXISTS idx_native_token_source_time ON codex_native_token_events(source_event_at_utc);
+                    CREATE INDEX IF NOT EXISTS idx_native_token_session_source_time ON codex_native_token_events(session_id, source_event_at_utc DESC);
+                    CREATE INDEX IF NOT EXISTS idx_context_source_time ON context_observations(source_event_at_utc);
+                    UPDATE observatory_schema SET version = 9 WHERE component = 'codex-observatory';
+                    """,
+                    cancellationToken);
+                version = 9;
+            }
+
             // Scrub rows written by pre-hardening Phase 3 builds. typed-v3 forces one safe replay so
             // current sources regain basename+hash labels and repository names without retaining paths.
             SqliteCommand privacyScrub = connection.CreateCommand();
@@ -567,7 +586,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         read.CommandText = """
                            SELECT source_file, counter_epoch, input_tokens, cached_input_tokens, cache_write_input_tokens,
                                   output_tokens, reasoning_output_tokens, total_tokens, last_source_event_id, last_observed_at_utc,
-                                  has_cumulative_baseline
+                                  has_cumulative_baseline, last_source_event_at_utc
                            FROM codex_counter_state
                            WHERE session_id = $session;
                            """;
@@ -589,13 +608,50 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                     reader.GetInt64(7),
                     reader.GetString(8),
                     ParseUtc(reader.GetString(9)),
-                    reader.GetInt64(10) != 0);
+                    reader.GetInt64(10) != 0)
+                {
+                    LastSourceEventAtUtc = reader.IsDBNull(11) ? null : ParseUtc(reader.GetString(11)),
+                };
             }
         }
 
         CodexTokenAccountingDecision decision = CodexTokenCounterReducer.Reduce(observation, previous, sourceEventAlreadyPersisted);
         if (decision.Kind is CodexTokenAccountingDecisionKind.Duplicate or CodexTokenAccountingDecisionKind.NoObservation)
         {
+            if (sourceEventAlreadyPersisted)
+            {
+                // A prefix-verified metadata replay keeps the same occurrence ID. Enrich only
+                // legacy/unverified event time; amounts, original observed time and capture time
+                // remain immutable. A missing/malformed source stays explicitly unknown.
+                using SqliteCommand timeRepair = connection.CreateCommand();
+                timeRepair.Transaction = transaction;
+                timeRepair.CommandText = """
+                    UPDATE codex_native_token_events
+                    SET source_event_at_utc = $sourceAt, source_timestamp_quality = $quality
+                    WHERE source_event_id = $id AND source_timestamp_quality = 'LegacyUnverified'
+                      AND source_event_at_utc IS NULL;
+                    """;
+                timeRepair.Parameters.AddWithValue("$id", observation.SourceEventId);
+                timeRepair.Parameters.AddWithValue("$sourceAt", DbValue(observation.SourceEventAtUtc is { } repairedSourceAt ? SerializeUtc(repairedSourceAt) : null));
+                timeRepair.Parameters.AddWithValue("$quality", observation.SourceTimestampQuality.ToString());
+                int repaired = await timeRepair.ExecuteNonQueryAsync(cancellationToken);
+                if (repaired > 0)
+                {
+                    timeRepair.CommandText = """
+                        UPDATE codex_counter_state SET last_source_event_at_utc =
+                            CASE WHEN last_source_event_at_utc IS NULL THEN $sourceAt
+                                 ELSE MAX(last_source_event_at_utc, $sourceAt) END
+                        WHERE session_id = (SELECT session_id FROM codex_native_token_events WHERE source_event_id = $id)
+                          AND counter_epoch = (SELECT counter_epoch FROM codex_native_token_events WHERE source_event_id = $id)
+                          AND $quality = 'Valid' AND $sourceAt IS NOT NULL;
+                        CREATE TABLE IF NOT EXISTS codex_native_accounting_revision (
+                            id INTEGER PRIMARY KEY CHECK(id = 1), revision INTEGER NOT NULL);
+                        INSERT INTO codex_native_accounting_revision(id, revision) VALUES(1, 1)
+                        ON CONFLICT(id) DO UPDATE SET revision = revision + 1;
+                        """;
+                    await timeRepair.ExecuteNonQueryAsync(cancellationToken);
+                }
+            }
             if (sourceEventAlreadyPersisted && observation.ReasoningEffort is not null)
             {
                 // Parser-version replay repairs absent context metadata, never counters or
@@ -645,8 +701,8 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                                   INSERT INTO codex_counter_state(
                                       session_id, source_file, counter_epoch, input_tokens, cached_input_tokens,
                                       cache_write_input_tokens, output_tokens, reasoning_output_tokens, total_tokens,
-                                      last_source_event_id, last_observed_at_utc, has_cumulative_baseline)
-                                  VALUES($session, $file, $epoch, $input, $cached, $cacheWrite, $output, $reasoning, $total, $event, $observed, $hasBaseline)
+                                      last_source_event_id, last_observed_at_utc, has_cumulative_baseline, last_source_event_at_utc)
+                                  VALUES($session, $file, $epoch, $input, $cached, $cacheWrite, $output, $reasoning, $total, $event, $observed, $hasBaseline, $sourceEventAt)
                                   ON CONFLICT(session_id) DO UPDATE SET
                                     source_file = excluded.source_file,
                                     counter_epoch = excluded.counter_epoch,
@@ -658,7 +714,8 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                                     total_tokens = excluded.total_tokens,
                                     last_source_event_id = excluded.last_source_event_id,
                                     last_observed_at_utc = excluded.last_observed_at_utc,
-                                    has_cumulative_baseline = excluded.has_cumulative_baseline;
+                                    has_cumulative_baseline = excluded.has_cumulative_baseline,
+                                    last_source_event_at_utc = excluded.last_source_event_at_utc;
                                   """;
         upsertState.Parameters.AddWithValue("$session", observation.SessionId);
         upsertState.Parameters.AddWithValue("$file", BuildSafeFileLabel(nextState.SourceFile));
@@ -672,6 +729,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         upsertState.Parameters.AddWithValue("$event", nextState.LastSourceEventId);
         upsertState.Parameters.AddWithValue("$observed", SerializeUtc(nextState.LastObservedAtUtc));
         upsertState.Parameters.AddWithValue("$hasBaseline", nextState.HasCumulativeBaseline ? 1 : 0);
+        upsertState.Parameters.AddWithValue("$sourceEventAt", DbValue(nextState.LastSourceEventAtUtc is { } sourceAt ? SerializeUtc(sourceAt) : null));
         await upsertState.ExecuteNonQueryAsync(cancellationToken);
 
         transaction.Commit();
@@ -684,9 +742,13 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             """
             INSERT INTO context_observations(
                 event_id, session_id, agent_id, observed_at_utc, model, input_tokens,
-                context_window_tokens, is_compaction, record_bytes, captured_at_utc)
-            VALUES($event, $session, $agent, $observed, $model, $input, $window, $compaction, $bytes, $captured)
-            ON CONFLICT(event_id) DO NOTHING;
+                context_window_tokens, is_compaction, record_bytes, captured_at_utc, source_event_at_utc, source_timestamp_quality)
+            VALUES($event, $session, $agent, $observed, $model, $input, $window, $compaction, $bytes, $captured, $sourceEventAt, $timeQuality)
+            ON CONFLICT(event_id) DO UPDATE SET
+                source_event_at_utc = excluded.source_event_at_utc,
+                source_timestamp_quality = excluded.source_timestamp_quality
+            WHERE context_observations.source_timestamp_quality = 'LegacyUnverified'
+              AND context_observations.source_event_at_utc IS NULL;
             """,
             command =>
             {
@@ -700,6 +762,8 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                 command.Parameters.AddWithValue("$compaction", observation.IsCompaction ? 1 : 0);
                 command.Parameters.AddWithValue("$bytes", DbValue(observation.RecordBytes));
                 command.Parameters.AddWithValue("$captured", SerializeUtc(observation.CapturedAtUtc ?? DateTimeOffset.UtcNow));
+                command.Parameters.AddWithValue("$sourceEventAt", DbValue(observation.SourceEventAtUtc is { } sourceAt ? SerializeUtc(sourceAt) : null));
+                command.Parameters.AddWithValue("$timeQuality", observation.SourceTimestampQuality.ToString());
             },
             cancellationToken);
     }
@@ -828,13 +892,19 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         long recordBytes,
         long fileSizeBytes,
         DateTimeOffset observedAtUtc,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        CodexSourceTimestampQuality timestampQuality = CodexSourceTimestampQuality.Valid)
     {
         await EnsureInitializedAsync(cancellationToken);
         string safeFileLabel = BuildSafeFileLabel(filePath);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
         using SqliteTransaction transaction = connection.BeginTransaction();
+
+        await SqliteCodexSourceGeneration.RetirePreviousAsync(
+            connection, transaction, safeFileLabel, sourceIdentity, cancellationToken);
+        if (timestampQuality != CodexSourceTimestampQuality.Valid)
+            await SqliteCodexSourceGeneration.RemoveUntimedTimelineAsync(connection, transaction, sourceRecordId, cancellationToken);
 
         SqliteCommand record = connection.CreateCommand();
         record.Transaction = transaction;
@@ -851,13 +921,6 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         record.Parameters.AddWithValue("$bytes", Math.Max(0, recordBytes));
         record.Parameters.AddWithValue("$observed", SerializeUtc(observedAtUtc));
         await record.ExecuteNonQueryAsync(cancellationToken);
-
-        SqliteCommand removePathAlias = connection.CreateCommand();
-        removePathAlias.Transaction = transaction;
-        removePathAlias.CommandText = "DELETE FROM rollout_files WHERE file_path = $file AND source_identity <> $identity;";
-        removePathAlias.Parameters.AddWithValue("$file", safeFileLabel);
-        removePathAlias.Parameters.AddWithValue("$identity", sourceIdentity);
-        await removePathAlias.ExecuteNonQueryAsync(cancellationToken);
 
         SqliteCommand file = connection.CreateCommand();
         file.Transaction = transaction;
@@ -1064,9 +1127,14 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
                               SELECT event_id, session_id, agent_id, observed_at_utc, model, input_tokens,
-                                     context_window_tokens, is_compaction, record_bytes
+                                     context_window_tokens, is_compaction, record_bytes, captured_at_utc,
+                                     source_event_at_utc, source_timestamp_quality
                               FROM context_observations WHERE session_id = $session
-                              ORDER BY observed_at_utc DESC LIMIT $take;
+                              ORDER BY CASE WHEN source_timestamp_quality = 'Valid' AND source_event_at_utc IS NOT NULL
+                                            THEN 0 ELSE 1 END,
+                                       CASE WHEN source_timestamp_quality = 'Valid' AND source_event_at_utc IS NOT NULL
+                                            THEN source_event_at_utc ELSE captured_at_utc END DESC,
+                                       rowid DESC LIMIT $take;
                               """;
         command.Parameters.AddWithValue("$session", sessionId);
         command.Parameters.AddWithValue("$take", Math.Max(0, take));
@@ -1084,7 +1152,13 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                     reader.IsDBNull(5) ? null : reader.GetInt64(5),
                     reader.IsDBNull(6) ? null : reader.GetInt64(6),
                     reader.GetInt32(7) != 0,
-                    reader.IsDBNull(8) ? null : reader.GetInt64(8)));
+                    reader.IsDBNull(8) ? null : reader.GetInt64(8),
+                    reader.IsDBNull(9) ? null : ParseUtc(reader.GetString(9)))
+                {
+                    SourceEventAtUtc = reader.IsDBNull(10) ? null : ParseUtc(reader.GetString(10)),
+                    SourceTimestampQuality = Enum.TryParse(reader.GetString(11), out CodexSourceTimestampQuality quality)
+                        ? quality : CodexSourceTimestampQuality.LegacyUnverified,
+                });
         }
         return results;
     }
@@ -1143,9 +1217,10 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                              INSERT INTO codex_native_token_events(
                                  source_event_id, source_file, session_id, agent_id, observed_at_utc, model, reasoning_effort,
                                  counter_epoch, uncached_input_tokens, cache_read_tokens, cache_write_tokens,
-                                 non_reasoning_output_tokens, reasoning_output_tokens, reported_total_tokens, captured_at_utc)
+                                 non_reasoning_output_tokens, reasoning_output_tokens, reported_total_tokens, captured_at_utc,
+                                 source_event_at_utc, source_timestamp_quality)
                              VALUES($event, $file, $session, $agent, $observed, $model, $reasoning, $epoch,
-                                    $uncached, $cached, $cacheWrite, $output, $reasoningOutput, $total, $captured)
+                                    $uncached, $cached, $cacheWrite, $output, $reasoningOutput, $total, $captured, $sourceEventAt, $timeQuality)
                              ON CONFLICT(source_event_id) DO NOTHING;
                              """;
         insert.Parameters.AddWithValue("$event", observation.SourceEventId);
@@ -1162,7 +1237,9 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         insert.Parameters.AddWithValue("$output", nonReasoningOutput);
         insert.Parameters.AddWithValue("$reasoningOutput", reasoningOutput);
         insert.Parameters.AddWithValue("$total", reportedTotal);
-        insert.Parameters.AddWithValue("$captured", SerializeUtc(DateTimeOffset.UtcNow));
+        insert.Parameters.AddWithValue("$captured", SerializeUtc(observation.CapturedAtUtc));
+        insert.Parameters.AddWithValue("$sourceEventAt", DbValue(observation.SourceEventAtUtc is { } sourceAt ? SerializeUtc(sourceAt) : null));
+        insert.Parameters.AddWithValue("$timeQuality", observation.SourceTimestampQuality.ToString());
         return await insert.ExecuteNonQueryAsync(cancellationToken);
     }
 

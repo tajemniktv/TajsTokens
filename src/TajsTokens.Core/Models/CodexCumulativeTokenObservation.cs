@@ -30,6 +30,8 @@ public record CodexTokenCountObservation
         SessionId = sessionId;
         AgentId = agentId;
         ObservedAtUtc = observedAtUtc;
+        SourceEventAtUtc = observedAtUtc;
+        CapturedAtUtc = DateTimeOffset.UtcNow;
         Model = model;
         ReasoningEffort = reasoningEffort;
         TotalTokenUsage = totalTokenUsage;
@@ -79,6 +81,11 @@ public record CodexTokenCountObservation
     public string SessionId { get; }
     public string? AgentId { get; }
     public DateTimeOffset ObservedAtUtc { get; }
+    /// <summary>The timestamp stated by the rollout source, or null when it was not parseable.</summary>
+    public DateTimeOffset? SourceEventAtUtc { get; init; }
+    /// <summary>When this process captured the rollout record; distinct from source event time.</summary>
+    public DateTimeOffset CapturedAtUtc { get; init; }
+    public CodexSourceTimestampQuality SourceTimestampQuality { get; init; } = CodexSourceTimestampQuality.Valid;
     public string? Model { get; }
     public string? ReasoningEffort { get; }
     public CodexTokenUsageSnapshot? TotalTokenUsage { get; }

@@ -82,7 +82,14 @@ public sealed class CodexServiceTierEvidenceTests
             // Reconstruct the preceding component schema and verify migration does not invent tier values.
             await Execute(
                 database,
-                "ALTER TABLE codex_workload_observations DROP COLUMN service_tier; UPDATE observatory_schema SET version=6 WHERE component='codex-observatory';");
+                "DROP INDEX idx_native_token_source_time; DROP INDEX idx_native_token_session_source_time; DROP INDEX idx_context_source_time; " +
+                "ALTER TABLE codex_native_token_events DROP COLUMN source_event_at_utc; " +
+                "ALTER TABLE codex_native_token_events DROP COLUMN source_timestamp_quality; " +
+                "ALTER TABLE codex_counter_state DROP COLUMN last_source_event_at_utc; " +
+                "ALTER TABLE context_observations DROP COLUMN source_event_at_utc; " +
+                "ALTER TABLE context_observations DROP COLUMN source_timestamp_quality; " +
+                "ALTER TABLE codex_workload_observations DROP COLUMN service_tier; " +
+                "UPDATE observatory_schema SET version=6 WHERE component='codex-observatory';");
             using var store = new SqliteCodexObservatoryStore(database);
             var ingestion = new CodexSessionIngestionService(new FileSystemCodexSessionEventProvider(), repository, store);
             await File.WriteAllTextAsync(path, Meta + "\n" + Settings("\"priority\"") + "\n");

@@ -144,6 +144,8 @@ public sealed class CodexNativeSourcesServiceTests
             await CreateDatabaseAsync(
                 newer,
                 "CREATE TABLE queued_items (id TEXT, thread_id TEXT); INSERT INTO queued_items VALUES ('newer', 't');");
+            File.SetLastWriteTimeUtc(older, new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc));
+            File.SetLastWriteTimeUtc(newer, new DateTime(2026, 9, 2, 0, 0, 0, DateTimeKind.Utc));
             var service = new CodexNativeSourcesService(directory.FullName);
             CodexNativeSourcesSnapshot automatic = await service.ReadAsync();
             Assert.Equal("newer", Assert.Single(automatic.Queue.Items).Id);
@@ -182,7 +184,14 @@ public sealed class CodexNativeSourcesServiceTests
                 Path.Combine(directory.FullName, "queue_1.sqlite"),
                 "CREATE TABLE queued_items (id TEXT, thread_id TEXT);");
             await File.WriteAllTextAsync(Path.Combine(directory.FullName, "queue_2.sqlite"), "not a SQLite database");
+            // Filesystems may give consecutive writes the same timestamp. Make the intended
+            // preference explicit so this exercises failure without fallback, not ordinal ties.
+            File.SetLastWriteTimeUtc(Path.Combine(directory.FullName, "queue_1.sqlite"),
+                new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc));
+            File.SetLastWriteTimeUtc(Path.Combine(directory.FullName, "queue_2.sqlite"),
+                new DateTime(2026, 9, 2, 0, 0, 0, DateTimeKind.Utc));
             CodexNativeSourcesSnapshot result = await new CodexNativeSourcesService(directory.FullName).ReadAsync();
+            Assert.Equal(Path.Combine(directory.FullName, "queue_2.sqlite"), result.Queue.Source.DatabasePath);
             Assert.Equal(CodexNativeSourceAvailability.Error, result.Queue.Source.Availability);
             Assert.Equal(2, Assert.Single(result.Selections, value => value.Kind == CodexNativeSourceKind.Queue).Candidates.Count);
         }

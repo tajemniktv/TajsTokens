@@ -116,6 +116,12 @@ public sealed class CodexResponseEvidenceTests
             }
             await Sql(
                 db,
+                "DROP INDEX idx_native_token_source_time; DROP INDEX idx_native_token_session_source_time; DROP INDEX idx_context_source_time; " +
+                "ALTER TABLE codex_native_token_events DROP COLUMN source_event_at_utc; " +
+                "ALTER TABLE codex_native_token_events DROP COLUMN source_timestamp_quality; " +
+                "ALTER TABLE codex_counter_state DROP COLUMN last_source_event_at_utc; " +
+                "ALTER TABLE context_observations DROP COLUMN source_event_at_utc; " +
+                "ALTER TABLE context_observations DROP COLUMN source_timestamp_quality; " +
                 "DROP TABLE codex_response_observations; UPDATE observatory_schema SET version=7 WHERE component='codex-observatory';");
             using var store = new SqliteCodexObservatoryStore(db);
             await store.InitializeAsync(default);

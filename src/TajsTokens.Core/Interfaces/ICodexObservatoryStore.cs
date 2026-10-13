@@ -43,7 +43,8 @@ public interface ICodexObservatoryStore
         long recordBytes,
         long fileSizeBytes,
         DateTimeOffset observedAtUtc,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        CodexSourceTimestampQuality timestampQuality = CodexSourceTimestampQuality.Valid);
 
     Task<CodexObservatorySummary> GetSummaryAsync(CancellationToken cancellationToken);
     Task<IReadOnlyList<CodexSessionOverview>> GetSessionOverviewsAsync(int take, CancellationToken cancellationToken);

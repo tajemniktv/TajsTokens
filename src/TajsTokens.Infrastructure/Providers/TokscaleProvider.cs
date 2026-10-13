@@ -74,10 +74,14 @@ public sealed class TokscaleProvider : ITokscaleProvider
                     "tokscale",
                     client,
                     model,
-                    observedAtUtc,
+                    null,
                     breakdown,
                     ReadString(entry, "profile") ?? "default",
-                    ReadString(entry, "sessionId")));
+                    ReadString(entry, "sessionId"))
+                {
+                    // Model rows are lifetime aggregates; the CLI supplies no event timestamp.
+                    CapturedAtUtc = observedAtUtc,
+                });
         }
 
         return results;

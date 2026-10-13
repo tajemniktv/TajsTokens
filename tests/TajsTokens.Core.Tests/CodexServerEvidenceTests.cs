@@ -31,6 +31,30 @@ public sealed class CodexServerEvidenceTests : IDisposable
 
     private string Database => Path.Combine(_directory, "telemetry.db");
 
+    [Fact]
+    public async Task RepeatedEventDiagnosticRetainsLegacyUnverifiedCandidates()
+    {
+        var repository = new SqliteTelemetryRepository(Database);
+        await repository.InitializeAsync(default);
+        using var store = new SqliteCodexObservatoryStore(Database);
+        await store.InitializeAsync(default);
+        await Execute("""
+            INSERT INTO codex_native_token_events(source_event_id,source_file,session_id,observed_at_utc,
+                model,reasoning_effort,counter_epoch,uncached_input_tokens,cache_read_tokens,
+                cache_write_tokens,non_reasoning_output_tokens,reasoning_output_tokens,reported_total_tokens,
+                source_timestamp_quality)
+            VALUES
+                ('a','source-a','session','2026-09-01T10:00:00+00:00','model','high',0,100,0,0,0,0,100,'LegacyUnverified'),
+                ('b','source-b','session','2026-09-01T10:00:00+00:00','model','high',0,100,0,0,0,0,100,'LegacyUnverified');
+            """);
+
+        CodexServerComparisonReport report = await Service(repository).CompareAsync(default);
+        CodexServerComparisonRow candidate = Assert.Single(report.Comparisons,
+            x => x.Scope == "Local repeated-event fingerprint candidates");
+        Assert.Equal(100, candidate.LocalTokens);
+        Assert.Contains("unverified", candidate.Detail);
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();
@@ -40,6 +64,7 @@ public sealed class CodexServerEvidenceTests : IDisposable
     [Theory]
     [InlineData(3, 4)]
     [InlineData(4, 5)]
+    [InlineData(6, 7)]
     public async Task ParserUpgradeInvalidatesOnlySelectionCacheAtomicallyAndCanRetry(int prior, int next)
     {
         var repository = new SqliteTelemetryRepository(Database);
@@ -65,6 +90,33 @@ public sealed class CodexServerEvidenceTests : IDisposable
         Assert.Empty(await index.GetFingerprintsAsync(default));
         Assert.Equal(0, await index.GetWatermarkAsync(default));
         Assert.Equal(1L, await Scalar("SELECT COUNT(*) FROM codex_server_evidence"));
+    }
+
+    [Fact]
+    public async Task ThreadSelectionExcludesSourceTimeAfterCaptureOrSelectionWithoutDroppingAmounts()
+    {
+        var repository = new SqliteTelemetryRepository(Database);
+        await repository.InitializeAsync(default);
+        using var store = new SqliteCodexObservatoryStore(Database);
+        await store.InitializeAsync(default);
+        DateTimeOffset captured = DateTimeOffset.UtcNow;
+        async Task Add(string id, DateTimeOffset sourceAt, DateTimeOffset collectedAt)
+        {
+            await store.ApplyCumulativeTokenObservationAsync(new CodexTokenCountObservation(
+                id, "synthetic-" + id, id, null, sourceAt, "model", null,
+                new CodexTokenUsageSnapshot(100, 0, 0, 0, 0, 100),
+                new CodexTokenUsageSnapshot(100, 0, 0, 0, 0, 100))
+                { CapturedAtUtc = collectedAt }, default);
+        }
+        await Add(Thread, captured.AddMinutes(-10), captured);
+        for (int i = 2; i <= 7; i++)
+            await Add($"019a0000-0000-7000-8000-{i:D12}", captured.AddDays(i), captured);
+        // A source time already in the past can still postdate its actual capture.
+        await Add("019a0000-0000-7000-8000-000000000008", captured.AddMinutes(-1), captured.AddMinutes(-2));
+        // A future capture value must not admit a future event at selection time.
+        await Add("019a0000-0000-7000-8000-000000000009", captured.AddDays(1), captured.AddDays(2));
+        Assert.Equal(Thread, Assert.Single(await Service(repository).SelectThreadsAsync(default)));
+        Assert.Equal(900L, await Scalar("SELECT SUM(reported_total_tokens) FROM codex_native_token_events"));
     }
 
     [Fact]
@@ -259,9 +311,9 @@ public sealed class CodexServerEvidenceTests : IDisposable
         await store.InitializeAsync(default);
         await Execute(
             $"""
-             INSERT INTO codex_native_token_events(source_event_id,source_file,session_id,observed_at_utc,counter_epoch,
+             INSERT INTO codex_native_token_events(source_event_id,source_file,session_id,observed_at_utc,source_event_at_utc,source_timestamp_quality,counter_epoch,
                  uncached_input_tokens,cache_read_tokens,cache_write_tokens,non_reasoning_output_tokens,reasoning_output_tokens,reported_total_tokens)
-             VALUES('fixture','fixture','{Thread}','2026-09-17T10:00:00.0000000+00:00',0,80,0,0,0,0,80);
+             VALUES('fixture','fixture','{Thread}','2026-09-17T10:00:00.0000000+00:00','2026-09-17T10:00:00.0000000+00:00','Valid',0,80,0,0,0,0,80);
              """);
         CodexServerObservation row = CodexAppServerEvidenceProvider.Correlate(ThreadRow(), "A", "A");
         await repository.SaveServerEvidenceAsync(new CodexServerCollection([row]), default);
