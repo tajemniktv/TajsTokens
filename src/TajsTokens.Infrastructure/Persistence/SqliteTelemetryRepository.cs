@@ -17,7 +17,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 
 public sealed partial class SqliteTelemetryRepository(string databasePath) : ITelemetryRepository, ISessionIngestionCheckpointStore
 {
-    private const int CurrentSchemaVersion = 14;
+    private const int CurrentSchemaVersion = 15;
     private const int IntelligenceSchemaVersion = 6;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _intelligenceInitializeGate = new(1, 1);
@@ -954,6 +954,38 @@ public sealed partial class SqliteTelemetryRepository(string databasePath) : ITe
                 cancellationToken);
         }
         if (version < 14) await CodexServerEvidenceStorage.MigrateAsync(connection, cancellationToken);
+        if (version < 15)
+        {
+            await ExecuteMigrationAsync(
+                connection,
+                """
+                CREATE TABLE IF NOT EXISTS remote_fleet_snapshots (
+                    snapshot_id TEXT PRIMARY KEY,
+                    host_alias TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    source_contract TEXT NOT NULL,
+                    remote_captured_at_utc TEXT NOT NULL,
+                    collected_at_utc TEXT NOT NULL,
+                    history_available INTEGER NOT NULL,
+                    truncated INTEGER NOT NULL,
+                    source_errors INTEGER NOT NULL,
+                    thread_count INTEGER NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_remote_fleet_snapshots_host_time
+                    ON remote_fleet_snapshots(host_alias, collected_at_utc DESC);
+                CREATE TABLE IF NOT EXISTS remote_fleet_threads (
+                    snapshot_id TEXT NOT NULL,
+                    thread_id TEXT NOT NULL,
+                    native_status TEXT NOT NULL,
+                    started_at_utc TEXT,
+                    observed_at_utc TEXT,
+                    PRIMARY KEY(snapshot_id, thread_id),
+                    FOREIGN KEY(snapshot_id) REFERENCES remote_fleet_snapshots(snapshot_id)
+                );
+                PRAGMA user_version = 15;
+                """,
+                cancellationToken);
+        }
     }
 
     /// <summary>

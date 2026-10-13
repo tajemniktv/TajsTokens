@@ -29,7 +29,7 @@ Binary rollback does **not** restore an older database schema. Stop the app and 
 
 ## Source and integration boundaries
 
-Codex native files and credentials are read-only. The app's local database owns retained evidence; no external collector should become a second authoritative Codex token ledger. The [local limits API](LOCAL_LIMITS_API.md) serves already-collected current quota on authenticated loopback only. Remote SSH fleet probes are explicit, read-only, content-free status checks; they do not synchronize history or quota. Avoid writing prompts, command bodies, account credentials or API tokens to shared reports.
+Codex native files and credentials are read-only. The app's local database owns retained evidence; no external collector should become a second authoritative Codex token ledger. The [local limits API](LOCAL_LIMITS_API.md) serves already-collected current quota on authenticated loopback only. [Remote SSH fleet probes](REMOTE_FLEET.md) are explicit, read-only, content-free status checks. They retain local status snapshots but do not synchronize token/quotas or transcripts. Avoid writing prompts, command bodies, account credentials or API tokens to shared reports.
 
 For machine-readable local workload totals, run:
 

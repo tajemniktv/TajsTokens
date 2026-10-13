@@ -146,14 +146,19 @@ public sealed class SshCodexRemoteFleetService
         {
             string? id = row.GetProperty("id").GetString();
             string? status = row.GetProperty("status").GetString();
-            if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(status) || id.Length > 128) continue;
+            if (!CodexRemoteFleetHostPolicy.IsSafeThreadId(id)) continue;
+            // Remote SQLite fields are untrusted input. Do not display or retain arbitrary text.
+            status = CodexRemoteFleetHostPolicy.NormalizeStatus(status);
             threads.Add(new CodexRemoteFleetThread(host, id, status,
                 ReadUnixTime(row, "started"), ReadUnixTime(row, "observed")));
         }
+        if (threads.Select(thread => thread.ThreadId).Distinct(StringComparer.Ordinal).Count() != threads.Count)
+            throw new JsonException("Duplicate remote thread identity.");
         int sourceErrors = root.GetProperty("source_errors").GetInt32();
         return new CodexRemoteFleetHostResult(host, captured, threads, null,
-            root.GetProperty("truncated").GetBoolean(), sourceErrors,
-            root.GetProperty("history_available").GetBoolean());
+            root.GetProperty("truncated").GetBoolean() || root.GetProperty("threads").GetArrayLength() > 150,
+            Math.Clamp(sourceErrors, 0, 10_000),
+            root.GetProperty("history_available").GetBoolean()) { CollectedAtUtc = DateTimeOffset.UtcNow };
     }
 
     private static DateTimeOffset? ReadUnixTime(JsonElement row, string name)

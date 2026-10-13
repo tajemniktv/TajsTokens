@@ -17,6 +17,9 @@ public sealed partial class CodexFleetPage : Page
     private Dictionary<string, long> _previousTotals = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, CodexRemoteFleetHostResult> _lastRemote = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, string> _remoteErrors = new(StringComparer.OrdinalIgnoreCase);
+    private bool _savedRemoteLoaded;
+    private bool _savedHistoryLoaded;
+    private bool _remotePersistenceWarning;
 
     public CodexFleetPage()
     {
@@ -33,6 +36,9 @@ public sealed partial class CodexFleetPage : Page
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         _cancellation = new CancellationTokenSource();
+        _savedRemoteLoaded = false;
+        _savedHistoryLoaded = false;
+        _remotePersistenceWarning = false;
         _timer.Start();
         await RefreshAsync(_cancellation.Token, false);
     }
@@ -70,12 +76,35 @@ public sealed partial class CodexFleetPage : Page
         _loading = true;
         try
         {
+            if (checkRemote || !_savedRemoteLoaded || !_savedHistoryLoaded)
+                _remotePersistenceWarning = false;
             Task<CodexLiveFleetSnapshot> fleetTask = Task.Run(
                 () => App.Services.CodexThreadReadModel.ReadLiveFleetAsync(cancellationToken), cancellationToken);
             Task<IReadOnlyList<CodexSessionOverview>> sessionsTask = Task.Run(
                 () => App.Services.ObservatoryReadModel.SearchSessionsAsync(string.Empty, 2_000, cancellationToken),
                 cancellationToken);
             string[] remoteHosts = App.Services.Settings.RemoteFleetSshHosts;
+            if (!_savedRemoteLoaded)
+            {
+                bool loadFailed = false;
+                foreach (string host in remoteHosts)
+                {
+                    try
+                    {
+                        CodexRemoteFleetHostResult? saved = await App.Services.Repository
+                            .ReadLatestRemoteFleetSnapshotAsync(host, cancellationToken);
+                        if (saved is not null && (!_lastRemote.TryGetValue(host, out CodexRemoteFleetHostResult? held) ||
+                            held.CollectedAtUtc is null || saved.CollectedAtUtc > held.CollectedAtUtc)) _lastRemote[host] = saved;
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                    catch (Exception exception) when (exception is not OutOfMemoryException)
+                    {
+                        _remotePersistenceWarning = true;
+                        loadFailed = true;
+                    }
+                }
+                _savedRemoteLoaded = !loadFailed;
+            }
             Task<CodexRemoteFleetHostResult>[] remoteTasks = checkRemote
                 ? remoteHosts.Select(host => App.Services.RemoteFleet.ReadHostAsync(host, cancellationToken)).ToArray()
                 : [];
@@ -146,9 +175,39 @@ public sealed partial class CodexFleetPage : Page
                     {
                         _lastRemote[source.Host] = source;
                         _remoteErrors.Remove(source.Host);
+                        try { await App.Services.Repository.SaveRemoteFleetSnapshotAsync(source, cancellationToken); }
+                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                        catch (Exception exception) when (exception is not OutOfMemoryException) { _remotePersistenceWarning = true; }
                     }
                     else _remoteErrors[source.Host] = source.Error;
                 }
+            }
+            if (checkRemote || !_savedHistoryLoaded)
+            {
+                var historyLines = new List<string>();
+                bool historyFailed = false;
+                foreach (string host in remoteHosts)
+                {
+                    try
+                    {
+                        IReadOnlyList<CodexRemoteFleetSnapshotSummary> history = await App.Services.Repository
+                            .ReadRemoteFleetHistoryAsync(host, 5, cancellationToken);
+                        historyLines.AddRange(history.Select(item =>
+                            $"{item.Host} · checked {item.CollectedAtUtc.ToLocalTime():g} · remote clock {item.RemoteCapturedAtUtc.ToLocalTime():g} · {item.ThreadCount:N0} thread(s)" +
+                            (item.Truncated ? " · bounded" : string.Empty) +
+                            (item.SourceErrors > 0 ? $" · {item.SourceErrors:N0} source warning(s)" : string.Empty)));
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+                    catch (Exception exception) when (exception is not OutOfMemoryException)
+                    {
+                        _remotePersistenceWarning = true;
+                        historyFailed = true;
+                    }
+                }
+                RemoteHistoryText.Text = historyLines.Count == 0
+                    ? "No saved SSH checks yet. Use Check SSH hosts to collect status metadata."
+                    : string.Join(Environment.NewLine, historyLines);
+                _savedHistoryLoaded = !historyFailed;
             }
             foreach (string host in remoteHosts)
             {
@@ -165,6 +224,11 @@ public sealed partial class CodexFleetPage : Page
                 }
                 remoteErrors += shown.SourceErrors;
                 string stale = error is null ? string.Empty : $" · unavailable now: {error}";
+                string checkedAt = shown.CollectedAtUtc is { } collected
+                    ? $" · checked {collected.ToLocalTime():g}" : " · check time unavailable";
+                bool recentlyChecked = CodexRemoteFleetFreshness.WasCheckedRecently(shown, DateTimeOffset.UtcNow);
+                if (!recentlyChecked)
+                    stale += " · saved status; current state unverified";
                 string sourceWarning = shown.SourceErrors > 0 ? $" · {shown.SourceErrors:N0} source warning(s)" : string.Empty;
                 if (shown.Threads.Count == 0)
                 {
@@ -172,25 +236,26 @@ public sealed partial class CodexFleetPage : Page
                         error ?? (shown.HistoryCapabilityAvailable
                             ? "No recent Codex turns on this host" : "Codex turn history unavailable on this host"),
                         "Remote usage not collected",
-                        $"SSH host {host} · captured {shown.CapturedAtUtc.ToLocalTime():g}"));
+                        $"SSH host {host}{checkedAt} · remote clock {shown.CapturedAtUtc.ToLocalTime():g}"));
                     continue;
                 }
                 foreach (CodexRemoteFleetThread thread in shown.Threads)
                 {
-                    CodexFleetState state = CodexLiveFleetPolicy.Classify(
-                        thread.NativeStatus, thread.LastObservedAtUtc, shown.CapturedAtUtc);
+                    CodexFleetState state = CodexRemoteFleetFreshness.Classify(shown, thread, DateTimeOffset.UtcNow);
                     string stateLabel = state switch
                     {
                         CodexFleetState.RecentlyWorking => "Recent in-progress evidence",
                         CodexFleetState.StaleInProgress => "In-progress record; freshness unverified",
-                        CodexFleetState.ReadyForPrompt => "Last turn completed · ready for a prompt",
+                        CodexFleetState.ReadyForPrompt => recentlyChecked
+                            ? "Last turn completed · ready for a prompt at check time"
+                            : "Saved completed turn; current readiness unknown",
                         CodexFleetState.Ended => $"Last turn {thread.NativeStatus}",
                         _ => "Turn state unavailable",
                     };
                     remoteRows.Add(new FleetRow(null, $"{host} · {thread.ThreadId}",
                         $"{stateLabel} · native {thread.NativeStatus}{stale}{sourceWarning}",
                         "Remote usage and quota not collected or merged",
-                        $"SSH host {host} · observed {thread.LastObservedAtUtc?.ToLocalTime().ToString("g") ?? "unknown"} · captured {shown.CapturedAtUtc.ToLocalTime():g}"));
+                        $"SSH host {host}{checkedAt} · observed {thread.LastObservedAtUtc?.ToLocalTime().ToString("g") ?? "unknown"} · remote clock {shown.CapturedAtUtc.ToLocalTime():g}"));
                 }
             }
             FleetRow[] rows = localRows.Concat(remoteRows).ToArray();
@@ -201,6 +266,7 @@ public sealed partial class CodexFleetPage : Page
                               (fleet.HistoryCapabilityAvailable ? string.Empty : " · turn history unavailable") +
                               (fleet.Warnings.Count > 0 ? $" · {fleet.Warnings.Count:N0} local source warning(s)" : string.Empty) +
                               (remoteErrors > 0 ? $" · {remoteErrors:N0} SSH/source warning(s)" : string.Empty) +
+                              (_remotePersistenceWarning ? " · saved SSH history unavailable" : string.Empty) +
                               (_lastRemote.Values.Any(snapshot => snapshot.Truncated) ? " · remote coverage bounded" : string.Empty);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }

@@ -32,4 +32,18 @@ public sealed class SshCodexRemoteFleetServiceTests
         Assert.Throws<System.Text.Json.JsonException>(() => SshCodexRemoteFleetService.Parse(
             "server", "{\"v\":2,\"captured\":0,\"threads\":[],\"truncated\":false,\"source_errors\":0,\"history_available\":false}"));
     }
+
+    [Fact]
+    public void Parse_DropsContentBearingIdsAndNormalizesUnknownStatuses()
+    {
+        const string json = """
+                            {"v":1,"captured":1791892800,"threads":[{"id":"prompt text with spaces","status":"inProgress"},{"id":"thread-2","status":"command body"}],"truncated":false,"source_errors":-4,"history_available":true}
+                            """;
+        var snapshot = SshCodexRemoteFleetService.Parse("server", json);
+        var thread = Assert.Single(snapshot.Threads);
+        Assert.Equal("thread-2", thread.ThreadId);
+        Assert.Equal("unknown", thread.NativeStatus);
+        Assert.Equal(0, snapshot.SourceErrors);
+        Assert.NotNull(snapshot.CollectedAtUtc);
+    }
 }

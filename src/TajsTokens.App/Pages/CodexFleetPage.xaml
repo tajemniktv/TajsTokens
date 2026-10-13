@@ -13,9 +13,15 @@
                 <Button Content="Refresh local" Click="OnRefreshClicked" />
                 <Button Content="Check SSH hosts" Click="OnRemoteRefreshClicked" />
             </StackPanel>
-            <TextBlock Text="Local rows refresh every 15 seconds while open. SSH hosts are checked only when you click Check SSH hosts; your key may require a hardware-key touch. Recent in-progress history is not process-liveness proof; waiting for input cannot be verified from these local sources. Token figures are collected session totals, not per-turn cost or quota share."
+            <TextBlock Text="Local rows refresh every 15 seconds while open. SSH hosts are checked only when you click Check SSH hosts; your key may require a hardware-key touch. Successful content-free status checks are retained locally for offline review. Saved status is historical, not process-liveness proof; waiting for input cannot be verified. Token figures are collected session totals, not per-turn cost or quota share."
                        Opacity="0.72" TextWrapping="Wrap" />
             <TextBlock x:Name="StatusText" Text="Reading local Codex fleet…" Opacity="0.8" TextWrapping="Wrap" />
+            <Expander Header="Saved SSH checks" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                <ScrollViewer MaxHeight="180" VerticalScrollBarVisibility="Auto">
+                    <TextBlock x:Name="RemoteHistoryText" Text="No saved SSH checks yet." TextWrapping="Wrap"
+                               IsTextSelectionEnabled="True" />
+                </ScrollViewer>
+            </Expander>
         </StackPanel>
         <ListView x:Name="FleetList" Grid.Row="1" SelectionMode="Single"
                   SelectionChanged="OnSelectionChanged" ScrollViewer.IsDeferredScrollingEnabled="True">

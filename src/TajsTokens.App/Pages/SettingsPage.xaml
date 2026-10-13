@@ -140,7 +140,7 @@
                              Header="Remote Codex fleet via SSH (one configured host alias per line)"
                              AcceptsReturn="True" TextWrapping="Wrap" MinHeight="76"
                              PlaceholderText="laptop&#xA;server" />
-                    <TextBlock Text="Opt-in, read-only SSH probes run only when you select Check SSH hosts in Live fleet. Hardware-backed SSH keys may require a touch once per host. Python 3 and Codex history must be available to the SSH user. No transcript bodies, quota readings or credentials are copied or merged; unreachable hosts stay separate from local evidence."
+                    <TextBlock Text="Opt-in, read-only SSH probes run only when you select Check SSH hosts in Live fleet. Hardware-backed SSH keys may require a touch once per host. Python 3 and Codex history must be available to the SSH user. Successful host-qualified turn-status snapshots are retained locally; no transcript bodies, quota readings or credentials are copied or merged."
                                Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                     <Expander Header="Advanced integrations" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                         <StackPanel Spacing="12">

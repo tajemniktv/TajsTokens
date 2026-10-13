@@ -5,7 +5,7 @@ TajsTokens is a local-first Windows companion for Codex quota, usage and activit
 ## Current features
 
 - Quota overview, history, alerts and tray status, including reset-aware outlooks with visible uncertainty.
-- Local Codex thread, subagent and tool inspection; Live fleet shows recent turn evidence, token increments and cache input mix. An on-demand SSH check can show host-qualified turn status for configured remote aliases without copying transcripts or merging account quotas.
+- Local Codex thread, subagent and tool inspection; Live fleet shows recent turn evidence, token increments and cache input mix. An [on-demand SSH check](docs/REMOTE_FLEET.md) shows host-qualified turn status for configured remote aliases and retains content-free checks for offline review without merging account quotas.
 - Usage breakdowns by model, project, session and time; advanced diagnostics, model evaluation and workload scenarios.
 - Read-only native Codex inspection. Optional local integrations are opt-in: the CLI harness runs only when requested, and the [local limits API](docs/LOCAL_LIMITS_API.md) is disabled by default.
 - A read-only observed account/source inventory in Settings. Backend account keys remain attached to the quota observations that supplied them; historical local work is not assigned to the current login automatically.

@@ -29,6 +29,8 @@ public sealed class SqliteTelemetryRepositoryTests
         "repositories",
         "workspaces",
         "forecast_snapshots",
+        "remote_fleet_snapshots",
+        "remote_fleet_threads",
     ];
 
     [Fact]
@@ -46,7 +48,7 @@ public sealed class SqliteTelemetryRepositoryTests
             {
                 await connection.OpenAsync();
 
-                Assert.Equal(14, await ReadSchemaVersionAsync(connection));
+                Assert.Equal(15, await ReadSchemaVersionAsync(connection));
                 HashSet<string> tables = await ReadTableNamesAsync(connection);
                 foreach (string expected in s_foundationTables)
                 {
@@ -99,7 +101,7 @@ public sealed class SqliteTelemetryRepositoryTests
             await using (var migrated = new SqliteConnection($"Data Source={path}"))
             {
                 await migrated.OpenAsync();
-                Assert.Equal(14, await ReadSchemaVersionAsync(migrated));
+                Assert.Equal(15, await ReadSchemaVersionAsync(migrated));
                 Assert.Contains("repositories", await ReadTableNamesAsync(migrated));
                 Assert.Contains("workspaces", await ReadTableNamesAsync(migrated));
                 Assert.Contains("forecast_snapshots", await ReadTableNamesAsync(migrated));
@@ -186,7 +188,7 @@ public sealed class SqliteTelemetryRepositoryTests
 
             await using var migrated = new SqliteConnection($"Data Source={path}");
             await migrated.OpenAsync();
-            Assert.Equal(14, await ReadSchemaVersionAsync(migrated));
+            Assert.Equal(15, await ReadSchemaVersionAsync(migrated));
             IReadOnlyList<QuotaSnapshot> snapshots = await repository.GetRecentQuotaSnapshotsAsync(
                 QuotaWindowKind.FiveHour,
                 "codex",
