@@ -367,6 +367,7 @@ public sealed class CodexStateDbExplorerTests
     [InlineData(@"\\server\share\rollout.jsonl", "rollout.jsonl")]
     [InlineData(@"/home/tester/back\ups/session.json", "session.json")]
     [InlineData(@"/home/tester/config\file.json", @"config\file.json")]
+    [InlineData(@"config\file.json", @"config\file.json")]
     public void SanitizedExport_PreservesBasenamesAcrossPathSyntax(string path, string basename)
     {
         var page = new CodexStateRawPage("source", "threads", 0, 50, 1,

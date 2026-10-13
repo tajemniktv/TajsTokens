@@ -16,8 +16,7 @@ public sealed record TokenUsage(
     string? Repository = null,
     string? AgentId = null)
 {
-    public DateTimeOffset? SourceEventAtUtc { get; init; } = ObservedAtUtc;
+    public DateTimeOffset? SourceEventAtUtc { get; init; }
     public DateTimeOffset? CapturedAtUtc { get; init; }
-    public CodexSourceTimestampQuality SourceTimestampQuality { get; init; } =
-        ObservedAtUtc is null ? CodexSourceTimestampQuality.Missing : CodexSourceTimestampQuality.Valid;
+    public CodexSourceTimestampQuality SourceTimestampQuality { get; init; } = CodexSourceTimestampQuality.Missing;
 }

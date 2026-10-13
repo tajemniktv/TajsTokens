@@ -1130,7 +1130,11 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                                      context_window_tokens, is_compaction, record_bytes, captured_at_utc,
                                      source_event_at_utc, source_timestamp_quality
                               FROM context_observations WHERE session_id = $session
-                              ORDER BY captured_at_utc DESC, source_event_at_utc DESC, rowid DESC LIMIT $take;
+                              ORDER BY CASE WHEN source_timestamp_quality = 'Valid' AND source_event_at_utc IS NOT NULL
+                                            THEN 0 ELSE 1 END,
+                                       CASE WHEN source_timestamp_quality = 'Valid' AND source_event_at_utc IS NOT NULL
+                                            THEN source_event_at_utc ELSE captured_at_utc END DESC,
+                                       rowid DESC LIMIT $take;
                               """;
         command.Parameters.AddWithValue("$session", sessionId);
         command.Parameters.AddWithValue("$take", Math.Max(0, take));

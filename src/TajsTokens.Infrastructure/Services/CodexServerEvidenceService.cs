@@ -382,8 +382,11 @@ public sealed class CodexServerEvidenceService(
                                   SELECT COUNT(*),SUM(extra_tokens) FROM (
                                       SELECT reported_total_tokens * (COUNT(*)-1) AS extra_tokens
                                       FROM codex_native_token_events
-                                      WHERE source_event_at_utc IS NOT NULL AND source_timestamp_quality = 'Valid'
-                                      GROUP BY session_id,source_event_at_utc,model,reasoning_effort,uncached_input_tokens,cache_read_tokens,
+                                      WHERE (source_timestamp_quality = 'Valid' AND source_event_at_utc IS NOT NULL)
+                                         OR (source_timestamp_quality = 'LegacyUnverified' AND observed_at_utc IS NOT NULL)
+                                      GROUP BY session_id,
+                                          CASE WHEN source_timestamp_quality = 'Valid' THEN source_event_at_utc ELSE observed_at_utc END,
+                                          model,reasoning_effort,uncached_input_tokens,cache_read_tokens,
                                           cache_write_tokens,non_reasoning_output_tokens,reasoning_output_tokens,reported_total_tokens
                                       HAVING COUNT(DISTINCT source_file)>1);
                                   """;
@@ -397,7 +400,7 @@ public sealed class CodexServerEvidenceService(
                         duplicateReader.GetInt64(1),
                         null,
                         AccountEvidenceClass.Unattributed,
-                        $"{duplicateReader.GetInt64(0):N0} identical session/time/model/effort/token fingerprints occur in multiple physical sources. Extra retained tokens shown, not automatically deduplicated or proven independent usage."));
+                        $"{duplicateReader.GetInt64(0):N0} identical session/time/model/effort/token fingerprints occur in multiple physical sources. Legacy timestamps are unverified; extra retained tokens are shown, not automatically deduplicated or proven independent usage."));
         }
         foreach (IGrouping<(string? CorrelatedAccountKey, AccountEvidenceClass AccountEvidence), CodexServerObservation> cohort in history
                      .Where(x => x.Activity is not null && x.State is ServerEvidenceState.Available or ServerEvidenceState.Empty)

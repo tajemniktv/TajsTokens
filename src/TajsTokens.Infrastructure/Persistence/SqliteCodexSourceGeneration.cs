@@ -24,6 +24,13 @@ internal static class SqliteCodexSourceGeneration
     public static async Task RetirePreviousAsync(SqliteConnection connection, SqliteTransaction transaction,
         string safeFileLabel, string sourceIdentity, CancellationToken cancellationToken)
     {
+        using SqliteCommand previous = connection.CreateCommand();
+        previous.Transaction = transaction;
+        previous.CommandText = "SELECT 1 FROM rollout_files WHERE file_path = $file AND source_identity <> $identity LIMIT 1;";
+        previous.Parameters.AddWithValue("$file", safeFileLabel);
+        previous.Parameters.AddWithValue("$identity", sourceIdentity);
+        if (await previous.ExecuteScalarAsync(cancellationToken) is null) return;
+
         using SqliteCommand command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """

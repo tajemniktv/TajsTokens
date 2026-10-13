@@ -31,6 +31,30 @@ public sealed class CodexServerEvidenceTests : IDisposable
 
     private string Database => Path.Combine(_directory, "telemetry.db");
 
+    [Fact]
+    public async Task RepeatedEventDiagnosticRetainsLegacyUnverifiedCandidates()
+    {
+        var repository = new SqliteTelemetryRepository(Database);
+        await repository.InitializeAsync(default);
+        using var store = new SqliteCodexObservatoryStore(Database);
+        await store.InitializeAsync(default);
+        await Execute("""
+            INSERT INTO codex_native_token_events(source_event_id,source_file,session_id,observed_at_utc,
+                model,reasoning_effort,counter_epoch,uncached_input_tokens,cache_read_tokens,
+                cache_write_tokens,non_reasoning_output_tokens,reasoning_output_tokens,reported_total_tokens,
+                source_timestamp_quality)
+            VALUES
+                ('a','source-a','session','2026-09-01T10:00:00+00:00','model','high',0,100,0,0,0,0,100,'LegacyUnverified'),
+                ('b','source-b','session','2026-09-01T10:00:00+00:00','model','high',0,100,0,0,0,0,100,'LegacyUnverified');
+            """);
+
+        CodexServerComparisonReport report = await Service(repository).CompareAsync(default);
+        CodexServerComparisonRow candidate = Assert.Single(report.Comparisons,
+            x => x.Scope == "Local repeated-event fingerprint candidates");
+        Assert.Equal(100, candidate.LocalTokens);
+        Assert.Contains("unverified", candidate.Detail);
+    }
+
     public void Dispose()
     {
         SqliteConnection.ClearAllPools();

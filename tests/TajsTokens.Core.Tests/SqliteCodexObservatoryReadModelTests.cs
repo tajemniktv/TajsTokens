@@ -16,6 +16,44 @@ namespace TajsTokens.Core.Tests;
 public sealed class SqliteCodexObservatoryReadModelTests
 {
     [Fact]
+    public async Task ContextLimitPrefersRecentVerifiedEventsOverLateBackfill()
+    {
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-context-order-");
+        string databasePath = Path.Combine(directory.FullName, "telemetry.db");
+        try
+        {
+            var repository = new SqliteTelemetryRepository(databasePath);
+            await repository.InitializeAsync(default);
+            using var store = new SqliteCodexObservatoryStore(databasePath);
+            await store.InitializeAsync(default);
+            await using var connection = new SqliteConnection($"Data Source={databasePath}");
+            await connection.OpenAsync();
+            SqliteCommand seed = connection.CreateCommand();
+            seed.CommandText = """
+                INSERT INTO context_observations(event_id,session_id,observed_at_utc,captured_at_utc,
+                    source_event_at_utc,source_timestamp_quality,is_compaction)
+                VALUES
+                    ('recent','session','2026-09-02T10:00:00+00:00','2026-09-02T10:01:00+00:00',
+                     '2026-09-02T10:00:00+00:00','Valid',0),
+                    ('backfill','session','2026-09-01T10:00:00+00:00','2026-09-03T10:00:00+00:00',
+                     '2026-09-01T10:00:00+00:00','Valid',0),
+                    ('unknown','session','2026-09-03T11:00:00+00:00','2026-09-03T11:00:00+00:00',
+                     NULL,'Missing',0);
+                """;
+            await seed.ExecuteNonQueryAsync();
+
+            Assert.Equal(new[] { "recent", "backfill", "unknown" },
+                (await store.GetContextObservationsAsync("session", 3, default)).Select(x => x.EventId));
+            Assert.Equal("recent", Assert.Single(await store.GetContextObservationsAsync("session", 1, default)).EventId);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(true);
+        }
+    }
+
+    [Fact]
     public async Task Queries_FilterBeforeLimit_AndPreserveSessionAggregatesTopologyAndStorage()
     {
         DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-observatory-read-");

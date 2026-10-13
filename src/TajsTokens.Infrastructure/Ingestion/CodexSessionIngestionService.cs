@@ -29,7 +29,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
     private readonly CodexRolloutParser _parser = new();
     private readonly ICodexSessionEventProvider _sessionEventProvider;
 
-    private readonly Dictionary<string, (string Identity, long Offset, string Hash, long Length, DateTime Written)> _verifiedPrefixes =
+    private readonly Dictionary<string, (string Identity, string PhysicalIdentity, long Offset, string Hash, long Length, DateTime Written)> _verifiedPrefixes =
         new(StringComparer.OrdinalIgnoreCase);
 
     public CodexSessionIngestionService(
@@ -76,6 +76,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             parserVersion += "/desktop-owner-v1";
         FileIngestionCheckpoint? existing = await _checkpointStore.GetCheckpointAsync(filePath, cancellationToken);
         string sourceIdentity = GetSourceIdentity(filePath);
+        string physicalIdentity = sourceIdentity;
         var initialInfo = new FileInfo(filePath);
         long initialLength = initialInfo.Length;
         DateTime initialWritten = initialInfo.LastWriteTimeUtc;
@@ -113,12 +114,14 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                         (previousIdentity == sourceIdentity || previousIdentity.StartsWith(
                             sourceIdentity + ":generation:",
                             StringComparison.Ordinal));
-        bool cachedPrefix = sameFile && !sourceIdentity.StartsWith("fallback-path:", StringComparison.Ordinal) &&
+        // A verified legacy checkpoint may retain its occurrence ID after gaining a stable
+        // physical file ID. Cache against that physical ID, never against a path-only fallback.
+        bool cachedPrefix = !sourceIdentity.StartsWith("fallback-path:", StringComparison.Ordinal) &&
                             existing?.ConsumedPrefixSha256 is { } knownHash &&
                             _verifiedPrefixes.TryGetValue(
                                 filePath,
-                                out (string Identity, long Offset, string Hash, long Length, DateTime Written) verified) &&
-                            verified == (existing.SourceIdentity, existing.LastByteOffset, knownHash, initialLength, initialWritten);
+                                out (string Identity, string PhysicalIdentity, long Offset, string Hash, long Length, DateTime Written) verified) &&
+                            verified == (existing.SourceIdentity, sourceIdentity, existing.LastByteOffset, knownHash, initialLength, initialWritten);
         string? existingPrefix = existing is null ? null :
             cachedPrefix ? existing.ConsumedPrefixSha256 :
             await HashThroughAsync(Math.Min(existing.LastByteOffset, prefixStream.Length));
@@ -250,8 +253,10 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             cancellationToken);
 
         var finalInfo = new FileInfo(filePath);
-        if (finalInfo.Length == initialLength && finalInfo.LastWriteTimeUtc == initialWritten)
-            _verifiedPrefixes[filePath] = (sourceIdentity, lastCompleteRecordOffset, finalPrefix, initialLength, initialWritten);
+        if (finalInfo.Length == initialLength && finalInfo.LastWriteTimeUtc == initialWritten &&
+            GetSourceIdentity(filePath) == physicalIdentity)
+            _verifiedPrefixes[filePath] = (sourceIdentity, physicalIdentity, lastCompleteRecordOffset,
+                finalPrefix, initialLength, initialWritten);
         else _verifiedPrefixes.Remove(filePath);
 
         int normalized = _observatoryStore is null ? recordsScanned : normalizedRecords;

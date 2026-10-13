@@ -1906,8 +1906,7 @@ public sealed class CodexStateDbExplorerService
             // Recognize foreign Windows paths without treating a Unix filename's backslash
             // as a directory separator, even when this inspection runs on Windows.
             bool windowsPath = text.StartsWith(@"\\", StringComparison.Ordinal) ||
-                (text.Length >= 3 && char.IsAsciiLetter(text[0]) && text[1] == ':' && text[2] is '\\' or '/') ||
-                (OperatingSystem.IsWindows() && !text.StartsWith('/'));
+                (text.Length >= 3 && char.IsAsciiLetter(text[0]) && text[1] == ':' && text[2] is '\\' or '/');
             string portablePath = windowsPath ? text.Replace('\\', '/') : text;
             return $"<path:{portablePath[(portablePath.LastIndexOf('/') + 1)..]}>";
         }
