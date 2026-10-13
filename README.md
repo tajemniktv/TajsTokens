@@ -1,98 +1,32 @@
 # TajsTokens
 
-TajsTokens is a local-first Windows companion for **Codex quota, usage and activity**.
+TajsTokens is a local-first Windows companion for Codex quota, usage and activity. It shows reported quota windows and source freshness, explores locally observed token and thread history, and offers conditional quota outlooks and planning. Token totals, API-equivalent price estimates and subscription quota remain distinct quantities.
 
-See your reported quota windows, explore your work history, and get conditional quota
-outlooks and usage predictions—with freshness and uncertainty kept visible.
+## Current features
 
-## What you can do
+- Quota overview, history, alerts and tray status, including reset-aware outlooks with visible uncertainty.
+- Local Codex thread, subagent and tool inspection; Live fleet shows recent turn evidence, token increments and cache input mix. An [on-demand SSH check](docs/REMOTE_FLEET.md) shows host-qualified turn status for configured remote aliases and retains content-free checks for offline review without merging account quotas.
+- Usage breakdowns by model, project, session and time; advanced diagnostics, model evaluation and workload scenarios.
+- Read-only native Codex inspection. Optional local integrations are opt-in: the CLI harness runs only when requested, and the [local limits API](docs/LOCAL_LIMITS_API.md) is disabled by default.
+- A read-only observed account/source inventory in Settings. Backend account keys remain attached to the quota observations that supplied them; historical local work is not assigned to the current login automatically.
+- A headless `--daily-json` report of UTC-day totals from the existing local native token ledger. It contains aggregates only and does not claim account ownership.
 
-- **Overview:** a dashboard leads with remaining allowance, a conditional outlook and the work
-  behind your usage. Work history, Planning and Evidence share one UTC date/account/model/project/chat selection for recorded workload,
-  breakdowns, quota observations, API-reference estimates and provider evidence. Account-wide quota
-  is explicitly unavailable under narrower work filters, not allocated in proportion to tokens.
-  The same screen includes current outlooks, scenario planning, evidence health and an inference manifest.
-  Retrospective accounting analysis is an explicit action, not a new background model.
-- **Current outlook:** reported quota, resets, local-token nowcasts and an even-burn comparison
-  against elapsed time at the reading. Its window start is explicitly inferred; even-burn is not a forecast.
-  Collection controls and failures stay in Diagnostics rather than a second overview page.
-- **Chats and work:** navigate workspaces, threads and subagents; inspect turns, tools,
-  context and supported native source details. Jump from a thread to its token usage.
-  Thread Storage also shows bounded supplemental response-evidence coverage, selected counter snapshots and identity conflicts;
-  these records stay separate from token totals and forecasts.
-- **Chats and agents → Usage breakdown:** compare models, projects, sessions, hours, days and months in consistent token
-  tables. Search/sort rows, inspect exact counts and filter a selected row across breakdowns.
-  A timeline and removable filter chips sit above the breakdown; detailed token columns are optional.
-  Times display locally; daily/monthly groups retain UTC boundaries. Totals are not inferred billing or quota cost.
-- **Advanced → Workload planner:** start with current quota outlooks, see token nowcasts and conditional 30/60-minute
-  session outlooks (recorded local work, not a prediction of human presence), estimate
-  supported workload scenarios, and browse saved outlooks. The planner can fill editable session counts
-  and model/effort from recent local activity while leaving your planned duration unchanged; this is a
-  conditional scenario, not a prediction that work continues.
-  Advanced → Model lab compares models within a selected history cohort and target. Historical evidence
-  explains which rollout/app-server readings are usable, repeated, conflicting or incomplete.
-  Cost-calibration diagnostics compare actual recorded work with quota movement; they are
-  separate from end-to-end forecast and cross-regime transfer diagnostics. Workload composition
-  is visible; a learned quota outlook replaces the incumbent only after independent validation gates pass.
-  Explicit Model Lab evaluations with workload-score results save an original local research report for later inspection;
-  these reports are experimental diagnostics, not a subscription balance or per-task accounting.
-- **Advanced → Quota history details:** select points on a quota-used timeline alongside optional local token activity and filter
-  quota drops separately from reset-time shifts. Account readings are the default; rollout
-  observations remain separate diagnostics, with explicit observation times and detailed deadlines.
-- **Advanced → Diagnostics / Model lab:** check source health, collection coverage and prediction evidence.
-- **Native log inspection:** WAL-mode log pages share a read-only snapshot for up to two minutes,
-  so new writes do not shift your pages. Apply refreshes the snapshot; expired snapshots ask you to
-  refresh. Other journal modes are explicitly labelled live pages. Log bodies remain opt-in and local.
-- **Auxiliary source inspection:** query an exact thread ID before paging through memory outputs,
-  goals, queue, artifacts and Desktop records. Separate loaded-row filtering never claims to search
-  the whole source. Auxiliary pages are live and may shift when Codex writes.
-- **Experimental daily backend reports:** opt in on Quota history to collect daily Codex token
-  counts and reported per-surface percentages using your existing Codex sign-in. Private endpoints
-  may change; failures remain visible. Reports stay local, credentials are not saved, and daily
-  percentages are not treated as the current weekly quota or a monetary cost.
-- **Provider-native account evidence:** Diagnostics compares backend account activity with retained local
-  tokens and reads optional thread credit estimates. Missing estimates remain unavailable; credits are
-  not quota percentages. Experimental plan history is not yet exposed through Codex's supported app-server seam.
-  Retained evidence also shows named quota/spend-control metadata and local service-tier setting
-  counts. Settings are observations, not proof of the tier billed; unknown values stay unknown.
-  Evidence-change diagnostics distinguish reported configuration changes, missing fields,
-  failures and revised historical reports without treating ordinary resets as policy changes.
-- **Historical rollout ownership:** explicitly associate retained histories with a recorded account
-  in Settings, or revoke the association. User assertions remain separate from native account IDs;
-  live learning still requires independently collected validation evidence.
-- **Advanced → Data explorer:** inspect Codex SQLite data read-only and compare selected sources.
-- **Advanced → CLI harness:** explicitly run a configured local CLI and inspect its output.
-- **Window preferences:** restored window size and maximized state survive restarts.
+Forecasts are estimates, not guarantees. A missing or stale quota lane is not zero usage or unlimited allowance. The Live fleet's recent-write state is not proof a Codex process is still running.
 
-Predictions are estimates, not guarantees. Token predictions describe recorded local usage
-(including cached input), not subscription-quota percentages. Quota outlooks and scenarios
-may remain in a learning state when compatible history is insufficient. An omitted quota
-window is not treated as unlimited usage.
+## Privacy and local data
 
-## Local data and privacy
+Codex sources and credentials are read-only. TajsTokens keeps selected telemetry in its own local database; opening source content does not automatically persist or upload it. Remote SSH status checks run only when requested and may require a hardware-key touch.
 
-Codex source inspection is read-only. TajsTokens keeps selected telemetry in its own local
-database; viewing a conversation or other source content does not automatically copy it
-into that database. Inspection exports are explicit local actions, not automatic uploads.
-The CLI harness runs only when invoked.
+The daily installation is `%LOCALAPPDATA%\Programs\TajemnikTV\TajsTokens\current`; persistent data lives in its sibling `data` directory.
 
-The daily installation lives at
-`%LOCALAPPDATA%/Programs/TajemnikTV/TajsTokens/current`, with persistent data in the
-sibling `data` directory. Launch **TajsTokens** from the Start menu after installation.
+## Build
 
-## Build and run
-
-Requires **Windows 10 19041+ or Windows 11** and **.NET SDK 10.0+** to build from source.
+Windows 10 19041+ or Windows 11 and .NET SDK 10.0+ are required for the WinUI app.
 
 ```powershell
 dotnet restore TajsTokens.slnx
+dotnet test tests/TajsTokens.Core.Tests/TajsTokens.Core.Tests.csproj -c Debug
 dotnet build TajsTokens.slnx -c Debug
 ```
 
-**A successful local app build installs and restarts the daily app.** To build without
-changing the running installation, add `-p:DogfoodEnabled=false`. CI and test-only builds
-do not deploy.
-
-See the [contributor guide](docs/DEVELOPMENT.md) for isolated running, tests, deployment,
-backup and recovery instructions. [PROJECT.md](PROJECT.md) contains current architecture,
-product direction and planned work; those plans are not a list of shipped features.
+A successful local app build installs and restarts the daily build. Add `-p:DogfoodEnabled=false` to build without changing the installed app. See [development and recovery](docs/DEVELOPMENT.md) and [project design/current work](PROJECT.md).

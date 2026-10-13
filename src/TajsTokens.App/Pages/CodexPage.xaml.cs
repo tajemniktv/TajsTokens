@@ -52,6 +52,7 @@ public sealed partial class CodexPage : Page
     private bool _showExecutionDetails;
     private bool _suppressTreeSelection;
     private UsagePage? _usagePage;
+    private CodexFleetPage? _fleetPage;
 
     public CodexPage()
     {
@@ -74,8 +75,37 @@ public sealed partial class CodexPage : Page
         ShowUsage(true);
     }
 
+    private void OnFleetViewClicked(object sender, RoutedEventArgs e)
+    {
+        ShowFleet(true);
+    }
+
+    private void ShowFleet(bool show)
+    {
+        if (show && _fleetPage is null)
+        {
+            _fleetPage = new CodexFleetPage();
+            _fleetPage.ThreadRequested += async (_, threadId) =>
+            {
+                ShowFleet(false);
+                await LoadThreadAsync(threadId);
+            };
+        }
+        FleetHost.Content = show ? _fleetPage : null;
+        FleetHost.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        UsageHost.Content = null;
+        UsageHost.Visibility = Visibility.Collapsed;
+        BrowserSplitView.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
+        BrowserControls.Visibility = StatusText.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
+        WorkViewButton.IsChecked = !show;
+        FleetViewButton.IsChecked = show;
+        UsageViewButton.IsChecked = false;
+    }
+
     private void ShowUsage(bool show, string? threadId = null)
     {
+        FleetHost.Content = null;
+        FleetHost.Visibility = Visibility.Collapsed;
         if (show && _usagePage is null)
         {
             _usagePage = new UsagePage();
@@ -92,6 +122,7 @@ public sealed partial class CodexPage : Page
         BrowserSplitView.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
         BrowserControls.Visibility = StatusText.Visibility = show ? Visibility.Collapsed : Visibility.Visible;
         WorkViewButton.IsChecked = !show;
+        FleetViewButton.IsChecked = false;
         UsageViewButton.IsChecked = show;
     }
 

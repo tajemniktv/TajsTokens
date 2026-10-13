@@ -41,6 +41,146 @@ public sealed class CodexThreadObservabilityService
     public string CodexHome => _sources.CodexHome;
 
     /// <summary>
+    ///     Bounded fleet status from local Codex history metadata only. No item bodies, prompts,
+    ///     command text or process controls are read. In-progress is freshness-qualified because
+    ///     crashed/interrupted runs may leave an old inProgress row behind.
+    /// </summary>
+    public async Task<CodexLiveFleetSnapshot> ReadLiveFleetAsync(CancellationToken cancellationToken)
+    {
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        CodexThreadSearchResult catalog = await SearchThreadsAsync(null, 1_000, cancellationToken);
+        var warnings = new List<string>(catalog.Warnings);
+        var latestTurns = new Dictionary<string, FleetTurnEvidence>(StringComparer.OrdinalIgnoreCase);
+        var latestItems = new Dictionary<string, (string? Type, DateTimeOffset? At, string SourcePath)>(StringComparer.OrdinalIgnoreCase);
+        bool historyAvailable = false;
+        bool truncated = catalog.SourceRowsTruncated || catalog.Entries.Count == 1_000;
+
+        foreach (CodexStateDatabaseCandidate candidate in OrderCandidates())
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                await using SqliteConnection connection = await OpenReadOnlyAsync(candidate.Path, cancellationToken);
+                if (!await HasTableAsync(connection, "thread_turns", cancellationToken)) continue;
+                historyAvailable = true;
+                string turnOrder = await HasColumnAsync(connection, "thread_turns", "rollout_ordinal", cancellationToken)
+                    ? "rollout_ordinal DESC"
+                    : "rowid DESC";
+                string turnStart = await HasColumnAsync(connection, "thread_turns", "started_at", cancellationToken)
+                    ? "started_at"
+                    : "NULL AS started_at";
+                string turnEnd = await HasColumnAsync(connection, "thread_turns", "completed_at", cancellationToken)
+                    ? "completed_at"
+                    : "NULL AS completed_at";
+                await using SqliteCommand turnsCommand = connection.CreateCommand();
+                turnsCommand.CommandText = $"""
+                    SELECT thread_id, turn_id, status, started_at, completed_at
+                    FROM (SELECT thread_id, turn_id, status, {turnStart}, {turnEnd},
+                                 ROW_NUMBER() OVER (PARTITION BY thread_id ORDER BY {turnOrder}) AS rn
+                          FROM thread_turns)
+                    WHERE rn = 1 LIMIT 10001;
+                    """;
+                await using (SqliteDataReader reader = await turnsCommand.ExecuteReaderAsync(cancellationToken))
+                {
+                    int rows = 0;
+                    while (await reader.ReadAsync(cancellationToken))
+                    {
+                        if (++rows > 10_000) { truncated = true; break; }
+                        string? threadId = reader.IsDBNull(0) ? null : reader.GetString(0);
+                        if (string.IsNullOrWhiteSpace(threadId)) continue;
+                        var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                        {
+                            ["started_at"] = reader.IsDBNull(3) ? null : reader.GetValue(3),
+                            ["completed_at"] = reader.IsDBNull(4) ? null : reader.GetValue(4),
+                        };
+                        var evidence = new FleetTurnEvidence(
+                            reader.IsDBNull(1) ? null : reader.GetString(1),
+                            reader.IsDBNull(2) ? null : reader.GetString(2),
+                            ReadTimestamp(values, "started_at_ms", "started_at"),
+                            ReadTimestamp(values, "completed_at_ms", "completed_at"),
+                            candidate.Path);
+                        if (!latestTurns.TryGetValue(threadId, out FleetTurnEvidence? existing) ||
+                            evidence.ObservedAtUtc > existing.ObservedAtUtc)
+                            latestTurns[threadId] = evidence;
+                    }
+                }
+
+                if (!await HasTableAsync(connection, "thread_items", cancellationToken) ||
+                    !await HasColumnAsync(connection, "thread_items", "item_type", cancellationToken) ||
+                    !await HasColumnAsync(connection, "thread_items", "turn_id", cancellationToken)) continue;
+                string itemOrder = await HasColumnAsync(connection, "thread_items", "rollout_ordinal", cancellationToken)
+                    ? "rollout_ordinal DESC"
+                    : "rowid DESC";
+                string itemTime = await HasColumnAsync(connection, "thread_items", "created_at_ms", cancellationToken)
+                    ? "created_at_ms"
+                    : await HasColumnAsync(connection, "thread_items", "created_at", cancellationToken)
+                        ? "created_at"
+                        : "NULL";
+                foreach (KeyValuePair<string, FleetTurnEvidence> turn in latestTurns.Where(pair =>
+                             pair.Value.SourcePath == candidate.Path &&
+                             !string.IsNullOrWhiteSpace(pair.Value.TurnId) &&
+                             string.Equals(pair.Value.Status, "inProgress", StringComparison.OrdinalIgnoreCase)))
+                {
+                    await using SqliteCommand itemCommand = connection.CreateCommand();
+                    itemCommand.CommandText = $"SELECT item_type, {itemTime} FROM thread_items WHERE thread_id = $thread AND turn_id = $turn ORDER BY {itemOrder} LIMIT 1;";
+                    itemCommand.Parameters.AddWithValue("$thread", turn.Key);
+                    itemCommand.Parameters.AddWithValue("$turn", turn.Value.TurnId!);
+                    await using SqliteDataReader itemReader = await itemCommand.ExecuteReaderAsync(cancellationToken);
+                    if (!await itemReader.ReadAsync(cancellationToken)) continue;
+                    var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["created_at"] = itemReader.IsDBNull(1) ? null : itemReader.GetValue(1),
+                    };
+                    DateTimeOffset? at = ReadTimestamp(values, "created_at_ms", "created_at");
+                    if (!latestItems.TryGetValue(turn.Key, out var prior) || at > prior.At)
+                        latestItems[turn.Key] = (itemReader.IsDBNull(0) ? null : CodexLiveFleetPolicy.NormalizeItemType(itemReader.GetString(0)), at, candidate.Path);
+                }
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+            catch (Exception exception) when (IsSourceFailure(exception))
+            {
+                warnings.Add($"{candidate.Path}: fleet metadata unavailable: {Summarize(exception.Message)}");
+            }
+        }
+
+        CodexLiveFleetThread[] threads = catalog.Entries
+            .Where(entry => entry.Preferred.Archived != true)
+            .Select(entry =>
+            {
+                string id = entry.Preferred.ThreadId;
+                latestTurns.TryGetValue(id, out FleetTurnEvidence? turn);
+                latestItems.TryGetValue(id, out var item);
+                DateTimeOffset? turnObserved = new[]
+                    { turn?.ObservedAtUtc, turn is not null && item.SourcePath == turn.SourcePath ? item.At : null }
+                    .Where(value => value is not null).Max();
+                DateTimeOffset? observed = new[]
+                    { turnObserved, entry.Preferred.RecencyAtUtc, entry.Preferred.UpdatedAtUtc }
+                    .Where(value => value is not null).Max();
+                return new CodexLiveFleetThread(
+                    entry.Preferred,
+                    CodexLiveFleetPolicy.Classify(turn?.Status, turnObserved, now),
+                    turn?.TurnId, turn?.Status, turn?.StartedAtUtc, observed,
+                    turn is not null && item.SourcePath == turn.SourcePath ? item.Type : null,
+                    turn?.SourcePath);
+            })
+            .Where(thread => thread.State is CodexFleetState.RecentlyWorking or CodexFleetState.StaleInProgress ||
+                             thread.LastObservedAtUtc >= now.AddHours(-24))
+            .OrderBy(thread => thread.State == CodexFleetState.RecentlyWorking ? 0 :
+                               thread.State == CodexFleetState.StaleInProgress ? 1 : 2)
+            .ThenByDescending(thread => thread.LastObservedAtUtc)
+            .Take(150)
+            .ToArray();
+        return new CodexLiveFleetSnapshot(now, threads, warnings, historyAvailable, truncated);
+    }
+
+    private sealed record FleetTurnEvidence(
+        string? TurnId, string? Status, DateTimeOffset? StartedAtUtc,
+        DateTimeOffset? CompletedAtUtc, string SourcePath)
+    {
+        public DateTimeOffset? ObservedAtUtc => CompletedAtUtc ?? StartedAtUtc;
+    }
+
+    /// <summary>
     ///     Lists source-native thread rows from all readable state stores. Every matching source row
     ///     that was read is retained in <see cref="CodexThreadSearchResult.SourceObservations" /> and
     ///     the bounded presentation entries expose the explicit reconciliation policy and alternatives.

@@ -48,6 +48,7 @@ public sealed class AppServices
         CodexNativeSources = new CodexNativeSourcesService(explorer: CodexStateExplorer);
         CodexThreadObservability = new CodexThreadObservabilityService();
         CodexThreadReadModel = new CodexThreadReadModel(CodexThreadObservability);
+        RemoteFleet = new SshCodexRemoteFleetService();
         CodexCliHarness = new CodexCliHarnessService();
         TokscaleProvider = new TokscaleProvider();
         NativeCodexAccountingProvider = new SqliteNativeCodexAccountingProvider(DatabasePath);
@@ -84,6 +85,8 @@ public sealed class AppServices
             Intelligence,
             () => Telemetry.Latest);
         AlertEngine = new QuotaAlertEngine(Settings.LowQuotaThresholds);
+        LocalLimitsApi = new LocalLimitsHttpServer(() =>
+            LocalLimitsProjection.Build(Telemetry.Latest, Settings.LocalLimitsApiToken, DateTimeOffset.UtcNow));
     }
 
     public string DataFolder { get; }
@@ -102,6 +105,8 @@ public sealed class AppServices
     /// <summary>Product-facing provider-native Codex thread query boundary.</summary>
     public ICodexThreadReadModel CodexThreadReadModel { get; }
 
+    public SshCodexRemoteFleetService RemoteFleet { get; }
+
     public ICodexCliHarness CodexCliHarness { get; }
     public ITokscaleProvider TokscaleProvider { get; }
     public ICodexTokenAccountingProvider NativeCodexAccountingProvider { get; }
@@ -115,6 +120,7 @@ public sealed class AppServices
     public ICodexIntelligence CodexIntelligence { get; }
     public TelemetryCoordinator Telemetry { get; }
     public QuotaAlertEngine AlertEngine { get; }
+    public LocalLimitsHttpServer LocalLimitsApi { get; }
     public Exception? StartupPersistenceError { get; }
 
     public async Task<RolloutAccountAssociation[]> PrepareRolloutAccountAssociationsAsync(

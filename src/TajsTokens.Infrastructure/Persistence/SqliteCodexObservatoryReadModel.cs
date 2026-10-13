@@ -22,6 +22,42 @@ public sealed class SqliteCodexObservatoryReadModel(string databasePath)
 {
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
 
+    /// <summary>Recent recorded native increments, not a live API stream or per-turn attribution.</summary>
+    public async Task<IReadOnlyDictionary<string, CodexNativeTokenTotals>> GetRecentSessionTokensAsync(
+        DateTimeOffset fromUtc,
+        IReadOnlyCollection<string> sessionIds,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(sessionIds);
+        string[] ids = sessionIds.Where(id => !string.IsNullOrWhiteSpace(id))
+            .Distinct(StringComparer.OrdinalIgnoreCase).Take(150).ToArray();
+        if (ids.Length == 0) return new Dictionary<string, CodexNativeTokenTotals>();
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        await using SqliteCommand command = connection.CreateCommand();
+        string parameters = string.Join(", ", Enumerable.Range(0, ids.Length).Select(index => $"$session{index}"));
+        command.CommandText = $"""
+                              SELECT session_id,
+                                     SUM(uncached_input_tokens), SUM(cache_read_tokens), SUM(cache_write_tokens),
+                                     SUM(non_reasoning_output_tokens), SUM(reasoning_output_tokens),
+                                     SUM(reported_total_tokens)
+                              FROM codex_native_token_events
+                              WHERE session_id IN ({parameters}) AND observed_at_utc >= $from
+                              GROUP BY session_id
+                              """;
+        command.Parameters.AddWithValue("$from", fromUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+        for (int index = 0; index < ids.Length; index++) command.Parameters.AddWithValue($"$session{index}", ids[index]);
+        var result = new Dictionary<string, CodexNativeTokenTotals>(StringComparer.OrdinalIgnoreCase);
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            result[reader.GetString(0)] = new CodexNativeTokenTotals(
+                reader.GetInt64(1), reader.GetInt64(2), reader.GetInt64(3),
+                reader.GetInt64(4), reader.GetInt64(5), reader.GetInt64(6));
+        }
+        return result;
+    }
+
     public async Task<IReadOnlyList<CodexSessionOverview>> SearchSessionsAsync(
         string? search,
         int take,

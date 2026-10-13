@@ -1,82 +1,108 @@
-# TajsTokens product and architecture
+# TajsTokens - Project Design Document
 
-> **Status: active product development.** This is the single authority for product goals,
-> architecture, source contracts, retention, implementation status and next work.
-> [Current work](#current-work) distinguishes delivered behavior from planned changes.
-> [AGENTS.md](AGENTS.md) owns stable contributor rules; [README.md](README.md) describes shipped
-> user-facing features; [the contributor guide](docs/DEVELOPMENT.md) owns build/recovery procedures.
+## What is TajsTokens?
 
-## Development stage
+TajsTokens is a Codex companion app, that allows for quick overview on how they use Codex, where most of the quota usage went and predict future quota usage.
 
-The foundation reset established the evidence, provenance, privacy, and provider-native boundaries below. It is no longer the organizing phase of the project. TajsTokens has working acquisition, normalized history, native source inspection, forecasting, and product surfaces; the task now is to integrate and harden them into a coherent application.
+It's mostly a companion tool, with notifications, tray widget that shows current quota and quick prediction graphs. It's also an app that allows for exploring in more detail how Codex is used.
 
-Extend the existing implementation where it serves the product. Do not restart discovery or rebuild working systems merely because they originated before the reset. Investigate concrete semantic gaps and runtime disagreements, then deliver and validate the corresponding product behavior. The evidence rules remain permanent engineering constraints, not a reason to postpone useful features indefinitely.
+If TajsTokens could only do three things extremely well, it would be showing the current quota usage, showing the quota usage history and predicting future quota usage.
 
-## Product direction: Codex-first observability
+A person would prefer TajsTokens over Codex's dashboard because it shows more details, allows for quick overview of everything cleanly and has a prediction model.
 
-TajsTokens is a **Codex-first observability and intelligence application**. The goal is a dependable daily companion for understanding Codex activity, usage, quota, history, and likely future behavior. It is not primarily a database explorer, a generic AI telemetry platform, or a replacement Codex client.
-Quota planning is a primary product outcome: what remains, whether current or planned work will
-exhaust it, and what changed. Rich native history and usage understanding support that outcome
-and remain useful independently. A token-count prediction alone does not complete quota forecasting.
-Codex exposes a large and evolving set of source-native concepts. Where source contracts establish their semantics, TajsTokens should preserve and use that richness rather than flattening it into generic `session`, `event`, or `usage` records merely because those names might also fit another provider later.
-At the same time, TajsTokens should not become permanently shaped like Codex. Possible future providers influence the architecture through clean boundaries, not through premature genericization.
+It's mostly a product for myself, which is also shared on GitHub and might be used by others. But still, it's mostly my personal tool, and my workflow is serving as the first target profile.
 
-The guiding rule is:
+## User Experience
 
-> **TajsTokens is Codex-first, not Codex-shaped. Provider-native semantics are preserved. Shared abstractions are projections, not storage requirements. A provider is never forced into another provider's ontology merely to obtain a unified UI.**
+Three most important things on launch are: current quota usage, whether the quota is gonna last till next reset and how much quota has been used in the last reset cycle.
 
-This means:
+Quota is the main visually dominant over token usage, although both are important. If we introduce TT (TajsToken) concept, it should also be as important.
 
-- Codex may have a rich first-class model for concepts that Codex actually exposes, such as threads, turns, items, relationships, tools, jobs, logs, catalog state, or other contracted source-native structures.
-- A future provider may have a completely different first-class model, such as runs, requests, generations, workers, queues, hardware observations, or concepts we have not encountered yet.
-- Shared infrastructure may unify provenance, capture time, observation identity, contract/version metadata, persistence mechanics, and query plumbing without requiring a universal semantic payload.
-- Shared product views may project different provider-native models into a common answer only where the relevant semantics have been demonstrated to overlap.
-- Provider-specific views are allowed, and often preferable, when a provider exposes useful information that has no honest cross-provider equivalent.
-- Future-provider support is a design constraint on seams and ownership, not current implementation scope.
+The dashboard might answer the question "Am I okay?" with three markers:
+You're good. You're in dangerous area. You're doomed.
+The details can be explored elsewhere, but they have to be clearly accessible and fairly explainatory, without requiring a lot of reading and without exposing underlying models and concepts too much.
 
-A useful mental model is:
+The "Did OAI nerf usage?" is fairly important and deserves a marker of it's own on the dashboard. It can be a yes, no or "looks weird, but we're not sure, check the details here".
 
-```text
-Rollout JSONL + app-server quota + selected Codex SQLite observations
-    -> source-specific acquisition and normalization
-    -> TajsTokens telemetry.db (provenance-aware durable evidence)
-    -> reconciled read models
-    -> history / analytics / usage prediction / quota outlook / UI
+For important numbers, the normal UI should show a small source/freshness label like “OpenAI reported · provisional” or “Locally observed · fresh”, while keeping technical source details hidden unless opened.
 
-Content-heavy or unnecessary-to-duplicate native data
-    -> direct read-only inspection (not automatically copied into telemetry.db)
-```
+### Product Personality
 
-There is deliberately no universal provider schema in the middle of this pipeline.
-One physical owned database can hold workload facts, quota observations and selected native
-metadata, alongside separately identified derived tables and checkpoints. Sources are observation
-mechanisms feeding that store, not competing forecasting architectures. Combining evidence does
-not mean copying every native table, losing provenance or adding overlapping counters.
+The app should feel professional, dense but discoverable but also allow for "nerdy" exploration.
 
-## Product end state
+The important color, is as always purple. It could probably be used with something, but generally the design should follow my Taj's style.
 
-A production-quality local Windows application should let the user:
+Data density is going to be a problem. Hence we'll mostly try to go for cleaner UI with details on hover and/or click.
 
-- **Understand now:** open Codex and immediately see reported quota windows, usage, recent activity, freshness, and actionable problems. Missing windows, source failures, and stale history must look different.
-- **Understand work:** navigate workspaces, threads, turns, and supported root/subagent relationships; inspect relevant history and token/context behavior without manually joining SQLite rows and JSONL files.
-- **Understand changes:** investigate quota movement, lifecycle events, source disagreements, and collection gaps through concise summaries with evidence available on demand. Correlation must not masquerade as causality.
-- **Plan ahead:** see conditional quota outlooks, sustainable pace, supported workload scenarios, and useful uncertainty. Calibrated probabilities are an earned capability, not a release requirement that can be satisfied by inventing confidence.
-- **Trust the record:** understand what was observed, where it came from, when it was observed/collected, and what remains unknown. Repeated collection must not double-count work or rewrite historical meaning.
-- **Operate comfortably:** use responsive, accessible native views, reliable background collection, safe upgrades and recovery, and explicit privacy/export controls. Raw explorers remain useful diagnostic tools, not prerequisites for everyday workflows.
+Technical terms might have a "why" or "what is this" tooltip.
 
-The architectural end state is **selective durable collection + direct local inspection + rebuildable reconciled views**. Codex owns its operational data; TajsTokens owns its selected observation history and derived intelligence. Future providers may add their own native models when there is concrete demand, without weakening the Codex experience.
+The app should be as important or slightly less than the tray widget.
 
-This is the target, not a declaration that every workflow is complete. Delivery gates and outstanding
-work are in [Current work](#current-work); dated audits below describe captured evidence, not timeless guarantees.
+Uncertainty language should be somewhat between "still learning" and "insufficient  calibration epochs".
+
+## Source of Truth
+
+The source of truth is TajsTokens database, which collects data from multiple sources. These sources include in order of importance:
+
+1. Json Rollouts
+2. Codex live quota meter
+3. Codex database
+4. Provider analytics
+5. Derived models
+
+### Semantics
+
+**Reported** = provider said it
+**Observed** = TajsTokens/local source saw it
+**Derived** = deterministic transformation
+**Estimated** = model inference
+**Inferred change** = statistical interpretation
+
+### Conflict handling
+
+The sources may and probably will conflict from time to time. WE (TajsTokens Database) will have to reconcile the data in our own yard. For example, for example the Codex live quota meter reports quota usage is at 50%, but from json rollout we observe that it's at 49%. In this specific case, codex live quota meter is most likely correct.
+
+Provider analytics are probably gonna be the most delayed ones, but also they allow for some more details. They could be used as a supplementary mostly.
+
+If later provider reports are available, we will preserve the original observation, but let the later provider report become the best current interpretation. Never rewrite or delete what we actually observed. But if OpenAI later supplies a more authoritative finalized historical account for the same quantity, TajsTokens can use that as the best retrospective interpretation.
+And if they do get updated, we show latest/best value by default, with revisions available on demand.
+
+The principle "Raw evidence is preserved carefully; **product conclusions are allowed to be imperfect and revisable**." is surely correct.
+
+We can accept errors like forecast being off by 5pp, or temporarily misreporting quota usage by 1pp.
+
+### Provider Analytics
+
+New Provider analytics might be useful as supplementary data but shouldn't be taken at face value. Especially for live data - We might believe them after +6h, but still if they differ from our own observations, we should reconcile.
+We should use all the ones, that are available and reconcile them with the other sources.
+
+## Quota Intelligence
+
+We can show weak evidence estimates, but they should be marked as such.
+I'd rather see "Expected remaining at reset: ~37%, limited evidence" instead of "forecast unavailable".
+No estimate should require a formally trained model, but we should aim for at some uncertainty or confidence level.
+When evidence is sparse, we should show a range of possible outcomes, rather than a single point estimate. This is especially important for predictions that have high uncertainty.
+Learning shouldn't really be a thing permanently. It's okay if it doesn't have any data, but if it has anything at all, we just use it.
+
+### Forecasting
+
+The most important forecasts are most likely the next 15 minutes, remaining at reset, and exhaustion ETA.
+
+No forecast should require multiple reset cycles.
+
+### Planning
+
+User should be able to have a "planner", that allows to see whether their current usage will last for: x hours, with y model, with z effort.
+
+## Quota Accounting
+
+The current implementation keeps reported account quota, locally observed native Codex tokens, API-equivalent price weights and inferred quota cost separate. A source account key scopes the quota observations that supplied it; it does not retroactively assign local rollouts to the current login.
 
 ## Current work
 
-This is the single delivery-status and remaining-work record, updated 2026-09-20. The architecture and source contracts
-below remain authoritative. [Historical milestones](docs/archive/PROJECT_CURRENT_WORK_2026-09-19.md)
-preserve the previous chronological log, metrics and validation results; they are not current tasks.
-The [evidence review](docs/source-notes/CODEX_EVIDENCE_REPO_REVIEW.md) maps source findings and
-remaining proof boundaries. The [layered design](docs/source-notes/TT_LAYERED_STATISTICAL_DESIGN.md)
-defines model/TT rationale. Neither is a competing delivery plan.
+Implemented Codex-focused audit slices include the local Live fleet, explicit host-qualified SSH status checks, descriptive cache input mix, an opt-in authenticated read-only local limits API, a read-only inventory of source/account combinations retained in quota history, and aggregate daily JSON reports from the existing native event ledger. The inventory is derived from observations rather than a second mutable account registry. Unknown account keys remain unknown, and matching API windows receive the same opaque account ID only within the same provider and source. Daily local workload is explicitly unattributed to a backend account.
+
+Successful SSH fleet checks retain append-only host-qualified status snapshots with separate remote capture and local collection times for offline review. SSH is optional and never needed for account-wide provider quota on the PC. Local scanning cannot supply another machine's private thread history without an additional source. The snapshots do not establish remote account ownership or lossless cross-machine token/quota history. No remote agent, automatic SSH polling, remote quota merge, or process-level Stop action is provided. Any future native notify hook, distributed history, dynamic pricing, or burn/runout baseline needs source-specific privacy and chronological evidence before product claims.
 
 **Current status (2026-09-20): runtime/research and canonical-read consolidation implemented; provider capability and visual acceptance remain open.**
 The user adopted the "Define TajsTokens Features" discussion: one Codex product surface, a shared

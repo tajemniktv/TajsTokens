@@ -7,6 +7,19 @@ using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
+if ((args.Length is 2 or 3) && args[0] == "--daily-json")
+{
+    int days = args.Length == 2 ? 30 : int.Parse(args[2], CultureInfo.InvariantCulture);
+    if (days is < 1 or > 366) throw new ArgumentOutOfRangeException(nameof(days), "Choose 1 to 366 UTC days.");
+    DateTimeOffset to = DateTimeOffset.UtcNow;
+    DateTimeOffset from = new DateTimeOffset(to.UtcDateTime.Date, TimeSpan.Zero).AddDays(1 - days);
+    CodexDailyTokenReport report = await new SqliteCodexDailyReportReader(args[1])
+        .ReadAsync(from, to, CancellationToken.None);
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(report,
+        new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)));
+    return;
+}
+
 if (args.Length == 2 && args[0] == "--reconciliation")
 {
     var home = Path.GetFullPath(args[1]);

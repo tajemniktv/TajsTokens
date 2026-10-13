@@ -25,6 +25,11 @@ public sealed class CodexThreadReadModel : ICodexThreadReadModel
         _sourceReader = sourceReader ?? throw new ArgumentNullException(nameof(sourceReader));
     }
 
+    public Task<CodexLiveFleetSnapshot> ReadLiveFleetAsync(CancellationToken cancellationToken)
+    {
+        return _sourceReader.ReadLiveFleetAsync(cancellationToken);
+    }
+
     public Task<CodexThreadNavigationResult> BrowseThreadsAsync(
         CodexThreadNavigationQuery query,
         CancellationToken cancellationToken)

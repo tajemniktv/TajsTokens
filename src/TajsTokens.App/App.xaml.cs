@@ -66,6 +66,8 @@ public partial class App : Application
 
         Services.Telemetry.SnapshotUpdated += OnSnapshotUpdated;
         Services.SettingsChanged += OnSettingsChanged;
+        Services.LocalLimitsApi.Configure(Services.Settings.LocalLimitsApiEnabled,
+            Services.Settings.LocalLimitsApiPort, Services.Settings.LocalLimitsApiToken);
 
         bool startHidden = args.Arguments
             .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -153,6 +155,11 @@ public partial class App : Application
 
     private void OnSettingsChanged(RuntimeSettings previous, RuntimeSettings current)
     {
+        if (previous.LocalLimitsApiEnabled != current.LocalLimitsApiEnabled ||
+            previous.LocalLimitsApiPort != current.LocalLimitsApiPort ||
+            previous.LocalLimitsApiToken != current.LocalLimitsApiToken)
+            Services.LocalLimitsApi.Configure(current.LocalLimitsApiEnabled,
+                current.LocalLimitsApiPort, current.LocalLimitsApiToken);
         if (previous.PollIntervalSeconds != current.PollIntervalSeconds && !_exitRequested)
         {
             StartPeriodicCollector();
@@ -179,6 +186,29 @@ public partial class App : Application
                 _trayService.ShowNotification(alert.Title, alert.Message);
             }
         });
+        _ = UpdateRecentFleetTrayAsync(snapshot);
+    }
+
+    private async Task UpdateRecentFleetTrayAsync(TelemetrySnapshot snapshot)
+    {
+        try
+        {
+            CodexLiveFleetSnapshot fleet = await Services.CodexThreadReadModel.ReadLiveFleetAsync(_lifetimeCancellation.Token);
+            if (!ReferenceEquals(Services.Telemetry.Latest, snapshot) || _exitRequested) return;
+            int recent = fleet.Threads.Count(thread => thread.State == CodexFleetState.RecentlyWorking);
+            SystemTrayStatus status = SystemTrayStatusPresenter.WithRecentFleet(
+                SystemTrayStatusPresenter.Build(Services.CodexIntelligence.Current), recent);
+            _dispatcher?.TryEnqueue(() =>
+            {
+                if (!_exitRequested && ReferenceEquals(Services.Telemetry.Latest, snapshot))
+                    _trayService.UpdateStatus(status);
+            });
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested) { }
+        catch (Exception)
+        {
+            // Quota status remains available when Codex thread history is absent or unreadable.
+        }
     }
 
     private async Task RefreshFromTrayAsync()
@@ -357,6 +387,7 @@ public partial class App : Application
         _periodicCancellation = null;
         Services.Telemetry.SnapshotUpdated -= OnSnapshotUpdated;
         Services.SettingsChanged -= OnSettingsChanged;
+        Services.LocalLimitsApi.Dispose();
         _trayService.Dispose();
         _dogfoodLifetime?.Dispose();
         _window?.Close();

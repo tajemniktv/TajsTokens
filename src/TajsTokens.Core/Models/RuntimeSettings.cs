@@ -13,7 +13,7 @@ namespace TajsTokens.Core.Models;
 public sealed record RuntimeSettings
 {
 
-    public const int CurrentSchemaVersion = 4;
+    public const int CurrentSchemaVersion = 6;
     private static readonly int[] s_defaultThresholdValues = [30, 20, 10, 5];
     public RolloutAccountAssociation[] RolloutAccountAssociations { get; init; } = [];
     public static IReadOnlyList<int> DefaultLowQuotaThresholds { get; } = Array.AsReadOnly(s_defaultThresholdValues);
@@ -38,6 +38,14 @@ public sealed record RuntimeSettings
     public bool TokscaleFallbackEnabled { get; init; }
 
     public bool ExperimentalCodexBackendEnabled { get; init; }
+
+    /// <summary>Opt-in, bearer-protected read-only limits API bound to IPv4 loopback.</summary>
+    public bool LocalLimitsApiEnabled { get; init; }
+    public int LocalLimitsApiPort { get; init; } = 6737;
+    public string LocalLimitsApiToken { get; init; } = string.Empty;
+
+    /// <summary>Opt-in SSH config aliases for read-only, host-qualified live Codex status.</summary>
+    public string[] RemoteFleetSshHosts { get; init; } = [];
 
     /// <summary>
     ///     User-configured executable or PATH command used only when the Codex CLI harness is run.

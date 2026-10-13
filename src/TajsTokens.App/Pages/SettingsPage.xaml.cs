@@ -6,8 +6,10 @@
 
 using System.Globalization;
 using System.Reflection;
+using System.Security.Cryptography;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Windows.ApplicationModel.DataTransfer;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 
@@ -29,14 +31,35 @@ public sealed partial class SettingsPage : Page
 
     private App App => (App)Application.Current;
 
-    private void OnLoaded(object sender, RoutedEventArgs e)
+    private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         RenderSettings();
+        await RenderObservedAccountsAsync();
     }
 
-    private void OnReloadClicked(object sender, RoutedEventArgs e)
+    private async Task RenderObservedAccountsAsync()
+    {
+        try
+        {
+            QuotaSourceAccountInventory inventory = await App.Services.Repository.ReadQuotaSourceAccountsAsync(20, CancellationToken.None);
+            if (!IsLoaded) return;
+            ObservedAccountsText.Text = inventory.Observations.Count == 0
+                ? "No retained quota observations yet."
+                : string.Join(Environment.NewLine, inventory.Observations.Select(row =>
+                    $"{row.Provider}/{row.Profile} · {QuotaAccountScope.Describe(row.AccountKey)} · {row.Source} · " +
+                    $"{row.FirstObservedAtUtc.ToLocalTime():g} to {row.LastObservedAtUtc.ToLocalTime():g} · {row.ObservationCount:N0} observations")) +
+                  (inventory.Truncated ? Environment.NewLine + "More source/account combinations exist; this view shows the 20 most recently observed." : string.Empty);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            if (IsLoaded) ObservedAccountsText.Text = "Account/source inventory unavailable; retained quota data was not changed.";
+        }
+    }
+
+    private async void OnReloadClicked(object sender, RoutedEventArgs e)
     {
         RenderSettings();
+        await RenderObservedAccountsAsync();
         ShowStatus(InfoBarSeverity.Informational, "Reloaded", "Restored the currently persisted runtime settings.");
     }
 
@@ -60,9 +83,24 @@ public sealed partial class SettingsPage : Page
             return;
         }
 
+        if (double.IsNaN(LocalLimitsApiPortBox.Value) || LocalLimitsApiPortBox.Value is < 1024 or > 65535)
+        {
+            ShowStatus(InfoBarSeverity.Error, "Invalid API port", "Choose a loopback port between 1024 and 65535.");
+            return;
+        }
+
         if (!TryParseThresholds(ThresholdsTextBox.Text, out int[] thresholds, out string? thresholdError))
         {
             ShowStatus(InfoBarSeverity.Error, "Invalid notification thresholds", thresholdError!);
+            return;
+        }
+
+        string[] remoteHosts = RemoteFleetHostsBox.Text
+            .Split(['\r', '\n', ',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (remoteHosts.Length > 16 || remoteHosts.Any(host => !CodexRemoteFleetHostPolicy.IsValid(host)))
+        {
+            ShowStatus(InfoBarSeverity.Error, "Invalid SSH hosts", "Enter at most 16 simple SSH config aliases, one per line. Options and shell characters are not allowed.");
             return;
         }
 
@@ -76,6 +114,12 @@ public sealed partial class SettingsPage : Page
             LowQuotaThresholds = thresholds,
             TokscaleReconciliationEnabled = TokscaleReconciliationToggle.IsOn,
             TokscaleFallbackEnabled = TokscaleFallbackToggle.IsOn,
+            RemoteFleetSshHosts = remoteHosts,
+            LocalLimitsApiEnabled = LocalLimitsApiToggle.IsOn,
+            LocalLimitsApiPort = (int)Math.Round(LocalLimitsApiPortBox.Value, MidpointRounding.AwayFromZero),
+            LocalLimitsApiToken = LocalLimitsApiToggle.IsOn && string.IsNullOrEmpty(baseline.LocalLimitsApiToken)
+                ? Convert.ToHexString(RandomNumberGenerator.GetBytes(32))
+                : baseline.LocalLimitsApiToken,
             CodexCliCommand = CodexCliCommandBox.Text,
             CodexCliArguments = CodexCliArgumentsBox.Text,
             CodexCliWorkingDirectory = CodexCliWorkingDirectoryBox.Text,
@@ -95,10 +139,12 @@ public sealed partial class SettingsPage : Page
             }
 
             RenderSettings();
-            ShowStatus(
-                InfoBarSeverity.Success,
-                "Settings saved",
-                "Runtime settings were persisted and live services were updated where applicable.");
+            bool apiFailed = App.Services.Settings.LocalLimitsApiEnabled &&
+                             !App.Services.LocalLimitsApi.Status.StartsWith("Listening", StringComparison.Ordinal);
+            ShowStatus(apiFailed ? InfoBarSeverity.Warning : InfoBarSeverity.Success,
+                apiFailed ? "Settings saved; API unavailable" : "Settings saved",
+                apiFailed ? App.Services.LocalLimitsApi.Status :
+                    "Runtime settings were persisted and live services were updated where applicable.");
         }
         finally
         {
@@ -117,6 +163,10 @@ public sealed partial class SettingsPage : Page
         ThresholdsTextBox.Text = string.Join(", ", settings.LowQuotaThresholds);
         TokscaleReconciliationToggle.IsOn = settings.TokscaleReconciliationEnabled;
         TokscaleFallbackToggle.IsOn = settings.TokscaleFallbackEnabled;
+        RemoteFleetHostsBox.Text = string.Join(Environment.NewLine, settings.RemoteFleetSshHosts);
+        LocalLimitsApiToggle.IsOn = settings.LocalLimitsApiEnabled;
+        LocalLimitsApiPortBox.Value = settings.LocalLimitsApiPort;
+        LocalLimitsApiStatusText.Text = $"{App.Services.LocalLimitsApi.Status} · http://127.0.0.1:{settings.LocalLimitsApiPort}/v1/limits";
         CodexCliCommandBox.Text = settings.CodexCliCommand;
         CodexCliArgumentsBox.Text = settings.CodexCliArguments;
         CodexCliWorkingDirectoryBox.Text = settings.CodexCliWorkingDirectory;
@@ -133,6 +183,20 @@ public sealed partial class SettingsPage : Page
         RolloutOwnershipText.Text =
             $"{settings.RolloutAccountAssociations.Length} bounded source/session associations. Attribution remains user-asserted, not provider-verified.";
         RevokeRolloutsButton.IsEnabled = settings.RolloutAccountAssociations.Length > 0;
+    }
+
+    private void OnCopyLocalApiTokenClicked(object sender, RoutedEventArgs e)
+    {
+        string token = App.Services.Settings.LocalLimitsApiToken;
+        if (string.IsNullOrEmpty(token))
+        {
+            ShowStatus(InfoBarSeverity.Informational, "No access token", "Enable and save the local API to create a token.");
+            return;
+        }
+        var data = new DataPackage();
+        data.SetText(token);
+        Clipboard.SetContent(data);
+        ShowStatus(InfoBarSeverity.Informational, "Access token copied", "Paste it only into a trusted local client. The clipboard may be read by other apps.");
     }
 
     private async void OnAssociateRolloutsClicked(object sender, RoutedEventArgs e)

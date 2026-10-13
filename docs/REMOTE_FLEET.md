@@ -1,0 +1,11 @@
+# Remote Codex fleet status
+
+The Codex subscription quota shown on **Overview** is account-wide provider evidence read from the PC. It does **not** require an SSH connection or a TajsTokens installation on another machine. Local token/session files and live turn status are different sources: a PC-only scanner, including Tokscale's local Codex scanner, cannot infer another machine's private local history from that quota reading. This SSH feature is optional and only for remote thread-status metadata; it is not needed for the core quota workflow.
+
+The **Live fleet** page can check any configured SSH host alias that can run the read-only Codex history probe. Add aliases under **Settings → Sources**, then select **Optional: check remote status via SSH**. No SSH connection is opened by normal local refreshes or by starting TajsTokens. Hardware-backed SSH keys may ask for a touch when you explicitly check hosts.
+
+The probe sends a small Python script over the existing SSH connection. It reads only Codex thread-turn history metadata on the remote user account. TajsTokens accepts bounded, validated thread IDs, native turn status and timestamps; it discards arbitrary status text. No prompts, command bodies, credentials, quota readings or raw rollout files are copied. SSH host-key verification stays enabled. The current probe requires Python 3 and compatible Codex SQLite history on the SSH host; an unavailable host is not treated as having zero activity.
+
+Each successful check is retained in the local TajsTokens database as an append-only, host-qualified status snapshot. Repeated persistence of the same received check is idempotent; a later check remains a distinct observation even if the remote state did not change. Saved checks can be viewed on the Live fleet page after the host is offline. Local receive time and remote-reported capture time are kept separately. The remote account is **unknown**, and neither remote quota nor token totals are merged into the local account. This is status history, not lossless remote usage history or a remote collector.
+
+Saved status is never proof that a process is currently alive. A completed turn in an older check has unknown current readiness; an in-progress turn is freshness-qualified using source-relative age and local receive time to avoid SSH clock skew. No Stop action is sent to remote processes.

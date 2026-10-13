@@ -194,8 +194,16 @@ try {
         $stage = Join-Path $repo ".codex/temp/dogfood/staging/$id"
         $rid = if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -eq 'Arm64') { 'win-arm64' } else { 'win-x64' }
         $platform = if ($rid -eq 'win-arm64') { 'arm64' } else { 'x64' }
-        & dotnet publish (Join-Path $repo 'src/TajsTokens.App/TajsTokens.App.csproj') -c $Configuration -r $rid --self-contained true -o $stage '-p:DogfoodEnabled=false' "-p:Platform=$platform" '-p:WindowsAppSDKSelfContained=true'
+        # Keep PublishDir stable so MSBuild can reuse publish outputs and its prior-file
+        # inventory (including removal of outputs no longer in the project). Never move
+        # this cache into the installation: deployment gets a fresh disposable snapshot.
+        $publishCache = Join-Path $repo "artifacts/dogfood-publish/$Configuration/$rid"
+        Assert-PlainTree $publishCache
+        & dotnet publish (Join-Path $repo 'src/TajsTokens.App/TajsTokens.App.csproj') -c $Configuration -r $rid --self-contained true -o $publishCache '-p:DogfoodEnabled=false' "-p:Platform=$platform" '-p:WindowsAppSDKSelfContained=true'
         if ($LASTEXITCODE -ne 0) { throw "Publish failed ($LASTEXITCODE); running app and installation unchanged." }
+        Validate-Publish $publishCache
+        New-Item -ItemType Directory -Path (Split-Path $stage) -Force | Out-Null
+        Copy-Item -LiteralPath $publishCache -Destination $stage -Recurse
         Validate-Publish $stage
         $manifest = @{
             schemaVersion = 1

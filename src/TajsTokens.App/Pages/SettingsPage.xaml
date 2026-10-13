@@ -49,6 +49,24 @@
 
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="14" Padding="20">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Local limits API" FontSize="20" FontWeight="SemiBold" />
+                    <ToggleSwitch x:Name="LocalLimitsApiToggle"
+                                  Header="Enable read-only API for local tools"
+                                  OffContent="Disabled (default)"
+                                  OnContent="Loopback only; bearer token required" />
+                    <NumberBox x:Name="LocalLimitsApiPortBox" Header="Loopback port" Minimum="1024" Maximum="65535"
+                               SmallChange="1" SpinButtonPlacementMode="Compact" />
+                    <TextBlock x:Name="LocalLimitsApiStatusText" TextWrapping="Wrap" />
+                    <Button Content="Copy access token" Click="OnCopyLocalApiTokenClicked" HorizontalAlignment="Left" />
+                    <TextBlock Text="GET /v1/limits returns existing quota lanes with source and freshness. It does not trigger collection. The token is stored in this user's settings.json; keep it private. Browser origins are rejected and no cross-origin access is granted."
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1"
                     CornerRadius="14"
                     Padding="20">
@@ -106,9 +124,24 @@
                     <TextBlock Text="Native Codex state + rollouts"
                                FontWeight="SemiBold" />
                     <TextBlock
-                        Text="Default token/session source. TajsTokens incrementally normalizes local Codex state and rollouts; remote/cloud-only sessions are explicitly outside this coverage until that source exists."
+                        Text="Default token/session source. TajsTokens incrementally normalizes local Codex state and rollouts; remote/cloud-only sessions remain outside local token accounting. The SSH fleet probe below shows remote status separately."
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         TextWrapping="Wrap" />
+                    <Expander Header="Observed quota accounts and sources" HorizontalAlignment="Stretch"
+                              HorizontalContentAlignment="Stretch">
+                        <StackPanel Spacing="8">
+                            <TextBlock x:Name="ObservedAccountsText" Text="Loading retained observations…"
+                                       TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                            <TextBlock Text="Historical source keys stay with their original observations. A key is a backend pseudonym, not proof that local Codex threads belong to that account."
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Expander>
+                    <TextBox x:Name="RemoteFleetHostsBox"
+                             Header="Optional remote thread status via SSH (one host alias per line)"
+                             AcceptsReturn="True" TextWrapping="Wrap" MinHeight="76"
+                             PlaceholderText="laptop&#xA;server" />
+                    <TextBlock Text="Account-wide Codex quota is read on this PC and does not require SSH or TajsTokens on other machines. These optional, read-only probes fetch only remote local thread status when you select the SSH button in Live fleet. Hardware-backed keys may require a touch. Python 3 and Codex history must be available to the SSH user. Successful host-qualified status snapshots are retained locally; no transcript bodies, quota readings or credentials are copied or merged."
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                     <Expander Header="Advanced integrations" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                         <StackPanel Spacing="12">
                             <ToggleSwitch x:Name="TokscaleReconciliationToggle"

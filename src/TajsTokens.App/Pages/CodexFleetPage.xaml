@@ -1,0 +1,40 @@
+<Page
+    x:Class="TajsTokens.App.Pages.CodexFleetPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <Grid Padding="4" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <StackPanel Spacing="6">
+            <StackPanel Orientation="Horizontal" Spacing="12">
+                <TextBlock Text="Local Codex fleet" FontSize="22" FontWeight="SemiBold" />
+                <Button Content="Refresh local" Click="OnRefreshClicked" />
+                <Button Content="Optional: check remote status via SSH" Click="OnRemoteRefreshClicked" />
+            </StackPanel>
+            <TextBlock Text="Account quota on the Overview does not need SSH. This page shows local thread history; optional remote status needs a remote source. SSH hosts are checked only when you click the button and your key may require a touch. Successful content-free status checks are retained locally for offline review. Saved status is historical, not process-liveness proof; waiting for input cannot be verified. Token figures are collected session totals, not per-turn cost or quota share."
+                       Opacity="0.72" TextWrapping="Wrap" />
+            <TextBlock x:Name="StatusText" Text="Reading local Codex fleet…" Opacity="0.8" TextWrapping="Wrap" />
+            <Expander Header="Saved SSH checks" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                <ScrollViewer MaxHeight="180" VerticalScrollBarVisibility="Auto">
+                    <TextBlock x:Name="RemoteHistoryText" Text="No saved SSH checks yet." TextWrapping="Wrap"
+                               IsTextSelectionEnabled="True" />
+                </ScrollViewer>
+            </Expander>
+        </StackPanel>
+        <ListView x:Name="FleetList" Grid.Row="1" SelectionMode="Single"
+                  SelectionChanged="OnSelectionChanged" ScrollViewer.IsDeferredScrollingEnabled="True">
+            <ListView.ItemTemplate>
+                <DataTemplate>
+                    <StackPanel Padding="8" Spacing="3">
+                        <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Text="{Binding StateLine}" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding UsageLine}" Opacity="0.72" TextWrapping="Wrap" />
+                        <TextBlock Text="{Binding EvidenceLine}" Opacity="0.6" TextTrimming="CharacterEllipsis" />
+                    </StackPanel>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+    </Grid>
+</Page>

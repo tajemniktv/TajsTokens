@@ -1,0 +1,752 @@
+# TajsTokens - Project Design Questionnaire
+
+## 1. What is TajsTokens?
+
+### Product purpose
+
+**1.** Finish this sentence without mentioning implementation:
+
+> **“TajsTokens exists so that I can…”**
+
+**2.** Which is closest to the core product?
+
+* A quota companion
+* A Codex usage dashboard
+* A Codex observability tool
+* A Codex intelligence/forecasting tool
+* A forensic/research tool
+* Something else
+
+**3.** If TajsTokens could do **only three things extremely well**, which three would survive?
+
+**4.** What problem would make you personally open TajsTokens every day?
+
+**5.** What problem would make somebody install it rather than simply look at Codex's own usage page?
+
+**6.** Is this primarily:
+
+* **a product for you**, which might later generalize;
+* a public product designed for arbitrary Codex users from day one;
+* both, with your workflow explicitly serving as the first target profile?
+
+**7.** Is this sentence still right?
+
+> **Understand what Codex used, where it went, how it affected your quota, and what is likely to happen next.**
+
+Rewrite it until you would actually put it on the website.
+
+---
+
+# 2. User Experience
+
+## First 10 seconds
+
+**8.** What are the **three most important numbers or states** on launch?
+
+**9.** Should remaining quota be visually dominant over token usage?
+
+**10.** Should TajsTokens foreground:
+
+* remaining quota;
+* consumed quota;
+* both equally?
+
+**11.** Should the dashboard answer “Am I okay?” with a simple state such as:
+
+* Plenty left
+* On pace
+* Burning quickly
+* Likely to exhaust
+* Unknown
+
+Or is that too reductive?
+
+**12.** How important is “what changed since yesterday / last cycle?”
+
+**13.** Should recent work immediately show *which project/chat/model consumed most workload*?
+
+**14.** Should an accounting anomaly/regime shift appear on Overview, or only when it is strong enough to matter?
+
+**15.** What information should **never** be on the initial screen even if we possess it?
+
+---
+
+## Product personality
+
+**150.** Should the app feel:
+
+* technical/professional;
+* friendly;
+* nerdy;
+* minimal;
+* dense but discoverable?
+
+**151.** Is purple still the identity?
+
+**152.** How much data density do you enjoy before it becomes overwhelming?
+
+**153.** Do you want explanatory microcopy, or cleaner UI with details on hover/click?
+
+**154.** Should uncertainty language be human:
+
+> “Still learning”
+
+rather than:
+
+> “Insufficient calibration epochs”
+
+**155.** Should technical terms have a “why?” affordance rather than occupying the main UI?
+
+**156.** Should the app have a compact tray-first experience in addition to the dashboard?
+
+---
+
+# 3. Source of Truth
+
+## Source hierarchy
+
+**16.** Rank these sources by what you intuitively want them used for:
+
+* Codex live quota meter
+* provider historical analytics
+* provider per-chat accounting
+* rollout token events
+* Codex SQLite
+* TajsTokens' retained observations
+* derived models
+
+---
+
+## Semantics
+
+**17.** Do you agree with this hierarchy of language?
+
+**Reported** = provider said it
+**Observed** = TajsTokens/local source saw it
+**Derived** = deterministic transformation
+**Estimated** = model inference
+**Inferred change** = statistical interpretation
+
+---
+
+## Conflict handling and revision
+
+**18.** When provider sources disagree, should TajsTokens:
+
+* select a winner;
+* show both;
+* show a reconciled value plus discrepancy;
+* depend on the quantity?
+
+**19.** If OpenAI later publishes a finalized historical value that differs from what TajsTokens saw live, should History use the finalized value while preserving the original live observation underneath?
+
+**20.** When provider analytics revise a historical value, should normal History show only the latest/best value, with previous revisions available in details?
+
+**21.** For important numbers, should the normal UI show a small source/freshness label like:
+
+> “OpenAI reported · provisional”
+
+or:
+
+> “Locally observed · fresh”
+
+while keeping technical source details hidden unless opened?
+
+**22.** Is this principle correct?
+
+> Raw evidence is preserved carefully; **product conclusions are allowed to be imperfect and revisable**.
+
+**23.** What kinds of errors are acceptable?
+
+* forecast off by 5 percentage points?
+* 10 pp?
+* temporarily missing a regime shift?
+* falsely warning about one?
+* incorrectly assigning work to a chat?
+
+**24.** Which errors are genuinely unacceptable?
+
+---
+
+## Provider analytics
+
+**117.** Is the newly available Codex analytics data:
+
+* a primary source;
+* a calibration source;
+* a shadow source until validated?
+
+**118.** Which fields would make it immediately useful?
+
+* historical allowance %
+* per-chat allowance %
+* model breakdown
+* surface
+* turn trigger
+* credits
+* provider tokens
+
+**119.** How long should TajsTokens observe/reconcile it before using it for live calibration?
+
+**120.** Does `accounting_complete` from provider metadata count as final enough, or do we still observe revisions afterward?
+
+**121.** Should TajsTokens automatically compare:
+
+* provider period vs live quota history;
+* provider chat vs rollout chat;
+* provider token count vs local count;
+* grouping totals against each other?
+
+**122.** What discrepancy should produce a visible warning?
+
+**123.** Should delayed analytics enhance history while **never blocking live functionality**?
+
+---
+
+# 4. Quota Intelligence
+
+## When is an estimate good enough to show?
+
+**25.** Should TajsTokens show an estimate with weak evidence if it clearly says **Low confidence / preliminary**?
+
+**26.** Or should weak estimates be hidden completely?
+
+**27.** Would you rather see:
+
+> Expected remaining at reset: **~37%**
+> limited historical evidence
+
+or:
+
+> Forecast unavailable: fewer than 8 independent evidence blocks
+
+**28.** Should every estimate require a formally calibrated uncertainty interval before being useful?
+
+**29.** Should TajsTokens distinguish:
+
+* *useful estimate*,
+* *validated estimate*,
+* *research result*?
+
+**30.** When evidence is sparse, should the app fall back to simple arithmetic/EWMA rather than display nothing?
+
+**31.** Should “learning” be a temporary state, or is it acceptable for some advanced models to remain forever experimental while a simple baseline works?
+
+---
+
+## Forecasting
+
+**32.** Which forecasts actually matter to you?
+
+* next 15 minutes
+* 30 minutes
+* 2 hours
+* 24 hours
+* remaining at reset
+* exhaustion ETA
+* sustainable burn rate
+
+**33.** Do you care more about predicting exact quota consumption or answering:
+
+> “Can I keep working like this without hitting the limit?”
+
+**34.** Should reset-horizon forecasts remain even when they have weak calibration?
+
+**35.** How should weekly-only Pro quotas change the experience?
+
+**36.** Should TajsTokens learn substantially within **one weekly cycle**, using non-overlapping evidence, rather than waiting for multiple resets?
+
+**37.** For true end-of-cycle claims, are you comfortable with:
+
+> estimate now, calibration quality improves across completed cycles
+
+rather than withholding the estimate until many cycles exist?
+
+**38.** Should “sustainable pace” remain a prominent concept?
+
+---
+
+## Planning
+
+**39.** Do you actually care about hypothetical planning such as:
+
+> “What if I keep this session going another 2 hours?”
+
+**40.** If yes, should planning be based on:
+
+* current work;
+* selected historical work;
+* manually selected model/effort;
+* all of those?
+
+---
+
+# 5. Quota Accounting and “Did OpenAI Nerf It?”
+
+## Workload → quota accounting
+
+**41.** Is the core question:
+
+> **How much quota does this workload appear to cost?**
+
+**42.** Should the app expose a current exchange-like rate, e.g.:
+
+> Current quota cost: **1.4× historical baseline**
+
+**43.** Should that baseline be:
+
+* previous cycle;
+* rolling 30 days;
+* same regime;
+* selectable?
+
+**44.** Do you want accounting by:
+
+* chat;
+* project;
+* model;
+* reasoning effort;
+* token type;
+* subagent/root activity?
+
+**45.** When precise attribution is impossible, should TajsTokens estimate proportional attribution or refuse to assign account quota to individual work?
+
+**46.** Is provider per-chat `% of weekly limit` special enough to display directly even if our local model disagrees?
+
+**47.** Should local accounting and provider accounting appear side by side?
+
+Example:
+
+```text
+Provider attributed        2.24%
+Local estimate             2.05%
+Difference                +0.19 pp
+```
+
+---
+
+## Accounting/regime change
+
+**48.** What do you actually want TajsTokens to tell you?
+
+> “Something changed.”
+
+versus
+
+> “OpenAI reduced your effective quota by ~35%.”
+
+**49.** Should cause remain **unknown** unless provider evidence identifies it?
+
+**50.** Should TajsTokens detect:
+
+* abrupt changes;
+* slow drift;
+* recurring time-of-day variation;
+* all three?
+
+**51.** How sensitive should warnings be?
+
+**52.** Would you prefer more early “possible shift” warnings or fewer, later warnings?
+
+**53.** Should a regime candidate need to persist for:
+
+* several hours;
+* several evidence blocks;
+* several days;
+* no fixed rule?
+
+**54.** Should regime boundaries be permitted **mid-cycle**?
+
+**55.** What should the language tiers be?
+
+For example:
+
+```text
+Normal variation
+Unusual accounting
+Possible shift
+Persistent shift
+Strong evidence of changed accounting
+```
+
+**56.** Should the user be able to manually annotate:
+
+> “OpenAI update happened here”
+
+without that annotation becoming statistical truth?
+
+---
+
+# 6. Metrics and Units
+
+**57.** Which metric should be the default “workload” number?
+
+**58.** Do raw tokens remain important enough to be visible everywhere?
+
+**59.** Should native provider credits appear whenever available, even if they are zero for included Pro usage?
+
+**60.** Is **API-equivalent cost** useful as:
+
+* a prominent metric;
+* secondary context;
+* research-only trivia?
+
+**61.** Do you still want **TT** as a user-facing concept eventually?
+
+**62.** What problem must TT solve that raw tokens do not?
+
+**63.** Should TT aim to be:
+
+* stable normalized workload;
+* provider-independent comparison;
+* simplified user-facing usage currency;
+* all of the above;
+* none?
+
+**64.** Should TT remain invisible until its definition feels intuitively explainable in one paragraph?
+
+**65.** Do you accept this foundational rule?
+
+> Raw workload is canonical. Credits, API equivalent, TT, and quota cost are **parallel interpretations**, not a conversion chain.
+
+---
+
+# 7. App Structure and Design
+
+## Main navigation
+
+**66.** What are the top-level destinations you would expect as a user?
+
+**67.** Is `Overview` the correct first destination?
+
+**68.** Is `Chats and work` important enough to remain first-class navigation?
+
+**69.** Should **History** be first-class rather than buried inside Overview?
+
+**70.** Should **Planning** be its own page or a contextual action?
+
+**71.** Should **Evidence** be normal navigation, or clearly Advanced?
+
+**72.** Do tabs inside Overview feel right, or like a second navigation bar nested inside the first one?
+
+**73.** Should there be one global time range/filter that persists while moving between screens?
+
+**74.** Which filters deserve actual UI controls rather than developer text fields?
+
+* account
+* period
+* model
+* effort
+* project
+* chat
+* source
+* regime
+
+**75.** Should filters be discoverable chips/dropdowns rather than “exact project path” and “chat ID” boxes?
+
+---
+
+## Overview
+
+**76.** Draw the page mentally from top to bottom. What comes first?
+
+**77.** How many cards are acceptable before it feels like enterprise BI software?
+
+**78.** What deserves a graph?
+
+**79.** Should workload and quota share a timeline or remain visually separate but synchronized?
+
+**80.** What period should Overview default to?
+
+* current quota cycle
+* today
+* 7 days
+* adaptive depending on quota window
+
+**81.** Should weekly quota history automatically become the graph's time scale on Pro?
+
+**82.** Should current work/session activity appear live?
+
+**83.** Should “top work” be a short list of projects/chats?
+
+**84.** Should an accounting-change card appear only when interesting?
+
+**85.** What should happen when TajsTokens has almost no history yet?
+
+**86.** What should happen when provider analytics are delayed by 18 hours?
+
+**87.** What should a completely healthy boring state look like?
+
+---
+
+## Work / chats / agents
+
+**88.** Is TajsTokens trying to be a **Codex conversation inspector**, or should this remain supporting functionality?
+
+**89.** What does opening a chat need to show that Codex itself does not?
+
+**90.** Rank:
+
+* tokens
+* quota attribution
+* model/effort
+* subagents
+* turns
+* context usage
+* runtime
+* tools
+* errors
+* provider accounting
+
+**91.** Should project be the primary grouping above chats?
+
+**92.** Should roots and subagents form a tree?
+
+**93.** Should work be searchable by title/content metadata, or only identifiers/project?
+
+**94.** How much raw source detail belongs here versus Advanced inspection?
+
+---
+
+## History
+
+**95.** What should History answer?
+
+Potentially:
+
+> What did I use?
+> When did quota burn?
+> What caused large periods?
+> Did accounting behavior change?
+
+**96.** Should the primary history timeline show:
+
+* workload;
+* quota;
+* regime;
+* resets;
+* provider historical labels;
+* all, toggleable?
+
+**97.** Should historical provider revisions be shown as events?
+
+**98.** Do you want cycle-to-cycle comparison as a first-class feature?
+
+**99.** Do you want “this week vs previous week at same elapsed time”?
+
+**100.** Should there be an explicit forensic mode for a suspicious period?
+
+---
+
+# 8. Models, Research and Statistical Philosophy
+
+## Research vs product
+
+**101.** Which of these should ordinary users *never* need?
+
+* Model Lab
+* source explorer
+* SQLite explorer
+* rollout coverage
+* inference manifest
+* raw provenance
+* transfer experiments
+* TT basis diagnostics
+* CLI harness
+
+**102.** Should Model Lab exist in release builds or behind a developer/research setting?
+
+**103.** Should experimental results ever automatically affect runtime behavior?
+
+**104.** If so, what promotion process feels reasonable?
+
+**105.** Should you manually approve a new runtime model after seeing comparative evidence?
+
+**106.** Would a “Use experimental accounting model” toggle be useful or dangerous nonsense?
+
+---
+
+## Statistical philosophy
+
+**107.** For every model, should we require a plain-English answer to:
+
+* What is the input?
+* What is the output?
+* Why should these variables predict it?
+* What baseline must it beat?
+* What can make it wrong?
+
+**108.** Should a model be rejected if we cannot explain it intuitively, even if it scores slightly better?
+
+**109.** Is a 2% improvement worth doubling complexity?
+
+**110.** What improvement would justify a materially more complex model?
+
+* 5%
+* 10%
+* 20%
+* depends on task
+
+**111.** Should simple baselines **always remain visible in evaluation**?
+
+**112.** Should runtime prefer simpler models within a practical-equivalence band?
+
+**113.** Should evidence requirements depend on consequence?
+
+For example:
+
+```text
+Show preliminary estimate       low threshold
+Use in default forecast         moderate threshold
+Claim calibrated 80% interval   high threshold
+Claim provider policy changed   high threshold
+Rewrite historical evidence     never
+```
+
+**114.** Do you agree that **reset count should only matter for questions that genuinely depend on independent cycles**, not as the universal unit of evidence?
+
+**115.** Are provisional 6-hour blocks acceptable as an interim heuristic, or should we re-derive that design before relying on it?
+
+**116.** Should effective sample size remain diagnostic rather than a magic permission number?
+
+---
+
+# 9. Data, Privacy and Technical Constraints
+
+## Local-first and storage
+
+**124.** Is local-first still a defining property?
+
+**125.** Should TajsTokens ever need a TajsTokens cloud service?
+
+**126.** Should raw prompt/response content remain unretained unless explicitly inspected/exported?
+
+**127.** How much historical telemetry should be kept?
+
+* indefinitely;
+* bounded by size;
+* configurable?
+
+**128.** Should derived models/results be rebuildable from evidence whenever possible?
+
+**129.** What should export contain?
+
+* raw evidence
+* normalized ledger
+* charts
+* model diagnostics
+* support report
+
+**130.** Should there eventually be a one-click anonymized issue/report bundle?
+
+---
+
+## Performance
+
+**131.** How fast must Overview open?
+
+**132.** Is “load stale cached snapshot immediately, refresh afterward” acceptable?
+
+**133.** How much background CPU/database work is acceptable?
+
+**134.** Should research analysis **never** run automatically?
+
+**135.** Should a huge historical query be allowed to block the UI?
+
+---
+
+## Platform
+
+**136.** Is the current WinUI/.NET architecture something you actively want to keep?
+
+**137.** Is Windows-only acceptable for the foreseeable future?
+
+**138.** Which engineering properties are genuinely MUSTs?
+
+* safe upgrades
+* rollback
+* no evidence corruption
+* no duplicate counting
+* offline operation
+* low idle resource use
+* crash recovery
+
+---
+
+## Future providers
+
+**139.** Do you actually want Claude Code/Gemini/etc. in foreseeable TajsTokens scope?
+
+**140.** Or should “Codex-first, future-compatible seams” remain enough?
+
+**141.** What must be generic today?
+
+* provenance
+* workload concepts
+* product layout
+* persistence
+* nothing except interfaces at boundaries
+
+**142.** What should remain unapologetically Codex-specific?
+
+---
+
+# 10. Explicit Non-Goals
+
+**143.** Is TajsTokens **not** a Codex client?
+
+**144.** Is it not a billing authority?
+
+**145.** Is it not trying to tell users exactly what OpenAI's secret internal accounting algorithm is?
+
+**146.** Is it not a generic telemetry framework?
+
+**147.** Is it not an ML research platform, despite containing research tools?
+
+**148.** Is it not supposed to predict whether the human will sit at the computer and work tomorrow?
+
+**149.** What else should we explicitly refuse to become?
+
+---
+
+# 11. Existing App Review
+
+These are best answered **after you've designed the product**, because otherwise the existing application starts negotiating for its own continued employment.
+
+For every existing feature/class/page:
+
+**157.** If this did not exist today, **would we deliberately build it again?**
+
+**158.** Does it answer one of the product's core questions?
+
+**159.** Does another feature answer the same question better?
+
+**160.** Is it product functionality, evidence infrastructure, or research?
+
+**161.** If research, why is it in normal navigation?
+
+**162.** If nobody can explain its output without reading source code, should it survive?
+
+**163.** Are we preserving it because it is useful or because it took effort to build?
+
+---
+
+# 12. Final Priorities
+
+After all of that, classify the resulting **features and decisions**, not individual questions.
+
+## MUST
+
+What TajsTokens fails to be TajsTokens without.
+
+## SHOULD
+
+Important and intended for v1, but not fundamental enough to block the product.
+
+## COULD
+
+Useful ideas worth retaining without committing to implementation.
+
+## WON'T
+
+Things deliberately outside the redesigned product.

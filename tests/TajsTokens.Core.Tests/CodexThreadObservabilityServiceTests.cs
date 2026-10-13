@@ -63,11 +63,63 @@ public sealed class CodexThreadObservabilityServiceTests
             Assert.Equal(Path.GetFullPath(historyPath), result.HistorySourcePath);
             Assert.Equal(stateBefore, File.GetLastWriteTimeUtc(statePath));
             Assert.Equal(historyBefore, File.GetLastWriteTimeUtc(historyPath));
+            CodexLiveFleetSnapshot fleet = await service.ReadLiveFleetAsync(CancellationToken.None);
+            Assert.True(fleet.HistoryCapabilityAvailable);
+            CodexLiveFleetThread fleetThread = Assert.Single(fleet.Threads, item => item.Thread.ThreadId == "thread-1");
+            Assert.Equal(CodexFleetState.StaleInProgress, fleetThread.State);
+            Assert.Equal("inProgress", fleetThread.NativeTurnStatus);
+            Assert.Null(fleetThread.LastItemType); // The agent message belongs to the previous turn.
+            Assert.Equal(Path.GetFullPath(historyPath), fleetThread.HistorySourcePath);
+            Assert.Equal(historyBefore, File.GetLastWriteTimeUtc(historyPath));
         }
         finally
         {
             SqliteConnection.ClearAllPools();
             directory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task ReadLiveFleet_UsesOnlyCurrentTurnItemAndKnownNativeType()
+    {
+        DirectoryInfo? root = new(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "TajsTokens.slnx"))) root = root.Parent;
+        Assert.NotNull(root);
+        string tempRoot = Path.Combine(root.FullName, ".codex", "temp");
+        Directory.CreateDirectory(tempRoot);
+        string path = Path.Combine(tempRoot, "fleet-item-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        try
+        {
+            string history = Path.Combine(path, "thread_history_1.sqlite");
+            string state = Path.Combine(path, "state_5.sqlite");
+            await CreateHistoryAsync(history);
+            await CreateStateAsync(state);
+            await using (var connection = new SqliteConnection($"Data Source={history}"))
+            {
+                await connection.OpenAsync();
+                await using SqliteCommand command = connection.CreateCommand();
+                command.CommandText = "INSERT INTO thread_items VALUES ('thread-1','turn-2','item-3',4,1700000003000,'{}','commandExecution',4);";
+                await command.ExecuteNonQueryAsync();
+            }
+            var service = new CodexThreadObservabilityService(path);
+            CodexLiveFleetSnapshot first = await service.ReadLiveFleetAsync(default);
+            Assert.Equal("commandExecution", Assert.Single(first.Threads, item => item.Thread.ThreadId == "thread-1").LastItemType);
+
+            await using (var connection = new SqliteConnection($"Data Source={history}"))
+            {
+                await connection.OpenAsync();
+                await using SqliteCommand command = connection.CreateCommand();
+                command.CommandText = "INSERT INTO thread_items VALUES ('thread-1','turn-2','item-4',5,1700000004000,'{}','prompt text masquerading as type',5);";
+                await command.ExecuteNonQueryAsync();
+            }
+            CodexLiveFleetSnapshot second = await service.ReadLiveFleetAsync(default);
+            Assert.Null(Assert.Single(second.Threads, item => item.Thread.ThreadId == "thread-1").LastItemType);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(path, recursive: true);
         }
     }
 

@@ -5,6 +5,10 @@ on:
     paths:
       - 'src/**'
       - 'tests/**'
+      - 'Directory.Build.*'
+      - 'TajsTokens.slnx'
+      - 'tools/dogfood/**'
+      - '.github/workflows/**'
   workflow_dispatch:
 
 permissions:

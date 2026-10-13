@@ -39,6 +39,7 @@ function Set-Launcher { }
 function dotnet {
     $script:publishes++
     $stagePath = $args[[Array]::IndexOf($args, '-o') + 1]
+    $script:publishPaths += $stagePath
     New-Fixture $stagePath 'new'
     if ($script:publishFails) { $global:LASTEXITCODE = 1; return }
     if ($script:incomplete) { Remove-Item -LiteralPath (Join-Path $stagePath 'coreclr.dll') }
@@ -81,6 +82,7 @@ try {
         Set-Content -LiteralPath (Join-Path $data 'settings.json') -Value 'keep me'
         $script:stops = 0; $script:starts = 0
         $script:publishes = 0
+        $script:publishPaths = @()
         $script:stopFails = $false; $script:startFailures = 0
         $script:publishFails = $false; $script:incomplete = $false
         $script:cleanupFails = $false
@@ -127,6 +129,10 @@ try {
                 Assert (@(Get-ChildItem -LiteralPath (Join-Path $root 'retained')).Count -eq 0) 'Old binaries retained'
                 $manifest = Get-Content -LiteralPath (Join-Path $current 'build-identity.json') -Raw | ConvertFrom-Json
                 Assert ($manifest.schemaVersion -eq 1 -and $manifest.appName -eq 'TajsTokens' -and $manifest.files.Count -eq 9) 'Build manifest contract differs'
+                Invoke-DogfoodDeployment
+                Assert ($script:publishPaths.Count -eq 2 -and $script:publishPaths[0] -eq $script:publishPaths[1]) 'Publish directory is not stable'
+                Assert ($script:publishPaths[0].StartsWith((Join-Path $repo 'artifacts/dogfood-publish'))) 'Publish cache escaped SDK outputs'
+                Assert (-not (Test-Path (Join-Path $script:publishPaths[0] 'build-identity.json'))) 'Deployment metadata contaminated publish cache'
             }
             'publish-failure' {
                 $script:publishFails = $true

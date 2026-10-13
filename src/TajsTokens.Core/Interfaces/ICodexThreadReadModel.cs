@@ -16,6 +16,8 @@ namespace TajsTokens.Core.Interfaces;
 /// </summary>
 public interface ICodexThreadReadModel
 {
+    Task<CodexLiveFleetSnapshot> ReadLiveFleetAsync(CancellationToken cancellationToken);
+
     Task<CodexThreadNavigationResult> BrowseThreadsAsync(
         CodexThreadNavigationQuery query,
         CancellationToken cancellationToken);
