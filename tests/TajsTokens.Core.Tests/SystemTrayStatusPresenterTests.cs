@@ -14,6 +14,18 @@ namespace TajsTokens.Core.Tests;
 
 public sealed class SystemTrayStatusPresenterTests
 {
+    [Fact]
+    public void RecentFleetHint_PreservesQuotaHealthAndDoesNotClaimProcessLiveness()
+    {
+        var baseStatus = new SystemTrayStatus("TajsTokens · 5h 70% · week 40% · live", 40, true, "live");
+        SystemTrayStatus status = SystemTrayStatusPresenter.WithRecentFleet(baseStatus, 2);
+        Assert.Contains("2 recent turn(s)", status.Tooltip);
+        Assert.Equal(40, status.ConstrainedRemainingPercent);
+        Assert.True(status.IsFresh);
+        Assert.DoesNotContain("active", status.Tooltip, StringComparison.OrdinalIgnoreCase);
+        Assert.Equal(baseStatus, SystemTrayStatusPresenter.WithRecentFleet(baseStatus, 0));
+    }
+
     [Theory]
     [InlineData(true)]
     [InlineData(false)]

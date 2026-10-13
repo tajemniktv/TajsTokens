@@ -106,6 +106,9 @@ public sealed class RuntimeSettingsStore
             RolloutAccountAssociations =
             (settings.RolloutAccountAssociations ?? []).Where(x => x is not null && x.IsValid).Distinct().ToArray(),
             RemoteFleetSshHosts = CodexRemoteFleetHostPolicy.Normalize(settings.RemoteFleetSshHosts),
+            LocalLimitsApiPort = Math.Clamp(settings.LocalLimitsApiPort, 1024, 65535),
+            LocalLimitsApiToken = settings.LocalLimitsApiToken is { Length: 64 } token && token.All(Uri.IsHexDigit)
+                ? token : string.Empty,
             PollIntervalSeconds = Math.Clamp(settings.PollIntervalSeconds, 15, 3600),
             LowQuotaThresholds = RuntimeSettings.NormalizeLowQuotaThresholds(settings.LowQuotaThresholds),
             CodexCliCommand = string.IsNullOrWhiteSpace(settings.CodexCliCommand)

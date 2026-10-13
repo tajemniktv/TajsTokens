@@ -1,0 +1,9 @@
+# Local limits API
+
+TajsTokens can expose its **already collected** current Codex quota lanes to trusted tools on this Windows account. The API is off by default. Enable it under **Settings → Local limits API**, choose a loopback port, and save. The Settings page shows whether the listener started and can copy its access token.
+
+The only endpoint is `GET http://127.0.0.1:6737/v1/limits` (substitute the configured port). Send `Authorization: Bearer <token>`. The token is generated when the API is first enabled and stored in this user's TajsTokens `data/settings.json`; treat it as a secret. The listener binds only to `127.0.0.1`, requires the token, rejects requests with a browser `Origin` header, emits no CORS permission, and supports no writes. Disabling the setting stops the listener.
+
+The response uses `schema: "tajstokens.limits.v1"`, a generation time, the last TajsTokens refresh time (null before collection), a top-level `available`/`not-collected` status, and a `resources` array. Each resource has an opaque stable ID, provider, window, source, authority, health state, optional used/remaining percent, window duration and reset time, and observation/collection times. Missing and stale lanes remain missing or stale; they are **not** converted to zero. Resource IDs are derived with a local secret, and raw account keys or account display labels are not returned. `accountIdentity: "source-key-unverified"` means a source key exists, not that historical ownership was independently established.
+
+This is a read-only projection of the same current quota state used by the app. Requests do not refresh Codex, expose transcripts, include remote SSH hosts, merge accounts, or convert token totals or API-equivalent prices into subscription quota cost. The API's current scope is local Codex quota, not a general telemetry export.

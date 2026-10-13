@@ -6,8 +6,10 @@
 
 using System.Globalization;
 using System.Reflection;
+using System.Security.Cryptography;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Windows.ApplicationModel.DataTransfer;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 
@@ -60,6 +62,12 @@ public sealed partial class SettingsPage : Page
             return;
         }
 
+        if (double.IsNaN(LocalLimitsApiPortBox.Value) || LocalLimitsApiPortBox.Value is < 1024 or > 65535)
+        {
+            ShowStatus(InfoBarSeverity.Error, "Invalid API port", "Choose a loopback port between 1024 and 65535.");
+            return;
+        }
+
         if (!TryParseThresholds(ThresholdsTextBox.Text, out int[] thresholds, out string? thresholdError))
         {
             ShowStatus(InfoBarSeverity.Error, "Invalid notification thresholds", thresholdError!);
@@ -86,6 +94,11 @@ public sealed partial class SettingsPage : Page
             TokscaleReconciliationEnabled = TokscaleReconciliationToggle.IsOn,
             TokscaleFallbackEnabled = TokscaleFallbackToggle.IsOn,
             RemoteFleetSshHosts = remoteHosts,
+            LocalLimitsApiEnabled = LocalLimitsApiToggle.IsOn,
+            LocalLimitsApiPort = (int)Math.Round(LocalLimitsApiPortBox.Value, MidpointRounding.AwayFromZero),
+            LocalLimitsApiToken = LocalLimitsApiToggle.IsOn && string.IsNullOrEmpty(baseline.LocalLimitsApiToken)
+                ? Convert.ToHexString(RandomNumberGenerator.GetBytes(32))
+                : baseline.LocalLimitsApiToken,
             CodexCliCommand = CodexCliCommandBox.Text,
             CodexCliArguments = CodexCliArgumentsBox.Text,
             CodexCliWorkingDirectory = CodexCliWorkingDirectoryBox.Text,
@@ -105,10 +118,12 @@ public sealed partial class SettingsPage : Page
             }
 
             RenderSettings();
-            ShowStatus(
-                InfoBarSeverity.Success,
-                "Settings saved",
-                "Runtime settings were persisted and live services were updated where applicable.");
+            bool apiFailed = App.Services.Settings.LocalLimitsApiEnabled &&
+                             !App.Services.LocalLimitsApi.Status.StartsWith("Listening", StringComparison.Ordinal);
+            ShowStatus(apiFailed ? InfoBarSeverity.Warning : InfoBarSeverity.Success,
+                apiFailed ? "Settings saved; API unavailable" : "Settings saved",
+                apiFailed ? App.Services.LocalLimitsApi.Status :
+                    "Runtime settings were persisted and live services were updated where applicable.");
         }
         finally
         {
@@ -128,6 +143,9 @@ public sealed partial class SettingsPage : Page
         TokscaleReconciliationToggle.IsOn = settings.TokscaleReconciliationEnabled;
         TokscaleFallbackToggle.IsOn = settings.TokscaleFallbackEnabled;
         RemoteFleetHostsBox.Text = string.Join(Environment.NewLine, settings.RemoteFleetSshHosts);
+        LocalLimitsApiToggle.IsOn = settings.LocalLimitsApiEnabled;
+        LocalLimitsApiPortBox.Value = settings.LocalLimitsApiPort;
+        LocalLimitsApiStatusText.Text = $"{App.Services.LocalLimitsApi.Status} · http://127.0.0.1:{settings.LocalLimitsApiPort}/v1/limits";
         CodexCliCommandBox.Text = settings.CodexCliCommand;
         CodexCliArgumentsBox.Text = settings.CodexCliArguments;
         CodexCliWorkingDirectoryBox.Text = settings.CodexCliWorkingDirectory;
@@ -144,6 +162,20 @@ public sealed partial class SettingsPage : Page
         RolloutOwnershipText.Text =
             $"{settings.RolloutAccountAssociations.Length} bounded source/session associations. Attribution remains user-asserted, not provider-verified.";
         RevokeRolloutsButton.IsEnabled = settings.RolloutAccountAssociations.Length > 0;
+    }
+
+    private void OnCopyLocalApiTokenClicked(object sender, RoutedEventArgs e)
+    {
+        string token = App.Services.Settings.LocalLimitsApiToken;
+        if (string.IsNullOrEmpty(token))
+        {
+            ShowStatus(InfoBarSeverity.Informational, "No access token", "Enable and save the local API to create a token.");
+            return;
+        }
+        var data = new DataPackage();
+        data.SetText(token);
+        Clipboard.SetContent(data);
+        ShowStatus(InfoBarSeverity.Informational, "Access token copied", "Paste it only into a trusted local client. The clipboard may be read by other apps.");
     }
 
     private async void OnAssociateRolloutsClicked(object sender, RoutedEventArgs e)

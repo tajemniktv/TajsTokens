@@ -165,6 +165,9 @@ public sealed class RuntimeSettingsStoreTests
                     TokscaleReconciliationEnabled = true,
                     TokscaleFallbackEnabled = true,
                     RemoteFleetSshHosts = ["server", "server", "laptop", "-unsafe", "host;command"],
+                    LocalLimitsApiEnabled = true,
+                    LocalLimitsApiPort = 70000,
+                    LocalLimitsApiToken = "aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899",
                     CodexCliCommand = "  custom-codex  ",
                     CodexCliArguments = " exec \r\n\r\n --json ",
                     CodexCliWorkingDirectory = "  C:\\repo  ",
@@ -180,6 +183,9 @@ public sealed class RuntimeSettingsStoreTests
             Assert.True(settings.TokscaleReconciliationEnabled);
             Assert.True(settings.TokscaleFallbackEnabled);
             Assert.Equal(["server", "laptop"], settings.RemoteFleetSshHosts);
+            Assert.True(settings.LocalLimitsApiEnabled);
+            Assert.Equal(65535, settings.LocalLimitsApiPort);
+            Assert.Equal("aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899", settings.LocalLimitsApiToken);
             Assert.Equal("custom-codex", settings.CodexCliCommand);
             Assert.Equal("exec" + Environment.NewLine + "--json", settings.CodexCliArguments);
             Assert.Equal("C:\\repo", settings.CodexCliWorkingDirectory);

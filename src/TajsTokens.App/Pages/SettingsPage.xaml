@@ -49,6 +49,24 @@
 
             <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+                    BorderThickness="1" CornerRadius="14" Padding="20">
+                <StackPanel Spacing="10">
+                    <TextBlock Text="Local limits API" FontSize="20" FontWeight="SemiBold" />
+                    <ToggleSwitch x:Name="LocalLimitsApiToggle"
+                                  Header="Enable read-only API for local tools"
+                                  OffContent="Disabled (default)"
+                                  OnContent="Loopback only; bearer token required" />
+                    <NumberBox x:Name="LocalLimitsApiPortBox" Header="Loopback port" Minimum="1024" Maximum="65535"
+                               SmallChange="1" SpinButtonPlacementMode="Compact" />
+                    <TextBlock x:Name="LocalLimitsApiStatusText" TextWrapping="Wrap" />
+                    <Button Content="Copy access token" Click="OnCopyLocalApiTokenClicked" HorizontalAlignment="Left" />
+                    <TextBlock Text="GET /v1/limits returns existing quota lanes with source and freshness. It does not trigger collection. The token is stored in this user's settings.json; keep it private. Browser origins are rejected and no cross-origin access is granted."
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                </StackPanel>
+            </Border>
+
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                     BorderThickness="1"
                     CornerRadius="14"
                     Padding="20">

@@ -13,6 +13,15 @@ namespace TajsTokens.Core.Services;
 
 public static class SystemTrayStatusPresenter
 {
+    public static SystemTrayStatus WithRecentFleet(SystemTrayStatus status, int recentlyWorkingThreads)
+    {
+        if (recentlyWorkingThreads <= 0) return status;
+        string quota = status.Tooltip.StartsWith("TajsTokens · ", StringComparison.Ordinal)
+            ? status.Tooltip["TajsTokens · ".Length..]
+            : status.Tooltip;
+        return status with { Tooltip = $"TajsTokens · {recentlyWorkingThreads} recent turn(s) · {quota}" };
+    }
+
     public static SystemTrayStatus Build(CodexIntelligenceSnapshot snapshot)
     {
         return Build(snapshot.CurrentState);

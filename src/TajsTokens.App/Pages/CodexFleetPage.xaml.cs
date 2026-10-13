@@ -5,6 +5,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using TajsTokens.Core.Models;
+using TajsTokens.Core.Services;
 
 namespace TajsTokens.App.Pages;
 
@@ -115,6 +116,9 @@ public sealed partial class CodexFleetPage : Page
                     ? "Collected usage unavailable"
                     : $"Recorded last 15m {recentTokens?.ReportedTotal.ToString("N0") ?? "none"} tokens" +
                       (recentTokens is null ? string.Empty : $" · cache read {recentTokens.CacheRead:N0} · cache write {recentTokens.CacheWrite:N0}") +
+                      (CodexInputComposition.From(recentTokens) is { } composition
+                          ? $" · input mix {composition.CacheReadPercent:0.#}% cache read, {composition.CacheWritePercent:0.#}% cache write"
+                          : string.Empty) +
                       $" · session total {session.NativeTokens.ReportedTotal:N0}" +
                       (delta is > 0 ? $" · +{delta:N0} since previous refresh" : string.Empty) +
                       (session.PeakContextPercent is { } peak ? $" · peak context {peak:0.#}%" : string.Empty);

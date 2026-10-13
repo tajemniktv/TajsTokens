@@ -85,6 +85,8 @@ public sealed class AppServices
             Intelligence,
             () => Telemetry.Latest);
         AlertEngine = new QuotaAlertEngine(Settings.LowQuotaThresholds);
+        LocalLimitsApi = new LocalLimitsHttpServer(() =>
+            LocalLimitsProjection.Build(Telemetry.Latest, Settings.LocalLimitsApiToken, DateTimeOffset.UtcNow));
     }
 
     public string DataFolder { get; }
@@ -118,6 +120,7 @@ public sealed class AppServices
     public ICodexIntelligence CodexIntelligence { get; }
     public TelemetryCoordinator Telemetry { get; }
     public QuotaAlertEngine AlertEngine { get; }
+    public LocalLimitsHttpServer LocalLimitsApi { get; }
     public Exception? StartupPersistenceError { get; }
 
     public async Task<RolloutAccountAssociation[]> PrepareRolloutAccountAssociationsAsync(
