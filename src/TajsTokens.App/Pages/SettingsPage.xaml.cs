@@ -31,14 +31,35 @@ public sealed partial class SettingsPage : Page
 
     private App App => (App)Application.Current;
 
-    private void OnLoaded(object sender, RoutedEventArgs e)
+    private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         RenderSettings();
+        await RenderObservedAccountsAsync();
     }
 
-    private void OnReloadClicked(object sender, RoutedEventArgs e)
+    private async Task RenderObservedAccountsAsync()
+    {
+        try
+        {
+            QuotaSourceAccountInventory inventory = await App.Services.Repository.ReadQuotaSourceAccountsAsync(20, CancellationToken.None);
+            if (!IsLoaded) return;
+            ObservedAccountsText.Text = inventory.Observations.Count == 0
+                ? "No retained quota observations yet."
+                : string.Join(Environment.NewLine, inventory.Observations.Select(row =>
+                    $"{row.Provider}/{row.Profile} · {QuotaAccountScope.Describe(row.AccountKey)} · {row.Source} · " +
+                    $"{row.FirstObservedAtUtc.ToLocalTime():g} to {row.LastObservedAtUtc.ToLocalTime():g} · {row.ObservationCount:N0} observations")) +
+                  (inventory.Truncated ? Environment.NewLine + "More source/account combinations exist; this view shows the 20 most recently observed." : string.Empty);
+        }
+        catch (Exception exception) when (exception is not OutOfMemoryException)
+        {
+            if (IsLoaded) ObservedAccountsText.Text = "Account/source inventory unavailable; retained quota data was not changed.";
+        }
+    }
+
+    private async void OnReloadClicked(object sender, RoutedEventArgs e)
     {
         RenderSettings();
+        await RenderObservedAccountsAsync();
         ShowStatus(InfoBarSeverity.Informational, "Reloaded", "Restored the currently persisted runtime settings.");
     }
 

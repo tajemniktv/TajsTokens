@@ -35,11 +35,14 @@ public static class LocalLimitsProjection
                 ? percent : null;
             string identity = value?.AccountKey is null ? "unknown" : "source-key-unverified";
             string idSource = string.Join('\u001f', lane.Provider, lane.Profile, lane.Window,
-                value?.LimitId ?? value?.Lane ?? "unknown", value?.AccountKey ?? "unknown");
-            byte[] digest = HMACSHA256.HashData(Encoding.UTF8.GetBytes(idSalt), Encoding.UTF8.GetBytes(idSource));
-            string id = Convert.ToHexString(digest.AsSpan(0, 12)).ToLowerInvariant();
+                value?.Source ?? "not-reported", value?.LimitId ?? value?.Lane ?? "unknown",
+                value?.AccountKey ?? "unknown");
+            string id = OpaqueId(idSalt, "resource\u001f" + idSource);
+            string? accountId = value?.AccountKey is { Length: > 0 } account
+                ? OpaqueId(idSalt, string.Join('\u001f', "account", lane.Provider, value.Source, account))
+                : null;
             return new LocalLimitResource(
-                id, lane.Provider, lane.Window, identity,
+                id, lane.Provider, lane.Window, identity, accountId,
                 value?.Source ?? "not-reported", value?.Authority.ToString() ?? "Unknown",
                 lane.State.ToString().ToLowerInvariant(), used, used is null ? null : 100 - used,
                 value?.WindowMinutes, value?.ResetsAtUtc, value?.CapturedAtUtc,
@@ -50,5 +53,11 @@ public static class LocalLimitsProjection
             snapshot.CapturedAtUtc == DateTimeOffset.MinValue ? null : snapshot.CapturedAtUtc,
             snapshot.CapturedAtUtc == DateTimeOffset.MinValue ? "not-collected" : "available",
             resources);
+    }
+
+    private static string OpaqueId(string salt, string source)
+    {
+        byte[] digest = HMACSHA256.HashData(Encoding.UTF8.GetBytes(salt), Encoding.UTF8.GetBytes(source));
+        return Convert.ToHexString(digest.AsSpan(0, 12)).ToLowerInvariant();
     }
 }

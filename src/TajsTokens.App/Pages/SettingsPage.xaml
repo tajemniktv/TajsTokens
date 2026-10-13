@@ -127,6 +127,15 @@
                         Text="Default token/session source. TajsTokens incrementally normalizes local Codex state and rollouts; remote/cloud-only sessions remain outside local token accounting. The SSH fleet probe below shows remote status separately."
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         TextWrapping="Wrap" />
+                    <Expander Header="Observed quota accounts and sources" HorizontalAlignment="Stretch"
+                              HorizontalContentAlignment="Stretch">
+                        <StackPanel Spacing="8">
+                            <TextBlock x:Name="ObservedAccountsText" Text="Loading retained observations…"
+                                       TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                            <TextBlock Text="Historical source keys stay with their original observations. A key is a backend pseudonym, not proof that local Codex threads belong to that account."
+                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Expander>
                     <TextBox x:Name="RemoteFleetHostsBox"
                              Header="Remote Codex fleet via SSH (one configured host alias per line)"
                              AcceptsReturn="True" TextWrapping="Wrap" MinHeight="76"

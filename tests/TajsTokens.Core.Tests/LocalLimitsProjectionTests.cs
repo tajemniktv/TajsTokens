@@ -49,7 +49,9 @@ public sealed class LocalLimitsProjectionTests
         Assert.Equal(42, weekly.UsedPercent);
         Assert.Equal(58, weekly.RemainingPercent);
         Assert.Equal("source-key-unverified", weekly.AccountIdentity);
+        Assert.NotNull(weekly.AccountId);
         Assert.Null(result.Resources[1].UsedPercent);
+        Assert.Null(result.Resources[1].AccountId);
         Assert.Equal("unavailable", result.Resources[1].State);
         Assert.DoesNotContain("private-account-key", JsonSerializer.Serialize(result));
     }
@@ -70,5 +72,30 @@ public sealed class LocalLimitsProjectionTests
         Assert.Equal(2, result.Resources.Count);
         Assert.NotEqual(result.Resources[0].Id, result.Resources[1].Id);
         Assert.Equal([20d, 70d], result.Resources.Select(resource => resource.UsedPercent));
+        Assert.NotEqual(result.Resources[0].AccountId, result.Resources[1].AccountId);
+    }
+
+    [Fact]
+    public void AccountIdsGroupOnlyMatchingProviderSourceAndKnownAccount()
+    {
+        DateTimeOffset now = DateTimeOffset.Parse("2026-10-13T08:00:00Z");
+        QuotaSnapshot first = new(QuotaWindowKind.Weekly, now, 20, 10080, now.AddDays(1),
+            "codex", "default", "app-server", "account-a");
+        TelemetrySnapshot snapshot = TelemetrySnapshot.Empty with
+        {
+            CapturedAtUtc = now,
+            QuotaSnapshots =
+            [
+                first,
+                first with { Kind = QuotaWindowKind.FiveHour },
+                first with { Source = "rollout" },
+                first with { Provider = "other" },
+            ],
+        };
+        LocalLimitsEnvelope result = LocalLimitsProjection.Build(snapshot, "secret", now);
+        Assert.Equal(result.Resources[0].AccountId, result.Resources[1].AccountId);
+        Assert.NotEqual(result.Resources[0].Id, result.Resources[2].Id);
+        Assert.NotEqual(result.Resources[0].AccountId, result.Resources[2].AccountId);
+        Assert.NotEqual(result.Resources[0].AccountId, result.Resources[3].AccountId);
     }
 }

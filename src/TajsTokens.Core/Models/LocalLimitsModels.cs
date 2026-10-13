@@ -17,6 +17,7 @@ public sealed record LocalLimitResource(
     string Provider,
     string Window,
     string AccountIdentity,
+    string? AccountId,
     string Source,
     string Authority,
     string State,
