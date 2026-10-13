@@ -33,6 +33,15 @@ public sealed record CodexLiveFleetSnapshot(
 
 public static class CodexLiveFleetPolicy
 {
+    /// <summary>Do not surface arbitrary SQLite text as a live item category.</summary>
+    public static string? NormalizeItemType(string? itemType) => itemType is
+        "userMessage" or "hookPrompt" or "agentMessage" or "functionCallOutput" or
+        "plan" or "reasoning" or "commandExecution" or "fileChange" or "mcpToolCall" or
+        "dynamicToolCall" or "collabAgentToolCall" or "subAgentActivity" or "webSearch" or
+        "imageView" or "sleep" or "imageGeneration" or "enteredReviewMode" or
+        "exitedReviewMode" or "contextCompaction"
+            ? itemType : null;
+
     public static CodexFleetState Classify(string? nativeStatus, DateTimeOffset? lastObservedAtUtc, DateTimeOffset nowUtc)
     {
         if (string.Equals(nativeStatus, "inProgress", StringComparison.OrdinalIgnoreCase))

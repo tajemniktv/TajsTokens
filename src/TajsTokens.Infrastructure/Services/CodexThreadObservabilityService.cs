@@ -106,7 +106,8 @@ public sealed class CodexThreadObservabilityService
                 }
 
                 if (!await HasTableAsync(connection, "thread_items", cancellationToken) ||
-                    !await HasColumnAsync(connection, "thread_items", "item_type", cancellationToken)) continue;
+                    !await HasColumnAsync(connection, "thread_items", "item_type", cancellationToken) ||
+                    !await HasColumnAsync(connection, "thread_items", "turn_id", cancellationToken)) continue;
                 string itemOrder = await HasColumnAsync(connection, "thread_items", "rollout_ordinal", cancellationToken)
                     ? "rollout_ordinal DESC"
                     : "rowid DESC";
@@ -115,14 +116,15 @@ public sealed class CodexThreadObservabilityService
                     : await HasColumnAsync(connection, "thread_items", "created_at", cancellationToken)
                         ? "created_at"
                         : "NULL";
-                foreach (string threadId in latestTurns.Where(pair =>
+                foreach (KeyValuePair<string, FleetTurnEvidence> turn in latestTurns.Where(pair =>
                              pair.Value.SourcePath == candidate.Path &&
-                             string.Equals(pair.Value.Status, "inProgress", StringComparison.OrdinalIgnoreCase))
-                         .Select(pair => pair.Key))
+                             !string.IsNullOrWhiteSpace(pair.Value.TurnId) &&
+                             string.Equals(pair.Value.Status, "inProgress", StringComparison.OrdinalIgnoreCase)))
                 {
                     await using SqliteCommand itemCommand = connection.CreateCommand();
-                    itemCommand.CommandText = $"SELECT item_type, {itemTime} FROM thread_items WHERE thread_id = $thread ORDER BY {itemOrder} LIMIT 1;";
-                    itemCommand.Parameters.AddWithValue("$thread", threadId);
+                    itemCommand.CommandText = $"SELECT item_type, {itemTime} FROM thread_items WHERE thread_id = $thread AND turn_id = $turn ORDER BY {itemOrder} LIMIT 1;";
+                    itemCommand.Parameters.AddWithValue("$thread", turn.Key);
+                    itemCommand.Parameters.AddWithValue("$turn", turn.Value.TurnId!);
                     await using SqliteDataReader itemReader = await itemCommand.ExecuteReaderAsync(cancellationToken);
                     if (!await itemReader.ReadAsync(cancellationToken)) continue;
                     var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
@@ -130,8 +132,8 @@ public sealed class CodexThreadObservabilityService
                         ["created_at"] = itemReader.IsDBNull(1) ? null : itemReader.GetValue(1),
                     };
                     DateTimeOffset? at = ReadTimestamp(values, "created_at_ms", "created_at");
-                    if (!latestItems.TryGetValue(threadId, out var prior) || at > prior.At)
-                        latestItems[threadId] = (itemReader.IsDBNull(0) ? null : itemReader.GetString(0), at, candidate.Path);
+                    if (!latestItems.TryGetValue(turn.Key, out var prior) || at > prior.At)
+                        latestItems[turn.Key] = (itemReader.IsDBNull(0) ? null : CodexLiveFleetPolicy.NormalizeItemType(itemReader.GetString(0)), at, candidate.Path);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
