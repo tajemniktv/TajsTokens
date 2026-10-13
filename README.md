@@ -9,6 +9,7 @@ TajsTokens is a local-first Windows companion for Codex quota, usage and activit
 - Usage breakdowns by model, project, session and time; advanced diagnostics, model evaluation and workload scenarios.
 - Read-only native Codex inspection. Optional local integrations are opt-in: the CLI harness runs only when requested, and the [local limits API](docs/LOCAL_LIMITS_API.md) is disabled by default.
 - A read-only observed account/source inventory in Settings. Backend account keys remain attached to the quota observations that supplied them; historical local work is not assigned to the current login automatically.
+- A headless `--daily-json` report of UTC-day totals from the existing local native token ledger. It contains aggregates only and does not claim account ownership.
 
 Forecasts are estimates, not guarantees. A missing or stale quota lane is not zero usage or unlimited allowance. The Live fleet's recent-write state is not proof a Codex process is still running.
 

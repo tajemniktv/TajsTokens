@@ -30,3 +30,11 @@ Binary rollback does **not** restore an older database schema. Stop the app and 
 ## Source and integration boundaries
 
 Codex native files and credentials are read-only. The app's local database owns retained evidence; no external collector should become a second authoritative Codex token ledger. The [local limits API](LOCAL_LIMITS_API.md) serves already-collected current quota on authenticated loopback only. Remote SSH fleet probes are explicit, read-only, content-free status checks; they do not synchronize history or quota. Avoid writing prompts, command bodies, account credentials or API tokens to shared reports.
+
+For machine-readable local workload totals, run:
+
+```powershell
+dotnet run --project tools/TajsTokens.ForecastEvaluation -- --daily-json "$env:LOCALAPPDATA/Programs/TajemnikTV/TajsTokens/data/telemetry.db" 30
+```
+
+The optional final number is 1–366 UTC days. Output is `tajstokens.daily-tokens.v1` JSON with retained native event counts and disjoint token categories by UTC day. Missing days mean no retained observations, **not** verified zero use. The report excludes paths, prompts, session IDs and account keys; it does not attribute local work to the current Codex account or include remote hosts.
