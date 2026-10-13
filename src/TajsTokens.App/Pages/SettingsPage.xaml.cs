@@ -66,6 +66,15 @@ public sealed partial class SettingsPage : Page
             return;
         }
 
+        string[] remoteHosts = RemoteFleetHostsBox.Text
+            .Split(['\r', '\n', ',', ';'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        if (remoteHosts.Length > 16 || remoteHosts.Any(host => !CodexRemoteFleetHostPolicy.IsValid(host)))
+        {
+            ShowStatus(InfoBarSeverity.Error, "Invalid SSH hosts", "Enter at most 16 simple SSH config aliases, one per line. Options and shell characters are not allowed.");
+            return;
+        }
+
         RuntimeSettings baseline = _renderedSettings ?? App.Services.Settings;
         RuntimeSettings candidate = baseline with
         {
@@ -76,6 +85,7 @@ public sealed partial class SettingsPage : Page
             LowQuotaThresholds = thresholds,
             TokscaleReconciliationEnabled = TokscaleReconciliationToggle.IsOn,
             TokscaleFallbackEnabled = TokscaleFallbackToggle.IsOn,
+            RemoteFleetSshHosts = remoteHosts,
             CodexCliCommand = CodexCliCommandBox.Text,
             CodexCliArguments = CodexCliArgumentsBox.Text,
             CodexCliWorkingDirectory = CodexCliWorkingDirectoryBox.Text,
@@ -117,6 +127,7 @@ public sealed partial class SettingsPage : Page
         ThresholdsTextBox.Text = string.Join(", ", settings.LowQuotaThresholds);
         TokscaleReconciliationToggle.IsOn = settings.TokscaleReconciliationEnabled;
         TokscaleFallbackToggle.IsOn = settings.TokscaleFallbackEnabled;
+        RemoteFleetHostsBox.Text = string.Join(Environment.NewLine, settings.RemoteFleetSshHosts);
         CodexCliCommandBox.Text = settings.CodexCliCommand;
         CodexCliArgumentsBox.Text = settings.CodexCliArguments;
         CodexCliWorkingDirectoryBox.Text = settings.CodexCliWorkingDirectory;

@@ -106,9 +106,15 @@
                     <TextBlock Text="Native Codex state + rollouts"
                                FontWeight="SemiBold" />
                     <TextBlock
-                        Text="Default token/session source. TajsTokens incrementally normalizes local Codex state and rollouts; remote/cloud-only sessions are explicitly outside this coverage until that source exists."
+                        Text="Default token/session source. TajsTokens incrementally normalizes local Codex state and rollouts; remote/cloud-only sessions remain outside local token accounting. The SSH fleet probe below shows remote status separately."
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         TextWrapping="Wrap" />
+                    <TextBox x:Name="RemoteFleetHostsBox"
+                             Header="Remote Codex fleet via SSH (one configured host alias per line)"
+                             AcceptsReturn="True" TextWrapping="Wrap" MinHeight="76"
+                             PlaceholderText="laptop&#xA;server" />
+                    <TextBlock Text="Opt-in, read-only SSH probes run only when you select Check SSH hosts in Live fleet. Hardware-backed SSH keys may require a touch once per host. Python 3 and Codex history must be available to the SSH user. No transcript bodies, quota readings or credentials are copied or merged; unreachable hosts stay separate from local evidence."
+                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
                     <Expander Header="Advanced integrations" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                         <StackPanel Spacing="12">
                             <ToggleSwitch x:Name="TokscaleReconciliationToggle"

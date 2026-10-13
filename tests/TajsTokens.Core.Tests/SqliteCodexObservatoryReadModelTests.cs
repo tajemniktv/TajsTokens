@@ -107,6 +107,12 @@ public sealed class SqliteCodexObservatoryReadModelTests
             Assert.Equal(123, selected.RolloutBytes);
             Assert.Equal(2, selected.TimelineEventCount);
 
+            IReadOnlyDictionary<string, CodexNativeTokenTotals> recent = await readModel.GetRecentSessionTokensAsync(
+                now.AddMinutes(-45), ["child", "root"], CancellationToken.None);
+            Assert.Equal(58, recent["child"].ReportedTotal);
+            Assert.Equal(2, recent["child"].CacheRead);
+            Assert.DoesNotContain("root", recent.Keys);
+
             CodexAgentTopology topology = await readModel.GetAgentTopologyAsync("child", CancellationToken.None);
             Assert.Equal(new[] { "root", "child" }, topology.Agents.Select(agent => agent.AgentId).ToArray());
             Assert.Single(topology.Relationships);

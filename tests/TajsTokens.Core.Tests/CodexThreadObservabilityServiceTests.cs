@@ -63,6 +63,14 @@ public sealed class CodexThreadObservabilityServiceTests
             Assert.Equal(Path.GetFullPath(historyPath), result.HistorySourcePath);
             Assert.Equal(stateBefore, File.GetLastWriteTimeUtc(statePath));
             Assert.Equal(historyBefore, File.GetLastWriteTimeUtc(historyPath));
+            CodexLiveFleetSnapshot fleet = await service.ReadLiveFleetAsync(CancellationToken.None);
+            Assert.True(fleet.HistoryCapabilityAvailable);
+            CodexLiveFleetThread fleetThread = Assert.Single(fleet.Threads, item => item.Thread.ThreadId == "thread-1");
+            Assert.Equal(CodexFleetState.StaleInProgress, fleetThread.State);
+            Assert.Equal("inProgress", fleetThread.NativeTurnStatus);
+            Assert.Equal("agentMessage", fleetThread.LastItemType);
+            Assert.Equal(Path.GetFullPath(historyPath), fleetThread.HistorySourcePath);
+            Assert.Equal(historyBefore, File.GetLastWriteTimeUtc(historyPath));
         }
         finally
         {
