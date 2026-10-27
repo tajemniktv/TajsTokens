@@ -187,7 +187,7 @@ public sealed class SqliteCodexObservatoryReadModelTests
             {
                 await connection.OpenAsync(CancellationToken.None);
                 SqliteCommand downgrade = connection.CreateCommand();
-                downgrade.CommandText = """
+                downgrade.CommandText = LegacyObservatoryFixture.RemoveProjectionCache + """
                                         DROP INDEX IF EXISTS idx_native_tokens_observed_time;
                                         DROP INDEX IF EXISTS idx_native_token_source_time;
                                         DROP INDEX IF EXISTS idx_native_token_session_source_time;

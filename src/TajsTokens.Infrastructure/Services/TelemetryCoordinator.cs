@@ -319,6 +319,7 @@ public sealed class TelemetryCoordinator
                     string detail = observatory.FilesDiscovered == 0
                         ? "No local Codex rollout JSONL sources were discovered. Previously normalized history, if any, remains historical rather than live."
                         : $"{observatory.FilesDiscovered} catalog rollout(s), {observatory.FilesScanned} changed file(s) scanned, {observatory.RecordsScanned} new complete record(s), {observatory.RecordsNormalized} normalized, {observatory.SessionsTouched} touched session(s), {FormatByteCount(observatory.BytesObserved)} observed on changed sources." +
+                          $" Logical work: {FormatByteCount(observatory.PrefixBytesHashed)} prefix hashed; {FormatByteCount(observatory.CompleteRecordBytesDecoded)} complete records decoded; {observatory.CheckpointWrites} checkpoint write(s)." +
                           (observatory.Errors > 0
                               ? $" {observatory.Errors} file(s) could not be refreshed and will retry."
                               : string.Empty) +

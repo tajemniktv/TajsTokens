@@ -26,10 +26,12 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _initializeGate = new(1, 1);
     private volatile bool _initialized;
+    private readonly SqliteDatabaseGeneration _initializedDatabase = new(databasePath);
+    public string? DatabaseGeneration => _initializedDatabase.Identity;
 
     public async Task InitializeAsync(CancellationToken cancellationToken)
     {
-        if (_initialized)
+        if (_initialized && _initializedDatabase.IsCurrent)
         {
             return;
         }
@@ -37,11 +39,13 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         await _initializeGate.WaitAsync(cancellationToken);
         try
         {
-            if (_initialized)
+            if (_initialized && _initializedDatabase.IsCurrent)
             {
                 return;
             }
 
+            _initialized = false;
+            _initializedDatabase.Reopen(_connectionString);
             // Ingestion can be the first reader after an upgrade. The telemetry owner must
             // migrate shared quota tables before any observatory writes use those columns.
             await new SqliteTelemetryRepository(databasePath).InitializeAsync(cancellationToken);
@@ -391,10 +395,16 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                 version = 9;
             }
 
+            using SqliteCommand privacyVersion = connection.CreateCommand();
+            privacyVersion.CommandText = "SELECT version FROM observatory_schema WHERE component = 'legacy-privacy-scrub';";
+            object? privacyMarker = await privacyVersion.ExecuteScalarAsync(cancellationToken);
+            int privacySchema = privacyMarker is null or DBNull ? 0 : Convert.ToInt32(privacyMarker, CultureInfo.InvariantCulture);
+            if (privacySchema > 1) throw new InvalidOperationException("Unsupported legacy privacy migration version.");
+            await SqliteNativeTokenRevision.EnsureAsync(connection, cancellationToken);
+
             // Scrub rows written by pre-hardening Phase 3 builds. typed-v3 forces one safe replay so
             // current sources regain basename+hash labels and repository names without retaining paths.
-            SqliteCommand privacyScrub = connection.CreateCommand();
-            privacyScrub.CommandText = """
+            const string privacyScrub = """
                                        UPDATE rollout_records
                                        SET file_path = '[redacted]'
                                        WHERE instr(file_path, '/') > 0 OR instr(file_path, char(92)) > 0;
@@ -410,9 +420,13 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                                        UPDATE sessions
                                        SET repository = '(unknown)'
                                        WHERE instr(repository, '/') > 0 OR instr(repository, char(92)) > 0;
-                                       """;
-            await privacyScrub.ExecuteNonQueryAsync(cancellationToken);
 
+                                       INSERT INTO observatory_schema(component, version) VALUES('legacy-privacy-scrub', 1)
+                                       ON CONFLICT(component) DO UPDATE SET version = 1;
+                                       """;
+            if (privacySchema < 1) await ExecuteMigrationAsync(connection, privacyScrub, cancellationToken);
+
+            _initializedDatabase.MarkInitialized();
             _initialized = true;
         }
         finally
@@ -569,19 +583,33 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
     }
 
     public async Task ApplyCumulativeTokenObservationAsync(CodexTokenCountObservation observation, CancellationToken cancellationToken)
+        => await ApplyCumulativeTokenObservationsAsync([observation], cancellationToken);
+
+    public async Task ApplyCumulativeTokenObservationsAsync(IReadOnlyList<CodexTokenCountObservation> observations, CancellationToken cancellationToken)
     {
+        if (observations.Count == 0) return;
         await EnsureInitializedAsync(cancellationToken);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
         using SqliteTransaction transaction = connection.BeginTransaction();
+        foreach (CodexTokenCountObservation observation in observations)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await ApplyTokenObservationAsync(connection, transaction, observation, cancellationToken);
+        }
+        transaction.Commit();
+    }
 
-        SqliteCommand duplicate = connection.CreateCommand();
+    private static async Task ApplyTokenObservationAsync(SqliteConnection connection, SqliteTransaction transaction,
+        CodexTokenCountObservation observation, CancellationToken cancellationToken)
+    {
+        using SqliteCommand duplicate = connection.CreateCommand();
         duplicate.Transaction = transaction;
         duplicate.CommandText = "SELECT 1 FROM codex_native_token_events WHERE source_event_id = $event LIMIT 1;";
         duplicate.Parameters.AddWithValue("$event", observation.SourceEventId);
         bool sourceEventAlreadyPersisted = await duplicate.ExecuteScalarAsync(cancellationToken) is not null;
 
-        SqliteCommand read = connection.CreateCommand();
+        using SqliteCommand read = connection.CreateCommand();
         read.Transaction = transaction;
         read.CommandText = """
                            SELECT source_file, counter_epoch, input_tokens, cached_input_tokens, cache_write_input_tokens,
@@ -644,10 +672,6 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                         WHERE session_id = (SELECT session_id FROM codex_native_token_events WHERE source_event_id = $id)
                           AND counter_epoch = (SELECT counter_epoch FROM codex_native_token_events WHERE source_event_id = $id)
                           AND $quality = 'Valid' AND $sourceAt IS NOT NULL;
-                        CREATE TABLE IF NOT EXISTS codex_native_accounting_revision (
-                            id INTEGER PRIMARY KEY CHECK(id = 1), revision INTEGER NOT NULL);
-                        INSERT INTO codex_native_accounting_revision(id, revision) VALUES(1, 1)
-                        ON CONFLICT(id) DO UPDATE SET revision = revision + 1;
                         """;
                     await timeRepair.ExecuteNonQueryAsync(cancellationToken);
                 }
@@ -664,7 +688,6 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                 repair.Parameters.AddWithValue("$id", observation.SourceEventId);
                 await repair.ExecuteNonQueryAsync(cancellationToken);
             }
-            transaction.Commit();
             return;
         }
         int epoch = decision.NextState?.Epoch ?? previous?.Epoch ?? 0;
@@ -684,18 +707,16 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
 
         if (inserted == 0)
         {
-            transaction.Commit();
             return;
         }
 
         if (!decision.AdvanceState || decision.NextState is null)
         {
-            transaction.Commit();
             return;
         }
 
         CodexTokenCounterState nextState = decision.NextState;
-        SqliteCommand upsertState = connection.CreateCommand();
+        using SqliteCommand upsertState = connection.CreateCommand();
         upsertState.Transaction = transaction;
         upsertState.CommandText = """
                                   INSERT INTO codex_counter_state(
@@ -732,7 +753,6 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         upsertState.Parameters.AddWithValue("$sourceEventAt", DbValue(nextState.LastSourceEventAtUtc is { } sourceAt ? SerializeUtc(sourceAt) : null));
         await upsertState.ExecuteNonQueryAsync(cancellationToken);
 
-        transaction.Commit();
     }
 
     public async Task UpsertContextObservationAsync(CodexContextObservation observation, CancellationToken cancellationToken)
@@ -871,7 +891,11 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                                file_path = excluded.file_path,
                                session_id = COALESCE(excluded.session_id, rollout_files.session_id),
                                size_bytes = excluded.size_bytes,
-                               last_seen_at_utc = MAX(rollout_files.last_seen_at_utc, excluded.last_seen_at_utc);
+                               last_seen_at_utc = MAX(rollout_files.last_seen_at_utc, excluded.last_seen_at_utc)
+                             WHERE rollout_files.file_path IS NOT excluded.file_path
+                                OR (excluded.session_id IS NOT NULL AND rollout_files.session_id IS NOT excluded.session_id)
+                                OR rollout_files.size_bytes IS NOT excluded.size_bytes
+                                OR julianday(excluded.last_seen_at_utc) - julianday(rollout_files.last_seen_at_utc) >= 5.0 / 1440;
                              """;
         upsert.Parameters.AddWithValue("$identity", sourceIdentity);
         upsert.Parameters.AddWithValue("$file", safeFileLabel);
@@ -1211,7 +1235,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         long reportedTotal,
         CancellationToken cancellationToken)
     {
-        SqliteCommand insert = connection.CreateCommand();
+        using SqliteCommand insert = connection.CreateCommand();
         insert.Transaction = transaction;
         insert.CommandText = """
                              INSERT INTO codex_native_token_events(
@@ -1245,10 +1269,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
 
     private async Task EnsureInitializedAsync(CancellationToken cancellationToken)
     {
-        if (!_initialized)
-        {
-            await InitializeAsync(cancellationToken);
-        }
+        await InitializeAsync(cancellationToken);
     }
 
     private static async Task ExecuteMigrationAsync(SqliteConnection connection, string sql, CancellationToken cancellationToken)

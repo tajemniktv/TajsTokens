@@ -82,7 +82,7 @@ public sealed class CodexServiceTierEvidenceTests
             // Reconstruct the preceding component schema and verify migration does not invent tier values.
             await Execute(
                 database,
-                "DROP INDEX idx_native_token_source_time; DROP INDEX idx_native_token_session_source_time; DROP INDEX idx_context_source_time; " +
+                LegacyObservatoryFixture.RemoveProjectionCache + "DROP INDEX idx_native_token_source_time; DROP INDEX idx_native_token_session_source_time; DROP INDEX idx_context_source_time; " +
                 "ALTER TABLE codex_native_token_events DROP COLUMN source_event_at_utc; " +
                 "ALTER TABLE codex_native_token_events DROP COLUMN source_timestamp_quality; " +
                 "ALTER TABLE codex_counter_state DROP COLUMN last_source_event_at_utc; " +

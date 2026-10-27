@@ -125,7 +125,7 @@ public sealed class SqliteCodexTokenAccountingReducerTests
             {
                 await connection.OpenAsync();
                 SqliteCommand downgrade = connection.CreateCommand();
-                downgrade.CommandText = """
+                downgrade.CommandText = LegacyObservatoryFixture.RemoveProjectionCache + """
                                         DROP INDEX idx_native_token_source_time;
                                         DROP INDEX idx_native_token_session_source_time;
                                         DROP INDEX idx_context_source_time;

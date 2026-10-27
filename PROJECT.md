@@ -172,11 +172,13 @@ Owners: `WindowsResourcePolicy`, `App`, `MainWindow`, `TelemetryCoordinator`,
 `CodexObservatoryService`, SQLite stores/providers and `CalibrationProcessService`.
 Memo §11 supplies the mechanisms; their relative runtime cost remains to be measured.
 
-Stage 1 is in progress: PERF-002, PERF-003 and PERF-005 are implemented. Normal
-interactive scheduling, retryable/visible EcoQoS, coalesced fleet reads and independent
-discovery/catch-up are installed. All 653 Core tests and the Windows build pass.
-Broader measurements, presentation/cache/calibration/maintenance work and the token
-write benchmark remain open. See [current validation evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
+Stage 1 is in progress: PERF-002, PERF-003, PERF-005, PERF-006, PERF-008 and P-01
+are implemented. Normal interactive scheduling, retryable/visible EcoQoS, coalesced
+fleet reads, independent discovery/catch-up, precise projection invalidation, no-op
+write suppression, guarded initialization, indexed reset tails and ordered token
+batching are installed. All 668 Core tests and the Windows build pass. Broader
+measurements, presentation and calibration reuse remain open. See
+[current validation evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 
 - [ ] **PERF-001 — Establish measurements and targets.** Compare startup, warm idle,
   active append, backlog, hide/restore during work and reset boundary. Separate
@@ -213,27 +215,38 @@ write benchmark remain open. See [current validation evidence](docs/source-notes
   after restart. The installed app read one catalog row and reused full discovery
   while the existing unresolved rollout remained explicit;
   [653-test/build and runtime evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
-- [ ] **PERF-006 — Narrow invalidation and stop no-op writes.** Introduce token-relevant
+- [x] **PERF-006 — Narrow invalidation and stop no-op writes.** Introduce token-relevant
   revisions covering retirement/deletion/time enrichment, skip unchanged durable
   checkpoints and define coalesced last-seen freshness. Reuse bounded fingerprint/
   edge indexes with independent edge invalidation. Measure hot-file prefix work
   while preserving detection of rewritten consumed prefixes.
+  Verified by mutation/rollback/replacement/no-op regressions, synthetic prefix
+  measurements and installed logical-work diagnostics. Full suite: 668 passed;
+  Windows build/install passed; [evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 - [ ] **PERF-007 — Reuse qualified preparation/evaluation.** Gate expensive calibration
   on evidence revisions and newly matured outcomes, not cooldown alone. Reuse
   overlapping reads/prepared features and useful interrupted-slice progress. Keep
   cheap anchor/time-sensitive projection separate. Invalidate for account/source/
   cohort, parser/schema/settings, backfill/replacement, resets, moving windows and
   expiry; unchanged token counts alone are not a valid cache key.
-- [ ] **PERF-008 — Bound maintenance and queries.** Put legacy privacy scrubs under
+- [x] **PERF-008 — Bound maintenance and queries.** Put legacy privacy scrubs under
   durable migration ownership and enforce privacy in writers. Guard initialization
   with database-replacement recovery. Inspect fleet/reset/cache-stamp query plans;
   use bounded candidates/incremental tails where measured, rebuilding after
   backfill/deletion. Codex-owned schemas stay read-only.
-- [ ] **P-01 — Measure and conditionally batch token writes.** Benchmark the existing
+  Verified by migration/failure/replacement/reset regressions and installed query
+  plans. Unchanged reset refresh writes nothing; indexed tails retain raw stream
+  partitions and rebuild on late/changed evidence/time qualification. Full suite:
+  668 passed; Windows build/install passed; [evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
+- [x] **P-01 — Measure and conditionally batch token writes.** Benchmark the existing
   per-observation lane against batching within the reducer owner. Adopt only with
   material benefit and parity for order, identity, deduplication, atomic state/event
   writes and checkpoint-after-success recovery. Inject partial failures/restart.
   A measured decision to retain the existing lane also resolves this investigation.
+  Adopted ordered batches of 128 after the synthetic 10,000-observation comparison
+  (21.73 s → 2.20 s), reversed-order measurement and parity/failure/restart tests.
+  Full suite: 668 passed; Windows build/install passed;
+  [evidence and reproducible commands](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 
 **Exit:** measured restore responsiveness and lower repeated work without losing
 quota collection, alerts, freshness, cancellation or evidence. Warm unchanged sources

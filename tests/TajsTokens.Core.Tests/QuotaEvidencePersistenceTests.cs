@@ -250,6 +250,7 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
         // Repair the already-shipped v10 default too, not just new v9 upgrades.
         await Execute(
             "UPDATE quota_snapshots SET has_source_timestamp=1; ALTER TABLE ingestion_checkpoints DROP COLUMN consumed_prefix_sha256; DROP TABLE codex_server_evidence; PRAGMA user_version=10;");
+        repository = new SqliteTelemetryRepository(Database); // Simulate a new process upgrading the older schema.
         await repository.InitializeAsync(default);
         Assert.Equal(0L, await Scalar("SELECT has_source_timestamp FROM quota_snapshots;"));
     }

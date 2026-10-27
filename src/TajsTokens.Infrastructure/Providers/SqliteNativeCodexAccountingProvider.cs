@@ -8,6 +8,8 @@ using System.Globalization;
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
+using TajsTokens.Infrastructure.Ingestion;
+using TajsTokens.Infrastructure.Persistence;
 
 #endregion
 
@@ -16,8 +18,8 @@ namespace TajsTokens.Infrastructure.Providers;
 /// <summary>
 ///     Projects TajsTokens-owned disjoint Codex token events into the model/hourly shapes consumed by
 ///     Overview. Rollout parsing and counter semantics stay owned by the Observatory writer path. The
-///     potentially expensive historical aggregation is memoized by a writer-maintained revision plus
-///     cheap table-shape metadata, so unchanged warm refreshes do not rescan the full token-event table.
+///     historical aggregation uses its own token-row revision. Context-only evidence preserves those
+///     arrays while advancing the separate generation used for forecast freshness.
 /// </summary>
 public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : ICodexTokenAccountingProvider
 {
@@ -37,12 +39,27 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
     private CodexTokenAccountingSnapshot? _cachedSnapshot;
     private AccountingStamp? _cachedStamp;
     private bool _revisionStoreInitialized;
+    private string? _databaseIdentity;
 
     public async Task<CodexTokenAccountingSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
     {
         await _cacheGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            string identity = CodexSessionIngestionService.GetSourceIdentity(databasePath);
+            if (identity.StartsWith("fallback", StringComparison.Ordinal)) identity = Guid.NewGuid().ToString("N");
+            if (_databaseIdentity != identity)
+            {
+                _cachedSnapshot = null;
+                _cachedStamp = null;
+                _revisionStoreInitialized = false;
+                // Restoring a database can reuse revision values. Reopen its physical generation.
+                using var oldReader = new SqliteConnection(_readConnectionString);
+                using var oldWriter = new SqliteConnection(_writeConnectionString);
+                SqliteConnection.ClearPool(oldReader);
+                SqliteConnection.ClearPool(oldWriter);
+                _databaseIdentity = identity;
+            }
             await EnsureRevisionStoreAsync(cancellationToken).ConfigureAwait(false);
 
             await using var connection = new SqliteConnection(_readConnectionString);
@@ -50,9 +67,14 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
             using SqliteTransaction transaction = connection.BeginTransaction();
 
             AccountingStamp stamp = await ReadStampAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
-            if (_cachedStamp == stamp && _cachedSnapshot is not null)
+            if (_cachedStamp?.ProjectionRevision == stamp.ProjectionRevision && _cachedSnapshot is not null)
             {
                 transaction.Commit();
+                // Context-only evidence still invalidates forecast freshness. Reuse numeric
+                // projections without concealing the broader evidence generation's advance.
+                if (_cachedStamp.Revision != stamp.Revision)
+                    _cachedSnapshot = _cachedSnapshot with { Revision = stamp.Revision };
+                _cachedStamp = stamp;
                 return _cachedSnapshot;
             }
 
@@ -92,17 +114,7 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
 
         await using var connection = new SqliteConnection(_writeConnectionString);
         await connection.OpenAsync(cancellationToken).ConfigureAwait(false);
-        SqliteCommand command = connection.CreateCommand();
-        command.CommandText = """
-                              CREATE TABLE IF NOT EXISTS codex_native_accounting_revision (
-                                  id INTEGER PRIMARY KEY CHECK(id = 1),
-                                  revision INTEGER NOT NULL
-                              );
-                              INSERT INTO codex_native_accounting_revision(id, revision)
-                              VALUES(1, 0)
-                              ON CONFLICT(id) DO NOTHING;
-                              """;
-        await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        await SqliteNativeTokenRevision.EnsureAsync(connection, cancellationToken).ConfigureAwait(false);
         _revisionStoreInitialized = true;
     }
 
@@ -115,17 +127,15 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
         command.Transaction = transaction;
         command.CommandText = """
                               SELECT (SELECT revision FROM codex_native_accounting_revision WHERE id = 1),
-                                     COUNT(*),
-                                     COALESCE(MAX(rowid), 0)
-                              FROM codex_native_token_events;
+                                     (SELECT revision FROM codex_native_token_projection_revision WHERE id = 1);
                               """;
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
         if (!await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
-            return new AccountingStamp(0, 0, 0);
+            throw new InvalidOperationException("Native accounting revision is unavailable.");
         }
 
-        return new AccountingStamp(reader.GetInt64(0), reader.GetInt64(1), reader.GetInt64(2));
+        return new AccountingStamp(reader.GetInt64(0), reader.GetInt64(1));
     }
 
     private static async Task<IReadOnlyList<TokenUsage>> LoadModelUsageAsync(
@@ -246,5 +256,5 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
         return DateTimeOffset.Parse(value, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind).ToUniversalTime();
     }
 
-    private sealed record AccountingStamp(long Revision, long EventCount, long MaxRowId);
+    private sealed record AccountingStamp(long Revision, long ProjectionRevision);
 }

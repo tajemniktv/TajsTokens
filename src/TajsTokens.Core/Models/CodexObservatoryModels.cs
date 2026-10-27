@@ -12,6 +12,10 @@ public sealed record CodexIngestionResult(
     public string? SourceIdentity { get; init; }
     public long LastCompleteRecordOffset { get; init; }
     public long SourceLength { get; init; }
+    // Ephemeral logical work counters; never physical disk I/O or retained source content.
+    public long PrefixBytesHashed { get; init; }
+    public long CompleteRecordBytesDecoded { get; init; }
+    public int CheckpointWrites { get; init; }
 
     public bool ReachedCurrentEndOfFile => LastCompleteRecordOffset >= SourceLength;
 
@@ -31,6 +35,9 @@ public sealed record CodexObservatoryRefreshResult(
     public int DeferredFiles { get; init; }
     public bool DiscoveryReconciled { get; init; }
     public int CatalogRowsRead { get; init; }
+    public long PrefixBytesHashed { get; init; }
+    public long CompleteRecordBytesDecoded { get; init; }
+    public int CheckpointWrites { get; init; }
     public static CodexObservatoryRefreshResult Empty { get; } = new(0, 0, 0, 0, 0, 0, 0);
 }
 

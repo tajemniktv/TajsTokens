@@ -12,6 +12,7 @@ namespace TajsTokens.Core.Interfaces;
 
 public interface ICodexObservatoryStore
 {
+    string? DatabaseGeneration => null;
     Task InitializeAsync(CancellationToken cancellationToken);
     Task UpsertSessionAsync(CodexSession session, CancellationToken cancellationToken);
     Task UpsertAgentAsync(Agent agent, CancellationToken cancellationToken);
@@ -19,6 +20,11 @@ public interface ICodexObservatoryStore
     Task UpsertUsageEventAsync(UsageEvent usageEvent, CancellationToken cancellationToken);
     Task UpsertQuotaSnapshotAsync(QuotaSnapshot snapshot, CancellationToken cancellationToken);
     Task ApplyCumulativeTokenObservationAsync(CodexTokenCountObservation observation, CancellationToken cancellationToken);
+    async Task ApplyCumulativeTokenObservationsAsync(IReadOnlyList<CodexTokenCountObservation> observations, CancellationToken cancellationToken)
+    {
+        foreach (CodexTokenCountObservation observation in observations)
+            await ApplyCumulativeTokenObservationAsync(observation, cancellationToken);
+    }
     Task UpsertContextObservationAsync(CodexContextObservation observation, CancellationToken cancellationToken);
     Task UpsertWorkloadObservationAsync(CodexWorkloadObservation observation, CancellationToken cancellationToken);
     Task UpsertResponseObservationAsync(CodexResponseObservation observation, CancellationToken cancellationToken);

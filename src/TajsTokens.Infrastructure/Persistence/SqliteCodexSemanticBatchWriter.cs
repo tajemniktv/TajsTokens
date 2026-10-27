@@ -29,8 +29,8 @@ internal interface ICodexIngestionBatchWriter
 /// <summary>
 ///     Single high-volume writer lane for one Codex rollout batch. Semantic projections and rollout
 ///     file/record metadata share one serialization gate, connection and transaction. Correctness-critical
-///     token-count observations remain ordered and are reduced by the dedicated Core accounting
-///     state machine after the projection transaction; the gate remains held until those writes complete,
+///     token-count observations remain ordered and are reduced in one token transaction by the Core
+///     accounting state machine after the projection transaction; the gate remains held until it completes,
 ///     and the source checkpoint is advanced only after the entire batch succeeds.
 /// </summary>
 internal sealed class SqliteCodexIngestionBatchWriter(
@@ -79,20 +79,13 @@ internal sealed class SqliteCodexIngestionBatchWriter(
             await bumpRevision.ExecuteNonQueryAsync(cancellationToken);
             transaction.Commit();
 
-            // Counter observations deliberately remain ordered through the SQLite store, which
-            // persists each reducer decision and next state atomically. Replay is safe because every
+            // Counter observations remain ordered through the SQLite store in one bounded token
+            // transaction, including each reducer decision and next state. Replay is safe because every
             // projection/storage mutation above is idempotent and the byte checkpoint is not advanced
             // until these writes also succeed.
-            foreach (ParsedRolloutRecord record in records)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                if (record.TokenObservation is not null)
-                {
-                    await _observatoryStore.ApplyCumulativeTokenObservationAsync(
-                        record.TokenObservation,
-                        cancellationToken);
-                }
-            }
+            await _observatoryStore.ApplyCumulativeTokenObservationsAsync(
+                records.Where(record => record.TokenObservation is not null).Select(record => record.TokenObservation!).ToArray(),
+                cancellationToken);
         }
         finally
         {

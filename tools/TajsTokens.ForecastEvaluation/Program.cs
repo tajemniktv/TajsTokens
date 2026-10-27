@@ -7,6 +7,18 @@ using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
+if (args.Length is 3 or 4 && args[0] == "--benchmark-token-writes")
+{
+    await IngestionPerformanceCli.BenchmarkWritesAsync(args[1], int.Parse(args[2], CultureInfo.InvariantCulture),
+        args.Length == 4 && args[3] == "--reverse");
+    return;
+}
+if (args.Length == 2 && args[0] == "--benchmark-ingestion-prefix")
+{
+    await IngestionPerformanceCli.BenchmarkPrefixAsync(args[1]);
+    return;
+}
+
 if (args.Length == 4 && args[0] == "--threshold-study")
 {
     CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;

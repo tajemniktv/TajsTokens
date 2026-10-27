@@ -64,7 +64,7 @@ public sealed class SqliteRemoteFleetSnapshotTests
                     """;
                 await command.ExecuteNonQueryAsync();
             }
-            await repository.InitializeAsync(default);
+            await new SqliteTelemetryRepository(path).InitializeAsync(default);
             await using var check = new SqliteConnection($"Data Source={path}");
             await check.OpenAsync();
             await using SqliteCommand query = check.CreateCommand();

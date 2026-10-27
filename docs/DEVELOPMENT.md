@@ -35,6 +35,28 @@ The study opens telemetry read-only, writes aggregate JSON to standard output an
 
 The final fifth of candidate origins is reserved for comparison after choosing configurations on earlier matured outcomes. Report fixed-horizon, near-reset, scenario and composed-selection results separately. Composed availability is a conservative replay lower bound on constructed targets, not a measured live abstention rate. No source, identity, overlap, freshness or collection-time safeguard is tuned. Default evaluation options reproduce the released policy. See [the retained-data study](source-notes/FORECAST_THRESHOLD_STUDY.md) for observed limitations and interpretation.
 
+## Ingestion performance fixtures
+
+The existing evaluation executable also provides local synthetic ingestion benchmarks:
+
+```powershell
+dotnet build tools/TajsTokens.ForecastEvaluation/TajsTokens.ForecastEvaluation.csproj -c Debug
+dotnet run --project tools/TajsTokens.ForecastEvaluation -c Debug --no-build --no-restore -- --benchmark-token-writes .codex/temp/ingestion-bench 10000 > .codex/temp/token-writes.jsonl
+dotnet run --project tools/TajsTokens.ForecastEvaluation -c Debug --no-build --no-restore -- --benchmark-token-writes .codex/temp/ingestion-bench 1000 --reverse > .codex/temp/token-writes-reverse.jsonl
+dotnet run --project tools/TajsTokens.ForecastEvaluation -c Debug --no-build --no-restore -- --benchmark-ingestion-prefix .codex/temp/ingestion-bench > .codex/temp/ingestion-prefix.jsonl
+```
+
+The write fixture compares per-observation transactions with ordered batches of 128
+through the same current reducer, SQLite policy and revision triggers. It checks token
+conservation on initial ingestion and duplicate replay. `--reverse` swaps measurement
+order to expose warmup effects. Counts are limited to 1–100,000. The prefix fixture
+reports cold, unchanged, append and consumed-prefix-rewrite work; complete-record
+bytes exclude incomplete trailing data. These logical counters are not physical disk
+I/O. Neither command opens native Codex data or generates provider traffic. Each uses
+a fresh child directory under the supplied output root and removes only its own
+fixture after completion. Keep aggregate JSON and qualify hardware/warmup differences;
+these are not timings of an old released binary. See [Stage 1 evidence](source-notes/STAGE1_RESOURCE_VALIDATION.md).
+
 ## Daily installation
 
 A successful default local app build publishes, installs and restarts `%LOCALAPPDATA%\Programs\TajemnikTV\TajsTokens\current`. Persistent database/settings live in sibling `data`; the prior binary is kept in `previous`, and deployment backups are in `backups`. The build does not delete `data`.

@@ -5,6 +5,7 @@
 #region
 
 using System.Globalization;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Models;
 
@@ -77,9 +78,12 @@ public sealed class CodexThreadObservabilityService
                     SELECT thread_id, turn_id, status, started_at, completed_at
                     FROM (SELECT thread_id, turn_id, status, {turnStart}, {turnEnd},
                                  ROW_NUMBER() OVER (PARTITION BY thread_id ORDER BY {turnOrder}) AS rn
-                          FROM thread_turns)
+                          FROM thread_turns
+                          WHERE thread_id IN (SELECT value FROM json_each($threads)))
                     WHERE rn = 1 LIMIT 10001;
                     """;
+                turnsCommand.Parameters.AddWithValue("$threads", JsonSerializer.Serialize(
+                    catalog.Entries.Select(entry => entry.Preferred.ThreadId)));
                 await using (SqliteDataReader reader = await turnsCommand.ExecuteReaderAsync(cancellationToken))
                 {
                     int rows = 0;

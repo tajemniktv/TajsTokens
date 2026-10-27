@@ -285,6 +285,7 @@ public sealed class CodexServerEvidenceTests : IDisposable
         await repository.InitializeAsync(default);
         await Execute(
             "DROP TABLE codex_server_evidence; PRAGMA user_version=12; INSERT INTO quota_snapshots(provider,profile,kind,captured_at_utc,source,account_key) VALUES('codex','default','Weekly','2026-09-01','codex-rollout:test','');");
+        repository = new SqliteTelemetryRepository(Database);
         await repository.InitializeAsync(default);
         CodexServerObservation row = ThreadRow();
         await repository.SaveServerEvidenceAsync(new CodexServerCollection([row]), default);
@@ -425,6 +426,7 @@ public sealed class CodexServerEvidenceTests : IDisposable
         Assert.Equal(
             JsonSerializer.Serialize(row),
             JsonSerializer.Serialize(Assert.Single((await Service(repository).CompareAsync(default)).LatestObservations)));
+        repository = new SqliteTelemetryRepository(Database);
         await repository.InitializeAsync(default);
         Assert.Equal(15L, await Scalar("PRAGMA user_version"));
         Assert.Equal(
@@ -446,6 +448,7 @@ public sealed class CodexServerEvidenceTests : IDisposable
             PRAGMA user_version=13;
             INSERT INTO codex_server_evidence VALUES('bad','AccountActivity',NULL,NULL,'2026-09-18','2026-09-18','fixture','Error','invalid JSON');
             """);
+        repository = new SqliteTelemetryRepository(Database);
         await Assert.ThrowsAsync<JsonException>(() => repository.InitializeAsync(default));
         Assert.Equal(13L, await Scalar("PRAGMA user_version"));
         Assert.Equal(

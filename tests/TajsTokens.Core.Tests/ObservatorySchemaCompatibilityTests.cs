@@ -18,7 +18,7 @@ public sealed class ObservatorySchemaCompatibilityTests
         {
             await SeedAsync(database);
             // Recreate the old v8 shape only in this disposable fixture, never in user data.
-            await ExecuteAsync(database, """
+            await ExecuteAsync(database, LegacyObservatoryFixture.RemoveProjectionCache + """
                 DROP INDEX idx_native_token_source_time;
                 DROP INDEX idx_native_token_session_source_time;
                 DROP INDEX idx_context_source_time;

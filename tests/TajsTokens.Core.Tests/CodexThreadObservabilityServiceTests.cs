@@ -99,7 +99,12 @@ public sealed class CodexThreadObservabilityServiceTests
             {
                 await connection.OpenAsync();
                 await using SqliteCommand command = connection.CreateCommand();
-                command.CommandText = "INSERT INTO thread_items VALUES ('thread-1','turn-2','item-3',4,1700000003000,'{}','commandExecution',4);";
+                command.CommandText = """
+                    INSERT INTO thread_items VALUES ('thread-1','turn-2','item-3',4,1700000003000,'{}','commandExecution',4);
+                    WITH RECURSIVE seq(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM seq WHERE n<10001)
+                    INSERT INTO thread_turns(thread_id,turn_id,rollout_ordinal,status)
+                        SELECT 'aaa-unselected-' || n,'old',1,'completed' FROM seq;
+                    """;
                 await command.ExecuteNonQueryAsync();
             }
             var service = new CodexThreadObservabilityService(path);

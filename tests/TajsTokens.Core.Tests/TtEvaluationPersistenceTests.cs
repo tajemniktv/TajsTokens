@@ -178,13 +178,14 @@ public sealed class TtEvaluationPersistenceTests : IDisposable
         QuotaSnapshot quota = ComposedQuotaEvaluatorTests.TimelyData().Quota[0];
         await repository.UpsertQuotaSnapshotAsync(quota, default);
         await Execute(
+            LegacyIntelligenceFixture.RemoveResetTails +
             "DROP TABLE tt_evaluation_snapshots; UPDATE intelligence_schema SET version=5; CREATE VIEW tt_evaluation_snapshots AS SELECT 1;");
         await Assert.ThrowsAsync<SqliteException>(() => new SqliteTelemetryRepository(Database).InitializeIntelligenceAsync(default));
         Assert.Equal(5, await Scalar("SELECT version FROM intelligence_schema"));
         Assert.Equal(1, await Scalar("SELECT COUNT(*) FROM quota_snapshots"));
         await Execute("DROP VIEW tt_evaluation_snapshots;");
         await new SqliteTelemetryRepository(Database).InitializeIntelligenceAsync(default);
-        Assert.Equal(6, await Scalar("SELECT version FROM intelligence_schema"));
+        Assert.Equal(7, await Scalar("SELECT version FROM intelligence_schema"));
         Assert.Equal(1, await Scalar("SELECT COUNT(*) FROM quota_snapshots"));
     }
 

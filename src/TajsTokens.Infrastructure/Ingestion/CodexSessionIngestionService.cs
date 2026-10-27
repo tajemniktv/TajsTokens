@@ -99,6 +99,9 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         var initialInfo = new FileInfo(filePath);
         long initialLength = initialInfo.Length;
         DateTime initialWritten = initialInfo.LastWriteTimeUtc;
+        long prefixBytesHashed = 0;
+        long completeRecordBytesDecoded = 0;
+        int checkpointWrites = 0;
         using var prefixHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         await using var prefixStream = new FileStream(
             filePath,
@@ -125,6 +128,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                     cancellationToken);
                 if (read == 0) throw new IOException("Rollout changed while verifying its byte checkpoint; retry required.");
                 prefixHash.AppendData(hashBuffer, 0, read);
+                prefixBytesHashed += read;
             }
             return Convert.ToHexString(prefixHash.GetCurrentHash());
         }
@@ -200,6 +204,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         {
             cancellationToken.ThrowIfCancellationRequested();
             recordsScanned++;
+            completeRecordBytesDecoded += record.EndByteOffset - record.StartByteOffset;
 
             if (_observatoryStore is not null)
             {
@@ -252,6 +257,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                     sourceIdentity,
                     await HashThroughAsync(lastCompleteRecordOffset),
                     cancellationToken);
+                checkpointWrites++;
             }
         }
 
@@ -261,15 +267,19 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             filePath,
             cancellationToken);
         string finalPrefix = canResume && recordsScanned == 0 ? existingPrefix! : await HashThroughAsync(lastCompleteRecordOffset);
-        await SaveCheckpointAsync(
-            filePath,
-            lastCompleteRecordOffset,
-            state,
-            existing?.LastSessionId,
-            parserVersion,
-            sourceIdentity,
-            finalPrefix,
-            cancellationToken);
+        if ((!canResume && recordsScanned == 0) || recordsScanned % DurableBatchSize != 0)
+        {
+            await SaveCheckpointAsync(
+                filePath,
+                lastCompleteRecordOffset,
+                state,
+                existing?.LastSessionId,
+                parserVersion,
+                sourceIdentity,
+                finalPrefix,
+                cancellationToken);
+            checkpointWrites++;
+        }
 
         var finalInfo = new FileInfo(filePath);
         if (finalInfo.Length == initialLength && finalInfo.LastWriteTimeUtc == initialWritten &&
@@ -284,6 +294,9 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             SourceIdentity = sourceIdentity,
             LastCompleteRecordOffset = lastCompleteRecordOffset,
             SourceLength = TryGetFileSize(filePath),
+            PrefixBytesHashed = prefixBytesHashed,
+            CompleteRecordBytesDecoded = completeRecordBytesDecoded,
+            CheckpointWrites = checkpointWrites,
         };
     }
 

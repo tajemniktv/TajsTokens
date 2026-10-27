@@ -55,6 +55,7 @@ public sealed class QuotaAccountScopeTests : IDisposable
         await repository.InitializeAsync(default);
         foreach (QuotaResetEvent item in events) await repository.UpsertQuotaResetEventAsync(item, default);
         await ExecuteAsync(
+            LegacyIntelligenceFixture.RemoveResetTails +
             "UPDATE quota_reset_events SET event_id='legacy-' || source; UPDATE intelligence_schema SET version=2 WHERE component='phase4-intelligence';");
         repository = new SqliteTelemetryRepository(Database);
         foreach (QuotaResetEvent item in events) await repository.UpsertQuotaResetEventAsync(item, default);
@@ -78,13 +79,14 @@ public sealed class QuotaAccountScopeTests : IDisposable
         QuotaResetEvent legacy = Assert.Single(new QuotaResetDetector().Detect([first, second])) with { EventId = "legacy-event" };
         await repository.UpsertQuotaResetEventAsync(legacy, default);
         await ExecuteAsync(
+            LegacyIntelligenceFixture.RemoveResetTails +
             "UPDATE intelligence_schema SET version=3; CREATE TRIGGER fail_reset_rebuild BEFORE INSERT ON quota_reset_events BEGIN SELECT RAISE(ABORT, 'fixture failure'); END;");
         await Assert.ThrowsAsync<SqliteException>(() => new SqliteTelemetryRepository(Database).InitializeIntelligenceAsync(default));
         Assert.Equal(3L, await ScalarAsync("SELECT version FROM intelligence_schema"));
         Assert.Equal(1L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events WHERE event_id='legacy-event'"));
         await ExecuteAsync("DROP TRIGGER fail_reset_rebuild;");
         await new SqliteTelemetryRepository(Database).InitializeIntelligenceAsync(default);
-        Assert.Equal(6L, await ScalarAsync("SELECT version FROM intelligence_schema"));
+        Assert.Equal(7L, await ScalarAsync("SELECT version FROM intelligence_schema"));
         Assert.Equal(2L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events"));
         Assert.Equal(0L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events WHERE event_id NOT LIKE 'quota-reset-v2-%'"));
         Assert.Equal(524L, await ScalarAsync("SELECT COUNT(*) FROM quota_snapshots"));

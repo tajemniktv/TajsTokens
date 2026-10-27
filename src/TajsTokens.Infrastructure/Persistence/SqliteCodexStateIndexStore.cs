@@ -5,6 +5,7 @@
 #region
 
 using System.Globalization;
+using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using TajsTokens.Infrastructure.Services;
 
@@ -51,15 +52,17 @@ internal sealed class SqliteCodexStateIndexStore
     private readonly string _connectionString;
     private readonly SemaphoreSlim _initializeGate = new(1, 1);
     private volatile bool _initialized;
+    private readonly SqliteDatabaseGeneration _initializedDatabase;
 
     public SqliteCodexStateIndexStore(string databasePath)
     {
+        _initializedDatabase = new(databasePath);
         _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     }
 
     public async Task InitializeAsync(CancellationToken cancellationToken)
     {
-        if (_initialized)
+        if (_initialized && _initializedDatabase.IsCurrent)
         {
             return;
         }
@@ -67,11 +70,13 @@ internal sealed class SqliteCodexStateIndexStore
         await _initializeGate.WaitAsync(cancellationToken);
         try
         {
-            if (_initialized)
+            if (_initialized && _initializedDatabase.IsCurrent)
             {
                 return;
             }
 
+            _initialized = false;
+            _initializedDatabase.Reopen(_connectionString);
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
 
@@ -240,6 +245,7 @@ internal sealed class SqliteCodexStateIndexStore
                     $"Codex state index schema {version} is not supported by this build (expected {SchemaVersion}).");
             }
 
+            _initializedDatabase.MarkInitialized();
             _initialized = true;
         }
         finally
@@ -263,8 +269,10 @@ internal sealed class SqliteCodexStateIndexStore
     }
 
     public async Task<IReadOnlyDictionary<string, CodexStateThreadFingerprint>> GetFingerprintsAsync(
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<string>? threadIds = null)
     {
+        if (threadIds is { Count: 0 }) return new Dictionary<string, CodexStateThreadFingerprint>();
         await InitializeAsync(cancellationToken);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
@@ -273,6 +281,12 @@ internal sealed class SqliteCodexStateIndexStore
                               SELECT thread_id, updated_at_ms, tokens_used, model, reasoning_effort, archived, rollout_path_hash
                               FROM codex_state_thread_fingerprints;
                               """;
+        if (threadIds is not null)
+        {
+            command.CommandText = command.CommandText.TrimEnd().TrimEnd(';') +
+                " WHERE thread_id IN (SELECT value FROM json_each($threads));";
+            command.Parameters.AddWithValue("$threads", JsonSerializer.Serialize(threadIds));
+        }
 
         var results = new Dictionary<string, CodexStateThreadFingerprint>(StringComparer.OrdinalIgnoreCase);
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
