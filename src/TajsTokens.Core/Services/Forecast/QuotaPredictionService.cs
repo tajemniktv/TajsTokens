@@ -67,9 +67,9 @@ public static partial class QuotaPredictionService
         CodexForecastDataset data,
         double horizon,
         ForecastReplayAvailability availability,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, ForecastEvaluationOptions? options = null)
     {
-        return Evaluate(data, horizon, availability, null, cancellationToken).Trials;
+        return Evaluate(data, horizon, availability, null, cancellationToken, options: options).Trials;
     }
 
     /// <summary>Scores exact comparison targets without admitting them to the incumbent's training/selection history.</summary>
@@ -83,6 +83,19 @@ public static partial class QuotaPredictionService
         return Evaluate(data, horizon, availability, null, cancellationToken, targets).Targets;
     }
 
+    /// <summary>Origin-time outputs including origins without a later target; availability is not conditioned on a label.</summary>
+    public static IReadOnlyDictionary<DateTimeOffset, QuotaHorizonPrediction> ReplayOrigins(
+        CodexForecastDataset data, double horizon, ForecastReplayAvailability availability,
+        IReadOnlyList<DateTimeOffset> origins, CancellationToken cancellationToken = default,
+        ForecastEvaluationOptions? options = null)
+        => ReplayOriginsWithTrials(data, horizon, availability, origins, cancellationToken, options, null);
+
+    internal static IReadOnlyDictionary<DateTimeOffset, QuotaHorizonPrediction> ReplayOriginsWithTrials(
+        CodexForecastDataset data, double horizon, ForecastReplayAvailability availability,
+        IReadOnlyList<DateTimeOffset> origins, CancellationToken cancellationToken, ForecastEvaluationOptions? options,
+        IReadOnlyDictionary<string, IReadOnlyList<QuotaForecastTrial>>? paceTrials)
+        => Evaluate(data, horizon, availability, null, cancellationToken, options: options, origins: origins, paceTrials: paceTrials).Targets;
+
     private static (IReadOnlyList<QuotaPredictionTrial> Trials, QuotaHorizonPrediction? Current,
         IReadOnlyDictionary<DateTimeOffset, QuotaHorizonPrediction> Targets) Evaluate(
             CodexForecastDataset data,
@@ -91,13 +104,16 @@ public static partial class QuotaPredictionService
             QuotaSnapshot? current,
             CancellationToken cancellationToken,
             IReadOnlyList<(DateTimeOffset Origin, DateTimeOffset Outcome)>? targets = null,
-            CodexForecastFeatureIndex? featureIndex = null)
+            CodexForecastFeatureIndex? featureIndex = null, ForecastEvaluationOptions? options = null,
+            IReadOnlyList<DateTimeOffset>? origins = null,
+            IReadOnlyDictionary<string, IReadOnlyList<QuotaForecastTrial>>? paceTrials = null)
     {
+        options = (options ?? ForecastEvaluationOptions.Default).Validate();
         featureIndex ??= new CodexForecastFeatureIndex(data);
         // The caller supplies one source/account/window stream. SplitEpochs rejects mixed streams.
         Dictionary<string, Dictionary<DateTimeOffset, QuotaForecastTrial>> models = QuotaPaceModels.Candidates.ToDictionary(
             model => model,
-            model => QuotaForecastCalibration.Replay(data.Quota, model, horizon, cancellationToken)
+            model => (paceTrials?.GetValueOrDefault(model) ?? QuotaForecastCalibration.Replay(data.Quota, model, horizon, cancellationToken, options))
                 .ToDictionary(x => x.OriginUtc));
         QuotaForecastTrial[] labels = models[FallbackModel].Values.OrderBy(x => x.OriginUtc).ToArray();
         Dictionary<DateTimeOffset, QuotaSnapshot>
@@ -160,6 +176,21 @@ public static partial class QuotaPredictionService
                 matched[target.Origin] = PredictAt(anchor, lead, estimates, null).Prediction with { TargetUtc = target.Outcome };
             }
         }
+        if (origins is not null)
+        {
+            foreach (DateTimeOffset origin in origins)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (!anchors.TryGetValue(origin, out QuotaSnapshot? anchor) || anchor.ResetsAtUtc < origin.AddHours(horizon) ||
+                    anchor.UsedPercent is not >= 0 or >= 100) continue;
+                IReadOnlyList<QuotaSnapshot>? epoch = QuotaForecastCalibration.SplitEpochs(data.Quota.Where(x => x.CapturedAtUtc <= origin)).LastOrDefault();
+                if (epoch is null || epoch[^1] != anchor || origin - epoch[0].CapturedAtUtc < TimeSpan.FromMinutes(15)) continue;
+                Dictionary<string, double> estimates = QuotaPaceModels.Candidates.ToDictionary(model => model,
+                    model => QuotaPaceModels.ProjectRemaining(epoch, model, horizon));
+                // Query-only origins never become training labels or alter later selection history.
+                matched[origin] = PredictAt(anchor, horizon, estimates, null).Prediction;
+            }
+        }
         return (points.Select(x => new QuotaPredictionTrial(x.Label!, x.Prediction)).ToArray(), live, matched);
 
         Point PredictAt(QuotaSnapshot anchor, double lead, IReadOnlyDictionary<string, double> estimates, QuotaForecastTrial? label)
@@ -173,10 +204,10 @@ public static partial class QuotaPredictionService
                     Math.Abs(models[model][point.Label!.OriginUtc].PredictedRemaining - point.Label.ObservedRemaining));
             }
 
-            if (matured.Length >= MinimumSelectionSamples)
+            if (matured.Length >= options.SelectionSamples)
             {
                 string best = QuotaPaceModels.Candidates.MinBy(model => Error(model, matured))!;
-                if (Error(best, matured) + 0.05 < Error(FallbackModel, matured) * 0.9) selected = best;
+                if (Error(best, matured) + .05 * options.ImprovementMultiplier < Error(FallbackModel, matured) * (1 - .1 * options.ImprovementMultiplier)) selected = best;
             }
             double baseline = estimates[selected];
             if (!featureRows.ContainsKey(anchor.CapturedAtUtc))
@@ -189,7 +220,7 @@ public static partial class QuotaPredictionService
                 labels,
                 featureRows,
                 availability,
-                anchors);
+                anchors, options);
             Point[] validation = Independent(points.Where(x => x.Label!.OutcomeUtc <= anchor.CapturedAtUtc && x.Workload.Fitted))
                 .TakeLast(48).ToArray();
             double? baselineError = validation.Length > 0 ? Error(FallbackModel, validation) : null;
@@ -197,18 +228,18 @@ public static partial class QuotaPredictionService
             double? workloadError = validation.Length > 0
                 ? validation.Average(x => Math.Abs(x.Workload.Remaining - x.Label!.ObservedRemaining))
                 : null;
-            bool useWorkload = workload.Fitted && validation.Length >= MinimumSelectionSamples &&
-                               workloadError + 0.05 < baselineError * 0.9 && workloadError + 0.05 < selectedError * 0.9;
+            bool useWorkload = workload.Fitted && validation.Length >= options.SelectionSamples &&
+                               workloadError + .05 * options.ImprovementMultiplier < baselineError * (1 - .1 * options.ImprovementMultiplier) && workloadError + .05 * options.ImprovementMultiplier < selectedError * (1 - .1 * options.ImprovementMultiplier);
             double prediction = useWorkload ? workload.Remaining : baseline;
             double[] errors = matured.Select(x => Math.Abs(x.Prediction.RemainingPercent - x.Label!.ObservedRemaining)).Order().ToArray();
-            double? radius = errors.Length >= MinimumIntervalSamples
+            double? radius = errors.Length >= options.IntervalSamples
                 ? Math.Max(1, errors[Math.Min(errors.Length - 1, (int)Math.Ceiling((errors.Length + 1) * 0.8) - 1)])
                 : null;
             string explanation = useWorkload
                 ? $"Workload correction earned selection on {validation.Length} matured non-overlapping outcomes; MAE {workloadError:0.##}pp versus pace-only {baselineError:0.##}pp."
                 : !workload.Fitted
-                    ? $"Pace-only estimate; workload learning has {workload.TrainingSamples} compatible training outcomes (need 12), or current model/effort evidence is missing or unseen."
-                    : $"Pace-only estimate; workload has {validation.Length} held-out outcomes (need 6 and a material error improvement).";
+                    ? $"Pace-only estimate; workload learning has {workload.TrainingSamples} compatible training outcomes (need {options.TrainingSamples}), or current model/effort evidence is missing or unseen."
+                    : $"Pace-only estimate; workload has {validation.Length} held-out outcomes (need {options.SelectionSamples} and a material error improvement).";
             explanation += $" Pace selection: {matured.Length} matured non-overlapping outcomes. " +
                            (radius is null
                                ? "Uncertainty is learning; no calibrated band or exhaustion probability is claimed."
@@ -231,7 +262,7 @@ public static partial class QuotaPredictionService
             {
                 SupportReasons = (radius is null ? ForecastSupportReason.InsufficientIntervalEvidence : ForecastSupportReason.None) |
                     (useWorkload ? ForecastSupportReason.None : !workload.Fitted ? ForecastSupportReason.WorkloadFeaturesUnavailable :
-                        validation.Length < MinimumSelectionSamples ? ForecastSupportReason.InsufficientHistory : ForecastSupportReason.ChallengerNotBetter),
+                        validation.Length < options.SelectionSamples ? ForecastSupportReason.InsufficientHistory : ForecastSupportReason.ChallengerNotBetter),
                 Inference = useWorkload
                     ? workload.Inference
                     : new CodexNumericInference(

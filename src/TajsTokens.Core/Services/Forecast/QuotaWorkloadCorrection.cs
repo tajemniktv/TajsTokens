@@ -52,8 +52,9 @@ public static class QuotaWorkloadCorrection
         IReadOnlyList<QuotaForecastTrial> baseline,
         IReadOnlyDictionary<DateTimeOffset, CodexForecastFeatures> featureRows,
         ForecastReplayAvailability availability,
-        IReadOnlyDictionary<DateTimeOffset, QuotaSnapshot>? quotaOrigins = null)
+        IReadOnlyDictionary<DateTimeOffset, QuotaSnapshot>? quotaOrigins = null, ForecastEvaluationOptions? options = null)
     {
+        options = (options ?? ForecastEvaluationOptions.Default).Validate();
         CodexForecastFeatures features = featureRows.TryGetValue(anchor.CapturedAtUtc, out CodexForecastFeatures? existing)
             ? existing
             : CodexForecastFeatureBuilder.Build(data, anchor.CapturedAtUtc, 2, availability);
@@ -71,7 +72,7 @@ public static class QuotaWorkloadCorrection
             return new QuotaWorkloadPrediction(baselinePrediction, training.Length, false, features);
         }
 
-        if (training.Length < MinimumTrainingSamples || features.ObservedTokenEvents == 0 ||
+        if (training.Length < options.TrainingSamples || features.ObservedTokenEvents == 0 ||
             features.ModelTokenShares.Count == 0 || features.EffortTokenShares.Count == 0) return Fallback();
         string[] models = training.SelectMany(x => featureRows[x.OriginUtc].ModelTokenShares.Keys).Distinct().Order().Take(8).ToArray();
         string[] efforts = training.SelectMany(x => featureRows[x.OriginUtc].EffortTokenShares.Keys).Distinct().Order().Take(8).ToArray();

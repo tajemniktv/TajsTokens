@@ -54,11 +54,12 @@ public static class QuotaForecastCalibration
         DateTimeOffset origin,
         DateTimeOffset reset,
         double lead,
-        string fallback)
+        string fallback, ForecastEvaluationOptions? options = null)
     {
+        options = (options ?? ForecastEvaluationOptions.Default).Validate();
         (string Model, double Error)[] scores = candidates.Select(pair => (Model: pair.Key,
-                Errors: CalibrationErrors(pair.Value, origin, reset, lead)))
-            .Where(x => x.Errors.Count >= MinimumCalibrationGroups)
+                Errors: CalibrationErrors(pair.Value, origin, reset, lead, options)))
+            .Where(x => x.Errors.Count >= options.CalibrationGroups)
             .Select(x => (x.Model, Error: x.Errors.Average())).ToArray();
         if (scores.Length == 0) return fallback;
         double best = scores.Min(x => x.Error);
@@ -78,36 +79,38 @@ public static class QuotaForecastCalibration
             "damped-6h",
             "legacy-ewma",
         };
-        return preferred.First(model => scores.Any(x => x.Model == model && x.Error <= best * 1.1 + 0.1));
+        return preferred.First(model => scores.Any(x => x.Model == model && x.Error <= best * (1 + .1 * options.ImprovementMultiplier) + .1 * options.ImprovementMultiplier));
     }
 
     public static IReadOnlyList<QuotaForecastTrial> ReplayAdaptive(
         IReadOnlyList<QuotaSnapshot> stream,
         double? horizonHours,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, ForecastEvaluationOptions? options = null)
     {
+        options = (options ?? ForecastEvaluationOptions.Default).Validate();
         if (stream.Count == 0) return [];
         Dictionary<string, IReadOnlyList<QuotaForecastTrial>> candidates = QuotaPaceModels.Candidates.ToDictionary(
             model => model,
-            model => Replay(stream, model, horizonHours, cancellationToken));
+            model => Replay(stream, model, horizonHours, cancellationToken, options));
         string fallback = DefaultModel(stream[^1]);
-        return ReplayAdaptive(candidates, fallback);
+        return ReplayAdaptive(candidates, fallback, options);
     }
 
     public static IReadOnlyList<QuotaForecastTrial> ReplayAdaptive(
         IReadOnlyDictionary<string, IReadOnlyList<QuotaForecastTrial>> candidates,
-        string fallback)
+        string fallback, ForecastEvaluationOptions? options = null)
     {
+        options = (options ?? ForecastEvaluationOptions.Default).Validate();
         var selected = new List<QuotaForecastTrial>();
         Dictionary<string, Dictionary<DateTimeOffset, QuotaForecastTrial>> lookup = candidates.ToDictionary(
             x => x.Key,
             x => x.Value.ToDictionary(t => t.OriginUtc));
         foreach (QuotaForecastTrial trial in candidates[fallback])
         {
-            string model = SelectModel(candidates, trial.OriginUtc, trial.ResetUtc, trial.LeadHours, fallback);
+            string model = SelectModel(candidates, trial.OriginUtc, trial.ResetUtc, trial.LeadHours, fallback, options);
             QuotaForecastTrial point = lookup[model][trial.OriginUtc];
-            IReadOnlyList<double> errors = CalibrationErrors(selected, trial.OriginUtc, trial.ResetUtc, trial.LeadHours);
-            double? radius = ErrorRadius(errors);
+            IReadOnlyList<double> errors = CalibrationErrors(selected, trial.OriginUtc, trial.ResetUtc, trial.LeadHours, options);
+            double? radius = ErrorRadius(errors, options);
             selected.Add(
                 point with
                 {
@@ -172,8 +175,9 @@ public static class QuotaForecastCalibration
         IReadOnlyList<QuotaSnapshot> stream,
         string model,
         double? horizonHours,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, ForecastEvaluationOptions? options = null)
     {
+        options = (options ?? ForecastEvaluationOptions.Default).Validate();
         if (horizonHours is <= 0 || horizonHours is double h && !double.IsFinite(h))
             throw new ArgumentOutOfRangeException(nameof(horizonHours));
         var trials = new List<QuotaForecastTrial>();
@@ -201,8 +205,8 @@ public static class QuotaForecastCalibration
                 double rate = QuotaPaceModels.Estimate(epoch.Take(i + 1).ToArray(), model);
                 double lead = (target.CapturedAtUtc - anchor.CapturedAtUtc).TotalHours;
                 double prediction = QuotaPaceModels.ProjectRemaining(epoch.Take(i + 1).ToArray(), model, lead);
-                IReadOnlyList<double> calibration = CalibrationErrors(trials, anchor.CapturedAtUtc, anchor.ResetsAtUtc!.Value, lead);
-                double? radius = ErrorRadius(calibration);
+                IReadOnlyList<double> calibration = CalibrationErrors(trials, anchor.CapturedAtUtc, anchor.ResetsAtUtc!.Value, lead, options);
+                double? radius = ErrorRadius(calibration, options);
                 int exhaustedIndex = -1;
                 for (int j = i + 1; j < epoch.Count; j++)
                     if (epoch[j].UsedPercent >= 100)
@@ -257,8 +261,9 @@ public static class QuotaForecastCalibration
         IEnumerable<QuotaForecastTrial> trials,
         DateTimeOffset origin,
         DateTimeOffset reset,
-        double leadHours)
+        double leadHours, ForecastEvaluationOptions? options = null)
     {
+        options = (options ?? ForecastEvaluationOptions.Default).Validate();
         QuotaForecastTrial[] available = trials.Where(x => x.OutcomeUtc < origin &&
                                                            x.LeadHours >= leadHours / 2 && x.LeadHours <= leadHours * 2).ToArray();
         // End-of-window validation genuinely needs completed cycles. Fixed horizons do not.
@@ -269,13 +274,14 @@ public static class QuotaForecastCalibration
                 .Select(g => g.OrderBy(x => Math.Abs(x.LeadHours - leadHours)).ThenByDescending(x => x.OriginUtc).First())
                 .OrderByDescending(x => x.ResetUtc).Take(40)
                 .Select(x => Math.Abs(x.PredictedRemaining - x.ObservedRemaining)).ToArray();
-        return ChronologicalEvidence.Blocks(available, x => x.OriginUtc, x => x.OutcomeUtc, x => x.ResetUtc)
+        return ChronologicalEvidence.Blocks(available, x => x.OriginUtc, x => x.OutcomeUtc, x => x.ResetUtc, options.BlockHours)
             .TakeLast(40).Select(g => g.Max(x => Math.Abs(x.PredictedRemaining - x.ObservedRemaining))).ToArray();
     }
 
-    public static double? ErrorRadius(IReadOnlyList<double> errors)
+    public static double? ErrorRadius(IReadOnlyList<double> errors, ForecastEvaluationOptions? options = null)
     {
-        if (errors.Count < MinimumCalibrationGroups) return null;
+        options = (options ?? ForecastEvaluationOptions.Default).Validate();
+        if (errors.Count < options.CalibrationGroups) return null;
         double[] sorted = errors.Order().ToArray();
         int rank = (int)Math.Ceiling((sorted.Length + 1) * NominalCoverage);
         // One point is a conservative meter-resolution policy, not a provider precision guarantee.

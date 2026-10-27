@@ -106,6 +106,7 @@ public static class ComposedQuotaPolicy
                 Inference = inference,
                 Model = ComposedQuotaValidation.Version + "/" + selected.CostModel,
                 UsesWorkload = true,
+                SupportReasons = TajsTokens.Core.Enums.ForecastSupportReason.None,
                 TrainingSamples = training.Length,
                 ValidationSamples = selected.HeldOutIntervals,
                 ValidationMeanAbsoluteError = selected.DisplayedDeltaMae,
@@ -125,16 +126,17 @@ public static class ComposedQuotaPolicy
     // and cost error directly; never multiply separate uncertainty endpoints.
     public static (double? Radius, int Blocks) CalibrateUncertainty(
         IEnumerable<ComposedQuotaTrial> trials,
-        DateTimeOffset origin)
+        DateTimeOffset origin, ForecastEvaluationOptions? options = null)
     {
+        options = (options ?? ForecastEvaluationOptions.Default).Validate();
         double[] errors = ChronologicalEvidence.Blocks(
                 trials.Where(x =>
                     x.OutcomeUtc <= origin && x.CalibrationAvailableAtUtc <= origin),
                 x => x.OriginUtc,
                 x => x.OutcomeUtc,
-                x => x.ResetUtc)
+                x => x.ResetUtc, options.BlockHours)
             .Select(g => g.Max(x => Math.Abs(x.PredictedDelta - x.ObservedDelta))).Order().ToArray();
-        return (errors.Length < 8
+        return (errors.Length < options.CalibrationGroups
             ? null
             : Math.Max(
                 1,
@@ -147,19 +149,20 @@ public static class ComposedQuotaPolicy
     }
 
     /// <summary>Shared selection gate evidence, not a claim that all live promotion gates passed.</summary>
-    public static ComposedSelectionAssessment AssessSelection(ComposedQuotaScore score, DateTimeOffset origin, bool requireStrict = false)
+    public static ComposedSelectionAssessment AssessSelection(ComposedQuotaScore score, DateTimeOffset origin, bool requireStrict = false, ForecastEvaluationOptions? options = null)
     {
+        options = (options ?? ForecastEvaluationOptions.Default).Validate();
         var reasons = new List<string>();
         IReadOnlyList<IReadOnlyList<ComposedQuotaTrial>> generations = ChronologicalEvidence.Blocks(
             score.Trials,
             x => x.OriginUtc,
             x => x.OutcomeUtc,
-            x => x.ResetUtc);
+            x => x.ResetUtc, options.BlockHours);
         int pairs = score.Trials.Count(x => x.IncumbentIntervalLoss is not null);
-        if (score.HeldOutIntervals < 16 || score.Trials.Count < 16) reasons.Add("At least 16 held-out outcomes are required.");
-        if (generations.Sum(x => x.Count) < 16)
-            reasons.Add("At least 16 non-overlapping valid outcomes are required; duplicate polls do not add support.");
-        if (generations.Count < 8) reasons.Add("At least eight chronological evaluation blocks are required.");
+        if (score.HeldOutIntervals < options.ComposedOutcomes || score.Trials.Count < options.ComposedOutcomes) reasons.Add($"At least {options.ComposedOutcomes} held-out outcomes are required.");
+        if (generations.Sum(x => x.Count) < options.ComposedOutcomes)
+            reasons.Add($"At least {options.ComposedOutcomes} non-overlapping valid outcomes are required; duplicate polls do not add support.");
+        if (generations.Count < options.CalibrationGroups) reasons.Add($"At least {options.CalibrationGroups} chronological evaluation blocks are required.");
         if (score.MissingComposition > score.HeldOutIntervals) reasons.Add("Withheld intervals exceed evaluated outcomes.");
         if (score.Trials.Any(x => x.OutcomeUtc > origin)) reasons.Add("Some outcomes occur after the assessment time.");
         if (score.Trials.Count == 0) reasons.Add("No held-out trials are available.");
@@ -171,11 +174,11 @@ public static class ComposedQuotaPolicy
         double? incumbentLoss = generations.Count == 0 || pairs != score.Trials.Count
             ? null
             : generations.Average(g => g.Average(x => x.IncumbentIntervalLoss!.Value));
-        if (loss is { } l && paceLoss is { } p && !(l + .1 < p && l < p * .9))
+        if (loss is { } l && paceLoss is { } p && !(l + .1 * options.ImprovementMultiplier < p && l < p * (1 - .1 * options.ImprovementMultiplier)))
             reasons.Add("The block-balanced improvement over pace is not both greater than 0.1pp and 10%.");
         if (loss is { } il && incumbentLoss is { } b)
         {
-            if (!(il + .1 < b && il < b * .9))
+            if (!(il + .1 * options.ImprovementMultiplier < b && il < b * (1 - .1 * options.ImprovementMultiplier)))
                 reasons.Add("The block-balanced improvement over incumbent is not both greater than 0.1pp and 10%.");
             if (generations.Count(g => g.Average(x => x.IntervalLoss) < g.Average(x => x.IncumbentIntervalLoss!.Value)) <=
                 generations.Count / 2)

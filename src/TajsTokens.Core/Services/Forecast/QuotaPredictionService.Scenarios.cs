@@ -19,8 +19,9 @@ public static partial class QuotaPredictionService
     public static ScenarioEstimate Simulate(
         ScenarioRequest request,
         IReadOnlyList<ScenarioHistorySample> history,
-        DateTimeOffset? evaluatedAtUtc = null)
+        DateTimeOffset? evaluatedAtUtc = null, ForecastEvaluationOptions? options = null)
     {
+        options = (options ?? ForecastEvaluationOptions.Default).Validate();
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(history);
         if (!double.IsFinite(request.DurationHours) || request.DurationHours <= 0 || request.DurationHours > 168 ||
@@ -65,9 +66,9 @@ public static partial class QuotaPredictionService
                                              x.DominantReasoningEffort,
                                              request.ReasoningEffort,
                                              StringComparison.Ordinal))).ToArray();
-            if (samples.Length < MinimumScenarioSamples)
+            if (samples.Length < options.ScenarioSamples)
                 return Unknown(
-                    $"Not enough matching history: need {MinimumScenarioSamples} intervals; have {samples.Length}. Requested model/effort cohorts are never replaced silently.",
+                    $"Not enough matching history: need {options.ScenarioSamples} intervals; have {samples.Length}. Requested model/effort cohorts are never replaced silently.",
                     samples.Length);
             if (request.IntensityMultiplier != 1)
                 return Unknown(
@@ -85,20 +86,20 @@ public static partial class QuotaPredictionService
             {
                 // No overlapping interval outcome may enter this prediction's training set.
                 ScenarioHistorySample[] prefix = samples.Where(x => x.EndUtc <= target.StartUtc && x.StartUtc < target.StartUtc).ToArray();
-                if (prefix.Length < 6) continue;
+                if (prefix.Length < options.SelectionSamples) continue;
                 double baseline = Baseline(prefix, Hours(target));
                 AccountLocalRidge? fit = Fit(prefix);
                 if (fit is null) continue;
                 double ridge = Math.Clamp(fit.Predict(Features(target)), 0, 100);
                 (ScenarioHistorySample Sample, double BaselineError, double RidgeError, double SelectedError)[] previous =
                     trials.Where(x => x.Sample.EndUtc <= target.StartUtc).ToArray();
-                bool useRidge = previous.Length >= 6 &&
-                                previous.Average(x => x.RidgeError) + 0.1 < previous.Average(x => x.BaselineError) * 0.9;
+                bool useRidge = previous.Length >= options.SelectionSamples &&
+                                previous.Average(x => x.RidgeError) + .1 * options.ImprovementMultiplier < previous.Average(x => x.BaselineError) * (1 - .1 * options.ImprovementMultiplier);
                 trials.Add(
                     (target, Math.Abs(target.QuotaDeltaPercent - baseline), Math.Abs(target.QuotaDeltaPercent - ridge),
                         Math.Abs(target.QuotaDeltaPercent - (useRidge ? ridge : baseline))));
             }
-            bool selectedRidge = trials.Count >= 6 && trials.Average(x => x.RidgeError) + 0.1 < trials.Average(x => x.BaselineError) * 0.9;
+            bool selectedRidge = trials.Count >= options.SelectionSamples && trials.Average(x => x.RidgeError) + .1 * options.ImprovementMultiplier < trials.Average(x => x.BaselineError) * (1 - .1 * options.ImprovementMultiplier);
             double prediction = selectedRidge && Fit(samples) is { } model
                 ? Math.Clamp(model.Predict([request.DurationHours, request.RootAgents, request.Subagents]), 0, 100)
                 : Baseline(samples, request.DurationHours);
@@ -107,9 +108,9 @@ public static partial class QuotaPredictionService
                                       Hours(x.Sample) >= request.DurationHours / 2 && Hours(x.Sample) <= request.DurationHours * 2),
                     x => x.Sample.StartUtc,
                     x => x.Sample.EndUtc,
-                    x => x.Sample.ResetUtc!.Value)
+                    x => x.Sample.ResetUtc!.Value, options.BlockHours)
                 .Select(g => g.Max(x => x.SelectedError)).ToArray();
-            double? radius = QuotaForecastCalibration.ErrorRadius(errors);
+            double? radius = QuotaForecastCalibration.ErrorRadius(errors, options);
             return new ScenarioWindowEstimate(
                 kind,
                 true,
@@ -120,13 +121,13 @@ public static partial class QuotaPredictionService
                 0,
                 $"Conditional {(selectedRidge ? "workload ridge" : "elapsed-time baseline")}; {trials.Count} chronological test outcomes. " +
                 (radius is null
-                    ? "Uncertainty is learning: fewer than 8 comparable held-out chronological blocks. "
+                    ? $"Uncertainty is learning: fewer than {options.CalibrationGroups} comparable held-out chronological blocks. "
                     : "Empirical 80%-target band from earlier held-out chronological blocks; coverage can change with workload. ") +
                 "Unchanged meters are precision-limited, not exact zero burn. Session counts are not measured concurrency; no confidence probability is assigned.")
             {
                 Cohort = latest?.Cohort,
                 SupportReasons = (radius is null ? ForecastSupportReason.InsufficientIntervalEvidence : ForecastSupportReason.None) |
-                    (selectedRidge ? ForecastSupportReason.None : trials.Count >= 6 ? ForecastSupportReason.ChallengerNotBetter : ForecastSupportReason.InsufficientHistory),
+                    (selectedRidge ? ForecastSupportReason.None : trials.Count >= options.SelectionSamples ? ForecastSupportReason.ChallengerNotBetter : ForecastSupportReason.InsufficientHistory),
             };
         }
     }

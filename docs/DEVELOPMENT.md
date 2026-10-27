@@ -22,6 +22,19 @@ To bring an already-running installed tray instance forward through the same act
 
 The signal is restricted to the current user/session and the same installation directory. With no matching instance, this starts the dashboard normally. `--background` starts tray-only. Neither flag changes persistent settings.
 
+## Forecast threshold study
+
+Run this explicitly against the app-owned telemetry database, with a fixed past UTC range:
+
+```powershell
+dotnet build tools/TajsTokens.ForecastEvaluation/TajsTokens.ForecastEvaluation.csproj -c Debug
+dotnet run --project tools/TajsTokens.ForecastEvaluation/TajsTokens.ForecastEvaluation.csproj -c Debug --no-build --no-restore -- --threshold-study "$env:LOCALAPPDATA/Programs/TajemnikTV/TajsTokens/data/telemetry.db" 2026-09-27T00:00:00Z 2026-10-27T14:58:00Z > .codex/temp/threshold-study.json
+```
+
+The study opens telemetry read-only, writes aggregate JSON to standard output and progress to standard error, and supports Ctrl+C. It does not collect data, write calibration results to telemetry, change installed settings or promote a model. The range must be ordered, in the past and no longer than 366 days. Results include dataset identity, explicit configurations, cohort aliases, split boundaries, error/availability metrics and unsupported reasons. They contain no raw account IDs, project paths or chat content. Keep the full local JSON with useful research artifacts; preserve conclusions and reproducibility details in source notes.
+
+The final fifth of candidate origins is reserved for comparison after choosing configurations on earlier matured outcomes. Report fixed-horizon, near-reset, scenario and composed-selection results separately. Composed availability is a conservative replay lower bound on constructed targets, not a measured live abstention rate. No source, identity, overlap, freshness or collection-time safeguard is tuned. Default evaluation options reproduce the released policy. See [the retained-data study](source-notes/FORECAST_THRESHOLD_STUDY.md) for observed limitations and interpretation.
+
 ## Daily installation
 
 A successful default local app build publishes, installs and restarts `%LOCALAPPDATA%\Programs\TajemnikTV\TajsTokens\current`. Persistent database/settings live in sibling `data`; the prior binary is kept in `previous`, and deployment backups are in `backups`. The build does not delete `data`.

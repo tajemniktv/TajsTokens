@@ -92,6 +92,8 @@ Conditional point estimates can learn within a reset cycle. They require compati
 
 Fixed-horizon uncertainty uses earlier matured outcomes (non-overlapping errors or chronological blocks, depending on the policy). Reset-horizon uncertainty needs completed compatible cycles at comparable lead; within-cycle blocks cannot establish reset-horizon coverage. These evidence requirements do not hide a supported point estimate. Challenger promotion is a separate decision and preserves the pace baseline when the challenger has not earned selection. Block spacing and evidence/improvement floors are provisional engineering policies, not mathematical guarantees.
 
+The explicit local threshold study varies one engineering choice at a time around immutable released defaults. It reuses existing pace, scenario and composed-selection implementations, reserves the final 20% of candidate origins for comparison, and reports paired error, point/band availability, range coverage/width and non-overlapping support separately. Collection-time availability, account/source/unit boundaries, overlap rejection and assertion-specific safeguards remain fixed. Reset-horizon bands continue to use completed cycles. The command and retained-data results are in [development](docs/DEVELOPMENT.md#forecast-threshold-study) and [source notes](docs/source-notes/FORECAST_THRESHOLD_STUDY.md); no experimental configuration is selected automatically in the app.
+
 ### Planning
 
 User should be able to have a "planner", that allows to see whether their current usage will last for: x hours, with y model, with z effort.

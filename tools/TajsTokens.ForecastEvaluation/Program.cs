@@ -7,6 +7,22 @@ using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
+if (args.Length == 4 && args[0] == "--threshold-study")
+{
+    CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
+    DateTimeOffset from = DateTimeOffset.Parse(args[2], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal).ToUniversalTime();
+    DateTimeOffset to = DateTimeOffset.Parse(args[3], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal).ToUniversalTime();
+    if (from >= to || to - from > TimeSpan.FromDays(366) || to > DateTimeOffset.UtcNow)
+        throw new ArgumentException("Choose an ordered past UTC range of at most 366 days.");
+    using var cancellation = new CancellationTokenSource();
+    Console.CancelKeyPress += (_, e) => { e.Cancel = true; cancellation.Cancel(); };
+    CodexForecastDataset dataset = await new SqliteForecastDatasetReader(args[1]).ReadAsync("codex", "default", from, to, cancellation.Token);
+    ForecastThresholdReport report = ForecastThresholdStudy.Evaluate(dataset, cancellation.Token, Console.Error.WriteLine);
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { requestedFromUtc = from, requestedToUtc = to, report },
+        new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web) { WriteIndented = true }));
+    return;
+}
+
 if (args.Length == 1 && args[0] == "--calibration-worker")
 {
     Environment.ExitCode = await CalibrationWorkerHost.RunAsync(Console.In, Console.Out);

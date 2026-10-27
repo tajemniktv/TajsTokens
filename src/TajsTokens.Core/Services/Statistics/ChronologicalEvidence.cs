@@ -17,8 +17,9 @@ public static class ChronologicalEvidence
         IEnumerable<T> rows,
         Func<T, DateTimeOffset> start,
         Func<T, DateTimeOffset> end,
-        Func<T, DateTimeOffset> reset)
+        Func<T, DateTimeOffset> reset, double blockHours = 6)
     {
+        if (!double.IsFinite(blockHours) || blockHours <= 0) throw new ArgumentOutOfRangeException(nameof(blockHours));
         var blocks = new List<IReadOnlyList<T>>();
         List<T>? block = null;
         DateTimeOffset? previousEnd = null;
@@ -29,7 +30,7 @@ public static class ChronologicalEvidence
             DateTimeOffset b = end(row);
             DateTimeOffset r = reset(row);
             if (b <= a || b > r || previousEnd is { } prior && a < prior) continue;
-            if (block is null || a - blockStart >= TimeSpan.FromHours(6) ||
+            if (block is null || a - blockStart >= TimeSpan.FromHours(blockHours) ||
                 !QuotaResetGenerationPolicy.SameTimestamp(r, blockReset))
             {
                 block = [];

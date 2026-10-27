@@ -17,8 +17,30 @@ public static partial class QuotaPredictionService
     public const string ResetOutlookPolicyVersion = "quota-walk-forward/v4";
 
     public static Forecast BuildResetOutlook(IReadOnlyList<QuotaSnapshot> snapshots, DateTimeOffset nowUtc,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, ForecastEvaluationOptions? options = null)
+        => BuildResetOutlookCore(snapshots, nowUtc, cancellationToken, options, null, null);
+
+    public static IReadOnlyDictionary<DateTimeOffset, Forecast> ReplayResetOrigins(IReadOnlyList<QuotaSnapshot> stream,
+        IReadOnlyList<DateTimeOffset> origins, CancellationToken token = default, ForecastEvaluationOptions? options = null)
+        => ReplayResetOriginsWithTrials(stream, origins, token, options, null);
+
+    internal static IReadOnlyDictionary<DateTimeOffset, Forecast> ReplayResetOriginsWithTrials(IReadOnlyList<QuotaSnapshot> stream,
+        IReadOnlyList<DateTimeOffset> origins, CancellationToken token, ForecastEvaluationOptions? options,
+        Dictionary<string, IReadOnlyList<QuotaForecastTrial>>? paceTrials)
     {
+        options = (options ?? ForecastEvaluationOptions.Default).Validate();
+        var candidates = paceTrials ?? QuotaPaceModels.Candidates.ToDictionary(model => model,
+            model => QuotaForecastCalibration.Replay(stream, model, null, token, options));
+        IReadOnlyList<QuotaForecastTrial> adaptive = QuotaForecastCalibration.ReplayAdaptive(candidates, "legacy-ewma", options);
+        return origins.ToDictionary(origin => origin, origin => BuildResetOutlookCore(
+            stream.Where(x => x.CapturedAtUtc <= origin).ToArray(), origin, token, options, candidates, adaptive));
+    }
+
+    private static Forecast BuildResetOutlookCore(IReadOnlyList<QuotaSnapshot> snapshots, DateTimeOffset nowUtc,
+        CancellationToken cancellationToken, ForecastEvaluationOptions? options,
+        Dictionary<string, IReadOnlyList<QuotaForecastTrial>>? replayCandidates, IReadOnlyList<QuotaForecastTrial>? replayAdaptive)
+    {
+        options = (options ?? ForecastEvaluationOptions.Default).Validate();
         cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(snapshots);
         QuotaSnapshot[] eligible = snapshots.Where(x => x.CapturedAtUtc <= nowUtc).OrderBy(x => x.CapturedAtUtc).ToArray();
@@ -134,10 +156,10 @@ public static partial class QuotaPredictionService
                 });
 
         double lead = (reset - latest.CapturedAtUtc).TotalHours;
-        Dictionary<string, IReadOnlyList<QuotaForecastTrial>> candidates = QuotaPaceModels.Candidates.ToDictionary(
+        Dictionary<string, IReadOnlyList<QuotaForecastTrial>> candidates = replayCandidates ?? QuotaPaceModels.Candidates.ToDictionary(
             candidate => candidate,
-            candidate => QuotaForecastCalibration.Replay(stream, candidate, null, cancellationToken));
-        model = QuotaForecastCalibration.SelectModel(candidates, latest.CapturedAtUtc, reset, lead, model);
+            candidate => QuotaForecastCalibration.Replay(stream, candidate, null, cancellationToken, options));
+        model = QuotaForecastCalibration.SelectModel(candidates, latest.CapturedAtUtc, reset, lead, model, options);
         double rate = QuotaPaceModels.Estimate(epoch, model);
         double elapsed = Math.Max(0, (nowUtc - latest.CapturedAtUtc).TotalHours);
         double remainingNow = QuotaPaceModels.ProjectRemaining(epoch, model, elapsed);
@@ -155,11 +177,11 @@ public static partial class QuotaPredictionService
             else survives = true; // Exhaustion exactly at reset is not before reset.
         }
         // Calibrate the actual prequential selection policy, not its in-sample winning candidate.
-        IReadOnlyList<QuotaForecastTrial> adaptiveTrials = QuotaForecastCalibration.ReplayAdaptive(
+        IReadOnlyList<QuotaForecastTrial> adaptiveTrials = replayAdaptive ?? QuotaForecastCalibration.ReplayAdaptive(
             candidates,
-            QuotaForecastCalibration.DefaultModel(latest));
-        IReadOnlyList<double> errors = QuotaForecastCalibration.CalibrationErrors(adaptiveTrials, latest.CapturedAtUtc, reset, lead);
-        double? radius = QuotaForecastCalibration.ErrorRadius(errors);
+            QuotaForecastCalibration.DefaultModel(latest), options);
+        IReadOnlyList<double> errors = QuotaForecastCalibration.CalibrationErrors(adaptiveTrials, latest.CapturedAtUtc, reset, lead, options);
+        double? radius = QuotaForecastCalibration.ErrorRadius(errors, options);
         evidence = evidence with
         {
             Model = model,

@@ -14,7 +14,7 @@ namespace TajsTokens.Core.Services;
 /// <summary>Non-overlapping authoritative intervals with workload features available at interval start.</summary>
 public static class CodexScenarioHistoryBuilder
 {
-    public static IReadOnlyList<ScenarioHistorySample> Build(CodexForecastDataset data)
+    public static IReadOnlyList<ScenarioHistorySample> Build(CodexForecastDataset data, ForecastReplayAvailability availability = ForecastReplayAvailability.ReconstructedEventTime)
     {
         var result = new List<ScenarioHistorySample>();
         foreach (IGrouping<(string Provider, string Profile, QuotaWindowKind Kind, string Source, string? AccountKey), QuotaSnapshot> stream
@@ -31,7 +31,7 @@ public static class CodexScenarioHistoryBuilder
                 if (hours < 0.5) continue;
                 start = end;
                 if (hours > 2 || before.UsedPercent >= 100) continue;
-                CodexForecastFeatures features = CodexForecastFeatureBuilder.Build(data, before.CapturedAtUtc);
+                CodexForecastFeatures features = CodexForecastFeatureBuilder.Build(data, before.CapturedAtUtc, 2, availability);
                 // Missing local evidence is not an observed zero-agent workload.
                 if (features.ObservedTokenEvents == 0 || features.TokenActiveUnknownSessions > 0) continue;
 
