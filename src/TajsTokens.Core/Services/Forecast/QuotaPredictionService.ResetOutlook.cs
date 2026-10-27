@@ -50,7 +50,7 @@ public static partial class QuotaPredictionService
             };
         }
 
-        Forecast Unknown(string reason, double? sustainable = null)
+        Forecast Unknown(string reason, double? sustainable = null, ForecastSupportReason support = ForecastSupportReason.InsufficientHistory)
         {
             return new Forecast(
                 latest.Kind,
@@ -60,15 +60,15 @@ public static partial class QuotaPredictionService
                 null,
                 sustainable,
                 0,
-                Evidence: Evidence(0, 0, reason));
+                Evidence: Evidence(0, 0, reason) with { SupportReasons = support });
         }
 
         if (latest.UsedPercent is not double used || !double.IsFinite(used) || used is < 0 or > 100)
-            return Unknown("The current meter is missing or invalid.");
+            return Unknown("The current meter is missing or invalid.", support: ForecastSupportReason.MissingMeter);
         if (latest.ResetsAtUtc is not DateTimeOffset reset || reset <= nowUtc)
-            return Unknown("A future authoritative reset is required; expired generations are not extended.");
+            return Unknown("A future authoritative reset is required; expired generations are not extended.", support: ForecastSupportReason.MissingOrExpiredReset);
         if (nowUtc - latest.CapturedAtUtc > TimeSpan.FromHours(6))
-            return Unknown("The anchor is too old for a current pace projection.");
+            return Unknown("The anchor is too old for a current pace projection.", support: ForecastSupportReason.StaleMeter);
         double remaining = latest.RemainingPercent!.Value;
         double hoursToReset = (reset - nowUtc).TotalHours;
         double sustainable = remaining / hoursToReset;
@@ -111,6 +111,7 @@ public static partial class QuotaPredictionService
                 {
                     UncertaintyDescription =
                     "Learning: at least 15 minutes of compatible same-source observations are needed. Poll count alone is not independent evidence.",
+                    SupportReasons = ForecastSupportReason.InsufficientHistory,
                 });
         bool flat = epoch.All(x => Math.Abs(x.UsedPercent!.Value - used) < 0.000001);
         if (flat)
@@ -129,6 +130,7 @@ public static partial class QuotaPredictionService
                 {
                     UncertaintyDescription =
                     "No movement is visible at meter precision. Neither exact zero burn nor survival until reset is established.",
+                    SupportReasons = ForecastSupportReason.FlatMeter,
                 });
 
         double lead = (reset - latest.CapturedAtUtc).TotalHours;
@@ -161,6 +163,7 @@ public static partial class QuotaPredictionService
         evidence = evidence with
         {
             Model = model,
+            SupportReasons = radius is null ? ForecastSupportReason.InsufficientIntervalEvidence : ForecastSupportReason.None,
             CalibrationEpochs = errors.Count,
             HistoricalAbsoluteErrorPercent = errors.Count > 0 ? errors.Average() : null,
             RemainingAtResetLowerPercent = radius is double r ? Math.Max(0, margin - r) : null,

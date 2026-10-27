@@ -229,6 +229,9 @@ public static partial class QuotaPredictionService
                 errors.Length,
                 explanation)
             {
+                SupportReasons = (radius is null ? ForecastSupportReason.InsufficientIntervalEvidence : ForecastSupportReason.None) |
+                    (useWorkload ? ForecastSupportReason.None : !workload.Fitted ? ForecastSupportReason.WorkloadFeaturesUnavailable :
+                        validation.Length < MinimumSelectionSamples ? ForecastSupportReason.InsufficientHistory : ForecastSupportReason.ChallengerNotBetter),
                 Inference = useWorkload
                     ? workload.Inference
                     : new CodexNumericInference(

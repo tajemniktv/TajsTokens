@@ -20,6 +20,8 @@ namespace TajsTokens.App.Pages;
 public sealed partial class CodexIntelligencePage : Page
 {
     private bool _loaded;
+    private bool _populatingAccounts;
+    private string? SelectedAccountKey => (Account.SelectedItem as AccountOption)?.Key;
     private CancellationTokenSource? _request;
     private CodexIntelligenceSnapshot? _snapshot;
 
@@ -48,20 +50,29 @@ public sealed partial class CodexIntelligencePage : Page
 
     private void PopulateAccounts()
     {
-        string? selected = (Account.SelectedItem as AccountOption)?.Key;
+        _populatingAccounts = true;
+        string? selected = SelectedAccountKey;
         string?[] keys = App.Services.Telemetry.Latest.QuotaSnapshots.Select(x => x.AccountKey)
             .Concat(App.Services.Settings.RolloutAccountAssociations.Select(x => x.AccountKey))
-            .Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().Order().ToArray();
+            .Append(selected).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().Order().ToArray();
         Account.ItemsSource = new[] { new AccountOption(null, "All local evidence · no assumed account ownership") }
             .Concat(
                 keys.Select((key, i) => new AccountOption(
                     key,
                     $"Account {i + 1} · …{key![Math.Max(0, key!.Length - 8)..]} · attributed evidence only"))).ToArray();
         Account.SelectedItem = Account.Items.Cast<AccountOption>().FirstOrDefault(x => x.Key == selected) ?? Account.Items[0];
+        _populatingAccounts = false;
     }
 
     private async void OnApply(object sender, RoutedEventArgs e)
     {
+        await LoadAsync();
+    }
+
+    private async void OnAccountChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (!_loaded || _populatingAccounts) return;
+        RenderCurrent();
         await LoadAsync();
     }
 
@@ -71,29 +82,22 @@ public sealed partial class CodexIntelligencePage : Page
         {
             if (!_loaded) return;
             PopulateAccounts();
-            if (_snapshot is null)
+            if (_snapshot is { } snapshot)
             {
-                if (_request is null) _ = LoadAsync();
-                return;
+                CodexIntelligenceSnapshot live = App.Services.CodexIntelligence.Current;
+                _snapshot = CodexIntelligenceProjection.WithLiveContext(snapshot, live, SelectedAccountKey);
+                if (!snapshot.Selection.HasWorkFilter && snapshot.Selection.AccountKey is null &&
+                    snapshot.Selection.FromUtc <= DateTimeOffset.UtcNow && snapshot.Selection.ToUtc >= DateTimeOffset.UtcNow.AddMinutes(-5))
+                    _snapshot = _snapshot with { Workload = live.Workload };
             }
-            CodexSelection selection = _snapshot.Selection;
-            if (selection.HasWorkFilter || selection.FromUtc > DateTimeOffset.UtcNow ||
-                selection.ToUtc < DateTimeOffset.UtcNow.AddMinutes(-5)) return;
-            CodexIntelligenceSnapshot live = App.Services.CodexIntelligence.Current;
-            _snapshot = _snapshot with
-            {
-                Current = live.Current.Where(x => selection.AccountKey is null || x.Current.AccountKey == selection.AccountKey)
-                    .ToArray(),
-                Workload = selection.AccountKey is null ? live.Workload : null,
-                CurrentState = live.CurrentState,
-            };
             RenderCurrent();
         });
     }
 
     private void RenderCurrent()
     {
-        if (_snapshot is not { } snapshot) return;
+        CodexIntelligenceSnapshot latest = App.Services.CodexIntelligence.Current;
+        CodexIntelligenceSnapshot snapshot = CodexIntelligenceProjection.WithLiveContext(_snapshot ?? latest, latest, SelectedAccountKey);
 
         static string EvenBurn(QuotaSnapshot quota)
         {
@@ -103,7 +107,7 @@ public sealed partial class CodexIntelligencePage : Page
         }
 
         CurrentText.Text = snapshot.Current.Count == 0
-            ? "Current quota unavailable for this scope. Filtered workload cannot allocate account-wide quota."
+            ? "No current quota reading for this account. Work history has a separate scope."
             : string.Join(
                 "\n",
                 snapshot.Current.Select(x =>
@@ -117,7 +121,7 @@ public sealed partial class CodexIntelligencePage : Page
                     ? "\n" + string.Join(
                         "\n",
                         horizons.Select(h =>
-                            $"{h.HorizonHours * 60:g} min: {h.ExpectedUsagePercent:0.##} pp · {h.Model} · {h.ValidationSamples} validation samples"))
+                            $"At {h.TargetUtc.ToLocalTime():g}: {h.ExpectedUsagePercent:0.##} pp · {h.Model} · {h.ValidationSamples} validation samples · {h.Explanation}"))
                     : "")));
         if (snapshot.Workload is { } work)
             ForecastText.Text += "\n" + string.Join(
@@ -148,19 +152,14 @@ public sealed partial class CodexIntelligencePage : Page
         var request = new CancellationTokenSource();
         _request = request;
         _snapshot = null;
-        QuotaTiles.ItemsSource = null;
-        QuotaEmpty.Visibility = Visibility.Visible;
-        QuotaEmpty.Text = "Updating selected evidence…";
+        RenderCurrent();
         WorkValue.Text = "Loading…";
         WorkDetail.Text = WorkRange.Text = NowcastSummary.Text = "";
-        OutlookValue.Text = "Updating…";
-        OutlookDetail.Text = "";
         Groups.ItemsSource = null;
         Timeline.Children.Clear();
-        SummaryText.Text = CurrentText.Text = ForecastText.Text =
+        SummaryText.Text =
             ProviderText.Text = EvidenceText.Text = ManifestText.Text = TimelineText.Text = TimelineLegend.Text = "";
         AccountingText.Text = "Run retrospective analysis explicitly; it does not change production forecasts.";
-        ScenarioText.Text = "";
         PeriodsText.Text = "";
         StatusText.Text = "Reading selected evidence…";
         try
@@ -181,7 +180,7 @@ public sealed partial class CodexIntelligencePage : Page
                 Optional(Thread));
             CodexIntelligenceSnapshot snapshot = await App.Services.CodexIntelligence.QueryAsync(selection, request.Token);
             if (!_loaded || _request != request || request.IsCancellationRequested) return;
-            _snapshot = snapshot;
+            _snapshot = CodexIntelligenceProjection.WithLiveContext(snapshot, App.Services.CodexIntelligence.Current, selection.AccountKey);
             StatusText.Text = $"{from:yyyy-MM-dd} → {to:yyyy-MM-dd} UTC · captured {snapshot.AsOfUtc.ToLocalTime():g}";
             SummaryText.Text =
                 $"{snapshot.Ledger.Sum(x => x.Workload.ReportedTotalTokens):N0} observed tokens · {snapshot.Ledger.Select(x => x.ThreadId).Distinct().Count():N0} chats\n" +

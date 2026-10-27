@@ -8,6 +8,7 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
+using TajsTokens.Core.Services;
 
 #endregion
 
@@ -30,6 +31,25 @@ public sealed partial class CodexIntelligencePage
 
     private void RenderDashboard()
     {
+        CodexIntelligenceSnapshot live = CodexIntelligenceProjection.WithLiveContext(
+            App.Services.CodexIntelligence.Current, App.Services.CodexIntelligence.Current, SelectedAccountKey);
+        AccountOutlook outlook = QuotaOutlookProjection.Build(live, DateTimeOffset.UtcNow);
+        QuotaEmpty.Visibility = live.Current.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        QuotaEmpty.Text = "No current reading for this account. Selected work remains available below.";
+        AccountScopeText.Text = SelectedAccountKey is null
+            ? "Current provider account · separate from all local work"
+            : "Selected account · only its current readings";
+        QuotaTiles.ItemsSource = outlook.Windows.Select(x => new QuotaTile(
+            QuotaOutlookProjection.Name(x.Kind) + " allowance",
+            x.Reading?.Current.RemainingPercent is { } left ? $"{left:0.#}% left" : x.NotReported ? "Not reported" : "Unavailable",
+            x.Reading?.Current.RemainingPercent ?? 0,
+            x.Reading?.Current.RemainingPercent is not null ? Visibility.Visible : Visibility.Collapsed,
+            x.Reading?.Current.ResetsAtUtc is { } reset ? $"Resets {reset.ToLocalTime():ddd, d MMM · HH:mm}" : "Reset time unavailable",
+            x.Conclusion,
+            x.Reading is { } reading ? $"{(reading.IsFresh ? "Reported" : "Last known")} · {reading.Current.CapturedAtUtc.ToLocalTime():g} · {QuotaAccountScope.Describe(reading.Current.AccountKey)}" : x.Detail)).ToArray();
+        OutlookValue.Text = outlook.Summary;
+        OutlookDetail.Text = string.Join("\n", outlook.Windows.Where(x => x.Reading is not null)
+            .Select(x => $"{QuotaOutlookProjection.Name(x.Kind)}: {x.Detail}"));
         if (_snapshot is not { } snapshot) return;
         string?[] filters = new[]
         {
@@ -38,34 +58,7 @@ public sealed partial class CodexIntelligencePage
             snapshot.Selection.ThreadId is { } chat ? "Chat " + chat[..Math.Min(8, chat.Length)] : null,
             snapshot.Selection.AccountKey is not null ? "Selected account" : null,
         }.Where(x => x is not null).ToArray();
-        SelectionExpander.Header =
-            filters.Length == 0 ? "History range · all local work" : "History filters · " + string.Join(" · ", filters);
-        QuotaEmpty.Visibility = snapshot.Current.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        QuotaEmpty.Text = "Current account quota is unavailable for this selection. Clear work filters or choose a range including today.";
-        QuotaTiles.ItemsSource = snapshot.Current.Select(x =>
-        {
-            QuotaEvenBurn? pace = QuotaEvenBurn.FromSnapshot(x.Current);
-            return new QuotaTile(
-                x.Current.Kind == QuotaWindowKind.Weekly ? "Weekly allowance" : "5-hour allowance",
-                x.Current.RemainingPercent is { } left ? $"{left:0.#}% left" : "Not reported",
-                x.Current.RemainingPercent ?? 0,
-                x.Current.ResetsAtUtc is { } reset ? $"Resets {reset.ToLocalTime():ddd, d MMM · HH:mm}" : "Reset time not reported",
-                pace is null
-                    ? "Even-burn comparison unavailable"
-                    : $"{Math.Abs(pace.ExcessPercentagePoints):0.#} pp {(pace.ExcessPercentagePoints > 0 ? "ahead of" : "below")} even burn · {pace.ElapsedPercent:0.#}% elapsed (inferred window)",
-                $"{(x.IsFresh ? "Updated" : x.State + " · last reading")} {x.Current.CapturedAtUtc.ToLocalTime():HH:mm} · reported quota");
-        }).ToArray();
-
-        CurrentQuotaForecast? forecast = snapshot.Current.FirstOrDefault(x => x.IsFresh && x.Forecast is not null);
-        QuotaHorizonPrediction? horizon = forecast?.Forecast?.Evidence?.HorizonPredictions?.OrderBy(x => x.HorizonHours).FirstOrDefault();
-        OutlookValue.Text = horizon is not null ? $"~{horizon.ExpectedUsagePercent:0.#} pp in {horizon.HorizonHours * 60:g} min"
-            : forecast?.Forecast?.ProjectedRemainingAtResetPercent is { } left ? $"~{left:0.#}% left at reset" : "Learning your pace";
-        OutlookDetail.Text = forecast is null
-            ? "No fresh, compatible quota forecast yet. Observed quota remains available independently."
-            : $"{forecast.Current.Kind} allowance · if recent conditions continue. " +
-              (horizon?.LowerRemainingPercent is { } low && horizon.UpperRemainingPercent is { } high
-                  ? $"Empirical range: {low:0.#}–{high:0.#}% remaining at that horizon."
-                  : "Uncertainty is still learning; this is not a guarantee.");
+        SelectionExpander.Header = filters.Length == 0 ? "History range · all local work" : "History filters · " + string.Join(" · ", filters);
         TokenWorkloadForecast? work = snapshot.Workload;
         TokenHorizonPrediction? prediction = work?.Predictions.OrderBy(x => Math.Abs(x.HorizonHours - .25)).FirstOrDefault();
         NowcastSummary.Text = work?.IsStale == true ? "Local workload telemetry is stale; no active nowcast."
@@ -122,5 +115,5 @@ public sealed partial class CodexIntelligencePage
         await LoadAsync();
     }
 
-    private sealed record QuotaTile(string Title, string Remaining, double Value, string Reset, string Pace, string Freshness);
+    private sealed record QuotaTile(string Title, string Remaining, double Value, Visibility MeterVisibility, string Reset, string Pace, string Freshness);
 }

@@ -103,7 +103,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                         TelemetryHealthState.Stale,
                         null,
                         "Forecasting is paused until this quota lane is provider-fresh.",
-                        "Last-known-good quota is displayed without borrowing a forecast from another generation."));
+                        "Last-known-good quota is displayed without borrowing a forecast from another generation.") { SupportReasons = ForecastSupportReason.StaleMeter });
                 continue;
             }
 
@@ -139,7 +139,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                         TelemetryHealthState.Live,
                         null,
                         "Current forecast is learning: the provider did not report backend-account scope.",
-                        "Unknown historical account scope is never assigned to the currently signed-in account."));
+                        "Unknown historical account scope is never assigned to the currently signed-in account.") { SupportReasons = ForecastSupportReason.UnknownAccount });
                 continue;
             }
 

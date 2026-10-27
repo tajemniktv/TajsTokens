@@ -4,6 +4,8 @@
 
 namespace TajsTokens.Core.Models;
 
+using TajsTokens.Core.Enums;
+
 /// <summary>Versioned, rebuildable forecast diagnostics, not provider evidence or calibrated probability.</summary>
 public sealed record ForecastEvidence(
     string PolicyVersion,
@@ -20,6 +22,7 @@ public sealed record ForecastEvidence(
     IReadOnlyList<QuotaHorizonPrediction>? HorizonPredictions = null,
     string? WorkloadStatus = null)
 {
+    public ForecastSupportReason SupportReasons { get; init; }
     public string? AnchorLimitId { get; init; }
     public string? AnchorPlanType { get; init; }
     public string? HistoryPolicy { get; init; }
@@ -42,6 +45,7 @@ public sealed record QuotaHorizonPrediction(
     int IntervalSamples,
     string Explanation)
 {
+    public ForecastSupportReason SupportReasons { get; init; }
     public CodexNumericInference? Inference { get; init; }
 }
 

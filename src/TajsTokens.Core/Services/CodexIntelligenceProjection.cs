@@ -16,6 +16,23 @@ namespace TajsTokens.Core.Services;
 
 public static class CodexIntelligenceProjection
 {
+    // Live account context is independent of the selected event range and work filters.
+    public static CodexIntelligenceSnapshot WithLiveContext(CodexIntelligenceSnapshot history, CodexIntelligenceSnapshot live,
+        string? accountKey)
+    {
+        bool Matches(QuotaSnapshot q) => accountKey is null || q.AccountKey == accountKey;
+        bool accountPresent = accountKey is null || live.Current.Any(x => Matches(x.Current));
+        return history with
+        {
+            Current = live.Current.Where(x => Matches(x.Current)).ToArray(),
+            CurrentState = live.CurrentState with
+            {
+                QuotaSnapshots = live.CurrentState.QuotaSnapshots.Where(Matches).ToArray(),
+                QuotaLanes = live.CurrentState.QuotaLanes.Where(x => x.Snapshot is { } q ? Matches(q) : accountPresent).ToArray(),
+            },
+        };
+    }
+
     public const string Version = "codex-intelligence/v1";
 
     public static CodexCurrentState CurrentState(TelemetrySnapshot telemetry)

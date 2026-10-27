@@ -88,7 +88,9 @@ Learning shouldn't really be a thing permanently. It's okay if it doesn't have a
 
 The most important forecasts are most likely the next 15 minutes, remaining at reset, and exhaustion ETA.
 
-No forecast should require multiple reset cycles.
+Conditional point estimates can learn within a reset cycle. They require compatible, fresh observations, not a trained workload model or a calibrated band. Flat rounded readings do not establish zero burn. Missing account identity, reset information or usable history must be explained specifically.
+
+Fixed-horizon uncertainty uses earlier matured outcomes (non-overlapping errors or chronological blocks, depending on the policy). Reset-horizon uncertainty needs completed compatible cycles at comparable lead; within-cycle blocks cannot establish reset-horizon coverage. These evidence requirements do not hide a supported point estimate. Challenger promotion is a separate decision and preserves the pace baseline when the challenger has not earned selection. Block spacing and evidence/improvement floors are provisional engineering policies, not mathematical guarantees.
 
 ### Planning
 
@@ -99,6 +101,8 @@ User should be able to have a "planner", that allows to see whether their curren
 The current implementation keeps reported account quota, locally observed native Codex tokens, API-equivalent price weights and inferred quota cost separate. A source account key scopes the quota observations that supplied it; it does not retroactively assign local rollouts to the current login.
 
 ## Current work
+
+Overview keeps current account allowances above the selected history views. Date, model, project and chat filters do not erase live context or allocate account quota to filtered work. Explicit account selection never substitutes another account's current reading. The shared outlook prioritizes exhausted meters, then earliest exhaustion before reset, then pressure against each window's sustainable pace. Both reported windows need fresh supported assessments for an overall sustainable-pace conclusion; partial and unreported windows remain explicit. Reset estimates and fixed-horizon predictions retain separate targets and uncertainty.
 
 The tray companion uses Windows background resource scheduling, EcoQoS and a 0.5% total-system CPU budget while its dashboard is hidden or minimized. Opening restores normal scheduling and removes that budget before constructing the window; page loading follows window activation. Hidden dashboards release their page cache and active queries/timers, retaining navigation destinations rather than selected historical data. Quota collection and alerts continue, with a full configured polling delay after each collection pass so slow work cannot create a catch-up loop. Compact quota-pace outlooks run independently of detailed calibration and never load its training dataset.
 

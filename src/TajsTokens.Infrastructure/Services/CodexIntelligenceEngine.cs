@@ -25,6 +25,9 @@ public sealed class CodexIntelligenceEngine(
 {
     public CodexIntelligenceSnapshot Current => CodexIntelligenceProjection.Live(current());
 
+    public Task<RecentScenarioPattern> GetRecentScenarioPatternAsync(DateTimeOffset nowUtc, CancellationToken token)
+        => intelligence.GetRecentScenarioPatternAsync(nowUtc, token);
+
     public Task<ScenarioEstimate> SimulateAsync(ScenarioRequest request, DateTimeOffset historyFromUtc, CancellationToken token)
     {
         return intelligence.EstimateScenarioAsync(request, historyFromUtc, token);
@@ -93,9 +96,7 @@ public sealed class CodexIntelligenceEngine(
                 x.CapturedAtUtc < selection.ToUtc && (selection.AccountKey is null || x.AccountKey == selection.AccountKey)).ToArray();
         CodexIntelligenceSnapshot live = Current;
         bool liveScope = !selection.HasWorkFilter && selection.FromUtc <= asOf && asOf - selection.ToUtc < TimeSpan.FromMinutes(5);
-        CurrentQuotaForecast[] forecasts = liveScope
-            ? live.Current.Where(x => selection.AccountKey is null || x.Current.AccountKey == selection.AccountKey).ToArray()
-            : [];
+        CurrentQuotaForecast[] forecasts = live.Current.Where(x => selection.AccountKey is null || x.Current.AccountKey == selection.AccountKey).ToArray();
         var health = new List<CodexEvidenceHealth>
         {
             new(
@@ -106,7 +107,7 @@ public sealed class CodexIntelligenceEngine(
                 "Quota",
                 selection.HasWorkFilter ? "Scope unavailable" : "Reported",
                 selection.HasWorkFilter
-                    ? "Account quota cannot be attributed to a model, project or chat filter. It is withheld, not prorated by tokens."
+                    ? "Live account allowances remain visible separately. Filtered quota history is withheld, never prorated by tokens."
                     : "Source/account lanes remain separate. Reset drops are not negative consumption; polls are not additive."),
             new(
                 "Provider analytics",
@@ -119,7 +120,7 @@ public sealed class CodexIntelligenceEngine(
             new("TT", "Research only", "No runtime TT basis has been promoted. Missing TT is not zero workload."),
             new("API equivalent", "Derived", ApiPriceWorkload.Assumptions),
         };
-        return new CodexIntelligenceSnapshot(
+        return CodexIntelligenceProjection.WithLiveContext(new CodexIntelligenceSnapshot(
             asOf,
             selection,
             selected,
@@ -148,6 +149,6 @@ public sealed class CodexIntelligenceEngine(
             HistoricalPeriods = selection.HasWorkFilter
                 ? []
                 : CodexProviderReconciliation.Analyze(evidence, selected, quota, selection, asOf),
-        };
+        }, live, selection.AccountKey);
     }
 }

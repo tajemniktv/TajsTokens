@@ -8,6 +8,7 @@ using Microsoft.UI.Xaml.Controls;
 using TajsTokens.App.Models;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
+using TajsTokens.Core.Services;
 
 #endregion
 
@@ -58,45 +59,20 @@ internal static class QuotaCardPresenter
             _ when forecast?.BurnRatePercentPerHour is double burn && forecast.SustainablePercentPerHour is double sustainable =>
                 $"{burn:0.0} pp/h · sustainable {sustainable:0.0} pp/h" +
                 (forecast.BurnPressure is double pressure ? $" · {pressure:0.00}× pace" : string.Empty),
-            _ when forecast?.SustainablePercentPerHour is double sustainable => $"Learning · sustainable {sustainable:0.0} pp/h",
-            _ => "Learning",
+            _ when forecast?.SustainablePercentPerHour is double sustainable => $"Sustainable {sustainable:0.0} pp/h · observed pace unavailable",
+            _ => "Observed pace unavailable",
         };
 
-        string windowForecast = forecast?.State switch
-        {
-            ForecastState.ExhaustionLikelyBeforeReset when forecast.EstimatedExhaustionAtUtc is DateTimeOffset exhaustion =>
-                snapshot.RemainingPercent <= 0
-                    ? "Provider meter exhausted"
-                    : $"At this pace: exhausted {exhaustion.ToLocalTime():ddd HH:mm}",
-            ForecastState.SafeUntilReset or ForecastState.NearSustainablePace when
-                forecast.ProjectedRemainingAtResetPercent is double margin =>
-                $"If pace continues: ~{margin:0}% left at reset",
-            ForecastState.IdleWithinMeterPrecision => "No meter movement visible yet",
-            _ => "Learning from this reset window",
-        };
-
-        string survivalMessage = forecast?.State switch
-        {
-            ForecastState.ExhaustionLikelyBeforeReset =>
-                "Current pace is projected to exhaust this quota window before its authoritative reset.",
-            ForecastState.NearSustainablePace => "Current pace is close to the sustainable pace for this reset window.",
-            ForecastState.SafeUntilReset => "Current pace is projected to survive the current reset window.",
-            ForecastState.IdleWithinMeterPrecision => "No visible meter change. Burn and survival until reset are still uncertain.",
-            _ => "Quota is live; more observations from this reset window are needed before making a burn claim.",
-        };
-
-        InfoBarSeverity severity = forecast?.State switch
-        {
-            ForecastState.ExhaustionLikelyBeforeReset => InfoBarSeverity.Warning,
-            ForecastState.SafeUntilReset => InfoBarSeverity.Informational,
-            ForecastState.NearSustainablePace => InfoBarSeverity.Informational,
-            _ => InfoBarSeverity.Informational,
-        };
+        AllowanceOutlook outlook = QuotaOutlookProjection.Window(snapshot.Kind,
+            new CurrentQuotaForecast(snapshot, TelemetryHealthState.Live, forecast, ""), false, DateTimeOffset.UtcNow);
+        string windowForecast = outlook.Conclusion;
+        string survivalMessage = outlook.Detail;
+        InfoBarSeverity severity = outlook.Status is "At risk" or "Exhausted" ? InfoBarSeverity.Warning : InfoBarSeverity.Informational;
 
         string confidence = forecast?.Evidence is { } evidence
             ? evidence.RemainingAtResetLowerPercent is double lower && evidence.RemainingAtResetUpperPercent is double upper
                 ? $" · 80%-target band {lower:0}–{upper:0}% ({evidence.CalibrationEpochs} past resets)"
-                : $" · uncertainty learning ({evidence.CalibrationEpochs} comparable past resets)"
+                : $" · reset range not yet supported ({evidence.CalibrationEpochs} comparable past resets)"
             : string.Empty;
         string methodology = forecast?.Evidence is { } diagnostics
             ? $"\n{diagnostics.UncertaintyDescription} Model: {diagnostics.Model}; {diagnostics.ObservationCount} observations over {diagnostics.ObservedHours:0.#}h."
@@ -108,10 +84,10 @@ internal static class QuotaCardPresenter
                 "\n",
                 horizons.Select(x =>
                     $"~{x.RemainingPercent:0.#}% left " +
-                    $"+{x.HorizonHours:0.#}h · {x.Model} · " +
+                    $"at {x.TargetUtc.ToLocalTime():g} · {x.Model} · " +
                     (x.LowerRemainingPercent is { } low && x.UpperRemainingPercent is { } high
                         ? $"80%-target band {low:0.#}–{high:0.#}%"
-                        : "uncertainty learning") +
+                        : "range not yet supported") +
                     $" · {x.TrainingSamples} workload training / {x.ValidationSamples} validation outcomes"));
         }
         string freshness = $"live · {snapshot.Source} · {QuotaAccountScope.Describe(snapshot.AccountKey)}";
@@ -133,15 +109,7 @@ internal static class QuotaCardPresenter
             EvenBurn = evenBurnText,
             ResetTimestamp = snapshot.ResetsAtUtc?.ToLocalTime().ToString("ddd d MMM HH:mm") ?? "Unknown reset",
             NeedsAttention = severity == InfoBarSeverity.Warning || snapshot.AccountKey is null,
-            Status = snapshot.AccountKey is null
-                ? "Account unknown"
-                : forecast?.State switch
-                {
-                    ForecastState.SafeUntilReset => "On track",
-                    ForecastState.NearSustainablePace => "Near limit",
-                    ForecastState.ExhaustionLikelyBeforeReset => "At risk",
-                    _ => "Learning",
-                },
+            Status = outlook.Status,
         };
     }
 

@@ -29,6 +29,7 @@ public sealed record CurrentQuotaForecast(
     string HistoryPolicy,
     string? Diagnostic = null)
 {
+    public ForecastSupportReason SupportReasons { get; init; }
     public bool IsFresh => State == TelemetryHealthState.Live;
     public QuotaObservationAuthority Authority => Current.Authority;
 }
