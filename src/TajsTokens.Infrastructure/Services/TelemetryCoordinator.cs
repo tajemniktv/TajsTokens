@@ -24,6 +24,11 @@ public sealed class TelemetryCoordinator
     private readonly object _activeRefreshSync = new();
     private readonly ConcurrentQueue<TelemetryRefreshEvent> _backgroundEvents = new();
     private readonly SemaphoreSlim _intelligenceRefreshGate = new(1, 1);
+    private readonly SemaphoreSlim _forecastRefreshGate = new(1, 1);
+    private readonly Func<bool> _isBackground;
+    private readonly TimeProvider _timeProvider;
+    private CancellationTokenSource? _backgroundForecastCancellation;
+    private Task _backgroundForecastTask = Task.CompletedTask;
     private readonly IIntelligenceService? _intelligenceService;
     private readonly ICodexObservatoryService? _observatoryService;
     private readonly ICodexQuotaProvider _quotaProvider;
@@ -42,7 +47,9 @@ public sealed class TelemetryCoordinator
         SqliteTelemetryRepository repository,
         ICodexObservatoryService? observatoryService = null,
         IIntelligenceService? intelligenceService = null,
-        CodexServerEvidenceService? serverEvidence = null)
+        CodexServerEvidenceService? serverEvidence = null,
+        Func<bool>? isBackground = null,
+        TimeProvider? timeProvider = null)
     {
         _tokenProvider = tokenProvider;
         _quotaProvider = quotaProvider;
@@ -50,9 +57,18 @@ public sealed class TelemetryCoordinator
         _observatoryService = observatoryService;
         _intelligenceService = intelligenceService;
         _serverEvidence = serverEvidence;
+        _isBackground = isBackground ?? (() => false);
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public TelemetrySnapshot Latest => Volatile.Read(ref _latest);
+    public bool IsForecastRefreshRunning => _forecastRefreshGate.CurrentCount == 0;
+    internal Task BackgroundForecastCompletion => Volatile.Read(ref _backgroundForecastTask);
+
+    public void SuspendDetailedForecasts()
+    {
+        lock (_activeRefreshSync) _activeRefreshCancellation?.Cancel();
+    }
 
     public event Action<TelemetrySnapshot>? SnapshotUpdated;
 
@@ -68,6 +84,11 @@ public sealed class TelemetryCoordinator
 
     private async Task<TelemetrySnapshot> RefreshCoreAsync(RefreshTrigger trigger, CancellationToken cancellationToken)
     {
+        bool deferForecasts = _isBackground();
+        if (!deferForecasts)
+        {
+            lock (_activeRefreshSync) _backgroundForecastCancellation?.Cancel();
+        }
         if (trigger == RefreshTrigger.Manual)
         {
             lock (_activeRefreshSync)
@@ -440,45 +461,58 @@ public sealed class TelemetryCoordinator
                 events.Add(new TelemetryRefreshEvent(startedAt, "Token accounting unavailable", detail));
             }
 
-            if (persistenceAvailable && _intelligenceService is not null)
+            bool forecastGateEntered = false;
+            TokenWorkloadForecast? tokenForecast = retainedTokenForecast;
+            try
             {
-                try
+                if (!deferForecasts && persistenceAvailable && _intelligenceService is not null)
                 {
-                    currentForecasts = (await _intelligenceService.BuildAndPersistCurrentForecastsAsync(
-                        quotaLanes,
-                        DateTimeOffset.UtcNow,
-                        refreshToken)).ToArray();
-                    int liveForecasts = currentForecasts.Count(item => item.IsFresh && item.Forecast is not null);
-                    events.Add(
-                        new TelemetryRefreshEvent(
-                            DateTimeOffset.UtcNow,
-                            "Current forecasts",
-                            $"Built and persisted {liveForecasts} provider-anchored current forecast(s)."));
+                    await _forecastRefreshGate.WaitAsync(refreshToken);
+                    forecastGateEntered = true;
                 }
-                catch (Exception exception) when (exception is not OperationCanceledException)
+                if (!deferForecasts && persistenceAvailable && _intelligenceService is not null)
                 {
-                    currentForecasts = currentForecasts
-                        .Select(item => item with
-                        {
-                            State = TelemetryHealthState.Stale,
-                            Diagnostic = AppendDiagnostic(item.Diagnostic, SummarizeError(exception)),
-                        })
-                        .ToArray();
-                    events.Add(new TelemetryRefreshEvent(DateTimeOffset.UtcNow, "Forecast unavailable", SummarizeError(exception)));
+                    try
+                    {
+                        currentForecasts = (await _intelligenceService.BuildAndPersistCurrentForecastsAsync(
+                            quotaLanes,
+                            DateTimeOffset.UtcNow,
+                            refreshToken)).ToArray();
+                        int liveForecasts = currentForecasts.Count(item => item.IsFresh && item.Forecast is not null);
+                        events.Add(
+                            new TelemetryRefreshEvent(
+                                DateTimeOffset.UtcNow,
+                                "Current forecasts",
+                                $"Built and persisted {liveForecasts} provider-anchored current forecast(s)."));
+                    }
+                    catch (Exception exception) when (exception is not OperationCanceledException)
+                    {
+                        currentForecasts = currentForecasts
+                            .Select(item => item with
+                            {
+                                State = TelemetryHealthState.Stale,
+                                Diagnostic = AppendDiagnostic(item.Diagnostic, SummarizeError(exception)),
+                            })
+                            .ToArray();
+                        events.Add(new TelemetryRefreshEvent(DateTimeOffset.UtcNow, "Forecast unavailable", SummarizeError(exception)));
+                    }
+                }
+
+                if (!deferForecasts && persistenceAvailable && _intelligenceService is not null)
+                {
+                    try
+                    {
+                        tokenForecast = await _intelligenceService.ForecastTokenWorkloadAsync(DateTimeOffset.UtcNow, refreshToken);
+                    }
+                    catch (Exception exception) when (exception is not OperationCanceledException)
+                    {
+                        events.Add(new TelemetryRefreshEvent(DateTimeOffset.UtcNow, "Token forecast unavailable", SummarizeError(exception)));
+                    }
                 }
             }
-
-            TokenWorkloadForecast? tokenForecast = retainedTokenForecast;
-            if (persistenceAvailable && _intelligenceService is not null)
+            finally
             {
-                try
-                {
-                    tokenForecast = await _intelligenceService.ForecastTokenWorkloadAsync(DateTimeOffset.UtcNow, refreshToken);
-                }
-                catch (Exception exception) when (exception is not OperationCanceledException)
-                {
-                    events.Add(new TelemetryRefreshEvent(DateTimeOffset.UtcNow, "Token forecast unavailable", SummarizeError(exception)));
-                }
+                if (forecastGateEntered) _forecastRefreshGate.Release();
             }
             refreshToken.ThrowIfCancellationRequested();
             stopwatch.Stop();
@@ -502,6 +536,10 @@ public sealed class TelemetryCoordinator
                 tokenGeneration,
                 currentForecasts,
                 tokenForecast);
+
+            if (deferForecasts && persistenceAvailable && _intelligenceService is not null)
+                Volatile.Write(ref _backgroundForecastTask,
+                    Task.Run(() => RefreshBackgroundForecastsAsync(publishedSnapshot, cancellationToken), cancellationToken));
 
             // Historical intelligence is derived from already-persisted normalized telemetry. Queue
             // it only after the final telemetry snapshot has been published, and never hold the
@@ -546,6 +584,57 @@ public sealed class TelemetryCoordinator
         }
     }
 
+    private async Task RefreshBackgroundForecastsAsync(TelemetrySnapshot basis, CancellationToken cancellationToken)
+    {
+        if (!await _forecastRefreshGate.WaitAsync(0, cancellationToken)) return;
+        using var forecastCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        try
+        {
+            lock (_activeRefreshSync)
+            {
+                if (!_isBackground()) return;
+                _backgroundForecastCancellation = forecastCancellation;
+            }
+            CancellationToken token = forecastCancellation.Token;
+            IReadOnlyList<CurrentQuotaForecast> forecasts = await _intelligenceService!.BuildBackgroundForecastsAsync(
+                basis.QuotaLanes, _timeProvider.GetUtcNow(), token);
+            await _refreshGate.WaitAsync(token);
+            try
+            {
+                token.ThrowIfCancellationRequested();
+                TelemetrySnapshot latest = Latest;
+                // Never attach an older calculation to a newer provider anchor or token generation.
+                var updated = latest with
+                {
+                    CurrentForecasts = forecasts.Select(forecast => latest.QuotaLanes.Any(lane => lane.IsFresh && lane.Snapshot == forecast.Current)
+                        ? forecast
+                        : forecast with { State = TelemetryHealthState.Stale }).ToArray(),
+                    TokenForecast = latest.TokenForecast is { } workload ? workload with { IsStale = true } : null,
+                    Events = latest.Events.Append(new TelemetryRefreshEvent(_timeProvider.GetUtcNow(),
+                        "Background forecasts completed", "Background forecast calculation finished; quota polling continued independently.")).ToArray(),
+                };
+                Volatile.Write(ref _latest, updated);
+                SnapshotUpdated?.Invoke(updated);
+            }
+            finally { _refreshGate.Release(); }
+        }
+        catch (OperationCanceledException) when (forecastCancellation.IsCancellationRequested) { }
+        catch (Exception exception)
+        {
+            _backgroundEvents.Enqueue(new TelemetryRefreshEvent(_timeProvider.GetUtcNow(), "Background forecast unavailable",
+                $"Quota polling remains available. {SummarizeError(exception)}"));
+        }
+        finally
+        {
+            lock (_activeRefreshSync)
+            {
+                if (ReferenceEquals(_backgroundForecastCancellation, forecastCancellation))
+                    _backgroundForecastCancellation = null;
+            }
+            _forecastRefreshGate.Release();
+        }
+    }
+
     public async Task RunPeriodicAsync(TimeSpan interval, CancellationToken cancellationToken)
     {
         if (interval < TimeSpan.FromSeconds(15))
@@ -574,11 +663,13 @@ public sealed class TelemetryCoordinator
                     $"Periodic telemetry will retry. {SummarizeError(exception)}"));
         }
 
-        using var timer = new PeriodicTimer(interval);
         try
         {
-            while (await timer.WaitForNextTickAsync(cancellationToken))
+            while (true)
             {
+                // Leave a real idle interval after each pass. A PeriodicTimer retains a missed
+                // tick, causing slow scans/forecast replays to run back-to-back indefinitely.
+                await Task.Delay(interval, cancellationToken);
                 try
                 {
                     await RefreshAsync(RefreshTrigger.Interval, cancellationToken);

@@ -74,10 +74,19 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         return new IntelligenceRefreshResult(0, resetEventsDetected);
     }
 
-    public async Task<IReadOnlyList<CurrentQuotaForecast>> BuildAndPersistCurrentForecastsAsync(
+    public Task<IReadOnlyList<CurrentQuotaForecast>> BuildAndPersistCurrentForecastsAsync(
         IReadOnlyList<QuotaLaneState> quotaLanes,
         DateTimeOffset nowUtc,
         CancellationToken cancellationToken)
+        => BuildCurrentForecastsAsync(quotaLanes, nowUtc, cancellationToken, includeWorkload: true);
+
+    public Task<IReadOnlyList<CurrentQuotaForecast>> BuildBackgroundForecastsAsync(
+        IReadOnlyList<QuotaLaneState> quotaLanes, DateTimeOffset nowUtc, CancellationToken cancellationToken)
+        => BuildCurrentForecastsAsync(quotaLanes, nowUtc, cancellationToken, includeWorkload: false);
+
+    private async Task<IReadOnlyList<CurrentQuotaForecast>> BuildCurrentForecastsAsync(
+        IReadOnlyList<QuotaLaneState> quotaLanes, DateTimeOffset nowUtc,
+        CancellationToken cancellationToken, bool includeWorkload)
     {
         await EnsureInitializedAsync(cancellationToken);
         var results = new List<CurrentQuotaForecast>();
@@ -153,8 +162,8 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
 
             try
             {
-                Forecast forecast = QuotaPredictionService.BuildResetOutlook(anchored, nowUtc);
-                if (forecast.Evidence is { } evidence)
+                Forecast forecast = QuotaPredictionService.BuildResetOutlook(anchored, nowUtc, cancellationToken);
+                if (includeWorkload && forecast.Evidence is { } evidence)
                 {
                     IReadOnlyList<QuotaHorizonPrediction> predictions = [];
                     string workloadStatus;
@@ -199,6 +208,11 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                         },
                     };
                 }
+                if (!includeWorkload && forecast.Evidence is { } backgroundEvidence)
+                    forecast = forecast with { Evidence = backgroundEvidence with
+                    {
+                        WorkloadStatus = "Quota-pace outlook. Detailed workload recalibration resumes when the dashboard is open.",
+                    } };
                 if (forecast.Evidence is { } capturedEvidence)
                 {
                     string fingerprint = Convert.ToHexStringLower(

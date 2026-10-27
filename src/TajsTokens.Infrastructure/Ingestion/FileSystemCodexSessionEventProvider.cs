@@ -58,24 +58,34 @@ public sealed class FileSystemCodexSessionEventProvider : ICodexSessionEventProv
                 break;
             }
 
-            for (int index = 0; index < read; index++)
+            int index = 0;
+            while (index < read)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                byte value = buffer[index];
-                absoluteOffset++;
+                int newline = buffer.AsSpan(index, read - index).IndexOf((byte)'\n');
+                int count = newline < 0 ? read - index : newline;
+                if (recordBuffer.Length + count > MaxRecordBytes)
+                    throw new InvalidDataException($"JSONL record exceeds {MaxRecordBytes:N0} bytes: {filePath}");
+                recordBuffer.Write(buffer, index, count);
+                index += count;
+                absoluteOffset += count;
 
-                if (value == (byte)'\n')
+                if (newline >= 0)
                 {
-                    byte[] bytes = recordBuffer.ToArray();
-                    int length = bytes.Length;
-                    if (length > 0 && bytes[^1] == (byte)'\r')
+                    index++;
+                    absoluteOffset++;
+                    int length = (int)recordBuffer.Length;
+                    if (length > 0 && recordBuffer.GetBuffer()[length - 1] == (byte)'\r')
                     {
                         length--;
                     }
 
-                    string payload = Encoding.UTF8.GetString(bytes, 0, length);
+                    string payload = Encoding.UTF8.GetString(recordBuffer.GetBuffer(), 0, length);
                     var completedRecord = new RawSessionRecord(filePath, recordStart, absoluteOffset, payload);
                     recordBuffer.SetLength(0);
+                    // A rare multi-megabyte content record must not pin its capacity while the
+                    // iterator waits for the consumer to persist later, much smaller records.
+                    if (recordBuffer.Capacity > BufferSize) recordBuffer.Capacity = BufferSize;
                     recordStart = absoluteOffset;
 
                     if (!string.IsNullOrWhiteSpace(payload))
@@ -83,13 +93,6 @@ public sealed class FileSystemCodexSessionEventProvider : ICodexSessionEventProv
                         yield return completedRecord;
                     }
 
-                    continue;
-                }
-
-                recordBuffer.WriteByte(value);
-                if (recordBuffer.Length > MaxRecordBytes)
-                {
-                    throw new InvalidDataException($"JSONL record exceeds {MaxRecordBytes:N0} bytes: {filePath}");
                 }
             }
         }

@@ -22,7 +22,7 @@ namespace TajsTokens.App.Services;
 /// </summary>
 public sealed class AppServices
 {
-    public AppServices()
+    public AppServices(Func<bool>? isBackground = null)
     {
         string appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (!Directory.Exists(AppDataLocation.GetDataFolder(appDataPath)) && HasOtherInstanceInSession())
@@ -78,7 +78,8 @@ public sealed class AppServices
             Repository,
             CodexObservatory,
             Intelligence,
-            ServerEvidence);
+            ServerEvidence,
+            isBackground);
         CodexIntelligence = new CodexIntelligenceEngine(
             () => new SqliteForecastDatasetReader(DatabasePath, Settings.RolloutAccountAssociations),
             ServerEvidence,

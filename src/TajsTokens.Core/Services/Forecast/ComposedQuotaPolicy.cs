@@ -39,12 +39,18 @@ public static class ComposedQuotaPolicy
             x.Candidate is "total" or "categories" or "model-effort").ToArray();
         if (eligible.Length == 0 && prefix.AccountAssociations.Count == 0) return incumbent;
         // Extra short-horizon research does not expand the released forecast/promotion surface.
-        ComposedQuotaEvaluation evaluation = ComposedQuotaValidation.Evaluate(prefix, cancellationToken, horizons: [.5, 2d]);
         ComposedQuotaEvaluation strict = ComposedQuotaValidation.Evaluate(
             prefix,
             cancellationToken,
             ForecastReplayAvailability.CollectedByOrigin,
             [.5, 2d]);
+        // A reconstructed win cannot be promoted without qualifying collection-time evidence.
+        // Check that prerequisite first: backfilled histories otherwise replay every historical
+        // token model on every poll even though the result can only be the incumbent.
+        if (!strict.Scores.Any(score => score.Cohort == QuotaHistoryPolicy.Cohort(anchor) &&
+                incumbent.Any(baseline => baseline.HorizonHours == score.HorizonHours) &&
+                SupportsStrictSelection(score, anchor.CapturedAtUtc))) return incumbent;
+        ComposedQuotaEvaluation evaluation = ComposedQuotaValidation.Evaluate(prefix, cancellationToken, horizons: [.5, 2d]);
         IReadOnlyList<QuotaCostObservation> observations = QuotaCostObservationBuilder.Build(prefix, cancellationToken);
         return incumbent.Select(baseline =>
         {

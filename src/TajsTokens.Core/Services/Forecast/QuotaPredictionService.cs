@@ -45,6 +45,7 @@ public static partial class QuotaPredictionService
         if (epoch is null || epoch[^1] != anchor || epoch.Count < 2 ||
             anchor.CapturedAtUtc - epoch[0].CapturedAtUtc < TimeSpan.FromMinutes(15)) return [];
         var result = new List<QuotaHorizonPrediction>();
+        var featureIndex = new CodexForecastFeatureIndex(local);
         foreach (double horizon in anchor.Kind == QuotaWindowKind.Weekly ? new[] { 0.5, 2d, 24d } : new[] { 0.5, 2d })
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -55,7 +56,8 @@ public static partial class QuotaPredictionService
                     horizon,
                     ForecastReplayAvailability.CollectedByOrigin,
                     anchor,
-                    cancellationToken);
+                    cancellationToken,
+                    featureIndex: featureIndex);
             if (evaluated.Current is { } current) result.Add(current);
         }
         return ComposedQuotaPolicy.Apply(data, anchor, result, cancellationToken);
@@ -88,8 +90,10 @@ public static partial class QuotaPredictionService
             ForecastReplayAvailability availability,
             QuotaSnapshot? current,
             CancellationToken cancellationToken,
-            IReadOnlyList<(DateTimeOffset Origin, DateTimeOffset Outcome)>? targets = null)
+            IReadOnlyList<(DateTimeOffset Origin, DateTimeOffset Outcome)>? targets = null,
+            CodexForecastFeatureIndex? featureIndex = null)
     {
+        featureIndex ??= new CodexForecastFeatureIndex(data);
         // The caller supplies one source/account/window stream. SplitEpochs rejects mixed streams.
         Dictionary<string, Dictionary<DateTimeOffset, QuotaForecastTrial>> models = QuotaPaceModels.Candidates.ToDictionary(
             model => model,
@@ -102,7 +106,7 @@ public static partial class QuotaPredictionService
         foreach (QuotaForecastTrial label in labels)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            featureRows[label.OriginUtc] = CodexForecastFeatureBuilder.Build(data, label.OriginUtc, 2, availability);
+            featureRows[label.OriginUtc] = featureIndex.Build(label.OriginUtc, availability);
         }
         var points = new List<Point>();
         foreach (QuotaForecastTrial label in labels)
@@ -175,6 +179,8 @@ public static partial class QuotaPredictionService
                 if (Error(best, matured) + 0.05 < Error(FallbackModel, matured) * 0.9) selected = best;
             }
             double baseline = estimates[selected];
+            if (!featureRows.ContainsKey(anchor.CapturedAtUtc))
+                featureRows[anchor.CapturedAtUtc] = featureIndex.Build(anchor.CapturedAtUtc, availability);
             QuotaWorkloadPrediction workload = QuotaWorkloadCorrection.Predict(
                 data,
                 anchor,
@@ -182,7 +188,8 @@ public static partial class QuotaPredictionService
                 estimates[FallbackModel],
                 labels,
                 featureRows,
-                availability);
+                availability,
+                anchors);
             Point[] validation = Independent(points.Where(x => x.Label!.OutcomeUtc <= anchor.CapturedAtUtc && x.Workload.Fitted))
                 .TakeLast(48).ToArray();
             double? baselineError = validation.Length > 0 ? Error(FallbackModel, validation) : null;

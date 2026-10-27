@@ -22,6 +22,8 @@ public sealed partial class MainWindow : Window
     private readonly DispatcherTimer _saveWindowTimer = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private readonly string _windowStatePath = Path.Combine(((App)Application.Current).Services.DataFolder, "window-state.json");
     private bool _synchronizing;
+    private SuspendedNavigation? _suspendedNavigation;
+    private Frame ContentFrame => (Frame)AppNavigation.Content;
     private WindowSizeState _windowSize = new(1200, 850, false);
 
     public MainWindow()
@@ -91,6 +93,32 @@ public sealed partial class MainWindow : Window
         if (ContentFrame.CurrentSourcePageType == pageType && Equals(ContentFrame.Tag, parameter)) return;
         ContentFrame.Tag = parameter;
         ContentFrame.Navigate(pageType, parameter);
+    }
+
+    public void SetDashboardVisible(bool visible)
+    {
+        if (!visible && _suspendedNavigation is null && ContentFrame.CurrentSourcePageType is { } page)
+        {
+            _suspendedNavigation = new SuspendedNavigation(page, ContentFrame.Tag,
+                ContentFrame.BackStack.ToArray(), ContentFrame.ForwardStack.ToArray());
+            Frame previous = ContentFrame;
+            previous.Navigated -= OnNavigated;
+            var replacement = new Frame { CacheSize = 6 };
+            replacement.Navigated += OnNavigated;
+            // Replacing the frame unloads the active page (cancelling its timers/queries) and
+            // releases cached pages and selected history. Keep only navigation metadata in the tray.
+            AppNavigation.Content = replacement;
+            previous.CacheSize = 0;
+            previous.Content = null;
+        }
+        else if (visible && _suspendedNavigation is { } saved)
+        {
+            _suspendedNavigation = null;
+            Navigate(saved.Page, saved.Parameter);
+            foreach (PageStackEntry entry in saved.BackStack) ContentFrame.BackStack.Add(entry);
+            foreach (PageStackEntry entry in saved.ForwardStack) ContentFrame.ForwardStack.Add(entry);
+            AppNavigation.IsBackEnabled = ContentFrame.CanGoBack;
+        }
     }
 
     private void OnBackRequested(NavigationView sender, NavigationViewBackRequestedEventArgs args)
@@ -163,4 +191,6 @@ public sealed partial class MainWindow : Window
     }
 
     private sealed record WindowSizeState(int Width, int Height, bool Maximized);
+    private sealed record SuspendedNavigation(Type Page, object? Parameter,
+        PageStackEntry[] BackStack, PageStackEntry[] ForwardStack);
 }

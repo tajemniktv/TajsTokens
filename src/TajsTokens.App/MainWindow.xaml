@@ -34,7 +34,7 @@
                     </NavigationViewItem.MenuItems>
                 </NavigationViewItem>
             </NavigationView.MenuItems>
-            <Frame x:Name="ContentFrame" CacheSize="6" Navigated="OnNavigated" />
+            <Frame CacheSize="6" Navigated="OnNavigated" />
         </NavigationView>
     </Grid>
 </Window>

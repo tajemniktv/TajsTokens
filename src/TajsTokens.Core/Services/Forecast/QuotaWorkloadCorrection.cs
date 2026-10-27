@@ -51,11 +51,14 @@ public static class QuotaWorkloadCorrection
         double baselinePrediction,
         IReadOnlyList<QuotaForecastTrial> baseline,
         IReadOnlyDictionary<DateTimeOffset, CodexForecastFeatures> featureRows,
-        ForecastReplayAvailability availability)
+        ForecastReplayAvailability availability,
+        IReadOnlyDictionary<DateTimeOffset, QuotaSnapshot>? quotaOrigins = null)
     {
-        CodexForecastFeatures features = CodexForecastFeatureBuilder.Build(data, anchor.CapturedAtUtc, 2, availability);
-        Dictionary<DateTimeOffset, QuotaSnapshot>
-            origins = data.Quota.GroupBy(x => x.CapturedAtUtc).ToDictionary(x => x.Key, x => x.Last());
+        CodexForecastFeatures features = featureRows.TryGetValue(anchor.CapturedAtUtc, out CodexForecastFeatures? existing)
+            ? existing
+            : CodexForecastFeatureBuilder.Build(data, anchor.CapturedAtUtc, 2, availability);
+        IReadOnlyDictionary<DateTimeOffset, QuotaSnapshot> origins = quotaOrigins ??
+            data.Quota.GroupBy(x => x.CapturedAtUtc).ToDictionary(x => x.Key, x => x.Last());
         QuotaForecastTrial[] training = Independent(
                 baseline.Where(x => x.OutcomeUtc <= anchor.CapturedAtUtc && x.OriginUtc < anchor.CapturedAtUtc &&
                                     featureRows[x.OriginUtc].ObservedTokenEvents > 0 &&

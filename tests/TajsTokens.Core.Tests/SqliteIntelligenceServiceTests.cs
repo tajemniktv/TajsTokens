@@ -18,6 +18,50 @@ namespace TajsTokens.Core.Tests;
 public sealed class SqliteIntelligenceServiceTests
 {
     [Fact]
+    public async Task BackgroundOutlookDoesNotReadWorkloadTrainingData()
+    {
+        string directory = Directory.CreateTempSubdirectory("tajstokens-pace-").FullName;
+        try
+        {
+            string database = Path.Combine(directory, "telemetry.db");
+            var repository = new SqliteTelemetryRepository(database);
+            using var store = new SqliteCodexObservatoryStore(database);
+            await repository.InitializeIntelligenceAsync(CancellationToken.None);
+            await store.InitializeAsync(CancellationToken.None);
+            DateTimeOffset now = DateTimeOffset.Parse("2026-10-27T12:00:00Z");
+            QuotaSnapshot[] history = Enumerable.Range(0, 5).Select(i =>
+                Quota(QuotaWindowKind.FiveHour, now.AddMinutes(-60 + i * 15), 10 + i * 5,
+                    now.AddHours(3), "codex-app-server:test")).ToArray();
+            foreach (QuotaSnapshot quota in history)
+                await repository.UpsertQuotaSnapshotAsync(quota, CancellationToken.None);
+            await using var connection = new SqliteConnection($"Data Source={database}");
+            await connection.OpenAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                DROP TABLE codex_workload_observations;
+                CREATE VIEW codex_workload_observations AS SELECT * FROM unavailable_training_source;
+                """;
+            await command.ExecuteNonQueryAsync();
+            var service = new SqliteIntelligenceService(database, repository);
+            CurrentQuotaForecast result = Assert.Single(await service.BuildBackgroundForecastsAsync(
+                [new QuotaLaneState(QuotaWindowKind.FiveHour, "codex", "default", history[^1], TelemetryHealthState.Live, now)],
+                now, CancellationToken.None));
+            Assert.NotNull(result.Forecast);
+            Assert.Equal(history[^1], result.Current);
+            Assert.Equal(TelemetryHealthState.Live, result.State);
+            Assert.Equal(TajsTokens.Core.Services.QuotaPredictionService.BuildResetOutlook(history, now).ProjectedRemainingAtResetPercent,
+                result.Forecast.ProjectedRemainingAtResetPercent);
+            Assert.Null(result.Forecast.Evidence!.HorizonPredictions);
+            Assert.Contains("Quota-pace", result.Forecast.Evidence.WorkloadStatus);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
     public async Task UsageReport_PartialBucketsAndFilteredDimensionsReconcileWithoutTopTwentyTruncation()
     {
         var root = new DirectoryInfo(AppContext.BaseDirectory);

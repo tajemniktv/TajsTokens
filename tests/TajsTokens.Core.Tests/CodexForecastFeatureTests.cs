@@ -4,6 +4,7 @@
 
 #region
 
+using System.Text.Json;
 using TajsTokens.Core.Models;
 using TajsTokens.Core.Services;
 
@@ -14,6 +15,35 @@ namespace TajsTokens.Core.Tests;
 public sealed class CodexForecastFeatureTests
 {
     private static readonly DateTimeOffset Origin = DateTimeOffset.Parse("2026-09-01T12:00:00Z");
+
+    [Fact]
+    public void IndexedFeaturesMatchFullHistoryWithOldStartsAndLateEvidence()
+    {
+        CodexWorkloadObservation[] metadata =
+        [
+            Observation("old", "session_meta", -10000) with { SessionSourceKind = "cli" },
+            Observation("old", "task_started", -9000), Observation("old", "task_complete", -8000),
+            Observation("root", "session_meta", -1000) with { SessionSourceKind = "vscode" },
+            Observation("child", "session_meta", -1000) with { SessionSourceKind = "subagent", ParentThreadId = "root" },
+            Observation("root", "task_started", -500), Observation("root", "task_complete", -20),
+            Observation("child", "task_started", -150), Observation("child", "turn_context", -10),
+            Observation("child", "task_complete", -5) with { CapturedAtUtc = Origin.AddHours(1) },
+        ];
+        var token = new CodexPredictiveTokenEvent("root", Origin.AddMinutes(-5), Origin, "m", "high", 10, 20, 0, 6, 4, 40);
+        var context = new CodexContextObservation("ctx", "child", null, Origin.AddMinutes(-3), "m", 10, 100, false,
+            CapturedAtUtc: Origin.AddHours(1));
+        var data = new CodexForecastDataset([], metadata.Reverse().ToArray(),
+            [token, token with { SessionId = "child" }, token with { ObservedAtUtc = Origin.AddDays(-1) }],
+            [context, context with { EventId = "ctx2", InputTokens = 20 }], Origin, "fixture");
+        var index = new CodexForecastFeatureIndex(data);
+        foreach (ForecastReplayAvailability availability in Enum.GetValues<ForecastReplayAvailability>())
+        foreach (int offset in new[] { -200, -20, 0, 60, 200 })
+        {
+            DateTimeOffset at = Origin.AddMinutes(offset);
+            Assert.Equal(JsonSerializer.Serialize(CodexForecastFeatureBuilder.Build(data, at, availability: availability)),
+                JsonSerializer.Serialize(index.Build(at, availability)));
+        }
+    }
 
     [Fact]
     public void FutureCompletionsAndFutureModelsDoNotRewriteHistoricalActivity()

@@ -4,6 +4,8 @@
 
 #region
 
+using System.Globalization;
+using System.Text.Json;
 using TajsTokens.Core.Models;
 
 #endregion
@@ -33,6 +35,16 @@ public static class TokenWorkloadPredictionService
         double horizon,
         ForecastReplayAvailability availability = ForecastReplayAvailability.ReconstructedEventTime,
         CancellationToken cancellationToken = default)
+        => PredictHorizonCore(data, origin, horizon, availability, cancellationToken, null);
+
+    internal static TokenHorizonPrediction? PredictHorizonCached(
+        CodexForecastDataset data, DateTimeOffset origin, double horizon,
+        ForecastReplayAvailability availability, CancellationToken cancellationToken, ReplayCache cache)
+        => PredictHorizonCore(data, origin, horizon, availability, cancellationToken, cache);
+
+    private static TokenHorizonPrediction? PredictHorizonCore(
+        CodexForecastDataset data, DateTimeOffset origin, double horizon,
+        ForecastReplayAvailability availability, CancellationToken cancellationToken, ReplayCache? cache)
     {
         CodexForecastDataset prefix = data with
         {
@@ -49,7 +61,7 @@ public static class TokenWorkloadPredictionService
             };
         if (!prefix.Tokens.Any(x => x.ObservedAtUtc > origin.AddHours(-2))) return null;
         if (horizon <= .25 && !CodexNowcastActivity.Evaluate(prefix, origin, availability).SupportsNowcast) return null;
-        TokenHorizonPrediction? prediction = Evaluate(prefix, horizon, origin, cancellationToken).Current;
+        TokenHorizonPrediction? prediction = Evaluate(prefix, horizon, origin, cancellationToken, cache).Current;
         return prediction is null
             ? null
             : prediction with { Composition = WorkloadCompositionPrediction.Project(prefix, origin, prediction, availability) };
@@ -155,7 +167,8 @@ public static class TokenWorkloadPredictionService
         CodexForecastDataset data,
         double horizon,
         DateTimeOffset? now,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        ReplayCache? cache = null)
     {
         if (!double.IsFinite(horizon) || horizon <= 0 || horizon > 24 || TimeSpan.FromHours(horizon).Ticks == 0)
             throw new ArgumentOutOfRangeException(nameof(horizon));
@@ -228,7 +241,8 @@ public static class TokenWorkloadPredictionService
             if (features.ObservedTokenEvents == 0) continue;
             DateTimeOffset end = origin.AddHours(horizon);
             double target = Window(origin, end);
-            rows.Add(new Row(origin, end, features, Recent(origin), target));
+            var row = new Row(origin, end, features, Recent(origin), target);
+            rows.Add(cache?.Intern(row) ?? row);
         }
         var points = new List<Point>();
         foreach (Row row in rows)
@@ -240,7 +254,8 @@ public static class TokenWorkloadPredictionService
         if (now is { } at && at - tokens[0].ObservedAtUtc >= TimeSpan.FromHours(2))
         {
             CodexForecastFeatures features = Features(at);
-            current = PredictAt(new Row(at, at.AddHours(horizon), features, Recent(at), 0)).Prediction;
+            var row = new Row(at, at.AddHours(horizon), features, Recent(at), 0);
+            current = PredictAt(cache?.Intern(row) ?? row).Prediction;
         }
         return (points.Select(x => new TokenForecastTrial(x.Row.Origin, x.Row.End, x.Row.Target, x.Prediction)).ToArray(), current, points);
 
@@ -252,6 +267,9 @@ public static class TokenWorkloadPredictionService
         Point PredictAt(Row row)
         {
             Row[] training = rows.Where(x => x.End <= row.Origin && x.Origin < row.Origin).TakeLast(120).ToArray();
+            Point[] validation = points.Where(x => x.Row.End <= row.Origin).TakeLast(48).ToArray();
+            string? cacheKey = cache?.Key(row, training, validation, horizon);
+            if (cacheKey is not null && cache!.TryGet(cacheKey, out Point? cached)) return cached!;
             var estimates = new Dictionary<string, double>
             {
                 ["zero-workload"] = 0, // Evaluation-only inactivity baseline, not a fitted activity classifier.
@@ -285,7 +303,6 @@ public static class TokenWorkloadPredictionService
                 if (linear is not null)
                     estimates["workload-linear"] = Math.Clamp(row.Recent + linear.Predict(Vector(row, models, efforts)), 0, limit);
             }
-            Point[] validation = points.Where(x => x.Row.End <= row.Origin).TakeLast(48).ToArray();
             string selected = horizon >= 2 && training.Length >= 8 ? "recent-median" : "recent-30m";
 
             double Error(string model, IEnumerable<Point> source)
@@ -306,7 +323,7 @@ public static class TokenWorkloadPredictionService
                 ? selectedErrors[Math.Min(selectedErrors.Length - 1, (int)Math.Ceiling((selectedErrors.Length + 1) * 0.8) - 1)]
                 : null;
             Point[] applicable = validation.Where(x => x.Estimates.ContainsKey(selected)).ToArray();
-            return new Point(
+            var point = new Point(
                 row,
                 estimates,
                 new TokenHorizonPrediction(
@@ -325,6 +342,7 @@ public static class TokenWorkloadPredictionService
                     (radius is null
                         ? " Uncertainty is learning."
                         : " Empirical 80%-target range from earlier selected-policy errors; not a guarantee.")));
+            return cacheKey is null ? point : cache!.Store(cacheKey, point);
         }
     }
 
@@ -382,7 +400,54 @@ public static class TokenWorkloadPredictionService
         return low;
     }
 
-    private sealed record Row(DateTimeOffset Origin, DateTimeOffset End, CodexForecastFeatures Features, double Recent, double Target);
+    internal sealed record Row(DateTimeOffset Origin, DateTimeOffset End, CodexForecastFeatures Features, double Recent, double Target)
+    {
+        public int CacheIdentity { get; init; }
+    }
 
-    private sealed record Point(Row Row, IReadOnlyDictionary<string, double> Estimates, TokenHorizonPrediction Prediction);
+    internal sealed record Point(Row Row, IReadOnlyDictionary<string, double> Estimates, TokenHorizonPrediction Prediction)
+    {
+        public int CacheIdentity { get; init; }
+    }
+
+    /// <summary>
+    /// Evaluation-local memoization of identical prequential inputs. Backfills change row identities;
+    /// changed training or prior validation predictions invalidate the fit. No cross-refresh retention.
+    /// </summary>
+    internal sealed class ReplayCache
+    {
+        private readonly Dictionary<string, Row> _rows = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, Point> _points = new(StringComparer.Ordinal);
+
+        internal Row Intern(Row row)
+        {
+            // JSON is a lossless value key for these numeric features, including dictionary values.
+            // Never key on object references, timestamps alone, or collision-prone numeric hashes.
+            string key = JsonSerializer.Serialize(row);
+            if (_rows.TryGetValue(key, out Row? existing)) return existing;
+            if (_rows.Count >= 8192) return row;
+            Row stored = row with { CacheIdentity = _rows.Count + 1 };
+            _rows.Add(key, stored);
+            return stored;
+        }
+
+        internal string? Key(Row row, Row[] training, Point[] validation, double horizon)
+        {
+            if (row.CacheIdentity == 0 ||
+                training.Any(x => x.CacheIdentity == 0) || validation.Any(x => x.CacheIdentity == 0)) return null;
+            return horizon.ToString("R", CultureInfo.InvariantCulture) + ":" + row.CacheIdentity + ":" +
+                string.Join(',', training.Select(x => x.CacheIdentity)) + ":" +
+                string.Join(',', validation.Select(x => x.CacheIdentity));
+        }
+
+        internal bool TryGet(string key, out Point? point) => _points.TryGetValue(key, out point);
+
+        internal Point Store(string key, Point point)
+        {
+            if (_points.Count >= 4096) return point;
+            Point stored = point with { CacheIdentity = _points.Count + 1 };
+            _points.Add(key, stored);
+            return stored;
+        }
+    }
 }

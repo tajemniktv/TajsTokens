@@ -27,6 +27,7 @@ public static class ComposedQuotaValidation
             cancellationToken,
             horizons: horizons ?? EvaluationHorizons);
         var predictions = new Dictionary<(DateTimeOffset, double), PredictedWorkload?>();
+        var tokenReplay = new TokenWorkloadPredictionService.ReplayCache();
         var activities = new Dictionary<DateTimeOffset, string>();
         var scores = new List<ComposedQuotaScore>();
         foreach (IGrouping<(QuotaHistoryCohort Cohort, double HorizonHours), QuotaCostObservation> group in rows.GroupBy(x =>
@@ -41,14 +42,19 @@ public static class ComposedQuotaValidation
                             data.Quota.Where(x => QuotaHistoryPolicy.Cohort(x) == group.Key.Cohort),
                             availability),
                         data.CapturedAtUtc)).SelectMany(x => x));
-            IReadOnlyDictionary<DateTimeOffset, QuotaHorizonPrediction> incumbent = nativeTraining.Length == 20
-                ? QuotaPredictionService.ReplayAtTargets(
+            IReadOnlyDictionary<DateTimeOffset, QuotaHorizonPrediction>? incumbent = null;
+
+            IReadOnlyDictionary<DateTimeOffset, QuotaHorizonPrediction> ReadIncumbent()
+            {
+                // Withheld trials have no comparison to score. In particular, late-collected
+                // training must not trigger a full replay that will never be used.
+                return incumbent ??= QuotaPredictionService.ReplayAtTargets(
                     data with { Quota = quota },
                     group.Key.HorizonHours,
                     availability,
                     ordered.Skip(20).Select(x => (x.StartUtc, x.EndUtc)).ToArray(),
-                    cancellationToken)
-                : new Dictionary<DateTimeOffset, QuotaHorizonPrediction>();
+                    cancellationToken);
+            }
             QuotaCostObservation[] asserted = QuotaCostTrainingPolicy.Select(rows, group.Key.Cohort, group.Key.HorizonHours, true);
             string[] candidates = new[] { "total", "categories", "model-effort" };
             foreach (string candidate in asserted.Length > nativeTraining.Length
@@ -116,12 +122,13 @@ public static class ComposedQuotaValidation
                         (DateTimeOffset StartUtc, double hours) key = (row.StartUtc, hours);
                         if (!predictions.TryGetValue(key, out PredictedWorkload? workload))
                         {
-                            workload = TokenWorkloadPredictionService.PredictHorizon(
+                            workload = TokenWorkloadPredictionService.PredictHorizonCached(
                                 data,
                                 row.StartUtc,
                                 hours,
                                 availability,
-                                cancellationToken)?.Composition;
+                                cancellationToken,
+                                tokenReplay)?.Composition;
                             predictions.Add(key, workload);
                         }
                         if (workload is null)
@@ -170,7 +177,7 @@ public static class ComposedQuotaValidation
                                 UpperRemainingPercent =
                                     calibration.Radius is { } high ? Math.Min(100 - row.StartUsed, remaining + high) : null,
                                 CalibrationBlocks = calibration.Blocks,
-                                IncumbentIntervalLoss = incumbent.TryGetValue(row.StartUtc, out QuotaHorizonPrediction? baseline) &&
+                                IncumbentIntervalLoss = ReadIncumbent().TryGetValue(row.StartUtc, out QuotaHorizonPrediction? baseline) &&
                                                         baseline.TargetUtc == row.EndUtc
                                     ? row.IntervalLoss(100 - row.StartUsed - baseline.RemainingPercent)
                                     : null,

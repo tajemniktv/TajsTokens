@@ -16,8 +16,10 @@ public static partial class QuotaPredictionService
 {
     public const string ResetOutlookPolicyVersion = "quota-walk-forward/v4";
 
-    public static Forecast BuildResetOutlook(IReadOnlyList<QuotaSnapshot> snapshots, DateTimeOffset nowUtc)
+    public static Forecast BuildResetOutlook(IReadOnlyList<QuotaSnapshot> snapshots, DateTimeOffset nowUtc,
+        CancellationToken cancellationToken = default)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         ArgumentNullException.ThrowIfNull(snapshots);
         QuotaSnapshot[] eligible = snapshots.Where(x => x.CapturedAtUtc <= nowUtc).OrderBy(x => x.CapturedAtUtc).ToArray();
         if (eligible.Length == 0)
@@ -132,7 +134,7 @@ public static partial class QuotaPredictionService
         double lead = (reset - latest.CapturedAtUtc).TotalHours;
         Dictionary<string, IReadOnlyList<QuotaForecastTrial>> candidates = QuotaPaceModels.Candidates.ToDictionary(
             candidate => candidate,
-            candidate => QuotaForecastCalibration.Replay(stream, candidate, null));
+            candidate => QuotaForecastCalibration.Replay(stream, candidate, null, cancellationToken));
         model = QuotaForecastCalibration.SelectModel(candidates, latest.CapturedAtUtc, reset, lead, model);
         double rate = QuotaPaceModels.Estimate(epoch, model);
         double elapsed = Math.Max(0, (nowUtc - latest.CapturedAtUtc).TotalHours);

@@ -21,6 +21,10 @@ public interface IIntelligenceService
         DateTimeOffset nowUtc,
         CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<CurrentQuotaForecast>> BuildBackgroundForecastsAsync(
+        IReadOnlyList<QuotaLaneState> quotaLanes, DateTimeOffset nowUtc, CancellationToken cancellationToken)
+        => BuildAndPersistCurrentForecastsAsync(quotaLanes, nowUtc, cancellationToken);
+
     Task<IntelligenceDashboard> QueryAsync(
         IntelligenceQuery query,
         CancellationToken cancellationToken);

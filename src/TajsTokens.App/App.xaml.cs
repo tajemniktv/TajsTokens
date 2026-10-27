@@ -23,6 +23,7 @@ public partial class App : Application
     private readonly SemaphoreSlim _settingsApplyGate = new(1, 1);
     private readonly WindowsStartupRegistrationService _startupService = new();
     private readonly WindowsSystemTrayService _trayService = new();
+    private readonly WindowsResourcePolicy _resourcePolicy = new();
     private DispatcherQueue? _dispatcher;
     private DogfoodLifetime? _dogfoodLifetime;
     private bool _exitRequested;
@@ -40,7 +41,8 @@ public partial class App : Application
             if (_startupLease is null) Environment.Exit(0);
         }
         InitializeComponent();
-        Services = new AppServices();
+        Services = new AppServices(() => _resourcePolicy.IsBackground);
+        _resourcePolicy.IsBusy = () => Services.Telemetry.IsForecastRefreshRunning;
     }
 
     public AppServices Services { get; }
@@ -69,13 +71,16 @@ public partial class App : Application
         Services.LocalLimitsApi.Configure(Services.Settings.LocalLimitsApiEnabled,
             Services.Settings.LocalLimitsApiPort, Services.Settings.LocalLimitsApiToken);
 
-        bool startHidden = args.Arguments
-            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+        // Unpackaged WinUI desktop activation can leave args.Arguments empty. The login command's
+        // --background switch must also be read from the actual process command line.
+        bool startHidden = Environment.GetCommandLineArgs().Skip(1)
+            .Concat(args.Arguments.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             .Any(argument => string.Equals(argument, "--background", StringComparison.OrdinalIgnoreCase));
         if (!startHidden)
         {
             ShowDashboard();
         }
+        else _resourcePolicy.SetDashboardVisible(false);
 
         StartPeriodicCollector();
         _dogfoodLifetime.MarkReady();
@@ -172,6 +177,8 @@ public partial class App : Application
         {
             CodexIntelligenceSnapshot intelligence = Services.CodexIntelligence.Current;
             _trayService.UpdateStatus(SystemTrayStatusPresenter.Build(intelligence));
+            if (snapshot.Events.Any(item => item.Type == "Refresh completed"))
+                _resourcePolicy.ScheduleReclamation();
 
             // Advance alert state even while notifications are muted. Otherwise re-enabling them can
             // replay stale threshold/provider transitions that happened while the user opted out.
@@ -186,7 +193,9 @@ public partial class App : Application
                 _trayService.ShowNotification(alert.Title, alert.Message);
             }
         });
-        _ = UpdateRecentFleetTrayAsync(snapshot);
+        // Progressive quota/scan snapshots do not each need a separate fleet database query.
+        if (snapshot.Events.Any(item => item.Type == "Refresh completed"))
+            _ = UpdateRecentFleetTrayAsync(snapshot);
     }
 
     private async Task UpdateRecentFleetTrayAsync(TelemetrySnapshot snapshot)
@@ -358,6 +367,7 @@ public partial class App : Application
 
         args.Cancel = true;
         sender.Hide();
+        UpdateDashboardVisibility();
     }
 
     private void ShowDashboard()
@@ -367,10 +377,30 @@ public partial class App : Application
             _window = new MainWindow();
             _window.Title = "TajsTokens";
             _window.AppWindow.Closing += OnWindowClosing;
+            _window.AppWindow.Changed += (_, _) => UpdateDashboardVisibility();
+            // Presenter state can settle after the native activation/size notification.
+            _window.Activated += (_, _) => _dispatcher?.TryEnqueue(UpdateDashboardVisibility);
+            _window.SizeChanged += (_, _) => _dispatcher?.TryEnqueue(UpdateDashboardVisibility);
         }
 
         _window.AppWindow.Show();
+        if (_window.AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } minimized)
+            minimized.Restore();
         _window.Activate();
+        UpdateDashboardVisibility();
+        if (Services.Telemetry.Latest.HasAnyData) _ = RefreshFromTrayAsync();
+    }
+
+    private void UpdateDashboardVisibility()
+    {
+        if (_exitRequested || _window is not MainWindow window) return;
+        bool visible = window.AppWindow.IsVisible &&
+            (window.AppWindow.Presenter is not OverlappedPresenter presenter ||
+             presenter.State != OverlappedPresenterState.Minimized);
+        bool enteringBackground = !visible && !_resourcePolicy.IsBackground;
+        _resourcePolicy.SetDashboardVisible(visible);
+        window.SetDashboardVisible(visible);
+        if (enteringBackground) Services.Telemetry.SuspendDetailedForecasts();
     }
 
     private void RequestExit()
@@ -388,6 +418,7 @@ public partial class App : Application
         Services.Telemetry.SnapshotUpdated -= OnSnapshotUpdated;
         Services.SettingsChanged -= OnSettingsChanged;
         Services.LocalLimitsApi.Dispose();
+        _resourcePolicy.Dispose();
         _trayService.Dispose();
         _dogfoodLifetime?.Dispose();
         _window?.Close();
