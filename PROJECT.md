@@ -104,6 +104,14 @@ The primary Planning tab owns the editable session scenario: duration, optional 
 
 The current implementation keeps reported account quota, locally observed native Codex tokens, API-equivalent price weights and inferred quota cost separate. A source account key scopes the quota observations that supplied it; it does not retroactively assign local rollouts to the current login.
 
+### Source time and schema compatibility
+
+Observatory component schema 9 keeps nullable source event time, first collection time and timestamp quality separate for token/context evidence. Missing, malformed or unverified source dates remain unknown. Their retained token amounts can contribute to all-time totals, but do not enter hourly history, recent-work autofill or forecasting inputs as invented event dates. Source timestamps require an explicit timezone or supported numeric Unix representation; mixed aggregates have capture time without a single source event date.
+
+The version-8-to-9 migration preserves original observation/capture values and counters, marking legacy source times `LegacyUnverified` rather than restamping them. State-index schema 7 clears disposable fingerprints/cursor so bounded, prefix-verified ingestion can enrich only unverified metadata under the original occurrence identity. Amounts and first capture times stay immutable; changed prefixes retain the existing generation-replacement policy. Source-owned Codex data remains read-only.
+
+Component versions are independent of the base telemetry database's `user_version`. An older binary must reject a newer component, not lower its version marker. Install compatible writers/readers together; restoring older binaries is not a database downgrade. Existing-schema planner paths and the newer-schema refusal are covered alongside migration tests.
+
 ## Current work
 
 Overview keeps current account allowances above the selected history views. Date, model, project and chat filters do not erase live context or allocate account quota to filtered work. Explicit account selection never substitutes another account's current reading. The shared outlook prioritizes exhausted meters, then earliest exhaustion before reset, then pressure against each window's sustainable pace. Both reported windows need fresh supported assessments for an overall sustainable-pace conclusion; partial and unreported windows remain explicit. Reset estimates and fixed-horizon predictions retain separate targets and uncertainty.

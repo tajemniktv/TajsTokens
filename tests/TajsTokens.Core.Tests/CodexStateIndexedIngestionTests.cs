@@ -7,7 +7,9 @@
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
+using TajsTokens.Infrastructure.Ingestion;
 using TajsTokens.Infrastructure.Persistence;
+using TajsTokens.Infrastructure.Providers;
 using TajsTokens.Infrastructure.Services;
 
 #endregion
@@ -16,6 +18,83 @@ namespace TajsTokens.Core.Tests;
 
 public sealed class CodexStateIndexedIngestionTests
 {
+    [Fact]
+    public async Task RefreshAsync_Version6CacheRevisitsUnchangedRolloutForTimestampProvenance()
+    {
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-cached-time-upgrade-");
+        try
+        {
+            const string owner = "33333333-3333-4333-8333-333333333333";
+            DirectoryInfo sessions = Directory.CreateDirectory(Path.Combine(directory.FullName, "sessions"));
+            string file = Path.Combine(sessions.FullName, $"rollout-{owner}.jsonl");
+            await File.WriteAllTextAsync(file, """
+                {"timestamp":"2026-09-01T10:00:00Z","type":"session_meta","payload":{"id":"33333333-3333-4333-8333-333333333333"}}
+                {"timestamp":"2026-09-01T10:01:00Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0,"total_tokens":100},"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0,"total_tokens":100}}}}
+                {"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":200,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0,"total_tokens":200},"last_token_usage":{"input_tokens":100,"cached_input_tokens":0,"cache_write_input_tokens":0,"output_tokens":0,"reasoning_output_tokens":0,"total_tokens":100}}}}
+                """ + "\n");
+            long updated = new DateTimeOffset(File.GetLastWriteTimeUtc(file)).ToUnixTimeMilliseconds();
+            await CreateStateDatabaseAsync(Path.Combine(directory.FullName, "state_5.sqlite"),
+                [new StateThread(owner, file, updated - 1000, updated, 200)]);
+            string database = Path.Combine(directory.FullName, "telemetry.db");
+            var repository = new SqliteTelemetryRepository(database);
+            await repository.InitializeAsync(default);
+            using var store = new SqliteCodexObservatoryStore(database);
+            var oldIndex = new SqliteCodexStateIndexStore(database);
+            CodexObservatoryService Service(SqliteCodexStateIndexStore index) => new(
+                new CodexSessionIngestionService(new FileSystemCodexSessionEventProvider(), repository, store), store,
+                new CodexStateCatalog(directory.FullName), index, [sessions.FullName]);
+            Assert.Equal(3, (await Service(oldIndex).RefreshAsync(default)).RecordsScanned);
+            Assert.Single(await oldIndex.GetFingerprintsAsync(default));
+            Assert.Equal(updated, await oldIndex.GetWatermarkAsync(default));
+            FileIngestionCheckpoint checkpoint = (await repository.GetCheckpointAsync(file, default))!;
+            await repository.SaveCheckpointAsync(checkpoint with { ParserVersion = "typed-v7-response-evidence" }, default);
+            await using (var connection = new SqliteConnection("Data Source=" + database))
+            {
+                await connection.OpenAsync();
+                using SqliteCommand downgrade = connection.CreateCommand();
+                downgrade.CommandText = """
+                    UPDATE codex_native_token_events SET source_event_at_utc = NULL, source_timestamp_quality = 'LegacyUnverified';
+                    UPDATE context_observations SET source_event_at_utc = NULL, source_timestamp_quality = 'LegacyUnverified';
+                    UPDATE codex_counter_state SET last_source_event_at_utc = NULL;
+                    UPDATE codex_state_index_schema SET version = 6 WHERE component = 'codex-state-index';
+                    """;
+                await downgrade.ExecuteNonQueryAsync();
+            }
+            async Task<string> ImmutableTokens()
+            {
+                await using var connection = new SqliteConnection("Data Source=" + database);
+                await connection.OpenAsync();
+                using SqliteCommand read = connection.CreateCommand();
+                read.CommandText = "SELECT source_event_id,observed_at_utc,captured_at_utc,reported_total_tokens FROM codex_native_token_events ORDER BY source_event_id;";
+                await using SqliteDataReader rows = await read.ExecuteReaderAsync();
+                var values = new List<string>();
+                while (await rows.ReadAsync()) values.Add($"{rows.GetString(0)}|{rows.GetString(1)}|{rows.GetString(2)}|{rows.GetInt64(3)}");
+                return string.Join('\n', values);
+            }
+            string original = await ImmutableTokens();
+            var upgradedIndex = new SqliteCodexStateIndexStore(database);
+            await upgradedIndex.InitializeAsync(default);
+            Assert.Empty(await upgradedIndex.GetFingerprintsAsync(default));
+            Assert.Equal(0, await upgradedIndex.GetWatermarkAsync(default));
+            // The source catalog, rollout bytes and mtimes have not changed.
+            CodexObservatoryService upgraded = Service(upgradedIndex);
+            Assert.Equal(3, (await upgraded.RefreshAsync(default)).RecordsScanned);
+            Assert.Equal(original, await ImmutableTokens());
+            Assert.Equal(200, (await store.GetSummaryAsync(default)).NativeTokens.ReportedTotal);
+            Assert.Equal(100, Assert.Single((await new SqliteNativeCodexAccountingProvider(database).GetSnapshotAsync(default)).Hourly).Breakdown.Total);
+            Assert.Equal(checkpoint.SourceIdentity, (await repository.GetCheckpointAsync(file, default))!.SourceIdentity);
+            Assert.Equal(0, (await upgraded.RefreshAsync(default)).RecordsScanned);
+            var reopenedIndex = new SqliteCodexStateIndexStore(database);
+            Assert.Single(await reopenedIndex.GetFingerprintsAsync(default));
+            Assert.Equal(updated, await reopenedIndex.GetWatermarkAsync(default));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(true);
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

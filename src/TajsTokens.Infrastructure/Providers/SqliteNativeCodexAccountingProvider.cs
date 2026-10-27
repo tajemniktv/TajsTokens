@@ -63,8 +63,7 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
                 await LoadHourlyUsageAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
             transaction.Commit();
 
-            DateTimeOffset? asOfUtc = usage.Select(item => (DateTimeOffset?)item.ObservedAtUtc)
-                .Concat(hourly.Select(item => item.StartUtc))
+            DateTimeOffset? asOfUtc = usage.Select(item => item.CapturedAtUtc)
                 .Where(item => item is not null)
                 .Max();
             var snapshot = new CodexTokenAccountingSnapshot(
@@ -138,7 +137,13 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
         command.Transaction = transaction;
         command.CommandText = """
                               SELECT COALESCE(NULLIF(e.model, ''), '(unknown)') AS model,
-                                     MAX(e.observed_at_utc) AS observed_at_utc,
+                                     CASE WHEN COUNT(e.source_event_at_utc) = COUNT(*)
+                                               AND MIN(e.source_timestamp_quality) = 'Valid'
+                                               AND MAX(e.source_timestamp_quality) = 'Valid'
+                                          THEN MAX(e.source_event_at_utc) END AS source_event_at_utc,
+                                     MAX(e.captured_at_utc) AS captured_at_utc,
+                                     CASE WHEN COUNT(DISTINCT e.source_timestamp_quality) = 1
+                                          THEN MAX(e.source_timestamp_quality) ELSE 'Mixed' END AS time_quality,
                                      SUM(e.uncached_input_tokens),
                                      SUM(e.cache_read_tokens),
                                      SUM(e.cache_write_tokens),
@@ -161,15 +166,22 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
         while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
         {
             string model = reader.GetString(0);
-            DateTimeOffset observed = ParseUtc(reader.GetString(1));
+            DateTimeOffset? observed = reader.IsDBNull(1) ? null : ParseUtc(reader.GetString(1));
             results.Add(
                 new TokenUsage(
                     ProviderId,
                     "codex",
                     model,
                     observed,
-                    ReadBreakdown(reader, 2),
-                    "default"));
+                    ReadBreakdown(reader, 4),
+                    "default")
+                {
+                    SourceEventAtUtc = observed,
+                    CapturedAtUtc = reader.IsDBNull(2) ? null : ParseUtc(reader.GetString(2)),
+                    SourceTimestampQuality = Enum.TryParse(reader.GetString(3), out CodexSourceTimestampQuality quality)
+                        ? quality
+                        : CodexSourceTimestampQuality.LegacyUnverified,
+                });
         }
 
         return results;
@@ -183,7 +195,7 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
         SqliteCommand command = connection.CreateCommand();
         command.Transaction = transaction;
         command.CommandText = """
-                              SELECT substr(e.observed_at_utc, 1, 13) || ':00:00+00:00' AS hour_utc,
+                              SELECT substr(e.source_event_at_utc, 1, 13) || ':00:00+00:00' AS hour_utc,
                                      SUM(e.uncached_input_tokens),
                                      SUM(e.cache_read_tokens),
                                      SUM(e.cache_write_tokens),
@@ -191,7 +203,8 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
                                      SUM(e.reasoning_output_tokens),
                                      SUM(e.reported_total_tokens)
                               FROM codex_native_token_events e
-                              GROUP BY substr(e.observed_at_utc, 1, 13)
+                              WHERE e.source_event_at_utc IS NOT NULL AND e.source_timestamp_quality = 'Valid'
+                              GROUP BY substr(e.source_event_at_utc, 1, 13)
                               HAVING SUM(e.uncached_input_tokens) +
                                      SUM(e.cache_read_tokens) +
                                      SUM(e.cache_write_tokens) +

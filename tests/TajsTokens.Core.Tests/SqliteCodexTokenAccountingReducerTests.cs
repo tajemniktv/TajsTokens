@@ -7,6 +7,8 @@
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Models;
 using TajsTokens.Infrastructure.Persistence;
+using TajsTokens.Infrastructure.Providers;
+using TajsTokens.Infrastructure.Services;
 
 #endregion
 
@@ -14,6 +16,167 @@ namespace TajsTokens.Core.Tests;
 
 public sealed class SqliteCodexTokenAccountingReducerTests
 {
+    [Fact]
+    public async Task UnknownSourceTimeKeepsCounterEvidenceButIsExcludedFromHourlyAndReplayWindowsAfterRestart()
+    {
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-unknown-token-time-");
+        string database = Path.Combine(directory.FullName, "telemetry.db");
+        DateTimeOffset captured = DateTimeOffset.Parse("2026-09-03T10:00:00Z");
+        DateTimeOffset eventAt = DateTimeOffset.Parse("2026-09-01T10:00:00Z");
+
+        try
+        {
+            var repository = new SqliteTelemetryRepository(database);
+            await repository.InitializeAsync(CancellationToken.None);
+            CodexTokenCountObservation unknown = Token(
+                "unknown-time", captured, 100, 80, 10, 4, 110, Last(100, 80, 0, 10, 4, 110)) with
+            {
+                SourceEventAtUtc = null,
+                CapturedAtUtc = captured,
+                SourceTimestampQuality = CodexSourceTimestampQuality.Missing,
+            };
+            CodexTokenCountObservation known = Token(
+                "known-time", eventAt, 200, 150, 20, 8, 220, Last(100, 70, 0, 10, 4, 110)) with
+            {
+                CapturedAtUtc = captured.AddSeconds(1),
+            };
+
+            using (var firstStore = new SqliteCodexObservatoryStore(database))
+            {
+                await firstStore.ApplyCumulativeTokenObservationAsync(unknown, CancellationToken.None);
+                await firstStore.ApplyCumulativeTokenObservationAsync(known, CancellationToken.None);
+            }
+
+            using (var restartedStore = new SqliteCodexObservatoryStore(database))
+            {
+                await restartedStore.ApplyCumulativeTokenObservationAsync(unknown, CancellationToken.None);
+                await restartedStore.ApplyCumulativeTokenObservationAsync(known, CancellationToken.None);
+                CodexObservatorySummary summary = await restartedStore.GetSummaryAsync(CancellationToken.None);
+                Assert.Equal(220, summary.NativeTokens.ReportedTotal);
+            }
+
+            CodexTokenAccountingSnapshot accounting = await new SqliteNativeCodexAccountingProvider(database)
+                .GetSnapshotAsync(CancellationToken.None);
+            TokenUsage model = Assert.Single(accounting.Usage);
+            Assert.Equal(220, model.Breakdown.Total);
+            Assert.Null(model.SourceEventAtUtc);
+            Assert.Equal(CodexSourceTimestampQuality.Mixed, model.SourceTimestampQuality);
+            TokenTimeBucket hour = Assert.Single(accounting.Hourly);
+            Assert.Equal(110, hour.Breakdown.Total);
+
+            CodexForecastDataset replay = await new SqliteForecastDatasetReader(database).ReadAsync(
+                "codex",
+                "default",
+                eventAt.AddDays(-1),
+                eventAt.AddDays(1),
+                CancellationToken.None,
+                includeQuota: false);
+            CodexPredictiveTokenEvent replayed = Assert.Single(replay.Tokens);
+            Assert.Equal("session", replayed.SessionId);
+            Assert.Equal(eventAt, replayed.ObservedAtUtc);
+
+            await using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = database }.ToString());
+            await connection.OpenAsync();
+            SqliteCommand provenance = connection.CreateCommand();
+            provenance.CommandText = "SELECT source_event_at_utc, captured_at_utc, source_timestamp_quality FROM codex_native_token_events WHERE source_event_id='unknown-time';";
+            await using SqliteDataReader row = await provenance.ExecuteReaderAsync();
+            Assert.True(await row.ReadAsync());
+            Assert.True(row.IsDBNull(0));
+            Assert.Equal(captured.ToString("O"), row.GetString(1));
+            Assert.Equal("Missing", row.GetString(2));
+            SqliteCommand count = connection.CreateCommand();
+            count.CommandText = "SELECT COUNT(*) FROM codex_native_token_events;";
+            Assert.Equal(2L, Convert.ToInt64(await count.ExecuteScalarAsync()));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task Version8MigrationMarksOldTokenTimesUnverifiedWithoutChangingStoredTimestamps()
+    {
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-v8-migration-");
+        string database = Path.Combine(directory.FullName, "telemetry.db");
+        DateTimeOffset storedObserved = DateTimeOffset.Parse("2026-09-01T10:00:00Z");
+        DateTimeOffset storedCapture = DateTimeOffset.Parse("2026-09-03T10:00:00Z");
+
+        try
+        {
+            var repository = new SqliteTelemetryRepository(database);
+            await repository.InitializeAsync(CancellationToken.None);
+            using (var store = new SqliteCodexObservatoryStore(database))
+            {
+                await store.ApplyCumulativeTokenObservationAsync(
+                    Token("legacy", storedObserved, 100, 80, 10, 4, 110, Last(100, 80, 0, 10, 4, 110)) with
+                    {
+                        SourceEventAtUtc = null,
+                        CapturedAtUtc = storedCapture,
+                        SourceTimestampQuality = CodexSourceTimestampQuality.Missing,
+                    },
+                    CancellationToken.None);
+                await store.UpsertContextObservationAsync(new CodexContextObservation("legacy-context", "session", null,
+                    storedObserved, "model", 100, 1000, false, 10, storedCapture), CancellationToken.None);
+            }
+
+            await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = database }.ToString()))
+            {
+                await connection.OpenAsync();
+                SqliteCommand downgrade = connection.CreateCommand();
+                downgrade.CommandText = """
+                                        DROP INDEX idx_native_token_source_time;
+                                        DROP INDEX idx_native_token_session_source_time;
+                                        DROP INDEX idx_context_source_time;
+                                        ALTER TABLE codex_native_token_events DROP COLUMN source_event_at_utc;
+                                        ALTER TABLE codex_native_token_events DROP COLUMN source_timestamp_quality;
+                                        ALTER TABLE codex_counter_state DROP COLUMN last_source_event_at_utc;
+                                        ALTER TABLE context_observations DROP COLUMN source_event_at_utc;
+                                        ALTER TABLE context_observations DROP COLUMN source_timestamp_quality;
+                                        UPDATE observatory_schema SET version = 8 WHERE component = 'codex-observatory';
+                                        """;
+                await downgrade.ExecuteNonQueryAsync();
+            }
+
+            using (var migrated = new SqliteCodexObservatoryStore(database))
+            {
+                await migrated.InitializeAsync(CancellationToken.None);
+            }
+            using (var reopened = new SqliteCodexObservatoryStore(database))
+            {
+                await reopened.InitializeAsync(CancellationToken.None);
+                CodexContextObservation context = Assert.Single(await reopened.GetContextObservationsAsync("session", 10, CancellationToken.None));
+                Assert.Equal(storedObserved, context.ObservedAtUtc);
+                Assert.Equal(storedCapture, context.CapturedAtUtc);
+                Assert.Null(context.SourceEventAtUtc);
+                Assert.Equal(CodexSourceTimestampQuality.LegacyUnverified, context.SourceTimestampQuality);
+            }
+
+            await using var verify = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = database }.ToString());
+            await verify.OpenAsync();
+            SqliteCommand check = verify.CreateCommand();
+            check.CommandText = "SELECT observed_at_utc,captured_at_utc,source_event_at_utc,source_timestamp_quality FROM codex_native_token_events WHERE source_event_id='legacy';";
+            await using SqliteDataReader row = await check.ExecuteReaderAsync();
+            Assert.True(await row.ReadAsync());
+            Assert.Equal(storedObserved.ToString("O"), row.GetString(0));
+            Assert.Equal(storedCapture.ToString("O"), row.GetString(1));
+            Assert.True(row.IsDBNull(2));
+            Assert.Equal("LegacyUnverified", row.GetString(3));
+            await row.DisposeAsync();
+            check.CommandText = "SELECT last_source_event_at_utc,total_tokens FROM codex_counter_state;";
+            await using SqliteDataReader counter = await check.ExecuteReaderAsync();
+            Assert.True(await counter.ReadAsync());
+            Assert.True(counter.IsDBNull(0));
+            Assert.Equal(110, counter.GetInt64(1));
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(true);
+        }
+    }
+
     [Fact]
     public async Task Store_PersistsReducerDeltasAndStateAtomicallyAcrossRegressionResetAndReplay()
     {

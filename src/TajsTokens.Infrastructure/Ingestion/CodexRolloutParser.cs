@@ -26,7 +26,7 @@ internal sealed partial class CodexRolloutParser
         JsonElement root = document.RootElement;
         if (root.ValueKind != JsonValueKind.Object)
         {
-            return ParsedRolloutRecord.StorageOnly(sourceRecordId, "unknown", recordBytes, DateTimeOffset.UtcNow, state.OwnSessionId);
+            return ParsedRolloutRecord.StorageOnly(sourceRecordId, "unknown", recordBytes, DateTimeOffset.UtcNow, state.OwnSessionId, CodexSourceTimestampQuality.Malformed);
         }
 
         string topType = ReadString(root, "type") ?? "unknown";
@@ -36,8 +36,9 @@ internal sealed partial class CodexRolloutParser
                 : root;
         string? nestedType = ReadString(payload, "type") ?? ReadString(payload, "event_type");
         string eventClass = ClassifyEvent(topType, nestedType);
-        DateTimeOffset? sourceTimestamp = ReadTimestamp(root, "timestamp") ?? ReadTimestamp(payload, "timestamp");
-        DateTimeOffset timestamp = sourceTimestamp ?? DateTimeOffset.UtcNow;
+        DateTimeOffset capturedAtUtc = DateTimeOffset.UtcNow;
+        (DateTimeOffset? sourceTimestamp, CodexSourceTimestampQuality timestampQuality) = ReadSourceTimestamp(root, payload);
+        DateTimeOffset timestamp = sourceTimestamp ?? capturedAtUtc;
 
         CodexWorkloadObservation Workload(string type)
         {
@@ -50,7 +51,7 @@ internal sealed partial class CodexRolloutParser
                 state.OwnSessionId!,
                 type,
                 sourceTimestamp,
-                DateTimeOffset.UtcNow,
+                capturedAtUtc,
                 ReadString(payload, "turn_id"),
                 ReadString(payload, "root_turn_id"),
                 type == "session_meta" ? state.ParentSessionId : null,
@@ -70,10 +71,10 @@ internal sealed partial class CodexRolloutParser
             string? sessionId = ReadString(payload, "id") ?? ReadString(payload, "session_id");
             if (!string.IsNullOrWhiteSpace(sessionId) && state.IsOwnSessionMeta(sessionId))
             {
-                state.EstablishOwnership(sessionId, payload, timestamp);
-                CodexSession session = state.BuildSession(timestamp, "active");
-                Agent agent = state.BuildAgent(timestamp, AgentRuntimeState.Running);
-                AgentRelationship? relationship = string.IsNullOrWhiteSpace(state.ParentSessionId)
+                state.EstablishOwnership(sessionId, payload, sourceTimestamp);
+                CodexSession? session = sourceTimestamp is null ? null : state.BuildSession(timestamp, "active");
+                Agent? agent = sourceTimestamp is null ? null : state.BuildAgent(timestamp, AgentRuntimeState.Running);
+                AgentRelationship? relationship = sourceTimestamp is null || string.IsNullOrWhiteSpace(state.ParentSessionId)
                     ? null
                     : new AgentRelationship(state.ParentSessionId!, sessionId, timestamp);
                 return new ParsedRolloutRecord(
@@ -89,22 +90,22 @@ internal sealed partial class CodexRolloutParser
                     null,
                     [],
                     null,
-                    Workload("session_meta"));
+                    Workload("session_meta"), TimestampQuality: timestampQuality);
             }
 
             // A filename without an owning UUID is intentionally storage-only. Choosing the first
             // session_meta is unsafe because child rollouts can start with copied parent history.
-            return ParsedRolloutRecord.StorageOnly(sourceRecordId, eventClass, recordBytes, timestamp, state.OwnSessionId);
+            return ParsedRolloutRecord.StorageOnly(sourceRecordId, eventClass, recordBytes, timestamp, state.OwnSessionId, timestampQuality);
         }
 
         if (!state.OwnershipEstablished)
         {
-            return ParsedRolloutRecord.StorageOnly(sourceRecordId, eventClass, recordBytes, timestamp, null);
+            return ParsedRolloutRecord.StorageOnly(sourceRecordId, eventClass, recordBytes, timestamp, null, timestampQuality);
         }
 
         if (topType == "token_usage_record")
         {
-            return ParsedRolloutRecord.StorageOnly(sourceRecordId, eventClass, recordBytes, timestamp, state.OwnSessionId)
+            return ParsedRolloutRecord.StorageOnly(sourceRecordId, eventClass, recordBytes, timestamp, state.OwnSessionId, timestampQuality)
                 with
                 {
                     ResponseObservation = CodexResponseObservationParser.Parse(
@@ -121,7 +122,7 @@ internal sealed partial class CodexRolloutParser
         {
             // A source setting, not an executed/billed tier. No carry-forward to token events:
             // first-turn absence and interleaved streams cannot establish that attribution.
-            return ParsedRolloutRecord.StorageOnly(sourceRecordId, eventClass, recordBytes, timestamp, state.OwnSessionId)
+            return ParsedRolloutRecord.StorageOnly(sourceRecordId, eventClass, recordBytes, timestamp, state.OwnSessionId, timestampQuality)
                 with
                 {
                     WorkloadObservation = Workload("thread_settings_applied"),
@@ -136,7 +137,7 @@ internal sealed partial class CodexRolloutParser
             // turn's value, especially across a model change. Current native format uses effort.
             state.ReasoningEffort = ReadEffort(payload);
             state.ContextWindowTokens = ReadLong(payload, "model_context_window") ?? state.ContextWindowTokens;
-            var usageEvent = new UsageEvent(
+            UsageEvent? usageEvent = sourceTimestamp is null ? null : new UsageEvent(
                 sourceRecordId,
                 state.OwnSessionId!,
                 timestamp,
@@ -149,14 +150,14 @@ internal sealed partial class CodexRolloutParser
                 recordBytes,
                 timestamp,
                 state.OwnSessionId,
-                state.BuildSession(timestamp, "active"),
-                state.BuildAgent(timestamp, AgentRuntimeState.Running),
+                sourceTimestamp is null ? null : state.BuildSession(timestamp, "active"),
+                sourceTimestamp is null ? null : state.BuildAgent(timestamp, AgentRuntimeState.Running),
                 null,
                 usageEvent,
                 null,
                 [],
                 null,
-                Workload("turn_context"));
+                Workload("turn_context"), TimestampQuality: timestampQuality);
         }
 
         if (IsTokenCount(topType, nestedType, payload))
@@ -187,7 +188,12 @@ internal sealed partial class CodexRolloutParser
                     state.CurrentModel,
                     state.ReasoningEffort,
                     totalSnapshot,
-                    lastUsage);
+                    lastUsage)
+                {
+                    SourceEventAtUtc = sourceTimestamp,
+                    CapturedAtUtc = capturedAtUtc,
+                    SourceTimestampQuality = timestampQuality,
+                };
             }
 
             long? contextWindow = ReadLong(info, "model_context_window") ?? state.ContextWindowTokens;
@@ -209,36 +215,43 @@ internal sealed partial class CodexRolloutParser
                     lastInput,
                     contextWindow,
                     false,
-                    recordBytes);
+                    recordBytes,
+                    capturedAtUtc)
+                {
+                    SourceEventAtUtc = sourceTimestamp,
+                    SourceTimestampQuality = timestampQuality,
+                };
 
             QuotaSnapshot[] quotaSnapshots = ParseRateLimits(payload, timestamp).Select(snapshot => snapshot with
             {
                 ObservationId = sourceRecordId + ":" + snapshot.Lane,
                 SourceIdentity = state.SourceIdentity,
                 SessionId = state.OwnSessionId,
-                CollectedAtUtc = DateTimeOffset.UtcNow,
+                CollectedAtUtc = capturedAtUtc,
                 HasSourceTimestamp = sourceTimestamp is not null,
             }).ToArray();
-            var usageEvent = new UsageEvent(
-                sourceRecordId + ":token",
-                state.OwnSessionId!,
-                timestamp,
-                "token_count",
-                "Codex token/quota observation",
-                null);
+            UsageEvent? usageEvent = sourceTimestamp is null
+                ? null
+                : new UsageEvent(
+                    sourceRecordId + ":token",
+                    state.OwnSessionId!,
+                    timestamp,
+                    "token_count",
+                    "Codex token/quota observation",
+                    null);
             return new ParsedRolloutRecord(
                 sourceRecordId,
                 eventClass,
                 recordBytes,
                 timestamp,
                 state.OwnSessionId,
-                state.BuildSession(timestamp, "active"),
-                state.BuildAgent(timestamp, AgentRuntimeState.Running),
+                sourceTimestamp is null ? null : state.BuildSession(timestamp, "active"),
+                sourceTimestamp is null ? null : state.BuildAgent(timestamp, AgentRuntimeState.Running),
                 null,
                 usageEvent,
                 tokenObservation,
                 quotaSnapshots,
-                context);
+                context, TimestampQuality: timestampQuality);
         }
 
         bool isCompaction = string.Equals(topType, "compacted", StringComparison.OrdinalIgnoreCase) ||
@@ -255,21 +268,27 @@ internal sealed partial class CodexRolloutParser
                 null,
                 state.ContextWindowTokens,
                 true,
-                recordBytes);
-            var usageEvent = new UsageEvent(sourceRecordId, state.OwnSessionId!, timestamp, "compaction", "Context compaction", null);
+                recordBytes,
+                capturedAtUtc)
+            {
+                SourceEventAtUtc = sourceTimestamp,
+                SourceTimestampQuality = timestampQuality,
+            };
+            UsageEvent? usageEvent = sourceTimestamp is null ? null :
+                new UsageEvent(sourceRecordId, state.OwnSessionId!, timestamp, "compaction", "Context compaction", null);
             return new ParsedRolloutRecord(
                 sourceRecordId,
                 eventClass,
                 recordBytes,
                 timestamp,
                 state.OwnSessionId,
-                state.BuildSession(timestamp, "active"),
-                state.BuildAgent(timestamp, AgentRuntimeState.Running),
+                sourceTimestamp is null ? null : state.BuildSession(timestamp, "active"),
+                sourceTimestamp is null ? null : state.BuildAgent(timestamp, AgentRuntimeState.Running),
                 null,
                 usageEvent,
                 null,
                 [],
-                context);
+                context, TimestampQuality: timestampQuality);
         }
 
         AgentRuntimeState? lifecycleState = MapLifecycleState(nestedType ?? topType);
@@ -285,7 +304,7 @@ internal sealed partial class CodexRolloutParser
                 _ => "active",
             };
             string normalizedType = NormalizeTimelineType(topType, nestedType);
-            var usageEvent = new UsageEvent(
+            UsageEvent? usageEvent = sourceTimestamp is null ? null : new UsageEvent(
                 sourceRecordId,
                 state.OwnSessionId!,
                 timestamp,
@@ -298,17 +317,18 @@ internal sealed partial class CodexRolloutParser
                 recordBytes,
                 timestamp,
                 state.OwnSessionId,
-                state.BuildSession(timestamp, status),
-                state.BuildAgent(timestamp, stateValue),
+                sourceTimestamp is null ? null : state.BuildSession(timestamp, status),
+                sourceTimestamp is null ? null : state.BuildAgent(timestamp, stateValue),
                 null,
                 usageEvent,
                 null,
                 [],
                 null,
-                normalizedType is "task_started" or "task_complete" or "turn_aborted" ? Workload(normalizedType) : null);
+                normalizedType is "task_started" or "task_complete" or "turn_aborted" ? Workload(normalizedType) : null,
+                TimestampQuality: timestampQuality);
         }
 
-        return ParsedRolloutRecord.StorageOnly(sourceRecordId, eventClass, recordBytes, timestamp, state.OwnSessionId);
+        return ParsedRolloutRecord.StorageOnly(sourceRecordId, eventClass, recordBytes, timestamp, state.OwnSessionId, timestampQuality);
     }
 
     private static string? ReadServiceTier(JsonElement payload)
@@ -557,8 +577,9 @@ internal sealed partial class CodexRolloutParser
             return null;
         }
         if (property.ValueKind == JsonValueKind.String &&
+            property.GetString() is { } text && SourceTimestampRegex().IsMatch(text) &&
             DateTimeOffset.TryParse(
-                property.GetString(),
+                text,
                 CultureInfo.InvariantCulture,
                 DateTimeStyles.RoundtripKind,
                 out DateTimeOffset timestamp))
@@ -580,6 +601,44 @@ internal sealed partial class CodexRolloutParser
         }
         return null;
     }
+
+    private static (DateTimeOffset? TimestampUtc, CodexSourceTimestampQuality Quality) ReadSourceTimestamp(
+        JsonElement root,
+        JsonElement payload)
+    {
+        TimestampField rootTimestamp = ReadTimestampField(root, "timestamp");
+        if (rootTimestamp.TimestampUtc is { } rootValue)
+        {
+            return (rootValue, CodexSourceTimestampQuality.Valid);
+        }
+
+        TimestampField payloadTimestamp = ReadTimestampField(payload, "timestamp");
+        if (payloadTimestamp.TimestampUtc is { } payloadValue)
+        {
+            return (payloadValue, CodexSourceTimestampQuality.Valid);
+        }
+
+        return (null, rootTimestamp.Present || payloadTimestamp.Present
+            ? CodexSourceTimestampQuality.Malformed
+            : CodexSourceTimestampQuality.Missing);
+    }
+
+    private static TimestampField ReadTimestampField(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out _))
+        {
+            return new TimestampField(false, null);
+        }
+
+        return new TimestampField(true, ReadTimestamp(element, propertyName));
+    }
+
+    private readonly record struct TimestampField(bool Present, DateTimeOffset? TimestampUtc);
+
+    // TryParse alone accepts partial dates/times and supplies today's date or local timezone.
+    // Source chronology requires a complete date/time with an explicit UTC offset.
+    [GeneratedRegex(@"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:[zZ]|[+-]\d{2}:\d{2})$")]
+    private static partial Regex SourceTimestampRegex();
 
     [GeneratedRegex("[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")]
     private static partial Regex SessionIdRegex();
@@ -635,14 +694,14 @@ internal sealed class RolloutParseState
         return OwnSessionId is not null && string.Equals(OwnSessionId, sessionId, StringComparison.OrdinalIgnoreCase);
     }
 
-    public void EstablishOwnership(string sessionId, JsonElement payload, DateTimeOffset timestamp)
+    public void EstablishOwnership(string sessionId, JsonElement payload, DateTimeOffset? timestamp)
     {
         OwnSessionId = sessionId;
         ParentSessionId = FindString(payload, "parent_thread_id") ?? FindString(payload, "parent_session_id") ?? ParentSessionId;
         AgentName = FindString(payload, "agent_nickname") ??
                     (string.IsNullOrWhiteSpace(ParentSessionId) ? "Root agent" : "Subagent");
         Repository = FindString(payload, "cwd") ?? FindString(payload, "repository") ?? Repository;
-        StartedAtUtc = CodexRolloutParser.ReadTimestamp(payload, "timestamp") ?? (StartedAtUtc == default ? timestamp : StartedAtUtc);
+        if (StartedAtUtc == default && timestamp is { } sourceTime) StartedAtUtc = sourceTime;
         CurrentModel = FindString(payload, "model") ?? CurrentModel;
     }
 
@@ -727,7 +786,8 @@ internal sealed record ParsedRolloutRecord(
     IReadOnlyList<QuotaSnapshot> QuotaSnapshots,
     CodexContextObservation? ContextObservation,
     CodexWorkloadObservation? WorkloadObservation = null,
-    CodexResponseObservation? ResponseObservation = null)
+    CodexResponseObservation? ResponseObservation = null,
+    CodexSourceTimestampQuality TimestampQuality = CodexSourceTimestampQuality.Valid)
 {
     public bool HasNormalizedTelemetry =>
         Session is not null || Agent is not null || Relationship is not null || UsageEvent is not null ||
@@ -739,7 +799,8 @@ internal sealed record ParsedRolloutRecord(
         string eventClass,
         long recordBytes,
         DateTimeOffset timestamp,
-        string? sessionId)
+        string? sessionId,
+        CodexSourceTimestampQuality timestampQuality = CodexSourceTimestampQuality.Valid)
     {
         return new ParsedRolloutRecord(
             sourceRecordId,
@@ -753,6 +814,6 @@ internal sealed record ParsedRolloutRecord(
             null,
             null,
             [],
-            null);
+            null, TimestampQuality: timestampQuality);
     }
 }

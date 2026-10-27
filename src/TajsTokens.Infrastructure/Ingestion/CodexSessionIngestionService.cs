@@ -4,7 +4,6 @@
 
 #region
 
-using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
 using System.Security.Cryptography;
@@ -22,7 +21,7 @@ namespace TajsTokens.Infrastructure.Ingestion;
 public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
 {
     private const string BoundaryParserVersion = "boundary-v2";
-    private const string TypedParserVersion = "typed-v7-response-evidence";
+    private const string TypedParserVersion = "typed-v8-source-timestamp-provenance";
     private const int DurableBatchSize = 128;
     private readonly ISessionIngestionCheckpointStore _checkpointStore;
     private readonly ICodexIngestionBatchWriter? _ingestionBatchWriter;
@@ -30,7 +29,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
     private readonly CodexRolloutParser _parser = new();
     private readonly ICodexSessionEventProvider _sessionEventProvider;
 
-    private readonly Dictionary<string, (string Identity, long Offset, string Hash, long Length, DateTime Written)> _verifiedPrefixes =
+    private readonly Dictionary<string, (string Identity, string PhysicalIdentity, long Offset, string Hash, long Length, DateTime Written)> _verifiedPrefixes =
         new(StringComparer.OrdinalIgnoreCase);
 
     public CodexSessionIngestionService(
@@ -77,6 +76,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             parserVersion += "/desktop-owner-v1";
         FileIngestionCheckpoint? existing = await _checkpointStore.GetCheckpointAsync(filePath, cancellationToken);
         string sourceIdentity = GetSourceIdentity(filePath);
+        string physicalIdentity = sourceIdentity;
         var initialInfo = new FileInfo(filePath);
         long initialLength = initialInfo.Length;
         DateTime initialWritten = initialInfo.LastWriteTimeUtc;
@@ -114,25 +114,31 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                         (previousIdentity == sourceIdentity || previousIdentity.StartsWith(
                             sourceIdentity + ":generation:",
                             StringComparison.Ordinal));
-        bool cachedPrefix = existing?.ConsumedPrefixSha256 is { } knownHash &&
+        // A verified legacy checkpoint may retain its occurrence ID after gaining a stable
+        // physical file ID. Cache against that physical ID, never against a path-only fallback.
+        bool cachedPrefix = !sourceIdentity.StartsWith("fallback-path:", StringComparison.Ordinal) &&
+                            existing?.ConsumedPrefixSha256 is { } knownHash &&
                             _verifiedPrefixes.TryGetValue(
                                 filePath,
-                                out (string Identity, long Offset, string Hash, long Length, DateTime Written) verified) &&
-                            verified == (existing.SourceIdentity, existing.LastByteOffset, knownHash, initialLength, initialWritten);
+                                out (string Identity, string PhysicalIdentity, long Offset, string Hash, long Length, DateTime Written) verified) &&
+                            verified == (existing.SourceIdentity, sourceIdentity, existing.LastByteOffset, knownHash, initialLength, initialWritten);
         string? existingPrefix = existing is null ? null :
             cachedPrefix ? existing.ConsumedPrefixSha256 :
             await HashThroughAsync(Math.Min(existing.LastByteOffset, prefixStream.Length));
-        bool verifiedContent = existing is not null && sameFile && existing.LastByteOffset <= prefixStream.Length &&
+        // A prefix-verified legacy fallback ID denotes the already captured occurrence, even
+        // though it never proved physical identity. Retain its IDs/capture times during the
+        // transition to stable OS identity; changed bytes still start a new generation.
+        bool legacyIdentity = existing?.SourceIdentity?.StartsWith("fallback:", StringComparison.Ordinal) == true ||
+                              existing?.SourceIdentity?.StartsWith("fallback-path:", StringComparison.Ordinal) == true;
+        bool verifiedContent = existing is not null && (sameFile || legacyIdentity) && existing.LastByteOffset <= prefixStream.Length &&
                                existing.ConsumedPrefixSha256 is not null &&
                                existing.ConsumedPrefixSha256 == existingPrefix;
         bool canResume = verifiedContent && string.Equals(existing!.ParserVersion, parserVersion, StringComparison.Ordinal);
-        // This upgrade only adds supplemental response evidence. Keep verified occurrence identity
-        // and prior capture times; ownership/reducer upgrades still require their generation replay.
+        // These upgrades enrich immutable occurrences only. Keep verified IDs, token amounts and
+        // prior capture times; ownership/reducer upgrades still require their generation replay.
         bool metadataOnlyReplay = verifiedContent && _observatoryStore is not null &&
-                                  existing!.ParserVersion == parserVersion.Replace(
-                                      TypedParserVersion,
-                                      "typed-v6-service-tier-evidence",
-                                      StringComparison.Ordinal);
+                                  (existing!.ParserVersion == parserVersion.Replace(TypedParserVersion, "typed-v6-service-tier-evidence", StringComparison.Ordinal) ||
+                                   existing.ParserVersion == parserVersion.Replace(TypedParserVersion, "typed-v7-response-evidence", StringComparison.Ordinal));
 
         if (canResume || metadataOnlyReplay) sourceIdentity = existing!.SourceIdentity!;
         else if (sameFile)
@@ -190,7 +196,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                         "malformed_json",
                         Math.Max(0, record.EndByteOffset - record.StartByteOffset),
                         DateTimeOffset.UtcNow,
-                        state.OwnSessionId);
+                        state.OwnSessionId, CodexSourceTimestampQuality.Malformed);
                 }
 
                 if (pendingRecords is not null)
@@ -247,8 +253,10 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             cancellationToken);
 
         var finalInfo = new FileInfo(filePath);
-        if (finalInfo.Length == initialLength && finalInfo.LastWriteTimeUtc == initialWritten)
-            _verifiedPrefixes[filePath] = (sourceIdentity, lastCompleteRecordOffset, finalPrefix, initialLength, initialWritten);
+        if (finalInfo.Length == initialLength && finalInfo.LastWriteTimeUtc == initialWritten &&
+            GetSourceIdentity(filePath) == physicalIdentity)
+            _verifiedPrefixes[filePath] = (sourceIdentity, physicalIdentity, lastCompleteRecordOffset,
+                finalPrefix, initialLength, initialWritten);
         else _verifiedPrefixes.Remove(filePath);
 
         int normalized = _observatoryStore is null ? recordsScanned : normalizedRecords;
@@ -291,6 +299,18 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             return;
         }
 
+        // Retire a replaced source before counter reduction, matching the production batch path.
+        await _observatoryStore.RecordRolloutRecordAsync(
+            parsed.SourceRecordId,
+            sourceIdentity,
+            filePath,
+            parsed.SessionId,
+            parsed.EventClass,
+            parsed.RecordBytes,
+            TryGetFileSize(filePath),
+            parsed.TimestampUtc,
+            cancellationToken, parsed.TimestampQuality);
+
         if (parsed.Session is not null)
         {
             await _observatoryStore.UpsertSessionAsync(parsed.Session, cancellationToken);
@@ -325,19 +345,6 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         }
         if (parsed.ResponseObservation is not null)
             await _observatoryStore.UpsertResponseObservationAsync(parsed.ResponseObservation, cancellationToken);
-
-        // Focused tests/alternate composition can omit the production batch writer. Preserve complete
-        // storage metadata semantics on that compatibility path even though it is intentionally slower.
-        await _observatoryStore.RecordRolloutRecordAsync(
-            parsed.SourceRecordId,
-            sourceIdentity,
-            filePath,
-            parsed.SessionId,
-            parsed.EventClass,
-            parsed.RecordBytes,
-            TryGetFileSize(filePath),
-            parsed.TimestampUtc,
-            cancellationToken);
     }
 
     private async Task SaveCheckpointAsync(
@@ -404,9 +411,66 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             }
         }
 
-        long creationTicks = File.GetCreationTimeUtc(filePath).Ticks;
-        return $"fallback:{creationTicks.ToString("X16", CultureInfo.InvariantCulture)}";
+        if (OperatingSystem.IsLinux() && TryGetLinuxFileIdentity(filePath) is { } linuxIdentity)
+        {
+            return linuxIdentity;
+        }
+
+        // CreationTimeUtc can map to ctime on filesystems without birth-time support, so it
+        // changes on append and cannot identify a stable source generation. A path hash is stable
+        // across appends and keeps the local path out of durable telemetry. Comparisons that need
+        // physical replacement detection fail closed when this fallback is in use.
+        string normalizedPath = Path.GetFullPath(filePath).Replace(Path.DirectorySeparatorChar, '/');
+        string pathHash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(normalizedPath)));
+        return $"fallback-path:{pathHash}";
     }
+
+    private static string? TryGetLinuxFileIdentity(string filePath)
+    {
+        const int atCurrentWorkingDirectory = -100;
+        const uint statxInode = 0x100;
+        const int statxBufferBytes = 256;
+        IntPtr buffer = Marshal.AllocHGlobal(statxBufferBytes);
+        try
+        {
+            for (int offset = 0; offset < statxBufferBytes; offset += sizeof(long))
+            {
+                Marshal.WriteInt64(buffer, offset, 0);
+            }
+
+            if (LinuxStatx(atCurrentWorkingDirectory, filePath, 0, statxInode, buffer) != 0 ||
+                (unchecked((uint)Marshal.ReadInt32(buffer, 0)) & statxInode) == 0)
+            {
+                return null;
+            }
+
+            // Linux struct statx has fixed ABI offsets for stx_ino and the device major/minor.
+            uint deviceMajor = unchecked((uint)Marshal.ReadInt32(buffer, 136));
+            uint deviceMinor = unchecked((uint)Marshal.ReadInt32(buffer, 140));
+            ulong inode = unchecked((ulong)Marshal.ReadInt64(buffer, 32));
+            return $"linux:{deviceMajor:X8}:{deviceMinor:X8}:{inode:X16}";
+        }
+        catch (DllNotFoundException)
+        {
+            return null;
+        }
+        catch (EntryPointNotFoundException)
+        {
+            return null;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    [DllImport("libc", EntryPoint = "statx", SetLastError = true)]
+    private static extern int LinuxStatx(
+        int directoryFileDescriptor,
+        [MarshalAs(UnmanagedType.LPUTF8Str)] string path,
+        int flags,
+        uint mask,
+        IntPtr buffer);
 
     private static string BuildSourceRecordId(string sourceIdentity, long start, long end)
     {

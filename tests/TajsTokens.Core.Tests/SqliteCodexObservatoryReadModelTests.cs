@@ -16,6 +16,44 @@ namespace TajsTokens.Core.Tests;
 public sealed class SqliteCodexObservatoryReadModelTests
 {
     [Fact]
+    public async Task ContextLimitPrefersRecentVerifiedEventsOverLateBackfill()
+    {
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-context-order-");
+        string databasePath = Path.Combine(directory.FullName, "telemetry.db");
+        try
+        {
+            var repository = new SqliteTelemetryRepository(databasePath);
+            await repository.InitializeAsync(default);
+            using var store = new SqliteCodexObservatoryStore(databasePath);
+            await store.InitializeAsync(default);
+            await using var connection = new SqliteConnection($"Data Source={databasePath}");
+            await connection.OpenAsync();
+            SqliteCommand seed = connection.CreateCommand();
+            seed.CommandText = """
+                INSERT INTO context_observations(event_id,session_id,observed_at_utc,captured_at_utc,
+                    source_event_at_utc,source_timestamp_quality,is_compaction)
+                VALUES
+                    ('recent','session','2026-09-02T10:00:00+00:00','2026-09-02T10:01:00+00:00',
+                     '2026-09-02T10:00:00+00:00','Valid',0),
+                    ('backfill','session','2026-09-01T10:00:00+00:00','2026-09-03T10:00:00+00:00',
+                     '2026-09-01T10:00:00+00:00','Valid',0),
+                    ('unknown','session','2026-09-03T11:00:00+00:00','2026-09-03T11:00:00+00:00',
+                     NULL,'Missing',0);
+                """;
+            await seed.ExecuteNonQueryAsync();
+
+            Assert.Equal(new[] { "recent", "backfill", "unknown" },
+                (await store.GetContextObservationsAsync("session", 3, default)).Select(x => x.EventId));
+            Assert.Equal("recent", Assert.Single(await store.GetContextObservationsAsync("session", 1, default)).EventId);
+        }
+        finally
+        {
+            SqliteConnection.ClearAllPools();
+            directory.Delete(true);
+        }
+    }
+
+    [Fact]
     public async Task Queries_FilterBeforeLimit_AndPreserveSessionAggregatesTopologyAndStorage()
     {
         DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-observatory-read-");
@@ -151,9 +189,17 @@ public sealed class SqliteCodexObservatoryReadModelTests
                 SqliteCommand downgrade = connection.CreateCommand();
                 downgrade.CommandText = """
                                         DROP INDEX IF EXISTS idx_native_tokens_observed_time;
+                                        DROP INDEX IF EXISTS idx_native_token_source_time;
+                                        DROP INDEX IF EXISTS idx_native_token_session_source_time;
+                                        DROP INDEX IF EXISTS idx_context_source_time;
                                         DROP TABLE codex_workload_observations;
                                         ALTER TABLE codex_native_token_events DROP COLUMN captured_at_utc;
                                         ALTER TABLE context_observations DROP COLUMN captured_at_utc;
+                                        ALTER TABLE codex_native_token_events DROP COLUMN source_event_at_utc;
+                                        ALTER TABLE codex_native_token_events DROP COLUMN source_timestamp_quality;
+                                        ALTER TABLE codex_counter_state DROP COLUMN last_source_event_at_utc;
+                                        ALTER TABLE context_observations DROP COLUMN source_event_at_utc;
+                                        ALTER TABLE context_observations DROP COLUMN source_timestamp_quality;
                                         UPDATE observatory_schema
                                         SET version = 2
                                         WHERE component = 'codex-observatory';
@@ -169,11 +215,17 @@ public sealed class SqliteCodexObservatoryReadModelTests
 
             SqliteCommand versionCommand = verify.CreateCommand();
             versionCommand.CommandText = "SELECT version FROM observatory_schema WHERE component = 'codex-observatory';";
-            Assert.Equal(8L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
+            Assert.Equal(9L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
 
             SqliteCommand indexCommand = verify.CreateCommand();
-            indexCommand.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_native_tokens_observed_time';";
-            Assert.Equal(1L, (long)(await indexCommand.ExecuteScalarAsync(CancellationToken.None))!);
+            indexCommand.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = $name;";
+            indexCommand.Parameters.AddWithValue("$name", "");
+            foreach (string name in new[] { "idx_native_tokens_observed_time", "idx_native_token_source_time",
+                         "idx_native_token_session_source_time", "idx_context_source_time" })
+            {
+                indexCommand.Parameters["$name"].Value = name;
+                Assert.Equal(1L, (long)(await indexCommand.ExecuteScalarAsync(CancellationToken.None))!);
+            }
         }
         finally
         {
@@ -183,7 +235,7 @@ public sealed class SqliteCodexObservatoryReadModelTests
     }
 
     [Fact]
-    public async Task Initialize_FreshDatabaseReopensWithSchemaVersion8()
+    public async Task Initialize_FreshDatabaseReopensWithSchemaVersion9()
     {
         DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-observatory-reopen-");
         string databasePath = Path.Combine(directory.FullName, "telemetry.db");
@@ -205,7 +257,7 @@ public sealed class SqliteCodexObservatoryReadModelTests
             await connection.OpenAsync(CancellationToken.None);
             SqliteCommand version = connection.CreateCommand();
             version.CommandText = "SELECT version FROM observatory_schema WHERE component = 'codex-observatory';";
-            Assert.Equal(8L, (long)(await version.ExecuteScalarAsync(CancellationToken.None))!);
+            Assert.Equal(9L, (long)(await version.ExecuteScalarAsync(CancellationToken.None))!);
         }
         finally
         {

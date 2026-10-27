@@ -415,13 +415,13 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                                      COALESCE((SELECT COUNT(*)
                                                FROM context_observations c
                                                WHERE c.session_id = e.session_id
-                                                 AND c.is_compaction = 1
-                                                 AND c.observed_at_utc > $from
-                                                 AND c.observed_at_utc <= $to), 0)
+                                                 AND c.is_compaction = 1 AND c.source_timestamp_quality = 'Valid'
+                                                 AND c.source_event_at_utc > $from
+                                                 AND c.source_event_at_utc <= $to), 0)
                               FROM codex_native_token_events e
                               LEFT JOIN sessions s ON s.session_id = e.session_id
                               LEFT JOIN agents a ON a.agent_id = e.session_id
-                              WHERE e.observed_at_utc > $from AND e.observed_at_utc <= $to
+                              WHERE e.source_timestamp_quality = 'Valid' AND e.source_event_at_utc > $from AND e.source_event_at_utc <= $to
                               GROUP BY e.session_id
                               ORDER BY SUM(e.reported_total_tokens) DESC
                               LIMIT $take;
@@ -637,7 +637,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         bool hasContext,
         CancellationToken cancellationToken)
     {
-        string bucketExpression = BucketSql(query.BucketSize, "e.observed_at_utc");
+        string bucketExpression = BucketSql(query.BucketSize, "e.source_event_at_utc");
         SqliteCommand command = connection.CreateCommand();
         command.CommandText = $"""
                                SELECT {bucketExpression} AS bucket,
@@ -653,7 +653,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                                                         THEN e.reported_total_tokens ELSE 0 END), 0),
                                       COUNT(DISTINCT e.session_id)
                                FROM codex_native_token_events e
-                               WHERE e.observed_at_utc >= $from AND e.observed_at_utc < $to {UsageFilterSql}
+                               WHERE e.source_timestamp_quality = 'Valid' AND e.source_event_at_utc >= $from AND e.source_event_at_utc < $to {UsageFilterSql}
                                GROUP BY bucket
                                ORDER BY bucket DESC
                                LIMIT $take;
@@ -688,9 +688,9 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         {
             SqliteCommand compactions = connection.CreateCommand();
             compactions.CommandText = $"""
-                                       SELECT {BucketSql(query.BucketSize, "c.observed_at_utc")} AS bucket, COUNT(*)
+                                       SELECT {BucketSql(query.BucketSize, "c.source_event_at_utc")} AS bucket, COUNT(*)
                                        FROM context_observations c
-                                       WHERE c.is_compaction = 1 AND c.observed_at_utc >= $from AND c.observed_at_utc < $to
+                                       WHERE c.is_compaction = 1 AND c.source_timestamp_quality = 'Valid' AND c.source_event_at_utc >= $from AND c.source_event_at_utc < $to
                                        GROUP BY bucket;
                                        """;
             compactions.Parameters.AddWithValue("$from", SerializeUtc(query.FromUtc));
@@ -821,7 +821,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                                       {(dimension == "Session" ? "(SELECT NULLIF(s.thread_id, '') FROM sessions s WHERE s.session_id = e.session_id)" : "NULL")}
                                FROM codex_native_token_events e
                                {join}
-                               WHERE e.observed_at_utc >= $from AND e.observed_at_utc < $to {UsageFilterSql}
+                               WHERE e.source_timestamp_quality = 'Valid' AND e.source_event_at_utc >= $from AND e.source_event_at_utc < $to {UsageFilterSql}
                                GROUP BY dimension_key
                                ORDER BY SUM(e.reported_total_tokens) DESC
                                LIMIT {(query.UsageOnly ? -1 : 20)};
@@ -853,12 +853,12 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
     {
         SqliteCommand command = connection.CreateCommand();
         command.CommandText = $"""
-                               SELECT CAST(strftime('%w', e.observed_at_utc) AS INTEGER),
-                                      CAST(strftime('%H', e.observed_at_utc) AS INTEGER),
+                               SELECT CAST(strftime('%w', e.source_event_at_utc) AS INTEGER),
+                                      CAST(strftime('%H', e.source_event_at_utc) AS INTEGER),
                                       COALESCE(SUM(e.reported_total_tokens), 0),
-                                      COUNT(DISTINCT strftime('%Y-%m-%dT%H', e.observed_at_utc))
+                                      COUNT(DISTINCT strftime('%Y-%m-%dT%H', e.source_event_at_utc))
                                FROM codex_native_token_events e
-                               WHERE e.observed_at_utc >= $from AND e.observed_at_utc < $to
+                               WHERE e.source_timestamp_quality = 'Valid' AND e.source_event_at_utc >= $from AND e.source_event_at_utc < $to
                                {UsageFilterSql}
                                GROUP BY 1, 2
                                ORDER BY 1, 2;
@@ -1004,7 +1004,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                                      COUNT(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM agent_relationships ar WHERE ar.child_agent_id = e.session_id)
                                                          THEN e.session_id END)
                               FROM codex_native_token_events e
-                              WHERE e.observed_at_utc > $from AND e.observed_at_utc <= $to;
+                              WHERE e.source_timestamp_quality = 'Valid' AND e.source_event_at_utc > $from AND e.source_event_at_utc <= $to;
                               """;
         command.Parameters.AddWithValue("$from", SerializeUtc(fromUtc));
         command.Parameters.AddWithValue("$to", SerializeUtc(toUtc));
@@ -1023,7 +1023,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             SqliteCommand compactionCommand = connection.CreateCommand();
             compactionCommand.CommandText = """
                                             SELECT COUNT(*) FROM context_observations
-                                            WHERE is_compaction = 1 AND observed_at_utc > $from AND observed_at_utc <= $to;
+                                            WHERE is_compaction = 1 AND source_timestamp_quality = 'Valid' AND source_event_at_utc > $from AND source_event_at_utc <= $to;
                                             """;
             compactionCommand.Parameters.AddWithValue("$from", SerializeUtc(fromUtc));
             compactionCommand.Parameters.AddWithValue("$to", SerializeUtc(toUtc));
@@ -1038,7 +1038,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             dominant.CommandText = """
                                    SELECT e.model, e.reasoning_effort, SUM(e.reported_total_tokens) AS tokens
                                    FROM codex_native_token_events e
-                                   WHERE e.observed_at_utc > $from AND e.observed_at_utc <= $to
+                                   WHERE e.source_timestamp_quality = 'Valid' AND e.source_event_at_utc > $from AND e.source_event_at_utc <= $to
                                    GROUP BY e.model, e.reasoning_effort
                                    ORDER BY tokens DESC
                                    LIMIT 1;

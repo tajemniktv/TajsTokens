@@ -54,6 +54,10 @@ public sealed record CodexTokenCounterState(
     DateTimeOffset LastObservedAtUtc,
     bool HasCumulativeBaseline = true)
 {
+    // Preserve the original constructor/deconstruction contract. Persistence explicitly assigns
+    // null for legacy state whose old timestamp cannot be verified as source event time.
+    public DateTimeOffset? LastSourceEventAtUtc { get; init; } = LastObservedAtUtc;
+
     public long LargestCounter => Math.Max(
         TotalTokens,
         Math.Max(
@@ -135,7 +139,8 @@ public static class CodexTokenCounterReducer
                 false);
         }
 
-        if (previous is not null && observation.ObservedAtUtc < previous.LastObservedAtUtc)
+        if (previous?.LastSourceEventAtUtc is { } previousSourceTime &&
+            VerifiedSourceTime(observation) is { } sourceTime && sourceTime < previousSourceTime)
         {
             return new CodexTokenAccountingDecision(
                 CodexTokenAccountingDecisionKind.StaleObservation,
@@ -177,7 +182,7 @@ public static class CodexTokenCounterReducer
             return new CodexTokenAccountingDecision(
                 CodexTokenAccountingDecisionKind.MonotonicIncrement,
                 ToDisjointDelta(observedIncrement),
-                ToState(observation, previous.Epoch, synthetic, previous.HasCumulativeBaseline),
+                ToState(observation, previous.Epoch, synthetic, previous.HasCumulativeBaseline, previous.LastSourceEventAtUtc),
                 true);
         }
 
@@ -205,7 +210,7 @@ public static class CodexTokenCounterReducer
             return new CodexTokenAccountingDecision(
                 firstCumulativeKind,
                 ToDisjointDelta(firstCumulativeDelta),
-                ToState(observation, previous.Epoch, current, true),
+                ToState(observation, previous.Epoch, current, true, previous.LastSourceEventAtUtc),
                 true);
         }
 
@@ -240,7 +245,7 @@ public static class CodexTokenCounterReducer
             return new CodexTokenAccountingDecision(
                 CodexTokenAccountingDecisionKind.CounterReset,
                 ToDisjointDelta(resetDelta),
-                ToState(observation, checked(previous.Epoch + 1), current, true),
+                ToState(observation, checked(previous.Epoch + 1), current, true, previous.LastSourceEventAtUtc),
                 true);
         }
 
@@ -248,7 +253,11 @@ public static class CodexTokenCounterReducer
         CodexTokenAccountingDecisionKind kind = delta.IsZero
             ? CodexTokenAccountingDecisionKind.NoIncrement
             : CodexTokenAccountingDecisionKind.MonotonicIncrement;
-        return new CodexTokenAccountingDecision(kind, ToDisjointDelta(delta), ToState(observation, previous.Epoch, current, true), true);
+        return new CodexTokenAccountingDecision(
+            kind,
+            ToDisjointDelta(delta),
+            ToState(observation, previous.Epoch, current, true, previous.LastSourceEventAtUtc),
+            true);
     }
 
     private static bool IsStaleRegression(
@@ -326,7 +335,8 @@ public static class CodexTokenCounterReducer
         {
             SourceFile = observation.SourceFile,
             LastSourceEventId = observation.SourceEventId,
-            LastObservedAtUtc = observation.ObservedAtUtc,
+            LastObservedAtUtc = observation.CapturedAtUtc,
+            LastSourceEventAtUtc = VerifiedSourceTime(observation) ?? previous.LastSourceEventAtUtc,
         };
     }
 
@@ -382,7 +392,8 @@ public static class CodexTokenCounterReducer
         CodexTokenCountObservation observation,
         int epoch,
         Counters counters,
-        bool hasCumulativeBaseline)
+        bool hasCumulativeBaseline,
+        DateTimeOffset? previousSourceEventAtUtc = null)
     {
         return new CodexTokenCounterState(
             observation.SourceFile,
@@ -394,9 +405,15 @@ public static class CodexTokenCounterReducer
             counters.ReasoningOutputTokens,
             counters.TotalTokens,
             observation.SourceEventId,
-            observation.ObservedAtUtc,
-            hasCumulativeBaseline);
+            observation.CapturedAtUtc,
+            hasCumulativeBaseline)
+        {
+            LastSourceEventAtUtc = VerifiedSourceTime(observation) ?? previousSourceEventAtUtc,
+        };
     }
+
+    private static DateTimeOffset? VerifiedSourceTime(CodexTokenCountObservation observation) =>
+        observation.SourceTimestampQuality == CodexSourceTimestampQuality.Valid ? observation.SourceEventAtUtc : null;
 
     private static long Clamp(long value)
     {

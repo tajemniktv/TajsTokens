@@ -645,7 +645,8 @@ public sealed partial class ObservatoryPage : Page
         string window = item.ContextWindowTokens is long windowTokens ? FormatCount(windowTokens) : "?";
         string model = string.IsNullOrWhiteSpace(item.Model) ? "model unknown" : item.Model;
         return new ContextRow(
-            $"{item.ObservedAtUtc.ToLocalTime():g} · {label}",
+            $"{(item.SourceTimestampQuality == CodexSourceTimestampQuality.Valid && item.SourceEventAtUtc is { } at ? at.ToLocalTime().ToString("g") :
+                item.CapturedAtUtc is { } captured ? $"event time unknown · captured {captured.ToLocalTime():g}" : "event time unknown")} · {label}",
             $"{model} · input {input} / window {window}" +
             (item.RecordBytes is long bytes ? $" · record {FormatBytes(bytes)}" : string.Empty));
     }

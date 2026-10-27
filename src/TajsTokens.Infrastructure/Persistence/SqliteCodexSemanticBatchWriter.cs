@@ -135,64 +135,8 @@ internal sealed class SqliteCodexIngestionBatchWriter(
             .LastOrDefault(value => !string.IsNullOrWhiteSpace(value));
         DateTimeOffset lastSeen = records.Max(record => record.TimestampUtc);
 
-        // A logical rollout path can be replaced with a new filesystem identity. The token-event and
-        // counter tables predate source_identity columns, so the privacy-safe file label is their
-        // generation owner. Retire the old generation in the same transaction that activates the new
-        // rollout identity; otherwise a replacement replay leaves both generations in accounting.
-        using (SqliteCommand replaceGeneration = BuildCommand(
-                   connection,
-                   transaction,
-                   """
-                   DELETE FROM codex_native_token_events
-                   WHERE source_file = $file
-                     AND EXISTS (
-                         SELECT 1 FROM rollout_files
-                         WHERE file_path = $file AND source_identity <> $identity);
-
-                   DELETE FROM codex_counter_state
-                   WHERE source_file = $file
-                     AND EXISTS (
-                         SELECT 1 FROM rollout_files
-                         WHERE file_path = $file AND source_identity <> $identity);
-
-                   DELETE FROM codex_workload_observations
-                   WHERE source_identity IN (SELECT source_identity FROM rollout_files
-                       WHERE file_path = $file AND source_identity <> $identity);
-
-                   DELETE FROM quota_snapshots
-                   WHERE source_identity IN (SELECT source_identity FROM rollout_files
-                       WHERE file_path = $file AND source_identity <> $identity);
-
-                   DELETE FROM context_observations
-                   WHERE event_id IN (SELECT source_record_id || ':ctx' FROM rollout_records
-                       WHERE file_path = $file AND source_identity <> $identity);
-
-                   DELETE FROM usage_events
-                   WHERE event_id IN (SELECT source_record_id FROM rollout_records
-                       WHERE file_path = $file AND source_identity <> $identity)
-                      OR event_id IN (SELECT source_record_id || ':token' FROM rollout_records
-                       WHERE file_path = $file AND source_identity <> $identity);
-
-                   DELETE FROM codex_parser_state
-                   WHERE source_identity IN (
-                       SELECT source_identity FROM rollout_files
-                       WHERE file_path = $file AND source_identity <> $identity);
-
-                   DELETE FROM rollout_records
-                   WHERE source_identity IN (
-                       SELECT source_identity FROM rollout_files
-                       WHERE file_path = $file AND source_identity <> $identity);
-
-                   DELETE FROM rollout_files
-                   WHERE file_path = $file AND source_identity <> $identity;
-                   """,
-                   "$file",
-                   "$identity"))
-        {
-            Set(replaceGeneration, "$file", safeFileLabel);
-            Set(replaceGeneration, "$identity", sourceIdentity);
-            await replaceGeneration.ExecuteNonQueryAsync(cancellationToken);
-        }
+        await SqliteCodexSourceGeneration.RetirePreviousAsync(
+            connection, transaction, safeFileLabel, sourceIdentity, cancellationToken);
 
         using (SqliteCommand rolloutFile = BuildCommand(
                    connection,
@@ -231,6 +175,9 @@ internal sealed class SqliteCodexIngestionBatchWriter(
         foreach (ParsedRolloutRecord record in records)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            if (record.TimestampQuality != CodexSourceTimestampQuality.Valid)
+                await SqliteCodexSourceGeneration.RemoveUntimedTimelineAsync(connection, transaction, record.SourceRecordId, cancellationToken);
 
             Set(rolloutRecord, "$id", record.SourceRecordId);
             Set(rolloutRecord, "$identity", sourceIdentity);
@@ -305,6 +252,10 @@ internal sealed class SqliteCodexIngestionBatchWriter(
                 Set(context, "$compaction", record.ContextObservation.IsCompaction ? 1 : 0);
                 Set(context, "$bytes", DbValue(record.ContextObservation.RecordBytes));
                 Set(context, "$captured", SerializeUtc(record.ContextObservation.CapturedAtUtc ?? DateTimeOffset.UtcNow));
+                Set(context, "$sourceEventAt", DbValue(record.ContextObservation.SourceEventAtUtc is { } sourceAt
+                    ? SerializeUtc(sourceAt)
+                    : null));
+                Set(context, "$timeQuality", record.ContextObservation.SourceTimestampQuality.ToString());
                 await context.ExecuteNonQueryAsync(cancellationToken);
             }
             if (record.WorkloadObservation is not null)
@@ -448,9 +399,13 @@ internal sealed class SqliteCodexIngestionBatchWriter(
             """
             INSERT INTO context_observations(
                 event_id, session_id, agent_id, observed_at_utc, model, input_tokens,
-                context_window_tokens, is_compaction, record_bytes, captured_at_utc)
-            VALUES($event, $session, $agent, $observed, $model, $input, $window, $compaction, $bytes, $captured)
-            ON CONFLICT(event_id) DO NOTHING;
+                context_window_tokens, is_compaction, record_bytes, captured_at_utc, source_event_at_utc, source_timestamp_quality)
+            VALUES($event, $session, $agent, $observed, $model, $input, $window, $compaction, $bytes, $captured, $sourceEventAt, $timeQuality)
+            ON CONFLICT(event_id) DO UPDATE SET
+                source_event_at_utc = excluded.source_event_at_utc,
+                source_timestamp_quality = excluded.source_timestamp_quality
+            WHERE context_observations.source_timestamp_quality = 'LegacyUnverified'
+              AND context_observations.source_event_at_utc IS NULL;
             """,
             "$event",
             "$session",
@@ -461,7 +416,9 @@ internal sealed class SqliteCodexIngestionBatchWriter(
             "$window",
             "$compaction",
             "$bytes",
-            "$captured");
+            "$captured",
+            "$sourceEventAt",
+            "$timeQuality");
     }
 
     private static SqliteCommand BuildCommand(

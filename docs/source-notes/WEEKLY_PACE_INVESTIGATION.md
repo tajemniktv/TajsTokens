@@ -68,6 +68,8 @@ The data therefore does **not** establish either 14 pp/h or 0.1 pp/h as the curr
 
 The unchanged integer meter does not establish exact zero consumption, and ongoing local work does not supply a quota conversion. In this capture, the retained native token ledger ended at 12:12:22 local, and retained workload observations ended at 12:00:53 local. Their absence during the reported interval is not evidence that the user was idle. The compact outlook does not read either training dataset. A synthetic regression with positively recorded ongoing token work reproduces the same legacy decay, showing that ingestion lag is not required to cause this artifact.
 
+Compatibility context: the affected installed build supported observatory component 8 while its retained database was already at component 9. That mismatch blocks observatory initialization, including recent-work and native-ingestion paths. Integrating the schema-9 timestamp readers/writers restores compatibility without downgrading evidence or changing the quota-only EWMA mechanism above.
+
 ## Regression and remaining decision
 
 `WeeklyPaceRegressionTests` covers exact retained-anchor replay; identical endpoint/elapsed-time comparisons with sparse and dense flat polling; and the production background service with ongoing recorded local work. It also verifies that an entirely flat segment remains unknown rather than becoming a measured zero burn or calibrated survival claim.
