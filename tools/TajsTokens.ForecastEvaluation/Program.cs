@@ -7,6 +7,12 @@ using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
+if (args.Length == 1 && args[0] == "--calibration-worker")
+{
+    Environment.ExitCode = await CalibrationWorkerHost.RunAsync(Console.In, Console.Out);
+    return;
+}
+
 if ((args.Length is 2 or 3) && args[0] == "--daily-json")
 {
     int days = args.Length == 2 ? 30 : int.Parse(args[2], CultureInfo.InvariantCulture);

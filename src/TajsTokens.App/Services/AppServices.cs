@@ -72,6 +72,9 @@ public sealed class AppServices
         CodexRolloutInspection = observatory.RolloutInspection;
 
         Intelligence = new SqliteIntelligenceService(DatabasePath, Repository, () => Settings.RolloutAccountAssociations);
+        Calibration = new CalibrationProcessService(
+            Path.Combine(AppContext.BaseDirectory, "TajsTokens.ForecastEvaluation.exe"), DatabasePath,
+            () => Settings.RolloutAccountAssociations, isBackground ?? (() => false));
         Telemetry = new TelemetryCoordinator(
             CodexTokenAccountingProvider,
             CodexQuotaProvider,
@@ -79,7 +82,8 @@ public sealed class AppServices
             CodexObservatory,
             Intelligence,
             ServerEvidence,
-            isBackground);
+            isBackground,
+            calibrationService: Calibration);
         CodexIntelligence = new CodexIntelligenceEngine(
             () => new SqliteForecastDatasetReader(DatabasePath, Settings.RolloutAccountAssociations),
             ServerEvidence,
@@ -118,6 +122,7 @@ public sealed class AppServices
     public ICodexObservatoryService CodexObservatory { get; }
     public ICodexRolloutInspection CodexRolloutInspection { get; }
     public IIntelligenceService Intelligence { get; }
+    public CalibrationProcessService Calibration { get; }
     public ICodexIntelligence CodexIntelligence { get; }
     public TelemetryCoordinator Telemetry { get; }
     public QuotaAlertEngine AlertEngine { get; }

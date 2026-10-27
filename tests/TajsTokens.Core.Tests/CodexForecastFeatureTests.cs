@@ -33,15 +33,16 @@ public sealed class CodexForecastFeatureTests
         var context = new CodexContextObservation("ctx", "child", null, Origin.AddMinutes(-3), "m", 10, 100, false,
             CapturedAtUtc: Origin.AddHours(1));
         var data = new CodexForecastDataset([], metadata.Reverse().ToArray(),
-            [token, token with { SessionId = "child" }, token with { ObservedAtUtc = Origin.AddDays(-1) }],
+            [token, token with { SessionId = "child", Model = "other", ObservedAtUtc = Origin.AddMinutes(-8) }, token with { ObservedAtUtc = Origin.AddDays(-1) }],
             [context, context with { EventId = "ctx2", InputTokens = 20 }], Origin, "fixture");
         var index = new CodexForecastFeatureIndex(data);
         foreach (ForecastReplayAvailability availability in Enum.GetValues<ForecastReplayAvailability>())
         foreach (int offset in new[] { -200, -20, 0, 60, 200 })
+        foreach (double hours in new[] { 5d / 60, .25, .5, 2, 3.7 })
         {
             DateTimeOffset at = Origin.AddMinutes(offset);
-            Assert.Equal(JsonSerializer.Serialize(CodexForecastFeatureBuilder.Build(data, at, availability: availability)),
-                JsonSerializer.Serialize(index.Build(at, availability)));
+            Assert.Equal(JsonSerializer.Serialize(CodexForecastFeatureBuilder.Build(data, at, hours, availability)),
+                JsonSerializer.Serialize(index.Build(at, hours, availability)));
         }
     }
 

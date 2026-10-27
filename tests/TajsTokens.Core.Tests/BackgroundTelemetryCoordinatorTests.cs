@@ -111,6 +111,94 @@ public sealed class BackgroundTelemetryCoordinatorTests
         }
     }
 
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task IsolatedCalibrationRunsInEitherModeWithoutBlockingOrReplacingNewerQuota(bool background)
+    {
+        string directory = Directory.CreateTempSubdirectory("tajstokens-worker-").FullName;
+        using var lifetime = new CancellationTokenSource();
+        var intelligence = new ControlledIntelligence();
+        intelligence.Release.TrySetResult();
+        var calibration = new ControlledCalibration();
+        try
+        {
+            var coordinator = new TelemetryCoordinator(new EmptyTokens(), new ChangingQuota(),
+                new SqliteTelemetryRepository(Path.Combine(directory, "test.db")),
+                intelligenceService: intelligence, isBackground: () => background, calibrationService: calibration);
+            TelemetrySnapshot first = await coordinator.RefreshAsync(RefreshTrigger.Startup, lifetime.Token)
+                .WaitAsync(TimeSpan.FromSeconds(5));
+            await calibration.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Task pending = coordinator.CalibrationCompletion;
+            await coordinator.BackgroundForecastCompletion.WaitAsync(TimeSpan.FromSeconds(5));
+            await coordinator.RefreshAsync(RefreshTrigger.Interval, lifetime.Token).WaitAsync(TimeSpan.FromSeconds(5));
+            await coordinator.BackgroundForecastCompletion.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(1, calibration.Calls);
+            QuotaSnapshot old = Assert.Single(first.QuotaSnapshots);
+            calibration.Result.TrySetResult(new CodexCalibrationResult(
+                [new CurrentQuotaForecast(old, TelemetryHealthState.Live,
+                    TajsTokens.Core.Services.QuotaPredictionService.BuildResetOutlook([old], old.CapturedAtUtc), "fixture")], null));
+            await pending.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(20, Assert.Single(coordinator.Latest.QuotaSnapshots).UsedPercent);
+            Assert.Equal(20, Assert.Single(coordinator.Latest.CurrentForecasts).Current.UsedPercent);
+            Assert.Contains(coordinator.Latest.Events, x => x.Type == "Calibration completed");
+        }
+        finally
+        {
+            lifetime.Cancel();
+            calibration.Result.TrySetResult(null);
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public async Task DelayedCompactOutlookDoesNotDowngradeCompletedCalibration()
+    {
+        string directory = Directory.CreateTempSubdirectory("tajstokens-worker-").FullName;
+        using var lifetime = new CancellationTokenSource();
+        var intelligence = new ControlledIntelligence();
+        var calibration = new ControlledCalibration();
+        try
+        {
+            var coordinator = new TelemetryCoordinator(new EmptyTokens(), new ChangingQuota(),
+                new SqliteTelemetryRepository(Path.Combine(directory, "test.db")),
+                intelligenceService: intelligence, isBackground: () => true, calibrationService: calibration);
+            TelemetrySnapshot first = await coordinator.RefreshAsync(RefreshTrigger.Startup, lifetime.Token);
+            await intelligence.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await calibration.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            QuotaSnapshot quota = Assert.Single(first.QuotaSnapshots);
+            var detailed = new CurrentQuotaForecast(quota, TelemetryHealthState.Live,
+                TajsTokens.Core.Services.QuotaPredictionService.BuildResetOutlook([quota], quota.CapturedAtUtc), "detailed fixture");
+            calibration.Result.TrySetResult(new CodexCalibrationResult([detailed], null));
+            await coordinator.CalibrationCompletion.WaitAsync(TimeSpan.FromSeconds(5));
+            intelligence.Release.TrySetResult();
+            await coordinator.BackgroundForecastCompletion.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal("detailed fixture", Assert.Single(coordinator.Latest.CurrentForecasts).HistoryPolicy);
+        }
+        finally
+        {
+            lifetime.Cancel();
+            intelligence.Release.TrySetResult();
+            calibration.Result.TrySetResult(null);
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(directory, true);
+        }
+    }
+
+    private sealed class ControlledCalibration : ICodexCalibrationService
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource<CodexCalibrationResult?> Result { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public int Calls;
+        public async Task<CodexCalibrationResult?> TryCalibrateAsync(IReadOnlyList<QuotaLaneState> lanes, CancellationToken token)
+        {
+            Interlocked.Increment(ref Calls);
+            Started.TrySetResult();
+            return await Result.Task.WaitAsync(token);
+        }
+    }
+
     private sealed class TestClock : TimeProvider
     {
         public DateTimeOffset Now { get; set; } = DateTimeOffset.UtcNow;

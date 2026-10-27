@@ -49,5 +49,30 @@
         <ProjectReference Include="..\TajsTokens.Core\TajsTokens.Core.csproj"/>
         <ProjectReference Include="..\TajsTokens.Infrastructure\TajsTokens.Infrastructure.csproj"/>
     </ItemGroup>
+
+    <!-- The existing headless evaluation executable hosts the bounded calibration worker.
+         It shares the app's self-contained runtime and libraries; only its four entry files
+         are added to output/publish. Its build remains incremental under artifacts/. -->
+    <Target Name="PrepareCalibrationWorker" BeforeTargets="CopyFilesToOutputDirectory;ComputeFilesToPublish"
+            Condition="'$(OS)' == 'Windows_NT' and '$(DesignTimeBuild)' != 'true'">
+        <PropertyGroup>
+            <_CalibrationProject>$(MSBuildThisFileDirectory)..\..\tools\TajsTokens.ForecastEvaluation\TajsTokens.ForecastEvaluation.csproj</_CalibrationProject>
+            <_CalibrationRid Condition="'$(RuntimeIdentifier)' != ''">$(RuntimeIdentifier)</_CalibrationRid>
+            <_CalibrationRid Condition="'$(_CalibrationRid)' == ''">win-$(Platform)</_CalibrationRid>
+            <_CalibrationProperties>Configuration=$(Configuration);Platform=AnyCPU;RuntimeIdentifier=$(_CalibrationRid);SelfContained=true;DogfoodEnabled=false</_CalibrationProperties>
+        </PropertyGroup>
+        <MSBuild Projects="$(_CalibrationProject)" Targets="Restore;Build" Properties="$(_CalibrationProperties)" BuildInParallel="false" />
+        <MSBuild Projects="$(_CalibrationProject)" Targets="GetTargetPath" Properties="$(_CalibrationProperties)">
+            <Output TaskParameter="TargetOutputs" ItemName="_CalibrationTarget" />
+        </MSBuild>
+        <ItemGroup>
+            <_CalibrationFile Include="@(_CalibrationTarget)" />
+            <_CalibrationFile Include="@(_CalibrationTarget->'%(RootDir)%(Directory)%(Filename).exe')" />
+            <_CalibrationFile Include="@(_CalibrationTarget->'%(RootDir)%(Directory)%(Filename).deps.json')" />
+            <_CalibrationFile Include="@(_CalibrationTarget->'%(RootDir)%(Directory)%(Filename).runtimeconfig.json')" />
+            <ResolvedFileToPublish Include="@(_CalibrationFile)" RelativePath="%(Filename)%(Extension)" CopyToPublishDirectory="PreserveNewest" />
+        </ItemGroup>
+        <Copy SourceFiles="@(_CalibrationFile)" DestinationFolder="$(TargetDir)" SkipUnchangedFiles="true" />
+    </Target>
 </Project>
 

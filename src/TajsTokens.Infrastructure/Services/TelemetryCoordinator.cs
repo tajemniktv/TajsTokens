@@ -27,6 +27,9 @@ public sealed class TelemetryCoordinator
     private readonly SemaphoreSlim _forecastRefreshGate = new(1, 1);
     private readonly Func<bool> _isBackground;
     private readonly TimeProvider _timeProvider;
+    private readonly ICodexCalibrationService? _calibrationService;
+    private readonly SemaphoreSlim _calibrationGate = new(1, 1);
+    private Task _calibrationTask = Task.CompletedTask;
     private CancellationTokenSource? _backgroundForecastCancellation;
     private Task _backgroundForecastTask = Task.CompletedTask;
     private readonly IIntelligenceService? _intelligenceService;
@@ -49,7 +52,8 @@ public sealed class TelemetryCoordinator
         IIntelligenceService? intelligenceService = null,
         CodexServerEvidenceService? serverEvidence = null,
         Func<bool>? isBackground = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        ICodexCalibrationService? calibrationService = null)
     {
         _tokenProvider = tokenProvider;
         _quotaProvider = quotaProvider;
@@ -59,11 +63,13 @@ public sealed class TelemetryCoordinator
         _serverEvidence = serverEvidence;
         _isBackground = isBackground ?? (() => false);
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _calibrationService = calibrationService;
     }
 
     public TelemetrySnapshot Latest => Volatile.Read(ref _latest);
     public bool IsForecastRefreshRunning => _forecastRefreshGate.CurrentCount == 0;
     internal Task BackgroundForecastCompletion => Volatile.Read(ref _backgroundForecastTask);
+    internal Task CalibrationCompletion => Volatile.Read(ref _calibrationTask);
 
     public void SuspendDetailedForecasts()
     {
@@ -84,7 +90,9 @@ public sealed class TelemetryCoordinator
 
     private async Task<TelemetrySnapshot> RefreshCoreAsync(RefreshTrigger trigger, CancellationToken cancellationToken)
     {
-        bool deferForecasts = _isBackground();
+        // The production app runs detailed fits in an isolated, bounded worker in both modes.
+        // Quota collection and the foreground dispatcher never wait for that worker.
+        bool deferForecasts = _calibrationService is not null || _isBackground();
         if (!deferForecasts)
         {
             lock (_activeRefreshSync) _backgroundForecastCancellation?.Cancel();
@@ -540,6 +548,9 @@ public sealed class TelemetryCoordinator
             if (deferForecasts && persistenceAvailable && _intelligenceService is not null)
                 Volatile.Write(ref _backgroundForecastTask,
                     Task.Run(() => RefreshBackgroundForecastsAsync(publishedSnapshot, cancellationToken), cancellationToken));
+            if (persistenceAvailable && _calibrationService is not null)
+                Volatile.Write(ref _calibrationTask,
+                    Task.Run(() => CalibrateAsync(publishedSnapshot, cancellationToken), cancellationToken));
 
             // Historical intelligence is derived from already-persisted normalized telemetry. Queue
             // it only after the final telemetry snapshot has been published, and never hold the
@@ -592,7 +603,7 @@ public sealed class TelemetryCoordinator
         {
             lock (_activeRefreshSync)
             {
-                if (!_isBackground()) return;
+                if (!_isBackground() && _calibrationService is null) return;
                 _backgroundForecastCancellation = forecastCancellation;
             }
             CancellationToken token = forecastCancellation.Token;
@@ -603,13 +614,24 @@ public sealed class TelemetryCoordinator
             {
                 token.ThrowIfCancellationRequested();
                 TelemetrySnapshot latest = Latest;
+                var merged = forecasts.Select(forecast =>
+                    latest.QuotaLanes.Any(lane => lane.IsFresh && lane.Snapshot == forecast.Current)
+                        ? forecast : forecast with { State = TelemetryHealthState.Stale }).ToList();
+                // A delayed compact calculation must not downgrade a detailed result (or another
+                // fresh anchor) published while it was running.
+                foreach (CurrentQuotaForecast current in latest.CurrentForecasts.Where(x => x.IsFresh && x.Forecast is not null))
+                {
+                    if (!latest.QuotaLanes.Any(lane => lane.IsFresh && lane.Snapshot == current.Current)) continue;
+                    merged.RemoveAll(x => x.Current.Kind == current.Current.Kind &&
+                        x.Current.Provider == current.Current.Provider && x.Current.Profile == current.Current.Profile);
+                    merged.Add(current);
+                }
                 // Never attach an older calculation to a newer provider anchor or token generation.
                 var updated = latest with
                 {
-                    CurrentForecasts = forecasts.Select(forecast => latest.QuotaLanes.Any(lane => lane.IsFresh && lane.Snapshot == forecast.Current)
-                        ? forecast
-                        : forecast with { State = TelemetryHealthState.Stale }).ToArray(),
-                    TokenForecast = latest.TokenForecast is { } workload ? workload with { IsStale = true } : null,
+                    CurrentForecasts = merged,
+                    TokenForecast = _calibrationService is not null ? latest.TokenForecast :
+                        latest.TokenForecast is { } workload ? workload with { IsStale = true } : null,
                     Events = latest.Events.Append(new TelemetryRefreshEvent(_timeProvider.GetUtcNow(),
                         "Background forecasts completed", "Background forecast calculation finished; quota polling continued independently.")).ToArray(),
                 };
@@ -633,6 +655,47 @@ public sealed class TelemetryCoordinator
             }
             _forecastRefreshGate.Release();
         }
+    }
+
+    private async Task CalibrateAsync(TelemetrySnapshot basis, CancellationToken cancellationToken)
+    {
+        if (!await _calibrationGate.WaitAsync(0, cancellationToken)) return;
+        try
+        {
+            CodexCalibrationResult? result = await _calibrationService!.TryCalibrateAsync(basis.QuotaLanes, cancellationToken);
+            if (result is null) return;
+            await _refreshGate.WaitAsync(cancellationToken);
+            try
+            {
+                TelemetrySnapshot latest = Latest;
+                var forecasts = latest.CurrentForecasts.ToList();
+                foreach (CurrentQuotaForecast candidate in result.Forecasts.Where(x => x.IsFresh && x.Forecast is not null))
+                {
+                    if (!latest.QuotaLanes.Any(lane => lane.IsFresh && lane.Snapshot == candidate.Current)) continue;
+                    forecasts.RemoveAll(x => x.Current == candidate.Current);
+                    forecasts.Add(candidate);
+                }
+                bool sameTokens = basis.TokenGeneration is { Revision: { } before } &&
+                    latest.TokenGeneration is { Revision: { } after } && before == after &&
+                    basis.TokenGeneration.Source == latest.TokenGeneration.Source && latest.TokenDataFresh;
+                var updated = latest with
+                {
+                    CurrentForecasts = forecasts,
+                    TokenForecast = result.Workload is { } workload ? workload with { IsStale = !sameTokens } : latest.TokenForecast,
+                    Events = latest.Events.Append(new TelemetryRefreshEvent(_timeProvider.GetUtcNow(), "Calibration completed",
+                        $"Detailed calibration finished independently of quota polling; {result.CacheHits} numeric fit cache hits, {result.CacheMisses} misses. Newer quota anchors retain their current outlooks.")).ToArray(),
+                };
+                Volatile.Write(ref _latest, updated);
+                SnapshotUpdated?.Invoke(updated);
+            }
+            finally { _refreshGate.Release(); }
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { }
+        catch (Exception error)
+        {
+            _backgroundEvents.Enqueue(new TelemetryRefreshEvent(_timeProvider.GetUtcNow(), "Calibration deferred", SummarizeError(error)));
+        }
+        finally { _calibrationGate.Release(); }
     }
 
     public async Task RunPeriodicAsync(TimeSpan interval, CancellationToken cancellationToken)

@@ -32,6 +32,8 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
     private const uint WmNull = 0x0000;
     private const uint WmApp = 0x8000;
     private const uint WmLButtonDblClk = 0x0203;
+    private const uint NinSelect = 0x0400;
+    private const uint NinKeySelect = 0x0401;
     private const uint WmRButtonUp = 0x0205;
     private const uint WmContextMenu = 0x007B;
     private const uint NimAdd = 0x00000000;
@@ -259,7 +261,7 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
             // and the icon id occupies HIWORD(lParam). Comparing the full lParam would make every
             // callback look different once version 4 is active and silently break tray interactions.
             uint mouseMessage = unchecked((uint)lParam.ToInt64()) & 0xFFFFu;
-            if (mouseMessage == WmLButtonDblClk)
+            if (mouseMessage is WmLButtonDblClk or NinSelect or NinKeySelect)
             {
                 OpenDashboardRequested?.Invoke(this, EventArgs.Empty);
                 return 0;

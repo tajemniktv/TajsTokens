@@ -22,6 +22,9 @@ public sealed partial class MainWindow : Window
     private readonly DispatcherTimer _saveWindowTimer = new() { Interval = TimeSpan.FromMilliseconds(500) };
     private readonly string _windowStatePath = Path.Combine(((App)Application.Current).Services.DataFolder, "window-state.json");
     private bool _synchronizing;
+    private bool _ready;
+    private bool _dashboardVisible;
+    private long _viewGeneration;
     private SuspendedNavigation? _suspendedNavigation;
     private Frame ContentFrame => (Frame)AppNavigation.Content;
     private WindowSizeState _windowSize = new(1200, 850, false);
@@ -70,7 +73,7 @@ public sealed partial class MainWindow : Window
             _saveWindowTimer.Stop();
             _saveWindowTimer.Start();
         };
-        Navigate(typeof(CodexIntelligencePage));
+        _ready = true;
     }
 
     private void SaveWindowSize()
@@ -97,6 +100,9 @@ public sealed partial class MainWindow : Window
 
     public void SetDashboardVisible(bool visible)
     {
+        if (_dashboardVisible == visible) return;
+        _dashboardVisible = visible;
+        long generation = ++_viewGeneration;
         if (!visible && _suspendedNavigation is null && ContentFrame.CurrentSourcePageType is { } page)
         {
             _suspendedNavigation = new SuspendedNavigation(page, ContentFrame.Tag,
@@ -111,13 +117,23 @@ public sealed partial class MainWindow : Window
             previous.CacheSize = 0;
             previous.Content = null;
         }
-        else if (visible && _suspendedNavigation is { } saved)
+        else if (visible)
         {
-            _suspendedNavigation = null;
-            Navigate(saved.Page, saved.Parameter);
-            foreach (PageStackEntry entry in saved.BackStack) ContentFrame.BackStack.Add(entry);
-            foreach (PageStackEntry entry in saved.ForwardStack) ContentFrame.ForwardStack.Add(entry);
-            AppNavigation.IsBackEnabled = ContentFrame.CanGoBack;
+            // Show/activate the shell first; history queries and page construction follow on a
+            // later dispatcher turn and never hold the native tray callback open.
+            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            {
+                if (!_dashboardVisible || generation != _viewGeneration) return;
+                if (_suspendedNavigation is { } saved)
+                {
+                    _suspendedNavigation = null;
+                    Navigate(saved.Page, saved.Parameter);
+                    foreach (PageStackEntry entry in saved.BackStack) ContentFrame.BackStack.Add(entry);
+                    foreach (PageStackEntry entry in saved.ForwardStack) ContentFrame.ForwardStack.Add(entry);
+                    AppNavigation.IsBackEnabled = ContentFrame.CanGoBack;
+                }
+                else if (ContentFrame.CurrentSourcePageType is null) Navigate(typeof(CodexIntelligencePage));
+            });
         }
     }
 
@@ -159,7 +175,7 @@ public sealed partial class MainWindow : Window
 
     private void OnNavigationSelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
     {
-        if (_synchronizing) return;
+        if (!_ready || _synchronizing) return;
         if (args.IsSettingsSelected)
         {
             Navigate(typeof(SettingsPage));

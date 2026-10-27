@@ -30,9 +30,12 @@ public partial class App : Application
     private CancellationTokenSource? _periodicCancellation;
     private IDisposable? _startupLease;
     private Window? _window;
+    private bool _dashboardOpenQueued;
 
     public App()
     {
+        if (Environment.GetCommandLineArgs().Contains("--open-dashboard", StringComparer.OrdinalIgnoreCase) &&
+            DogfoodLifetime.TryRequestDashboard()) Environment.Exit(0);
         // The deployment-owned child is started while its parent holds this same lease.
         if (!Environment.GetCommandLineArgs().Contains("--dogfood-start", StringComparer.Ordinal))
         {
@@ -55,9 +58,9 @@ public partial class App : Application
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
         _dispatcher = DispatcherQueue.GetForCurrentThread();
-        _dogfoodLifetime = new DogfoodLifetime(() => RunOnDispatcher(RequestExit));
+        _dogfoodLifetime = new DogfoodLifetime(() => RunOnDispatcher(RequestExit), () => RunOnDispatcher(RequestDashboard));
 
-        _trayService.OpenDashboardRequested += (_, _) => ShowDashboard();
+        _trayService.OpenDashboardRequested += (_, _) => RequestDashboard();
         _trayService.RefreshRequested += (_, _) => _ = RefreshFromTrayAsync();
         _trayService.ExitRequested += (_, _) => RequestExit();
         _trayService.NotificationsEnabledChanged += OnNotificationsEnabledChanged;
@@ -370,8 +373,26 @@ public partial class App : Application
         UpdateDashboardVisibility();
     }
 
+    private void RequestDashboard()
+    {
+        // Lift the process cap before any XAML construction, page reload, or queued activation.
+        _resourcePolicy.SetDashboardVisible(true);
+        Services.Calibration.RefreshBudget();
+        if (_dashboardOpenQueued || _exitRequested) return;
+        _dashboardOpenQueued = true;
+        _dispatcher?.TryEnqueue(DispatcherQueuePriority.High, () =>
+        {
+            try { ShowDashboard(); }
+            finally { _dashboardOpenQueued = false; }
+        });
+    }
+
     private void ShowDashboard()
     {
+        _resourcePolicy.SetDashboardVisible(true);
+        Services.Calibration.RefreshBudget();
+        bool wasVisible = _window?.AppWindow.IsVisible == true &&
+            _window.AppWindow.Presenter is not OverlappedPresenter { State: OverlappedPresenterState.Minimized };
         if (_window is null)
         {
             _window = new MainWindow();
@@ -388,7 +409,7 @@ public partial class App : Application
             minimized.Restore();
         _window.Activate();
         UpdateDashboardVisibility();
-        if (Services.Telemetry.Latest.HasAnyData) _ = RefreshFromTrayAsync();
+        if (!wasVisible && Services.Telemetry.Latest.HasAnyData) _ = RefreshFromTrayAsync();
     }
 
     private void UpdateDashboardVisibility()
@@ -399,6 +420,7 @@ public partial class App : Application
              presenter.State != OverlappedPresenterState.Minimized);
         bool enteringBackground = !visible && !_resourcePolicy.IsBackground;
         _resourcePolicy.SetDashboardVisible(visible);
+        Services.Calibration.RefreshBudget();
         window.SetDashboardVisible(visible);
         if (enteringBackground) Services.Telemetry.SuspendDetailedForecasts();
     }
@@ -411,6 +433,8 @@ public partial class App : Application
         }
 
         _exitRequested = true;
+        // Shutdown and cancellation must not compete for the tray's tiny CPU budget.
+        _resourcePolicy.SetDashboardVisible(true);
         _lifetimeCancellation.Cancel();
         _periodicCancellation?.Cancel();
         _periodicCancellation?.Dispose();
@@ -418,6 +442,7 @@ public partial class App : Application
         Services.Telemetry.SnapshotUpdated -= OnSnapshotUpdated;
         Services.SettingsChanged -= OnSettingsChanged;
         Services.LocalLimitsApi.Dispose();
+        Services.Calibration.Dispose();
         _resourcePolicy.Dispose();
         _trayService.Dispose();
         _dogfoodLifetime?.Dispose();

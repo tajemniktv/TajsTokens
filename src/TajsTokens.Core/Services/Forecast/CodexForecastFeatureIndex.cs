@@ -6,20 +6,20 @@ namespace TajsTokens.Core.Services;
 internal sealed class CodexForecastFeatureIndex
 {
     private readonly CodexForecastDataset _data;
-    private readonly CodexPredictiveTokenEvent[] _tokens;
+    private readonly (CodexPredictiveTokenEvent Row, int Ordinal)[] _tokens;
     private readonly DateTimeOffset[] _tokenTimes;
     private readonly CodexContextObservation[] _contexts;
     private readonly DateTimeOffset[] _contextTimes;
     private readonly CodexWorkloadObservation[] _metadata;
     private readonly DateTimeOffset[] _metadataTimes;
     private readonly Dictionary<string, (CodexWorkloadObservation Row, int Ordinal)[]> _sessions;
-    private readonly Dictionary<(DateTimeOffset, ForecastReplayAvailability), CodexForecastFeatures> _features = new();
+    private readonly Dictionary<(DateTimeOffset, double, ForecastReplayAvailability), CodexForecastFeatures> _features = new();
 
     public CodexForecastFeatureIndex(CodexForecastDataset data)
     {
         _data = data;
-        _tokens = data.Tokens.OrderBy(x => x.ObservedAtUtc).ToArray();
-        _tokenTimes = _tokens.Select(x => x.ObservedAtUtc).ToArray();
+        _tokens = data.Tokens.Select((row, ordinal) => (Row: row, Ordinal: ordinal)).OrderBy(x => x.Row.ObservedAtUtc).ToArray();
+        _tokenTimes = _tokens.Select(x => x.Row.ObservedAtUtc).ToArray();
         _contexts = data.Context.OrderBy(x => x.ObservedAtUtc).ToArray();
         _contextTimes = _contexts.Select(x => x.ObservedAtUtc).ToArray();
         _metadata = data.Workload.Where(x => x.ObservedAtUtc is not null).OrderBy(x => x.ObservedAtUtc).ToArray();
@@ -29,10 +29,16 @@ internal sealed class CodexForecastFeatureIndex
     }
 
     public CodexForecastFeatures Build(DateTimeOffset origin, ForecastReplayAvailability availability)
+        => Build(origin, 2, availability);
+
+    public CodexForecastFeatures Build(DateTimeOffset origin, double lookbackHours, ForecastReplayAvailability availability)
     {
-        if (_features.TryGetValue((origin, availability), out CodexForecastFeatures? cached)) return cached;
-        DateTimeOffset from = origin.AddHours(-2);
-        CodexPredictiveTokenEvent[] tokens = _tokens[Through(_tokenTimes, from)..Through(_tokenTimes, origin)];
+        if (!double.IsFinite(lookbackHours) || lookbackHours <= 0 || lookbackHours > 168)
+            throw new ArgumentOutOfRangeException(nameof(lookbackHours));
+        if (_features.TryGetValue((origin, lookbackHours, availability), out CodexForecastFeatures? cached)) return cached;
+        DateTimeOffset from = origin.AddHours(-lookbackHours);
+        CodexPredictiveTokenEvent[] tokens = _tokens[Through(_tokenTimes, from)..Through(_tokenTimes, origin)]
+            .OrderBy(x => x.Ordinal).Select(x => x.Row).ToArray();
         var sessions = new HashSet<string>(tokens.Select(x => x.SessionId), StringComparer.Ordinal);
         for (int i = Through(_metadataTimes, from), end = Through(_metadataTimes, origin); i < end; i++)
             sessions.Add(_metadata[i].SessionId);
@@ -47,8 +53,8 @@ internal sealed class CodexForecastFeatureIndex
             Tokens = tokens,
             Workload = metadata,
             Context = _contexts[Through(_contextTimes, from)..Through(_contextTimes, origin)],
-        }, origin, 2, availability);
-        _features.Add((origin, availability), features);
+        }, origin, lookbackHours, availability);
+        _features.Add((origin, lookbackHours, availability), features);
         return features;
     }
 

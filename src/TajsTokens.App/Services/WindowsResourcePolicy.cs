@@ -106,6 +106,9 @@ internal sealed class WindowsResourcePolicy : IDisposable
 
     public void Dispose()
     {
+        // Closing a job handle does not remove its limit from a still-running process.
+        // Native WinUI/resource-manager teardown must finish with the cap disabled.
+        SetDashboardVisible(true);
         _disposed = true;
         _reclamation?.Cancel();
         _reclamation = null;

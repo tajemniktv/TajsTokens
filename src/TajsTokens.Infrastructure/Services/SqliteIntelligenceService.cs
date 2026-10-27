@@ -211,7 +211,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 if (!includeWorkload && forecast.Evidence is { } backgroundEvidence)
                     forecast = forecast with { Evidence = backgroundEvidence with
                     {
-                        WorkloadStatus = "Quota-pace outlook. Detailed workload recalibration resumes when the dashboard is open.",
+                        WorkloadStatus = "Quota-pace outlook. Detailed workload calibration runs independently with a limited resource budget.",
                     } };
                 if (forecast.Evidence is { } capturedEvidence)
                 {

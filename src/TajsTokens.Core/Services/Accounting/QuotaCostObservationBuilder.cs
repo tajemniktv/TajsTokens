@@ -38,6 +38,7 @@ public static class QuotaCostObservationBuilder
     {
         var result = new List<QuotaCostObservation>();
         var coverage = new List<QuotaCostConstructionCoverage>();
+        CodexForecastFeatureIndex? featureIndex = null;
         IReadOnlyList<QuotaHistoryDecision> history = QuotaHistoryPolicy.Describe(data.Quota, data.CapturedAtUtc);
         foreach (IGrouping<QuotaHistoryCohort, QuotaHistoryDecision> stream in QuotaHistoryPolicy.Streams(history))
         foreach (IReadOnlyList<QuotaSnapshot> epoch in QuotaForecastCalibration.SplitEpochs(QuotaHistoryPolicy.ReplayRows(stream)))
@@ -104,7 +105,8 @@ public static class QuotaCostObservationBuilder
                 }
                 previousEnd = end.CapturedAtUtc;
                 double hours = (end.CapturedAtUtc - start.CapturedAtUtc).TotalHours;
-                CodexForecastFeatures features = CodexForecastFeatureBuilder.Build(data, end.CapturedAtUtc, hours);
+                featureIndex ??= new CodexForecastFeatureIndex(data);
+                CodexForecastFeatures features = featureIndex.Build(end.CapturedAtUtc, hours, ForecastReplayAvailability.ReconstructedEventTime);
                 CodexPredictiveTokenEvent[] tokens = data.Tokens
                     .Where(x => x.ObservedAtUtc > start.CapturedAtUtc && x.ObservedAtUtc <= end.CapturedAtUtc).ToArray();
 

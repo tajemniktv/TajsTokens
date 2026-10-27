@@ -12,6 +12,16 @@ dotnet build TajsTokens.slnx -c Debug
 
 Run tests and builds serially when they share outputs. Use `--no-restore` after a successful restore. `dotnet build TajsTokens.slnx -c Debug -p:DogfoodEnabled=false` performs an isolated app build; CI and test-only builds do not deploy. Full WinUI validation requires Windows. SDK outputs are in ignored `artifacts/`, and task temporary files belong in `.codex/temp/`.
 
+The Windows app build also builds the existing `TajsTokens.ForecastEvaluation` project for the app's RID and packages its executable, DLL, dependency manifest and runtime configuration. The calibration child uses the app's self-contained runtime and shared libraries; keep these entry files together with the app when publishing. It reads requests through private standard input, accesses only the app-owned database and numeric cache, and is killed by its owned Windows job when the parent exits. `data/calibration-cache.db` is disposable derived data; `telemetry.db` remains the retained evidence store.
+
+To bring an already-running installed tray instance forward through the same activation handler:
+
+```powershell
+& "$env:LOCALAPPDATA/Programs/TajemnikTV/TajsTokens/current/TajsTokens.App.exe" --open-dashboard
+```
+
+The signal is restricted to the current user/session and the same installation directory. With no matching instance, this starts the dashboard normally. `--background` starts tray-only. Neither flag changes persistent settings.
+
 ## Daily installation
 
 A successful default local app build publishes, installs and restarts `%LOCALAPPDATA%\Programs\TajemnikTV\TajsTokens\current`. Persistent database/settings live in sibling `data`; the prior binary is kept in `previous`, and deployment backups are in `backups`. The build does not delete `data`.

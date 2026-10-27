@@ -19,6 +19,13 @@ internal sealed record AccountLocalRidge(double[] Means, double[] Scales, double
         if (features.Count == 0 || features.Count != targets.Count) return null;
         int width = features[0].Length;
         if (features.Any(x => x.Length != width || x.Any(v => !double.IsFinite(v))) || targets.Any(v => !double.IsFinite(v))) return null;
+        var cache = RidgeFitCacheScope.Current;
+        string? cacheKey = cache is null ? null : RidgeFitCacheScope.Key(features, targets, penalty);
+        if (cacheKey is not null && cache!.Read(cacheKey) is { } cached &&
+            cached.Means.Length == width && cached.Scales.Length == width && cached.Coefficients.Length == width + 1 &&
+            cached.Means.All(double.IsFinite) && cached.Scales.All(x => double.IsFinite(x) && x > 0) &&
+            cached.Coefficients.All(double.IsFinite))
+            return new AccountLocalRidge(cached.Means, cached.Scales, cached.Coefficients);
         double[] means = Enumerable.Range(0, width).Select(i => features.Average(x => x[i])).ToArray();
         double[] scales = Enumerable.Range(0, width)
             .Select(i => Math.Max(0.000001, Math.Sqrt(features.Average(x => Math.Pow(x[i] - means[i], 2))))).ToArray();
@@ -57,6 +64,8 @@ internal sealed record AccountLocalRidge(double[] Means, double[] Scales, double
                 vector[row] -= factor * vector[column];
             }
         }
-        return vector.All(double.IsFinite) ? new AccountLocalRidge(means, scales, vector) : null;
+        if (!vector.All(double.IsFinite)) return null;
+        if (cacheKey is not null) cache!.Write(cacheKey, new(means, scales, vector));
+        return new AccountLocalRidge(means, scales, vector);
     }
 }
