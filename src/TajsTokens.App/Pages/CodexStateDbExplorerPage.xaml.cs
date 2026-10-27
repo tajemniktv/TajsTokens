@@ -16,7 +16,7 @@ using TajsTokens.Infrastructure.Services;
 
 namespace TajsTokens.App.Pages;
 
-public sealed partial class CodexStateDbExplorerPage : Page
+public sealed partial class CodexStateDbExplorerPage : Page, IHistoryPresentation
 {
     private readonly HashSet<CodexStateRawRow> _selectedRawRows = [];
     private CodexStateInspectionSnapshot? _baseline;
@@ -27,6 +27,7 @@ public sealed partial class CodexStateDbExplorerPage : Page
     private CodexStateRawPage? _page;
     private int _pageIndex;
     private string? _selectedDatabasePath;
+    private string? _suspendedTableName;
     private bool _suppressDatabaseSelection;
 
     public CodexStateDbExplorerPage()
@@ -37,6 +38,21 @@ public sealed partial class CodexStateDbExplorerPage : Page
     }
 
     private App App => (App)Application.Current;
+
+    public void ReleaseHistory()
+    {
+        if (_loaded) return;
+        _suspendedTableName = (TableList.SelectedItem as CodexStateTableInfo)?.Name ?? _suspendedTableName;
+        _inspection = null;
+        _page = null;
+        _selectedRawRows.Clear();
+        TableList.ItemsSource = FocusedTableComboBox.ItemsSource = DiffList.ItemsSource =
+            ComparisonDiffList.ItemsSource = TraceList.ItemsSource = null;
+        RawGrid.Children.Clear();
+        RawGrid.RowDefinitions.Clear();
+        RawGrid.ColumnDefinitions.Clear();
+        SelectedTableSchemaText.Text = ColumnsText.Text = IndexesText.Text = SqlText.Text = "";
+    }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
@@ -690,7 +706,8 @@ public sealed partial class CodexStateDbExplorerPage : Page
     private void ApplyInspection(CodexStateInspectionResult inspection)
     {
         _inspection = inspection;
-        string? selectedTableName = (TableList.SelectedItem as CodexStateTableInfo)?.Name;
+        string? selectedTableName = (TableList.SelectedItem as CodexStateTableInfo)?.Name ?? _suspendedTableName;
+        _suspendedTableName = null;
         TableList.ItemsSource = inspection.Tables;
         FocusedTableComboBox.ItemsSource = inspection.FocusedTables;
         TableCountText.Text =

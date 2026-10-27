@@ -172,12 +172,13 @@ Owners: `WindowsResourcePolicy`, `App`, `MainWindow`, `TelemetryCoordinator`,
 `CodexObservatoryService`, SQLite stores/providers and `CalibrationProcessService`.
 Memo §11 supplies the mechanisms; their relative runtime cost remains to be measured.
 
-Stage 1 is in progress: PERF-002, PERF-003, PERF-005, PERF-006, PERF-008 and P-01
+Stage 1 is in progress: PERF-002–006, PERF-008 and P-01
 are implemented. Normal interactive scheduling, retryable/visible EcoQoS, coalesced
 fleet reads, independent discovery/catch-up, precise projection invalidation, no-op
 write suppression, guarded initialization, indexed reset tails and ordered token
-batching are installed. All 668 Core tests and the Windows build pass. Broader
-measurements, presentation and calibration reuse remain open. See
+batching are installed. Retained presentation inputs, qualified short history reuse
+and hidden-history eviction are also installed. All 670 Core tests and the Windows
+build pass. Broader measurements and calibration reuse remain open. See
 [current validation evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 
 - [ ] **PERF-001 — Establish measurements and targets.** Compare startup, warm idle,
@@ -202,11 +203,16 @@ measurements, presentation and calibration reuse remain open. See
   repeat a completed collection's fleet scan or reclamation.
   Implemented with typed completion identity and the coalesced fleet reader;
   [652-test/build and installed evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
-- [ ] **PERF-004 — Preserve presentation state and reduce rendering.** Pause hidden
+- [x] **PERF-004 — Preserve presentation state and reduce rendering.** Pause hidden
   subscriptions/timers, retain lightweight navigation/filter state and selectively
   evict heavy history. Cache summaries by selection/data generation, coalesce visual
   snapshots and update changed properties. Keep alert transitions lossless and
   independent of visual coalescing.
+  Retains the detached frame/inputs, releases heavy history after 30 seconds hidden
+  and qualifies short overview reuse by selection, settings and SQLite generation.
+  Full suite: 670 passed; Windows build/install passed. Installed planning state,
+  hidden release and qualified cache-hit counters were observed;
+  [evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 - [x] **PERF-005 — Separate discovery from catch-up.** Deferred/missing/mismatched
   rollouts must not force full discovery every poll. Use bounded fair retries and
   filesystem-fallback budgets, independent relationship reconciliation and correct

@@ -12,10 +12,15 @@ using Microsoft.UI.Xaml.Navigation;
 
 namespace TajsTokens.App.Pages;
 
-public sealed partial class CodexDataExplorerPage : Page
+public sealed partial class CodexDataExplorerPage : Page, IHistoryPresentation
 {
     private bool _loaded;
     private string? _threadId;
+
+    public void ReleaseHistory()
+    {
+        if (ExplorerFrame.Content is IHistoryPresentation history) history.ReleaseHistory();
+    }
 
     public CodexDataExplorerPage()
     {

@@ -271,3 +271,55 @@ fixture timings include JIT/cache effects and are not a live workload latency SL
 
 PERF-001, PERF-004 and PERF-007 remain open. The overall resource/restore exit gate,
 physical I/O characterization and reduced combined retained memory remain unproven.
+
+## Presentation lifetime and selected-history reuse
+
+The presentation slice retains the existing frame rather than replacing it on each
+hide. Detaching it runs the pages' existing unload/cancellation paths. A single
+30-second hidden deadline releases large ledger/history/conversation/raw-row read
+models and generated visuals while retaining controls, navigation, filters and
+lightweight selection identities. A user-selected schema baseline remains retained.
+Restoring reattaches the same frame; existing page loaders reconstruct evicted data.
+
+The overview can reuse its selected history for at most 30 seconds when selection,
+settings instance and database generation still match. A persistent read-only SQLite
+connection supplies `data_version`; its opaque connection identity prevents comparing
+versions from different connections. Every other database connection's commit
+invalidates reuse, including backfill and derived writes. Unknown/unavailable identity
+disables reuse. A before/after check refuses to cache a history query spanning a
+commit. This broad read-cache key is deliberately **not** a calibration-evidence key.
+Live quota context remains independently projected from the latest telemetry.
+
+Overview and Diagnostics coalesce queued visual updates. The overview also reuses
+unchanged quota tile objects and avoids rescanning its selected ledger for summaries
+on every live update. Alerts retain their separate lossless input path. Planner inputs
+survive hiding; an estimate is invalidated and must be made against current anchors.
+
+Automated verification: the full Core suite passed **670 tests**, none skipped, in
+1 minute 18 seconds. New read-generation regressions distinguish commits from
+rollbacks, prevent reuse across new connections, preserve cancellation and avoid
+creating missing databases. Final Windows build/publish/install passed with zero
+warnings/errors in 57.13 seconds, installing
+`1.0.0+ed64cc0bdf21c11acba549b77ea6b888ca072fa6.dirty` as PID 38996.
+
+Installed native UI inspection confirmed that a long minimize/restore retained the
+Planning tab and temporary 2.5-hour / model / effort inputs. Those temporary inputs
+were returned to their original defaults afterward. Current provider timestamps
+continued advancing; the absent five-hour window remained explicit. This is runtime
+state-retention evidence, not a numerical latency or comprehensive visual acceptance.
+Diagnostics subsequently reported **one hidden history release pass and two overview
+history reads**, confirming that the deadline ran and restoration reloaded evicted
+history. A later short navigation return reported **three history reads and one
+qualified cache hit**, confirming reuse under unchanged generation/settings/selection.
+PERF-004 is complete. PERF-001 and PERF-007 remain open; broad visual acceptance and
+numerical restore/physical-key latency are separate from these native state checks.
+
+An observed-minimized 35-second process sample starting at 23:27:21 UTC captured both
+the parent and a working calibration child throughout about 34.9 seconds. Parent:
+0.0084% total-system CPU, 277.0 MiB final private commit (280.7 MiB peak), 373.6 MiB
+peak working set, 15,617 logical read bytes and 4,755 logical write bytes. Worker:
+0.5069% CPU, 253.9 MiB final private commit (272.3 MiB peak), 313.1 MiB peak working
+set and zero additional logical bytes during this interval. Final combined private
+commit was **530.9 MiB**. This is still too high for a solved background-resource
+claim; it motivates the remaining qualified calibration scheduling work. It is not
+a controlled memory-improvement ratio against the earlier naturally occurring phases.

@@ -17,6 +17,16 @@ namespace TajsTokens.App.Pages;
 
 public sealed partial class UsagePage : Page
 {
+    public void ReleaseHistory()
+    {
+        if (_loaded) return;
+        _rows = [];
+        _timeline = [];
+        _displayedQuery = null;
+        RowsList.ItemsSource = null;
+        UsageTimeline.Children.Clear();
+        DetailText.Text = "";
+    }
     private readonly DataTemplate? _detailedTemplate;
     private IntelligenceQuery? _displayedQuery;
     private DateTimeOffset? _from, _to;

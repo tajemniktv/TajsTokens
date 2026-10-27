@@ -14,7 +14,7 @@ using TajsTokens.Core.Models;
 
 namespace TajsTokens.App.Pages;
 
-public sealed partial class CodexSourcesPage : Page
+public sealed partial class CodexSourcesPage : Page, IHistoryPresentation
 {
     private readonly Dictionary<CodexNativeSourceKind, string> _selectedPaths = [];
     private CodexAuxiliaryQuery _auxiliaryQuery = new();
@@ -33,6 +33,7 @@ public sealed partial class CodexSourcesPage : Page
     private CodexNativeSourcesSnapshot? _snapshot;
     private long _sourceGeneration;
     private bool _updatingSourceSelection;
+    private string? _suspendedSourceKey;
 
     public CodexSourcesPage()
     {
@@ -42,6 +43,17 @@ public sealed partial class CodexSourcesPage : Page
     }
 
     private App App => (App)Application.Current;
+
+    public void ReleaseHistory()
+    {
+        if (_loaded) return;
+        _suspendedSourceKey = (SourceList.SelectedItem as SourceRow)?.Key ?? _suspendedSourceKey;
+        _snapshot = null;
+        _logs = null;
+        SourceStatusList.ItemsSource = MemoryList.ItemsSource = GoalsList.ItemsSource = QueueList.ItemsSource =
+            ArtifactsList.ItemsSource = CatalogList.ItemsSource = SummariesList.ItemsSource = LogsList.ItemsSource =
+            SourceList.ItemsSource = null;
+    }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
@@ -64,6 +76,7 @@ public sealed partial class CodexSourcesPage : Page
             LogThreadTextBox.Text = _initialThreadId;
             AuxiliaryThreadBox.Text = _initialThreadId;
             _auxiliaryQuery = new CodexAuxiliaryQuery(0, _initialThreadId);
+            _initialThreadId = null;
         }
         CancellationTokenSource? previous = Interlocked.Exchange(ref _cancellation, new CancellationTokenSource());
         previous?.Cancel();
@@ -622,7 +635,8 @@ public sealed partial class CodexSourcesPage : Page
 
     private void UpdateSourceRows(CodexNativeSourcesSnapshot snapshot)
     {
-        string? key = (SourceList.SelectedItem as SourceRow)?.Key;
+        string? key = (SourceList.SelectedItem as SourceRow)?.Key ?? _suspendedSourceKey;
+        _suspendedSourceKey = null;
         IReadOnlyList<SourceRow> rows = BuildSourceRows(snapshot);
         SourceList.ItemsSource = rows;
         SourceList.SelectedItem = rows.FirstOrDefault(row => row.Key == key) ?? rows.FirstOrDefault();

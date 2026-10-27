@@ -18,7 +18,7 @@ using TajsTokens.Core.Services;
 
 namespace TajsTokens.App.Pages;
 
-public sealed partial class CodexPage : Page
+public sealed partial class CodexPage : Page, IHistoryPresentation
 {
 
     public enum NavigationTreeKind
@@ -64,6 +64,23 @@ public sealed partial class CodexPage : Page
     }
 
     private App App => (App)Application.Current;
+
+    public void ReleaseHistory()
+    {
+        if (_loaded) return;
+        _dashboard = null;
+        _navigation = null;
+        _selectedThread = null;
+        _allPresentations = [];
+        _sessions = new Dictionary<string, CodexSessionOverview>(StringComparer.OrdinalIgnoreCase);
+        _threadNodes.Clear();
+        _treeParents.Clear();
+        NavigationTree.RootNodes.Clear();
+        DetailPanel.Children.Clear();
+        if (_conversationList is not null) _conversationList.ItemsSource = null;
+        _conversationList = null;
+        _usagePage?.ReleaseHistory();
+    }
 
     private void OnWorkViewClicked(object sender, RoutedEventArgs e)
     {

@@ -29,6 +29,7 @@ public sealed class AppServices
             throw new InvalidOperationException("Exit other TajsTokens instances before migrating application data.");
         DataFolder = AppDataLocation.EnsureMigrated(appDataPath);
         DatabasePath = Path.Combine(DataFolder, "telemetry.db");
+        PresentationDataGeneration = new SqliteReadGenerationMonitor(DatabasePath);
         string settingsPath = Path.Combine(DataFolder, "settings.json");
 
         try
@@ -96,6 +97,7 @@ public sealed class AppServices
 
     public string DataFolder { get; }
     public string DatabasePath { get; }
+    public SqliteReadGenerationMonitor PresentationDataGeneration { get; }
     public RuntimeSettings Settings { get; private set; }
     public RuntimeSettingsStore SettingsStore { get; }
     public SqliteTelemetryRepository Repository { get; }

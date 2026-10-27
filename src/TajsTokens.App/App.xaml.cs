@@ -52,6 +52,7 @@ public partial class App : Application
 
     public AppServices Services { get; }
     internal string SchedulingDiagnostic => _resourcePolicy.Diagnostic;
+    internal string PresentationDiagnostic => (_window as MainWindow)?.PresentationDiagnostic ?? "Presentation: no dashboard window.";
 
     public void Navigate(Type pageType, object? parameter = null)
     {
@@ -454,6 +455,7 @@ public partial class App : Application
         Services.SettingsChanged -= OnSettingsChanged;
         Services.LocalLimitsApi.Dispose();
         Services.Calibration.Dispose();
+        Services.PresentationDataGeneration.Dispose();
         _resourcePolicy.Dispose();
         _trayService.Dispose();
         _dogfoodLifetime?.Dispose();

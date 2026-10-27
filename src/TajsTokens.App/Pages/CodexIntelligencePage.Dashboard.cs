@@ -17,6 +17,7 @@ namespace TajsTokens.App.Pages;
 // Presentation only: every card is a projection of the same intelligence snapshot.
 public sealed partial class CodexIntelligencePage
 {
+    private IReadOnlyList<CodexLedgerEntry>? _workLedger;
 
     private static string Compact(long value)
     {
@@ -41,7 +42,7 @@ public sealed partial class CodexIntelligencePage
             : "Selected account · only its current readings";
         double cardWidth = DashboardCards.ActualWidth < 780 ? DashboardCards.ActualWidth : DashboardCards.ActualWidth / 2;
         double tileWidth = Math.Max(120, (cardWidth - 64) / 2);
-        QuotaTiles.ItemsSource = outlook.Windows.Select(x => new QuotaTile(
+        QuotaTile[] tiles = outlook.Windows.Select(x => new QuotaTile(
             tileWidth,
             QuotaOutlookProjection.Name(x.Kind) + " allowance",
             x.Reading?.Current.UsedPercent is >= 0 and <= 100 && x.Reading.Current.RemainingPercent is { } left ? $"{left:0.#}% left" : x.NotReported ? "Not reported" : "Unavailable",
@@ -50,6 +51,7 @@ public sealed partial class CodexIntelligencePage
             x.Reading?.Current.ResetsAtUtc is { } reset ? $"Resets {reset.ToLocalTime():ddd, d MMM · HH:mm}" : "Reset time unavailable",
             x.Conclusion,
             x.Reading is { } reading ? $"{(reading.IsFresh ? "Reported" : "Last known")} · {reading.Current.CapturedAtUtc.ToLocalTime():g} · {QuotaAccountScope.Describe(reading.Current.AccountKey)}" : x.Detail)).ToArray();
+        if (QuotaTiles.ItemsSource is not QuotaTile[] previous || !previous.SequenceEqual(tiles)) QuotaTiles.ItemsSource = tiles;
         OutlookValue.Text = outlook.Summary;
         OutlookDetail.Text = string.Join("\n", outlook.Windows.Where(x => x.Reading is not null)
             .Select(x => $"{QuotaOutlookProjection.Name(x.Kind)}: {x.Detail}"));
@@ -68,8 +70,10 @@ public sealed partial class CodexIntelligencePage
             : prediction is null ? "Local workload nowcast is not available for this scope."
             : $"Local workload · ~{Compact((long)Math.Clamp(prediction.ExpectedTokens, 0, long.MaxValue))} tokens over the next {prediction.HorizonHours * 60:g} minutes. Separate from quota cost.";
 
-        WorkValue.Text = Compact(snapshot.Ledger.Sum(x => x.Workload.ReportedTotalTokens)) + " tokens";
         WorkRange.Text = $"Selected history · {snapshot.Selection.FromUtc:dd MMM}–{snapshot.Selection.ToUtc.AddTicks(-1):dd MMM yyyy} UTC";
+        if (ReferenceEquals(_workLedger, snapshot.Ledger)) return;
+        _workLedger = snapshot.Ledger;
+        WorkValue.Text = Compact(snapshot.Ledger.Sum(x => x.Workload.ReportedTotalTokens)) + " tokens";
         CodexLedgerGroup? leading = snapshot.Breakdown.Where(x => x.Dimension == "Model").MaxBy(x => x.Tokens);
         WorkDetail.Text = $"{snapshot.Ledger.Select(x => x.ThreadId).Distinct().Count():N0} chats · " +
                           (leading is null ? "No recorded work in this selection." : $"most work on {leading.Key}");

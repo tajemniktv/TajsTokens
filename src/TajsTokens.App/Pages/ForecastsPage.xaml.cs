@@ -17,7 +17,7 @@ using TajsTokens.Core.Services;
 
 namespace TajsTokens.App.Pages;
 
-public sealed partial class ForecastsPage : Page
+public sealed partial class ForecastsPage : Page, IHistoryPresentation
 {
     private long _evaluationGeneration;
     private IReadOnlyList<EvaluationRow> _evaluationRows = [];
@@ -28,6 +28,7 @@ public sealed partial class ForecastsPage : Page
     private bool _modelLab;
     private object? _normalTab;
     private CancellationTokenSource? _pageCancellation;
+    private (string Provider, string Profile, QuotaWindowKind Kind, DateTimeOffset GeneratedAtUtc, string? AccountKey)? _suspendedForecast;
 
     public ForecastsPage()
     {
@@ -46,6 +47,19 @@ public sealed partial class ForecastsPage : Page
     }
 
     private App App => (App)Application.Current;
+
+    public void ReleaseHistory()
+    {
+        if (_isLoaded) return;
+        _suspendedForecast = (ForecastList.SelectedItem as ForecastRow)?.Identity ?? _suspendedForecast;
+        _history = [];
+        _evaluationRows = [];
+        ForecastList.ItemsSource = null;
+        EvaluationList.ItemsSource = null;
+        EvaluationGroup.ItemsSource = null;
+        EvaluationSelectionText.Text = "Run evaluation for the selected range.";
+        SelectedForecastDetails.Text = SelectedForecastSummary.Text = TtHistoryText.Text = "";
+    }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
@@ -67,6 +81,7 @@ public sealed partial class ForecastsPage : Page
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         _isLoaded = true;
+        EvaluateButton.IsEnabled = true;
         CancellationTokenSource? previous = Interlocked.Exchange(ref _pageCancellation, new CancellationTokenSource());
         previous?.Cancel();
         previous?.Dispose();
@@ -255,7 +270,8 @@ public sealed partial class ForecastsPage : Page
     private void RenderHistory()
     {
         (string Provider, string Profile, QuotaWindowKind Kind, DateTimeOffset GeneratedAtUtc, string? AccountKey)? selectedIdentity =
-            (ForecastList.SelectedItem as ForecastRow)?.Identity;
+            (ForecastList.SelectedItem as ForecastRow)?.Identity ?? _suspendedForecast;
+        _suspendedForecast = null;
         ForecastSnapshot[] filtered = _history.Where(x => WindowFilter.SelectedIndex == 0 ||
                                                           x.Forecast.Kind == (WindowFilter.SelectedIndex == 1
                                                               ? QuotaWindowKind.FiveHour

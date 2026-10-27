@@ -25,13 +25,37 @@ public sealed partial class MainWindow : Window
     private bool _ready;
     private bool _dashboardVisible;
     private long _viewGeneration;
-    private SuspendedNavigation? _suspendedNavigation;
-    private Frame ContentFrame => (Frame)AppNavigation.Content;
+    private readonly Frame _contentFrame;
+    private Frame ContentFrame => _contentFrame;
+    private readonly DispatcherTimer _historyEvictionTimer = new() { Interval = TimeSpan.FromSeconds(30) };
+    private readonly List<WeakReference<IHistoryPresentation>> _historyPages = [];
+    private int _historyReleasePasses;
+    public string PresentationDiagnostic
+    {
+        get
+        {
+            CodexIntelligencePage? overview = _historyPages.Select(reference =>
+                reference.TryGetTarget(out var page) ? page : null).OfType<CodexIntelligencePage>().FirstOrDefault();
+            return $"Presentation: {(_dashboardVisible ? "active" : "paused")}; {_historyReleasePasses} hidden history release pass(es)." +
+                (overview is null ? "" : $" Overview: {overview.HistoryReadCount} history read(s), {overview.HistoryCacheHits} qualified cache hit(s).");
+        }
+    }
     private WindowSizeState _windowSize = new(1200, 850, false);
 
     public MainWindow()
     {
         InitializeComponent();
+        _contentFrame = (Frame)AppNavigation.Content;
+        _historyEvictionTimer.Tick += (_, _) =>
+        {
+            _historyEvictionTimer.Stop();
+            if (_dashboardVisible) return;
+            _historyPages.RemoveAll(reference => !reference.TryGetTarget(out _));
+            foreach (var reference in _historyPages)
+                if (reference.TryGetTarget(out var page)) page.ReleaseHistory();
+            _historyReleasePasses++;
+        };
+        Closed += (_, _) => _historyEvictionTimer.Stop();
         try
         {
             if (File.Exists(_windowStatePath))
@@ -103,36 +127,24 @@ public sealed partial class MainWindow : Window
         if (_dashboardVisible == visible) return;
         _dashboardVisible = visible;
         long generation = ++_viewGeneration;
-        if (!visible && _suspendedNavigation is null && ContentFrame.CurrentSourcePageType is { } page)
+        if (!visible)
         {
-            _suspendedNavigation = new SuspendedNavigation(page, ContentFrame.Tag,
-                ContentFrame.BackStack.ToArray(), ContentFrame.ForwardStack.ToArray());
-            Frame previous = ContentFrame;
-            previous.Navigated -= OnNavigated;
-            var replacement = new Frame { CacheSize = 6 };
-            replacement.Navigated += OnNavigated;
-            // Replacing the frame unloads the active page (cancelling its timers/queries) and
-            // releases cached pages and selected history. Keep only navigation metadata in the tray.
-            AppNavigation.Content = replacement;
-            previous.CacheSize = 0;
-            previous.Content = null;
+            // Detaching runs the existing Unloaded cancellation/subscription lifecycle. Retain
+            // the same frame, navigation stack and inputs; evict heavy history after a short hide.
+            AppNavigation.Content = null;
+            _historyEvictionTimer.Start();
         }
         else if (visible)
         {
+            _historyEvictionTimer.Stop();
             // Show/activate the shell first; history queries and page construction follow on a
             // later dispatcher turn and never hold the native tray callback open.
             DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
             {
                 if (!_dashboardVisible || generation != _viewGeneration) return;
-                if (_suspendedNavigation is { } saved)
-                {
-                    _suspendedNavigation = null;
-                    Navigate(saved.Page, saved.Parameter);
-                    foreach (PageStackEntry entry in saved.BackStack) ContentFrame.BackStack.Add(entry);
-                    foreach (PageStackEntry entry in saved.ForwardStack) ContentFrame.ForwardStack.Add(entry);
-                    AppNavigation.IsBackEnabled = ContentFrame.CanGoBack;
-                }
-                else if (ContentFrame.CurrentSourcePageType is null) Navigate(typeof(CodexIntelligencePage));
+                AppNavigation.Content = ContentFrame;
+                if (ContentFrame.CurrentSourcePageType is null) Navigate(typeof(CodexIntelligencePage));
+                AppNavigation.IsBackEnabled = ContentFrame.CanGoBack;
             });
         }
     }
@@ -149,6 +161,10 @@ public sealed partial class MainWindow : Window
         try
         {
             ContentFrame.Tag = e.Parameter;
+            _historyPages.RemoveAll(reference => !reference.TryGetTarget(out _));
+            if (e.Content is IHistoryPresentation history && !_historyPages.Any(reference =>
+                    reference.TryGetTarget(out var page) && ReferenceEquals(page, history)))
+                _historyPages.Add(new(history));
             AppNavigation.IsBackEnabled = ContentFrame.CanGoBack;
             string tag = e.SourcePageType == typeof(CodexIntelligencePage) ? Equals(e.Parameter, "planning") ? "session-plan" : "codex-intelligence" :
                 e.SourcePageType == typeof(ForecastsPage) && Equals(e.Parameter, "model-lab") ? "model-lab" :
@@ -208,6 +224,4 @@ public sealed partial class MainWindow : Window
     }
 
     private sealed record WindowSizeState(int Width, int Height, bool Maximized);
-    private sealed record SuspendedNavigation(Type Page, object? Parameter,
-        PageStackEntry[] BackStack, PageStackEntry[] ForwardStack);
 }

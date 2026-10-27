@@ -12,18 +12,25 @@ using Microsoft.UI.Xaml.Navigation;
 using Microsoft.UI.Xaml.Shapes;
 using TajsTokens.Core.Models;
 using TajsTokens.Core.Services;
+using TajsTokens.Infrastructure.Persistence;
 
 #endregion
 
 namespace TajsTokens.App.Pages;
 
-public sealed partial class CodexIntelligencePage : Page
+public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
 {
     private bool _loaded;
     private bool _populatingAccounts;
     private string? SelectedAccountKey => (Account.SelectedItem as AccountOption)?.Key;
     private CancellationTokenSource? _request;
     private CodexIntelligenceSnapshot? _snapshot;
+    private SqliteReadGeneration? _historyGeneration;
+    private RuntimeSettings? _historySettings;
+    private DateTimeOffset _historyLoadedAt;
+    private int _telemetryRenderQueued;
+    public long HistoryReadCount { get; private set; }
+    public long HistoryCacheHits { get; private set; }
 
     public CodexIntelligencePage()
     {
@@ -36,7 +43,8 @@ public sealed partial class CodexIntelligencePage : Page
             _loaded = true;
             App.Services.Telemetry.SnapshotUpdated += OnTelemetry;
             PopulateAccounts();
-            await LoadAsync();
+            RefreshPlanAnchors();
+            await LoadAsync(allowCached: true);
         };
         Unloaded += (_, _) =>
         {
@@ -44,6 +52,7 @@ public sealed partial class CodexIntelligencePage : Page
             App.Services.Telemetry.SnapshotUpdated -= OnTelemetry;
             _request?.Cancel();
             InvalidatePlan();
+            ScenarioText.Text = "Estimate again for the current session and quota.";
         };
     }
 
@@ -51,11 +60,13 @@ public sealed partial class CodexIntelligencePage : Page
 
     private void PopulateAccounts()
     {
-        _populatingAccounts = true;
         string? selected = SelectedAccountKey;
         string?[] keys = App.Services.Telemetry.Latest.QuotaSnapshots.Select(x => x.AccountKey)
             .Concat(App.Services.Settings.RolloutAccountAssociations.Select(x => x.AccountKey))
             .Append(selected).Where(x => !string.IsNullOrWhiteSpace(x)).Distinct().Order().ToArray();
+        if (Account.ItemsSource is AccountOption[] options &&
+            options.Select(x => x.Key).SequenceEqual(new string?[] { null }.Concat(keys))) return;
+        _populatingAccounts = true;
         Account.ItemsSource = new[] { new AccountOption(null, "All local evidence · no assumed account ownership") }
             .Concat(
                 keys.Select((key, i) => new AccountOption(
@@ -80,8 +91,10 @@ public sealed partial class CodexIntelligencePage : Page
 
     private void OnTelemetry(TelemetrySnapshot telemetry)
     {
-        DispatcherQueue.TryEnqueue(() =>
+        if (Interlocked.Exchange(ref _telemetryRenderQueued, 1) != 0) return;
+        if (!DispatcherQueue.TryEnqueue(() =>
         {
+            Interlocked.Exchange(ref _telemetryRenderQueued, 0);
             if (!_loaded) return;
             PopulateAccounts();
             RefreshPlanAnchors();
@@ -94,7 +107,7 @@ public sealed partial class CodexIntelligencePage : Page
                     _snapshot = _snapshot with { Workload = live.Workload };
             }
             RenderCurrent();
-        });
+        })) Interlocked.Exchange(ref _telemetryRenderQueued, 0);
     }
 
     private void RenderCurrent()
@@ -148,43 +161,66 @@ public sealed partial class CodexIntelligencePage : Page
                                     $"{x.Current.Kind} · {x.Current.CapturedAtUtc:O} · {x.Forecast?.Evidence?.InferenceManifest?.Id ?? "artifact unavailable (not retroactively invented)"}"));
     }
 
-    private async Task LoadAsync()
+    private CodexSelection ReadSelection()
+    {
+        static string? Optional(TextBox box) => string.IsNullOrWhiteSpace(box.Text) ? null : box.Text.Trim();
+        return new(new DateTimeOffset((FromDate.Date ?? DateTimeOffset.UtcNow).Date, TimeSpan.Zero),
+            new DateTimeOffset((ToDate.Date ?? DateTimeOffset.UtcNow).Date, TimeSpan.Zero),
+            SelectedAccountKey, Optional(Model), Optional(Project), Optional(Thread));
+    }
+
+    public void ReleaseHistory()
+    {
+        if (_loaded) return;
+        _snapshot = null;
+        _historyGeneration = null;
+        _workLedger = null;
+        Groups.ItemsSource = null;
+        Timeline.Children.Clear();
+        SummaryText.Text = ProviderText.Text = EvidenceText.Text = ManifestText.Text = TimelineText.Text =
+            AccountingText.Text = PeriodsText.Text = "";
+    }
+
+    private async Task LoadAsync(bool allowCached = false)
     {
         if (!_loaded) return;
         _request?.Cancel();
         var request = new CancellationTokenSource();
         _request = request;
-        _snapshot = null;
-        RenderCurrent();
-        WorkValue.Text = "Loading…";
-        WorkDetail.Text = WorkRange.Text = NowcastSummary.Text = "";
-        Groups.ItemsSource = null;
-        Timeline.Children.Clear();
-        SummaryText.Text =
-            ProviderText.Text = EvidenceText.Text = ManifestText.Text = TimelineText.Text = TimelineLegend.Text = "";
-        AccountingText.Text = "Run retrospective analysis explicitly; it does not change production forecasts.";
-        PeriodsText.Text = "";
-        StatusText.Text = "Reading selected evidence…";
         try
         {
-            string? Optional(TextBox box)
-            {
-                return string.IsNullOrWhiteSpace(box.Text) ? null : box.Text.Trim();
-            }
-
-            var from = new DateTimeOffset((FromDate.Date ?? DateTimeOffset.UtcNow).Date, TimeSpan.Zero);
-            var to = new DateTimeOffset((ToDate.Date ?? DateTimeOffset.UtcNow).Date, TimeSpan.Zero);
-            var selection = new CodexSelection(
-                from,
-                to,
-                (Account.SelectedItem as AccountOption)?.Key,
-                Optional(Model),
-                Optional(Project),
-                Optional(Thread));
-            CodexIntelligenceSnapshot snapshot = await App.Services.CodexIntelligence.QueryAsync(selection, request.Token);
+            CodexSelection selection = ReadSelection();
+            RuntimeSettings settings = App.Services.Settings;
+            SqliteReadGeneration? before = await App.Services.PresentationDataGeneration.ReadAsync(request.Token);
             if (!_loaded || _request != request || request.IsCancellationRequested) return;
+            if (allowCached && before is not null && before == _historyGeneration &&
+                ReferenceEquals(settings, _historySettings) && _snapshot?.Selection == selection &&
+                DateTimeOffset.UtcNow - _historyLoadedAt is var age && age >= TimeSpan.Zero && age < TimeSpan.FromSeconds(30))
+            {
+                HistoryCacheHits++;
+                RenderCurrent();
+                return;
+            }
+            _snapshot = null;
+            RenderCurrent();
+            WorkValue.Text = "Loading…";
+            WorkDetail.Text = WorkRange.Text = NowcastSummary.Text = "";
+            Groups.ItemsSource = null;
+            Timeline.Children.Clear();
+            SummaryText.Text =
+                ProviderText.Text = EvidenceText.Text = ManifestText.Text = TimelineText.Text = TimelineLegend.Text = "";
+            AccountingText.Text = "Run retrospective analysis explicitly; it does not change production forecasts.";
+            PeriodsText.Text = "";
+            StatusText.Text = "Reading selected evidence…";
+            HistoryReadCount++;
+            CodexIntelligenceSnapshot snapshot = await App.Services.CodexIntelligence.QueryAsync(selection, request.Token);
+            SqliteReadGeneration? after = await App.Services.PresentationDataGeneration.ReadAsync(request.Token);
+            if (!_loaded || _request != request || request.IsCancellationRequested) return;
+            _historyGeneration = before == after ? after : null;
+            _historySettings = settings;
+            _historyLoadedAt = DateTimeOffset.UtcNow;
             _snapshot = CodexIntelligenceProjection.WithLiveContext(snapshot, App.Services.CodexIntelligence.Current, selection.AccountKey);
-            StatusText.Text = $"{from:yyyy-MM-dd} → {to:yyyy-MM-dd} UTC · captured {snapshot.AsOfUtc.ToLocalTime():g}";
+            StatusText.Text = $"{selection.FromUtc:yyyy-MM-dd} → {selection.ToUtc:yyyy-MM-dd} UTC · captured {snapshot.AsOfUtc.ToLocalTime():g}";
             SummaryText.Text =
                 $"{snapshot.Ledger.Sum(x => x.Workload.ReportedTotalTokens):N0} observed tokens · {snapshot.Ledger.Select(x => x.ThreadId).Distinct().Count():N0} chats\n" +
                 $"API reference: ${snapshot.ApiEquivalent.WeightedAmount:N2}{(snapshot.ApiEquivalent.IsComplete ? "" : " (partial)")} · TT: research only";

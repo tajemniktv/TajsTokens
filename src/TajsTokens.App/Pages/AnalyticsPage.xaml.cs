@@ -18,7 +18,7 @@ using TajsTokens.Core.Services;
 
 namespace TajsTokens.App.Pages;
 
-public sealed partial class AnalyticsPage : Page
+public sealed partial class AnalyticsPage : Page, IHistoryPresentation
 {
     private readonly Dictionary<string, QuotaBurnInterval> _intervalsById = new(StringComparer.Ordinal);
     private string _burnStatus = "Loading quota changes…";
@@ -28,6 +28,8 @@ public sealed partial class AnalyticsPage : Page
     private CancellationTokenSource? _pageCancellation;
     private IReadOnlyList<ResetRow> _resetRows = [];
     private long _selectionGeneration;
+    private string? _suspendedIntervalId;
+    private object? _suspendedSeriesKey;
 
     public AnalyticsPage()
     {
@@ -52,6 +54,19 @@ public sealed partial class AnalyticsPage : Page
     }
 
     private App App => (App)Application.Current;
+
+    public void ReleaseHistory()
+    {
+        if (_isLoaded) return;
+        _suspendedIntervalId = (BurnIntervalList.SelectedItem as BurnIntervalRow)?.IntervalId ?? _suspendedIntervalId;
+        _suspendedSeriesKey = (TimelineSeries.SelectedItem as TimelineGroup)?.Key ?? _suspendedSeriesKey;
+        _intervalsById.Clear();
+        _resetRows = [];
+        TimelineSeries.ItemsSource = null;
+        BurnIntervalList.ItemsSource = ContributorList.ItemsSource = ResetList.ItemsSource = BackendRows.ItemsSource = null;
+        QuotaTimeline.Children.Clear();
+        SelectedIntervalFacts.Text = IntervalEvidenceText.Text = "";
+    }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
@@ -232,13 +247,15 @@ public sealed partial class AnalyticsPage : Page
     private void Render(IntelligenceDashboard dashboard)
     {
         _loadError = null;
-        string? selectedId = (BurnIntervalList.SelectedItem as BurnIntervalRow)?.IntervalId;
+        string? selectedId = (BurnIntervalList.SelectedItem as BurnIntervalRow)?.IntervalId ?? _suspendedIntervalId;
+        _suspendedIntervalId = null;
         _intervalsById.Clear();
         foreach (QuotaBurnInterval interval in dashboard.QuotaBurnIntervals)
         {
             _intervalsById[interval.IntervalId] = interval;
         }
-        object? previousSeries = (TimelineSeries.SelectedItem as TimelineGroup)?.Key;
+        object? previousSeries = (TimelineSeries.SelectedItem as TimelineGroup)?.Key ?? _suspendedSeriesKey;
+        _suspendedSeriesKey = null;
         TimelineGroup[] series = dashboard.QuotaBurnIntervals
             .GroupBy(x => (x.Kind, x.AccountKey, x.BeforeSource, x.AfterSource, x.ResetsAtUtc))
             .OrderByDescending(g => g.Max(x => x.EndUtc)).Select((g, i) => new TimelineGroup(

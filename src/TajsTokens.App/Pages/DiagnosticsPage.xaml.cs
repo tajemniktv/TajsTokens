@@ -18,6 +18,7 @@ public sealed partial class DiagnosticsPage : Page
 {
     private bool _loaded;
     private CancellationTokenSource? _refreshCancellation;
+    private int _renderQueued;
 
     public DiagnosticsPage()
     {
@@ -45,11 +46,13 @@ public sealed partial class DiagnosticsPage : Page
 
     private void OnSnapshotUpdated(TelemetrySnapshot snapshot)
     {
-        DispatcherQueue.TryEnqueue(() =>
+        if (Interlocked.Exchange(ref _renderQueued, 1) != 0) return;
+        if (!DispatcherQueue.TryEnqueue(() =>
         {
+            Interlocked.Exchange(ref _renderQueued, 0);
             // Render the latest published generation, not a queued older event.
             if (_loaded) Render(App.Services.Telemetry.Latest);
-        });
+        })) Interlocked.Exchange(ref _renderQueued, 0);
     }
 
     private void Render(TelemetrySnapshot snapshot)
@@ -59,7 +62,7 @@ public sealed partial class DiagnosticsPage : Page
         SourceItems.ItemsSource = diagnostics.Sources;
         QuotaItems.ItemsSource = diagnostics.QuotaWindows;
         EmptySourcesText.Visibility = diagnostics.Sources.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        EventsText.Text = App.SchedulingDiagnostic + "\n\n" + (snapshot.Events.Count == 0
+        EventsText.Text = App.SchedulingDiagnostic + "\n" + App.PresentationDiagnostic + "\n\n" + (snapshot.Events.Count == 0
             ? "No refresh events in this snapshot."
             : string.Join(
                 "\n\n",
