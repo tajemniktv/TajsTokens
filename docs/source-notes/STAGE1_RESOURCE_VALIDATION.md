@@ -112,3 +112,42 @@ do not establish a continuous UI hang, its cause, or a numerical restore latency
 Performance targets and per-phase counters are not established by these initial
 samples. PERF-001 and the broader Stage 1 exit gate remain open. Removing the cap
 alone is not evidence that repeated work or combined resource use has fallen.
+
+## Independent discovery and bounded fallback
+
+The next slice separates the successful discovery watermark from rollout catch-up.
+An in-process pending set carries uncommitted catalog threads; the durable watermark
+still stays behind the oldest unapplied work. Startup performs full reconciliation,
+so a restart reconstructs the pending set even after interruption. A source-generation
+change resets discovery state without deleting retained observations. Full discovery
+continues on its existing five-minute cadence; immediate pending retries do not
+force it to run every poll.
+
+Filesystem fallback now uses the same 8-recent/8-rotating-older work budget. The
+ingestion owner skips an unchanged source only when its already-verified physical
+identity, consumed prefix, length/write time, parser version and durable checkpoint
+all still match. Unknown identities or missing checkpoints require ingestion.
+Appends still enter the existing strong prefix verifier; no suffix-only shortcut
+or replacement of content verification was introduced. The fallback still enumerates
+file names; this change bounds ingestion, not the cost of every directory listing.
+
+Validation:
+
+- Twelve focused ingestion tests passed, covering backlog/restart fairness, immediate
+  missing-file recovery without full rediscovery, source-generation changes,
+  periodic metadata corrections and filesystem fallback.
+- The 40-file fallback fixture catches up in bounded passes, skips all unchanged
+  files warm, reopens only one appended file and recovers a missing durable checkpoint.
+  Its untyped records intentionally replay their prefix when semantic resume state
+  is absent; that recovery behavior is preserved.
+- Full Core suite: 653 passed, none skipped; 1 minute 7 seconds.
+- Windows build/publish/install: passed, zero warnings/errors; 58.02 seconds.
+  It gracefully replaced the first-slice app and restarted the updated version.
+- Installed Diagnostics at 23:35 local reported **one catalog row read; full discovery
+  reused**, retaining coverage measured at 23:34:51. One rollout still failed and
+  remained explicitly stale. This confirms retries no longer require full discovery
+  while preserving the source-gap warning; it does not establish account-wide coverage.
+
+PERF-002, PERF-003 and PERF-005 are complete. PERF-001, PERF-004, PERF-006–008 and
+P-01 remain open. Final resource/latency acceptance, memory reduction and user visual
+acceptance have not been established.

@@ -135,6 +135,8 @@ public sealed class CodexStateIndexedIngestionTests
             CodexObservatoryService service = Service();
             CodexObservatoryRefreshResult first = await service.RefreshAsync(CancellationToken.None);
             Assert.Equal(16, first.FilesScanned);
+            Assert.True(first.DiscoveryReconciled);
+            Assert.Equal(40, first.CatalogRowsRead);
             Assert.Equal(24, first.DeferredFiles);
             Assert.Equal(threads.Reverse().Take(8).Select(x => x.RolloutPath), ingestion.Paths.Take(8));
             Assert.Equal(failingOldFiles ? 40_000 : 840_000, await index.GetWatermarkAsync(CancellationToken.None));
@@ -145,6 +147,11 @@ public sealed class CodexStateIndexedIngestionTests
             {
                 last = await service.RefreshAsync(CancellationToken.None);
                 Assert.InRange(last.FilesScanned, 0, 16);
+                if (failingOldFiles || pass > 0)
+                {
+                    Assert.False(last.DiscoveryReconciled);
+                    Assert.True(last.CatalogRowsRead < 40);
+                }
             }
             IReadOnlyDictionary<string, CodexStateThreadFingerprint>
                 fingerprints = await index.GetFingerprintsAsync(CancellationToken.None);
@@ -310,8 +317,10 @@ public sealed class CodexStateIndexedIngestionTests
             {
                 Assert.Equal(1, reconciliation.Errors);
                 await File.WriteAllTextAsync(replacementPath, "{}\n");
-                // Failure must retry immediately, not postpone another five minutes.
-                await service.RefreshAsync(CancellationToken.None);
+                // Retry the pending rollout immediately without repeating full discovery.
+                CodexObservatoryRefreshResult retry = await service.RefreshAsync(CancellationToken.None);
+                Assert.False(retry.DiscoveryReconciled);
+                Assert.Same(reconciliation.Coverage, retry.Coverage);
             }
             Assert.Equal(3, ingestion.Paths.Count);
             Assert.Equal(replacementPath, ingestion.Paths.Last());

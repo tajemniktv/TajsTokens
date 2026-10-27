@@ -30,6 +30,9 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
     private CodexCollectionCoverage? _lastCoverage;
     private string? _lastStateCatalogPath;
     private long? _lastStateReconciliation;
+    private long _discoveryWatermark;
+    private readonly Dictionary<string, CodexStateThread> _pendingThreads = new(StringComparer.OrdinalIgnoreCase);
+    private int _filesystemBackfillOffset;
 
     public CodexObservatoryService(
         ICodexSessionIngestionService ingestionService,
@@ -159,7 +162,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
         bool reconciliationDue = _lastStateReconciliation is not long lastReconciliation ||
                                  _timeProvider.GetElapsedTime(lastReconciliation, reconciliationStarted) >= StateReconciliationInterval;
         long minimumUpdatedAtMs = !reconciliationDue
-            ? Math.Max(0, watermark - StateOverlapMs)
+            ? Math.Max(0, Math.Max(watermark, _discoveryWatermark) - StateOverlapMs)
             : 0;
         CodexStateCatalogBatch? catalog = await _stateCatalog.TryReadSinceAsync(minimumUpdatedAtMs, cancellationToken);
         if (catalog is null)
@@ -194,11 +197,20 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
 
         IReadOnlyDictionary<string, CodexStateThreadFingerprint> fingerprints =
             await _stateIndexStore.GetFingerprintsAsync(cancellationToken);
-        CodexStateThread[] changedThreads = catalog.Threads
-            .Where(thread =>
-                !fingerprints.TryGetValue(thread.ThreadId, out CodexStateThreadFingerprint? fingerprint) ||
-                !fingerprint.Matches(thread))
-            .ToArray();
+        if (reconciliationDue) _pendingThreads.Clear();
+        foreach (CodexStateThread thread in catalog.Threads)
+        {
+            if (fingerprints.TryGetValue(thread.ThreadId, out CodexStateThreadFingerprint? fingerprint) && fingerprint.Matches(thread))
+                _pendingThreads.Remove(thread.ThreadId);
+            else _pendingThreads[thread.ThreadId] = thread;
+        }
+        // Discovery completion is independent of rollout catch-up. Keep uncommitted work in this
+        // process and retain the conservative durable cursor for crash/restart recovery. Startup
+        // always reconciles the full catalog, rebuilding this disposable pending set.
+        if (reconciliationDue) _lastStateReconciliation = reconciliationStarted;
+        _lastStateCatalogPath = catalog.DatabasePath;
+        _discoveryWatermark = minimumUpdatedAtMs == 0 ? catalog.MaxUpdatedAtMs : Math.Max(_discoveryWatermark, catalog.MaxUpdatedAtMs);
+        CodexStateThread[] changedThreads = _pendingThreads.Values.ToArray();
 
         // Bound indexed refreshes so an upgrade's old corpus cannot hold recent captures behind a
         // whole-history pass. Reserve half the batch for rotating older work, including retries.
@@ -302,13 +314,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
         {
             await _stateIndexStore.CommitAsync(appliedThreads, nextWatermark, cancellationToken);
         }
-
-        // Failed/cancelled full passes do not defer reconciliation: retry on the next refresh.
-        if (reconciliationDue && earliestUnappliedUpdatedAtMs is null)
-        {
-            _lastStateReconciliation = reconciliationStarted;
-            _lastStateCatalogPath = catalog.DatabasePath;
-        }
+        foreach (CodexStateThread thread in appliedThreads) _pendingThreads.Remove(thread.ThreadId);
 
         return new CodexObservatoryRefreshResult(
             catalog.TotalThreadCount,
@@ -317,7 +323,11 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
             normalized,
             sessionsTouched.Count,
             errors,
-            bytes) { Coverage = _lastCoverage, DeferredFiles = deferred.Length };
+            bytes)
+        {
+            Coverage = _lastCoverage, DeferredFiles = deferred.Length,
+            DiscoveryReconciled = reconciliationDue, CatalogRowsRead = catalog.Threads.Count,
+        };
     }
 
     private async Task<bool> CanCommitFingerprintAsync(
@@ -402,7 +412,28 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
         long bytes = 0;
         var sessionsTouched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
+        var changed = new List<string>();
         foreach (string file in files)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                if (!await _ingestionService.IsUnchangedAsync(file, cancellationToken)) changed.Add(file);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                // Keep failures eligible for the bounded retry batch.
+                changed.Add(file);
+            }
+        }
+        string[] recent = changed.Take(8).ToArray();
+        string[] older = changed.Skip(8).ToArray();
+        int offset = older.Length == 0 ? 0 : _filesystemBackfillOffset % older.Length;
+        string[] batch = recent.Concat(older.Skip(offset).Concat(older.Take(offset)).Take(8)).ToArray();
+        _filesystemBackfillOffset = older.Length == 0 ? 0 : (offset + Math.Min(8, older.Length)) % older.Length;
+        int incomplete = 0;
+
+        foreach (string file in batch)
         {
             cancellationToken.ThrowIfCancellationRequested();
             filesScanned++;
@@ -435,6 +466,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
                     info.Exists ? info.Length : 0,
                     DateTimeOffset.UtcNow,
                     cancellationToken);
+                if (!result.ReachedCurrentEndOfFile) incomplete++;
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -454,7 +486,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
             normalized,
             sessionsTouched.Count,
             errors,
-            bytes);
+            bytes) { DeferredFiles = changed.Count - batch.Length + incomplete, DiscoveryReconciled = true };
     }
 
     private IReadOnlyList<string> DiscoverFiles(CancellationToken cancellationToken = default)

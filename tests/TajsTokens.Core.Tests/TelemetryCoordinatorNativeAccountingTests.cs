@@ -80,7 +80,7 @@ public sealed class TelemetryCoordinatorNativeAccountingTests
             if (deferred)
                 Assert.Contains(
                     second.Sources,
-                    source => source.Provider == "Codex rollouts" && source.Detail.Contains("24 changed indexed file(s) remain queued"));
+                    source => source.Provider == "Codex rollouts" && source.Detail.Contains("24 changed file(s) remain queued"));
         }
         finally
         {

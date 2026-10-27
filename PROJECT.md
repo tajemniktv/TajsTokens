@@ -172,11 +172,11 @@ Owners: `WindowsResourcePolicy`, `App`, `MainWindow`, `TelemetryCoordinator`,
 `CodexObservatoryService`, SQLite stores/providers and `CalibrationProcessService`.
 Memo §11 supplies the mechanisms; their relative runtime cost remains to be measured.
 
-Stage 1 is in progress. The first slice implements normal interactive scheduling,
-retryable/visible EcoQoS state and generation-specific coalesced fleet refreshes.
-All 652 Core tests and the Windows app build pass; the app has been installed and
-restarted. Broader measurements, restore acceptance and the remaining work-reduction
-items are still open. See [current validation evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
+Stage 1 is in progress: PERF-002, PERF-003 and PERF-005 are implemented. Normal
+interactive scheduling, retryable/visible EcoQoS, coalesced fleet reads and independent
+discovery/catch-up are installed. All 653 Core tests and the Windows build pass.
+Broader measurements, presentation/cache/calibration/maintenance work and the token
+write benchmark remain open. See [current validation evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 
 - [ ] **PERF-001 — Establish measurements and targets.** Compare startup, warm idle,
   active append, backlog, hide/restore during work and reset boundary. Separate
@@ -185,11 +185,14 @@ items are still open. See [current validation evidence](docs/source-notes/STAGE1
   transactions, invalidations, fleet queries, preparation and cache hits. Choose
   numerical budgets from that hardware/data baseline; `BytesObserved` is not a
   physical-I/O counter.
-- [ ] **PERF-002 — Repair interactive scheduling.** Remove the UI/tray process hard
+- [x] **PERF-002 — Repair interactive scheduling.** Remove the UI/tray process hard
   CPU cap and routine forced compacting GC, retaining worker containment and
   cooperative bounded collection. Track desired/applied native policy separately;
   report failures and retry failed transitions. Verify restore/shutdown during work
   and injected policy failures.
+  Verified by failure/retry/disposal regressions, installed minimize/restore,
+  visible Diagnostics state and graceful app replacement during the next build;
+  [evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 - [x] **PERF-003 — Make completion side effects generation-specific.** Replace scans
   of historical `Refresh completed` display text with typed completion identity.
   Allow one fleet read in flight, coalesce superseded requests before expensive
@@ -202,10 +205,14 @@ items are still open. See [current validation evidence](docs/source-notes/STAGE1
   evict heavy history. Cache summaries by selection/data generation, coalesce visual
   snapshots and update changed properties. Keep alert transitions lossless and
   independent of visual coalescing.
-- [ ] **PERF-005 — Separate discovery from catch-up.** Deferred/missing/mismatched
+- [x] **PERF-005 — Separate discovery from catch-up.** Deferred/missing/mismatched
   rollouts must not force full discovery every poll. Use bounded fair retries and
   filesystem-fallback budgets, independent relationship reconciliation and correct
   watermarks; prove eventual coverage after recovery.
+  Pending work is independent of discovery; conservative durable cursors recover
+  after restart. The installed app read one catalog row and reused full discovery
+  while the existing unresolved rollout remained explicit;
+  [653-test/build and runtime evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 - [ ] **PERF-006 — Narrow invalidation and stop no-op writes.** Introduce token-relevant
   revisions covering retirement/deletion/time enrichment, skip unchanged durable
   checkpoints and define coalesced last-seen freshness. Reuse bounded fingerprint/
@@ -501,7 +508,7 @@ Overview keeps current account allowances above the selected history views. Date
 
 Known limitation [PACE-001](docs/source-notes/WEEKLY_PACE_INVESTIGATION.md): the reset fallback `legacy-ewma` weights each adjacent poll equally. Rounded-meter jumps can briefly inflate its rate, while unchanged polls decay it toward zero even during ongoing work. Startup polls affect that decay. Retained-anchor and ongoing-work regressions reproduce the defect; its conditional survival state is not validated by flat readings. The investigation leaves the live policy unchanged. Corrective work must address observation/poll semantics and compare later reset-horizon outcomes, rather than retain a desired old rate or equate a flat meter with idle activity.
 
-The tray companion uses Windows background resource scheduling, EcoQoS and a 0.5% total-system CPU budget while its dashboard is hidden or minimized. Opening restores normal scheduling and removes that budget before constructing the window; page loading follows window activation. Hidden dashboards release their page cache and active queries/timers, retaining navigation destinations rather than selected historical data. Quota collection and alerts continue, with a full configured polling delay after each collection pass so slow work cannot create a catch-up loop. Compact quota-pace outlooks run independently of detailed calibration and never load its training dataset.
+The tray/UI process keeps normal scheduling and has no hard CPU cap or routine forced compacting GC. EcoQoS remains a background hint with retryable native transitions exposed in Diagnostics; detailed calibration retains its separate worker budget. Typed collector completion generations coalesce supplementary fleet reads, and cached fleet status ages by clock time independently of database changes. Hidden dashboards still release their page cache and active queries/timers, retaining navigation destinations rather than selected history; PERF-004 owns preserving useful lightweight presentation state. Quota collection and alerts continue, with a full configured polling delay after each pass. Compact quota-pace outlooks remain independent of detailed calibration and never load its training dataset. Full source discovery now follows its reconciliation cadence independently of bounded pending rollout retries; a persistent failure remains explicit without forcing full discovery every poll.
 
 Detailed workload calibration and token nowcasts run in one owned headless process in either mode, independently of the collector and UI. Its Windows job limits total-system CPU to 0.5% in the background or 2% with the dashboard visible, private commit to 384 MiB and its managed heap to 256 MiB. Background-started slices allow ten minutes with a five-minute cooldown; foreground-started slices allow three minutes with a one-minute cooldown. The longer background wall budget lets historical data preparation finish at the lower CPU rate. Showing the dashboard adjusts an active worker's CPU budget immediately. Closing the app terminates its worker. Timeouts or memory-limit failures retain quota-pace outlooks and cached progress rather than blocking collection. Detailed results are published as fresh only for an unchanged fresh quota anchor; token nowcasts are stale if their native accounting generation changed. Full forecast promotion checks collection-time qualification before reconstructed comparisons; model selection, source provenance and acceptance criteria remain the same.
 

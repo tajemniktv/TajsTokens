@@ -59,6 +59,27 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         _ingestionBatchWriter = ingestionBatchWriter;
     }
 
+    public async Task<bool> IsUnchangedAsync(string filePath, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!_verifiedPrefixes.TryGetValue(filePath, out var verified) || verified.Offset != verified.Length ||
+            verified.PhysicalIdentity.StartsWith("fallback", StringComparison.Ordinal)) return false;
+        var info = new FileInfo(filePath);
+        if (!info.Exists || info.Length != verified.Length || info.LastWriteTimeUtc != verified.Written ||
+            GetSourceIdentity(filePath) != verified.PhysicalIdentity) return false;
+        FileIngestionCheckpoint? checkpoint = await _checkpointStore.GetCheckpointAsync(filePath, cancellationToken);
+        return checkpoint is not null && checkpoint.SourceIdentity == verified.Identity &&
+               checkpoint.LastByteOffset == verified.Offset && checkpoint.ConsumedPrefixSha256 == verified.Hash &&
+               checkpoint.ParserVersion == ParserVersion(filePath);
+    }
+
+    private string ParserVersion(string filePath)
+    {
+        string version = _observatoryStore is null ? BoundaryParserVersion : TypedParserVersion;
+        return _observatoryStore is not null && CodexRolloutParser.HasDesktopFilenameSuffix(filePath)
+            ? version + "/desktop-owner-v1" : version;
+    }
+
     public async Task<CodexIngestionResult> IngestAsync(string filePath, CancellationToken cancellationToken)
     {
         if (!File.Exists(filePath))
@@ -71,9 +92,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             await _observatoryStore.InitializeAsync(cancellationToken);
         }
 
-        string parserVersion = _observatoryStore is null ? BoundaryParserVersion : TypedParserVersion;
-        if (_observatoryStore is not null && CodexRolloutParser.HasDesktopFilenameSuffix(filePath))
-            parserVersion += "/desktop-owner-v1";
+        string parserVersion = ParserVersion(filePath);
         FileIngestionCheckpoint? existing = await _checkpointStore.GetCheckpointAsync(filePath, cancellationToken);
         string sourceIdentity = GetSourceIdentity(filePath);
         string physicalIdentity = sourceIdentity;

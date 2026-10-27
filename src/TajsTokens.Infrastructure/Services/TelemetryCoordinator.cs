@@ -323,11 +323,11 @@ public sealed class TelemetryCoordinator
                               ? $" {observatory.Errors} file(s) could not be refreshed and will retry."
                               : string.Empty) +
                           (observatory.DeferredFiles > 0
-                              ? $" {observatory.DeferredFiles} changed indexed file(s) remain queued for later bounded passes; token history is not yet fully refreshed."
+                              ? $" {observatory.DeferredFiles} changed file(s) remain queued for later bounded passes; token history is not yet fully refreshed."
                               : string.Empty);
                     if (observatory.Coverage is { } coverage)
                     {
-                        detail += $" Best-effort path coverage at {coverage.ObservedAtUtc:u}: " +
+                        detail += $" {observatory.CatalogRowsRead} catalog row(s) read; full discovery {(observatory.DiscoveryReconciled ? "completed" : "reused")} this pass. Best-effort path coverage at {coverage.ObservedAtUtc:u}: " +
                                   $"{coverage.AccessibleIndexedPaths}/{coverage.IndexedPaths} indexed paths accessible; " +
                                   $"{coverage.DiscoveredPaths} files in configured discovery roots, {coverage.UnindexedPaths} not indexed; " +
                                   $"{coverage.IndexedOutsideDiscovery} indexed paths outside that discovered set. " +

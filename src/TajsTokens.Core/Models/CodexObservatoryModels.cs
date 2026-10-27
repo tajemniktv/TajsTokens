@@ -29,6 +29,8 @@ public sealed record CodexObservatoryRefreshResult(
 {
     public CodexCollectionCoverage? Coverage { get; init; }
     public int DeferredFiles { get; init; }
+    public bool DiscoveryReconciled { get; init; }
+    public int CatalogRowsRead { get; init; }
     public static CodexObservatoryRefreshResult Empty { get; } = new(0, 0, 0, 0, 0, 0, 0);
 }
 
