@@ -6,6 +6,14 @@ Updated 13 October 2026. This combines the supplied **TajsTokens Architecture an
 
 ## Consolidated feature status
 
+Planning update, 27 October 2026: [PROJECT.md — Current work](../../PROJECT.md#current-work)
+owns the accounting/forecasting/TT checklist derived from the
+[preserved research](research/2026-10-27/SOURCE_INDEX.md). This planning update does
+not newly validate the feature statuses below. A-01 remains installed acceptance;
+T-01 is the public-basis decision; D-01 covers research/public version clarity;
+P-01 remains measured token-write throughput; PACE-001 is tracked under its existing
+ID in PROJECT.md and the pace investigation. Keep these IDs when implementation lands.
+
 | Audit capability | Status | TajsTokens now / remaining boundary |
 | --- | --- | --- |
 | Live Codex turn consumption and session fleet | **Partial** | Live fleet shows local native turn state, subagent role, elapsed time, recent 15-minute tokens, per-refresh increases, session totals, and cache input mix. Recent writes are **not** process-liveness or verified waiting-for-input evidence. Exact per-turn subscription quota cost is unavailable. See `CodexFleetPage` and `CodexThreadObservabilityService`. |
@@ -56,7 +64,10 @@ The [semantic batch writer](../../src/TajsTokens.Infrastructure/Persistence/Sqli
 
 The [README](../../README.md) already identifies the product as a Windows companion and names its Windows requirements. The [app project](../../src/TajsTokens.App/TajsTokens.App.csproj) still substitutes a library target compiling only `CrossPlatformBuildPlaceholder.cs` outside Windows. Release workflows package Windows x64, not a macOS or Linux client. Keep support/release copy explicit: a passing non-Windows app-project build is not portability evidence. A future platform claim needs a launchable packaged UI and platform-specific validation, not a generic framework rewrite.
 
-## Remaining Codex work, in dependency order
+## Remaining audit boundaries
+
+These explain the audit's outstanding source/product boundaries. Implementation
+sequence and completion checkboxes belong to [PROJECT.md](../../PROJECT.md#current-work).
 
 1. **Validate A-01 in the installed workflow.** PR #109 addresses the durable chronology contract and automated replay regressions; installed-data and visual acceptance remain separate. Do not mistake the static finding for a measured frequency in live data.
 2. **Decide T-01 before making TT a public workload unit.** The current v4 evaluator is research; a standard unit needs exact, versioned semantics and support rules. Clarify D-01's evaluator-v4/basis-v1 language now without rewriting archived v3 results.
