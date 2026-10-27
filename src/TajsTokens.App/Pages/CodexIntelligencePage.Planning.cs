@@ -120,7 +120,9 @@ public sealed partial class CodexIntelligencePage
             if (!_loaded || !_planRevision.IsCurrent(revision) || request.IsCancellationRequested || !_planAnchors.SequenceEqual(PlanAnchors())) return;
             ScenarioText.Text = string.Join("\n\n", new[] { result.FiveHour, result.Weekly }.Select(window =>
             {
-                SessionPlanWindow fit = SessionPlanProjection.Build(window, readings.FirstOrDefault(x => x.Current.Kind == window.Kind), hours, DateTimeOffset.UtcNow);
+                SessionPlanWindow fit = live.CurrentState.QuotaLanes.Any(x => x.Kind == window.Kind && x.NotReportedByProvider)
+                    ? new SessionPlanWindow(SessionFit.Unknown, "Not reported", "Codex did not report this allowance. The other window is assessed independently.")
+                    : SessionPlanProjection.Build(window, readings.FirstOrDefault(x => x.Current.Kind == window.Kind), hours, DateTimeOffset.UtcNow);
                 return $"{QuotaOutlookProjection.Name(window.Kind)} · {fit.Summary}\n{fit.Detail}";
             })) + $"\n\nEvaluated {result.EvaluatedAtUtc?.ToLocalTime():g} · {QuotaAccountScope.Describe(scenario.AccountKey)}\n" + result.Methodology;
         }

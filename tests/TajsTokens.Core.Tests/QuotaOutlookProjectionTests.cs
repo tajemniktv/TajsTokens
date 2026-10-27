@@ -32,6 +32,8 @@ public sealed class QuotaOutlookProjectionTests
         five = Reading(QuotaWindowKind.FiveHour, 4, 2);
         week = Reading(QuotaWindowKind.Weekly, 2, 1);
         Assert.Equal(week, QuotaOutlookProjection.Build(Snapshot(five, week), Now).Limiting!.Reading);
+        week = Reading(QuotaWindowKind.Weekly, 100, 2);
+        Assert.Equal(five, QuotaOutlookProjection.Build(Snapshot(week, five), Now).Limiting!.Reading);
         Assert.True(QuotaOutlookProjection.Build(Snapshot(five with { Current = five.Current with { UsedPercent = 100 } }, week), Now)
             .Limiting!.Exhausted);
     }
@@ -45,6 +47,9 @@ public sealed class QuotaOutlookProjectionTests
         Assert.Contains("Weekly: Meter unavailable", partial.Summary);
         Assert.False(QuotaOutlookProjection.Build(Snapshot(five, week with { State = TelemetryHealthState.Stale }), Now).Windows[1].Supported);
         Assert.False(QuotaOutlookProjection.Window(five.Current.Kind, five with { Current = five.Current with { AccountKey = null } }, false, Now).Supported);
+        Assert.Null(QuotaOutlookProjection.Build(Snapshot(five, week with { Current = week.Current with { AccountKey = "other" } }), Now).Limiting);
+        Assert.Equal("Meter unavailable", QuotaOutlookProjection.Window(five.Current.Kind,
+            five with { Current = five.Current with { UsedPercent = 110 } }, false, Now).Conclusion);
     }
 
     [Fact]

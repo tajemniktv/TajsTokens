@@ -18,7 +18,8 @@ public static class SessionPlanProjection
             return Unknown("The estimate does not match this meter's account, source, plan and window.");
         if (!estimate.HasEnoughHistory || estimate.ExpectedQuotaDeltaPercent is not { } delta || !double.IsFinite(delta))
             return Unknown(estimate.Explanation);
-        if (anchor.RemainingPercent is not { } left || !double.IsFinite(left)) return Unknown("Remaining allowance is unavailable.");
+        if (anchor.UsedPercent is not >= 0 or > 100 || anchor.RemainingPercent is not { } left || !double.IsFinite(left))
+            return Unknown("Remaining allowance is unavailable.");
         string consumption = $"~{delta:0.#} pp expected consumption · ~{Math.Max(0, left - delta):0.#}% left after the session. ";
         if (anchor.ResetsAtUtc is not { } reset || reset <= now) return Unknown("A future reported reset is required.");
         if (!double.IsFinite(durationHours) || durationHours <= 0) return Unknown("Enter a positive finite duration.");

@@ -39,11 +39,14 @@ public sealed partial class CodexIntelligencePage
         AccountScopeText.Text = SelectedAccountKey is null
             ? "Current provider account · separate from all local work"
             : "Selected account · only its current readings";
+        double cardWidth = DashboardCards.ActualWidth < 780 ? DashboardCards.ActualWidth : DashboardCards.ActualWidth / 2;
+        double tileWidth = Math.Max(120, (cardWidth - 64) / 2);
         QuotaTiles.ItemsSource = outlook.Windows.Select(x => new QuotaTile(
+            tileWidth,
             QuotaOutlookProjection.Name(x.Kind) + " allowance",
-            x.Reading?.Current.RemainingPercent is { } left ? $"{left:0.#}% left" : x.NotReported ? "Not reported" : "Unavailable",
+            x.Reading?.Current.UsedPercent is >= 0 and <= 100 && x.Reading.Current.RemainingPercent is { } left ? $"{left:0.#}% left" : x.NotReported ? "Not reported" : "Unavailable",
             x.Reading?.Current.RemainingPercent ?? 0,
-            x.Reading?.Current.RemainingPercent is not null ? Visibility.Visible : Visibility.Collapsed,
+            x.Reading?.Current.UsedPercent is >= 0 and <= 100 ? Visibility.Visible : Visibility.Collapsed,
             x.Reading?.Current.ResetsAtUtc is { } reset ? $"Resets {reset.ToLocalTime():ddd, d MMM · HH:mm}" : "Reset time unavailable",
             x.Conclusion,
             x.Reading is { } reading ? $"{(reading.IsFresh ? "Reported" : "Last known")} · {reading.Current.CapturedAtUtc.ToLocalTime():g} · {QuotaAccountScope.Describe(reading.Current.AccountKey)}" : x.Detail)).ToArray();
@@ -78,6 +81,7 @@ public sealed partial class CodexIntelligencePage
         OutlookColumn.Width = narrow ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
         Grid.SetColumn(OutlookCard, narrow ? 0 : 1);
         Grid.SetRow(OutlookCard, narrow ? 1 : 0);
+        if (_loaded && Math.Abs(e.NewSize.Width - e.PreviousSize.Width) > .5) RenderDashboard();
     }
 
     private void OnViewChanged(object sender, SelectionChangedEventArgs e)
@@ -115,5 +119,5 @@ public sealed partial class CodexIntelligencePage
         await LoadAsync();
     }
 
-    private sealed record QuotaTile(string Title, string Remaining, double Value, Visibility MeterVisibility, string Reset, string Pace, string Freshness);
+    private sealed record QuotaTile(double Width, string Title, string Remaining, double Value, Visibility MeterVisibility, string Reset, string Pace, string Freshness);
 }

@@ -23,12 +23,14 @@ public static class QuotaOutlookProjection
             bool absent = live.CurrentState.QuotaLanes.Any(x => x.Kind == kind && x.NotReportedByProvider);
             return Window(kind, absent ? null : reading, absent, now);
         }).ToArray();
+        if (live.Current.Select(x => x.Current.AccountKey).Distinct().Count() > 1)
+            return new AccountOutlook(windows, null, "Multiple account readings · select an account before comparing allowances");
         AllowanceOutlook? limiting = windows.Where(x => x.Supported)
-            .OrderByDescending(x => x.Exhausted)
-            .ThenByDescending(x => x.Reading?.Forecast?.SurvivesUntilReset == false)
-            .ThenBy(x => x.Reading?.Forecast?.SurvivesUntilReset == false
+            .OrderBy(x => x.Exhausted ? 0 : x.Reading?.Forecast?.SurvivesUntilReset == false ? 1 : 2)
+            .ThenBy(x => !x.Exhausted && x.Reading?.Forecast?.SurvivesUntilReset == false
                 ? x.Reading.Forecast.EstimatedExhaustionAtUtc ?? DateTimeOffset.MaxValue : DateTimeOffset.MaxValue)
-            .ThenByDescending(x => x.Reading?.Forecast?.BurnPressure ?? double.NegativeInfinity)
+            .ThenByDescending(x => !x.Exhausted && x.Reading?.Forecast?.SurvivesUntilReset == true
+                ? x.Reading.Forecast.BurnPressure ?? double.NegativeInfinity : double.NegativeInfinity)
             .ThenBy(x => x.Reading?.Current.ResetsAtUtc ?? DateTimeOffset.MaxValue)
             .ThenBy(x => x.Kind).FirstOrDefault();
         AllowanceOutlook[] reported = windows.Where(x => !x.NotReported).ToArray();
@@ -39,7 +41,7 @@ public static class QuotaOutlookProjection
                     : $"At this pace, {Name(limiting!.Kind).ToLowerInvariant()} allowance lasts until reset"
                 : "Reset outlook is incomplete";
         if (reported.Any(x => !x.Supported) || windows.Any(x => x.NotReported))
-            summary += ". " + string.Join(" · ", windows.Select(x => $"{Name(x.Kind)}: {x.Conclusion}"));
+            summary += ". " + string.Join(" · ", windows.Where(x => !x.Supported || limiting?.Reading?.Forecast?.SurvivesUntilReset != false && reported.Any(r => !r.Supported)).Select(x => $"{Name(x.Kind)}: {x.Conclusion}"));
         return new AccountOutlook(windows, limiting, summary);
     }
 
@@ -51,7 +53,7 @@ public static class QuotaOutlookProjection
         QuotaSnapshot q = reading.Current;
         if (!reading.IsFresh || now - q.CapturedAtUtc > TimeSpan.FromHours(6) || q.CapturedAtUtc > now)
             return Unknown("Last known reading", "Current pace assessment is paused until a fresh provider reading is available.");
-        if (q.RemainingPercent is not { } remaining || !double.IsFinite(remaining) || remaining is < 0 or > 100)
+        if (q.UsedPercent is not { } used || !double.IsFinite(used) || used is < 0 or > 100 || q.RemainingPercent is not { } remaining)
             return Unknown("Meter unavailable", "The current meter is missing or invalid.");
         if (remaining <= 0)
             return new(kind, reading, false, true, true, "Exhausted", "Provider meter exhausted", "Observed allowance is exhausted; this is not a predicted ETA.");

@@ -16,7 +16,7 @@
             </StackPanel>
             <Button Grid.Column="1" Content="Refresh view" Click="OnApply" VerticalAlignment="Center" />
         </Grid>
-        <ScrollViewer Grid.Row="1" MaxHeight="340" HorizontalScrollBarVisibility="Disabled">
+        <ScrollViewer Grid.Row="1" MaxHeight="300" HorizontalScrollBarVisibility="Disabled">
                         <Grid x:Name="DashboardCards" ColumnSpacing="16" RowSpacing="16" SizeChanged="OnDashboardSizeChanged">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*" /><ColumnDefinition x:Name="OutlookColumn" Width="*" />
@@ -31,10 +31,13 @@
                                     <TextBlock x:Name="QuotaEmpty" Text="Waiting for a reported quota reading."
                                                Style="{StaticResource CaptionStyle}" />
                                     <ItemsControl x:Name="QuotaTiles">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
-                                                <StackPanel Spacing="4" Margin="0,0,0,8">
-                                                    <TextBlock Text="{Binding Title}" Style="{StaticResource SubtitleStyle}" />
+                                                <StackPanel Width="{Binding Width}" Spacing="6" Margin="0,0,12,0">
+                                                    <TextBlock Text="{Binding Title}" TextWrapping="Wrap" Style="{StaticResource SubtitleStyle}" />
                                                     <TextBlock Text="{Binding Remaining}" FontSize="24" FontWeight="SemiBold" />
                                                     <ProgressBar Value="{Binding Value}" Visibility="{Binding MeterVisibility}" Minimum="0" Maximum="100"
                                                                  AutomationProperties.Name="Quota remaining percent" />
@@ -55,7 +58,6 @@
                                                TextWrapping="Wrap" />
                                     <TextBlock x:Name="OutlookDetail" Text="A current, compatible forecast will appear here."
                                                TextWrapping="Wrap" />
-                                    <TextBlock x:Name="NowcastSummary" Style="{StaticResource SubtitleStyle}" />
                                     <Button Content="Plan another work session" Click="OnPlan" HorizontalAlignment="Left" />
                                     <HyperlinkButton Content="Forecast details and uncertainty" Click="OnPlan" HorizontalAlignment="Left"
                                                      Padding="0" />
@@ -65,6 +67,7 @@
         </ScrollViewer>
         <Expander x:Name="SelectionExpander" Grid.Row="2" Header="History range and filters" HorizontalAlignment="Stretch"
                   HorizontalContentAlignment="Stretch">
+            <ScrollViewer MaxHeight="220" HorizontalScrollBarVisibility="Disabled">
             <StackPanel Spacing="10">
                 <StackPanel Orientation="Horizontal" Spacing="8">
                     <Button Content="Today" Tag="1" Click="OnQuickRange" />
@@ -84,6 +87,7 @@
                 <TextBox x:Name="Project" Header="Project" PlaceholderText="All projects — exact path to filter" />
                 <TextBox x:Name="Thread" Header="Chat" PlaceholderText="All chats — ID to filter" />
             </StackPanel>
+            </ScrollViewer>
         </Expander>
         <TabView Grid.Row="3" x:Name="Views" IsAddTabButtonVisible="False" TabWidthMode="SizeToContent" SelectionChanged="OnViewChanged">
             <TabViewItem Header="Overview" IsClosable="False">
@@ -103,6 +107,7 @@
                                 </Grid>
                                 <TextBlock x:Name="WorkValue" Style="{StaticResource HeroMetricStyle}" />
                                 <TextBlock x:Name="WorkDetail" Style="{StaticResource SubtitleStyle}" />
+                                <TextBlock x:Name="NowcastSummary" Style="{StaticResource SubtitleStyle}" />
                                 <HyperlinkButton Content="Inspect quota changes" Click="OnQuotaHistory" HorizontalAlignment="Left" />
                                 <Canvas x:Name="Timeline" Height="180" SizeChanged="OnTimelineSizeChanged"
                                         AutomationProperties.Name="Observed workload over the selected UTC range" />
