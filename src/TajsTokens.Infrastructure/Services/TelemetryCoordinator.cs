@@ -43,6 +43,7 @@ public sealed class TelemetryCoordinator
     private RefreshTrigger? _activeRefreshTrigger;
     private string _lastTokenSourceName = "Token accounting";
     private TelemetrySnapshot _latest = TelemetrySnapshot.Empty;
+    private long _completedCollectionGeneration;
 
     public TelemetryCoordinator(
         ICodexTokenAccountingProvider tokenProvider,
@@ -543,7 +544,8 @@ public sealed class TelemetryCoordinator
                 quotaLanes,
                 tokenGeneration,
                 currentForecasts,
-                tokenForecast);
+                tokenForecast,
+                collectionCompleted: true);
 
             if (deferForecasts && persistenceAvailable && _intelligenceService is not null)
                 Volatile.Write(ref _backgroundForecastTask,
@@ -816,7 +818,8 @@ public sealed class TelemetryCoordinator
         IReadOnlyList<QuotaLaneState> quotaLanes,
         TokenAccountingGenerationState? tokenGeneration,
         IReadOnlyList<CurrentQuotaForecast> currentForecasts,
-        TokenWorkloadForecast? tokenForecast = null)
+        TokenWorkloadForecast? tokenForecast = null,
+        bool collectionCompleted = false)
     {
         var snapshot = new TelemetrySnapshot(
             DateTimeOffset.UtcNow,
@@ -831,6 +834,9 @@ public sealed class TelemetryCoordinator
             events.ToArray())
         {
             QuotaLanes = quotaLanes, CurrentForecasts = currentForecasts, TokenGeneration = tokenGeneration, TokenForecast = tokenForecast,
+            CollectionCompletion = collectionCompleted
+                ? new TelemetryCollectionCompletion(Interlocked.Increment(ref _completedCollectionGeneration), _timeProvider.GetUtcNow())
+                : null,
         };
 
         Volatile.Write(ref _latest, snapshot);

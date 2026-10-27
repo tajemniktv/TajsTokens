@@ -21,15 +21,18 @@ public sealed class BackgroundTelemetryCoordinatorTests
             var coordinator = new TelemetryCoordinator(new EmptyTokens(), new ChangingQuota(),
                 new SqliteTelemetryRepository(Path.Combine(directory, "test.db")),
                 intelligenceService: intelligence, isBackground: () => true, timeProvider: clock);
-            await coordinator.RefreshAsync(RefreshTrigger.Startup, lifetime.Token).WaitAsync(TimeSpan.FromSeconds(5));
+            TelemetrySnapshot first = await coordinator.RefreshAsync(RefreshTrigger.Startup, lifetime.Token).WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(1, first.CollectionCompletion?.Generation);
             await intelligence.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
             Task firstForecast = coordinator.BackgroundForecastCompletion;
             TelemetrySnapshot second = await coordinator.RefreshAsync(RefreshTrigger.Interval, lifetime.Token)
                 .WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Equal(20, Assert.Single(second.QuotaSnapshots).UsedPercent);
+            Assert.Equal(2, second.CollectionCompletion?.Generation);
             Assert.Equal(1, intelligence.Calls);
             intelligence.Release.TrySetResult();
             await firstForecast.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Same(second.CollectionCompletion, coordinator.Latest.CollectionCompletion);
             Assert.Equal(20, Assert.Single(coordinator.Latest.QuotaSnapshots).UsedPercent);
             CurrentQuotaForecast retained = Assert.Single(coordinator.Latest.CurrentForecasts);
             Assert.Equal(10, retained.Current.UsedPercent);

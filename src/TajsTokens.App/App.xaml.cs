@@ -12,6 +12,7 @@ using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
+using TajsTokens.Infrastructure.Services;
 
 #endregion
 
@@ -31,6 +32,8 @@ public partial class App : Application
     private IDisposable? _startupLease;
     private Window? _window;
     private bool _dashboardOpenQueued;
+    private CodexFleetRefreshCoordinator? _fleetRefresh;
+    private readonly DispatcherTimer _fleetFreshnessTimer = new() { Interval = TimeSpan.FromSeconds(30) };
 
     public App()
     {
@@ -45,10 +48,10 @@ public partial class App : Application
         }
         InitializeComponent();
         Services = new AppServices(() => _resourcePolicy.IsBackground);
-        _resourcePolicy.IsBusy = () => Services.Telemetry.IsForecastRefreshRunning;
     }
 
     public AppServices Services { get; }
+    internal string SchedulingDiagnostic => _resourcePolicy.Diagnostic;
 
     public void Navigate(Type pageType, object? parameter = null)
     {
@@ -66,6 +69,11 @@ public partial class App : Application
         _trayService.NotificationsEnabledChanged += OnNotificationsEnabledChanged;
         _trayService.LaunchAtLoginChanged += OnLaunchAtLoginChanged;
         _trayService.Initialize();
+        _fleetRefresh = new CodexFleetRefreshCoordinator(Services.CodexThreadReadModel.ReadLiveFleetAsync,
+            _lifetimeCancellation.Token);
+        _fleetRefresh.Updated += QueueTrayPresentation;
+        _fleetFreshnessTimer.Tick += (_, _) => UpdateTrayPresentation();
+        _fleetFreshnessTimer.Start();
         _trayService.UpdatePreferences(Services.Settings.NotificationsEnabled, Services.Settings.LaunchAtLogin);
         _ = ReconcileStartupRegistrationAsync();
 
@@ -176,12 +184,14 @@ public partial class App : Application
 
     private void OnSnapshotUpdated(TelemetrySnapshot snapshot)
     {
+        // Capture each transition before dispatching; coalescing visual work must not skip an
+        // intermediate alert when another snapshot arrives before the UI callback executes.
+        CodexIntelligenceSnapshot intelligence = CodexIntelligenceProjection.Live(snapshot);
         _dispatcher?.TryEnqueue(() =>
         {
-            CodexIntelligenceSnapshot intelligence = Services.CodexIntelligence.Current;
-            _trayService.UpdateStatus(SystemTrayStatusPresenter.Build(intelligence));
-            if (snapshot.Events.Any(item => item.Type == "Refresh completed"))
-                _resourcePolicy.ScheduleReclamation();
+            if (_exitRequested) return;
+            if (snapshot.CollectionCompletion is not null)
+                _resourcePolicy.SetDashboardVisible(!_resourcePolicy.IsBackground);
 
             // Advance alert state even while notifications are muted. Otherwise re-enabling them can
             // replay stale threshold/provider transitions that happened while the user opted out.
@@ -196,31 +206,30 @@ public partial class App : Application
                 _trayService.ShowNotification(alert.Title, alert.Message);
             }
         });
-        // Progressive quota/scan snapshots do not each need a separate fleet database query.
-        if (snapshot.Events.Any(item => item.Type == "Refresh completed"))
-            _ = UpdateRecentFleetTrayAsync(snapshot);
+        QueueTrayPresentation();
+        if (snapshot.CollectionCompletion is { } completion)
+            _ = _fleetRefresh?.RequestAsync(completion.Generation);
     }
 
-    private async Task UpdateRecentFleetTrayAsync(TelemetrySnapshot snapshot)
+    private int _trayPresentationQueued;
+
+    private void QueueTrayPresentation()
     {
-        try
+        if (Interlocked.Exchange(ref _trayPresentationQueued, 1) != 0) return;
+        if (_dispatcher?.TryEnqueue(() =>
         {
-            CodexLiveFleetSnapshot fleet = await Services.CodexThreadReadModel.ReadLiveFleetAsync(_lifetimeCancellation.Token);
-            if (!ReferenceEquals(Services.Telemetry.Latest, snapshot) || _exitRequested) return;
-            int recent = fleet.Threads.Count(thread => thread.State == CodexFleetState.RecentlyWorking);
-            SystemTrayStatus status = SystemTrayStatusPresenter.WithRecentFleet(
-                SystemTrayStatusPresenter.Build(Services.CodexIntelligence.Current), recent);
-            _dispatcher?.TryEnqueue(() =>
-            {
-                if (!_exitRequested && ReferenceEquals(Services.Telemetry.Latest, snapshot))
-                    _trayService.UpdateStatus(status);
-            });
-        }
-        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested) { }
-        catch (Exception)
-        {
-            // Quota status remains available when Codex thread history is absent or unreadable.
-        }
+            Interlocked.Exchange(ref _trayPresentationQueued, 0);
+            UpdateTrayPresentation();
+        }) != true) Interlocked.Exchange(ref _trayPresentationQueued, 0);
+    }
+
+    private void UpdateTrayPresentation()
+    {
+        if (_exitRequested) return;
+        SystemTrayStatus status = SystemTrayStatusPresenter.Build(Services.CodexIntelligence.Current);
+        if (_fleetRefresh?.RecentCount is { } recent)
+            status = SystemTrayStatusPresenter.WithRecentFleet(status, recent);
+        _trayService.UpdateStatus(status);
     }
 
     private async Task RefreshFromTrayAsync()
@@ -375,7 +384,7 @@ public partial class App : Application
 
     private void RequestDashboard()
     {
-        // Lift the process cap before any XAML construction, page reload, or queued activation.
+        // Restore the foreground QoS hint before queued window activation.
         _resourcePolicy.SetDashboardVisible(true);
         Services.Calibration.RefreshBudget();
         if (_dashboardOpenQueued || _exitRequested) return;
@@ -433,8 +442,10 @@ public partial class App : Application
         }
 
         _exitRequested = true;
-        // Shutdown and cancellation must not compete for the tray's tiny CPU budget.
+        // Restore foreground QoS before shutdown and native resource teardown.
         _resourcePolicy.SetDashboardVisible(true);
+        _fleetFreshnessTimer.Stop();
+        if (_fleetRefresh is not null) _fleetRefresh.Updated -= QueueTrayPresentation;
         _lifetimeCancellation.Cancel();
         _periodicCancellation?.Cancel();
         _periodicCancellation?.Dispose();

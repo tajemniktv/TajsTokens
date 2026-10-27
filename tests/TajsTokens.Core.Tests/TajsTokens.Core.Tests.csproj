@@ -31,6 +31,7 @@
 
     <ItemGroup>
         <None Update="Fixtures\**\*" CopyToOutputDirectory="PreserveNewest"/>
+        <Compile Include="../../src/TajsTokens.App/Services/WindowsResourcePolicy.cs" Link="App/WindowsResourcePolicy.cs"/>
     </ItemGroup>
 
 </Project>

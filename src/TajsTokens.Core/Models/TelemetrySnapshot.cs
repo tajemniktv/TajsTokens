@@ -26,6 +26,7 @@ public sealed record TelemetrySnapshot(
     public IReadOnlyList<CurrentQuotaForecast> CurrentForecasts { get; init; } = [];
     public TokenAccountingGenerationState? TokenGeneration { get; init; }
     public TokenWorkloadForecast? TokenForecast { get; init; }
+    public TelemetryCollectionCompletion? CollectionCompletion { get; init; }
 
     public static TelemetrySnapshot Empty { get; } = new(
         DateTimeOffset.MinValue,
@@ -63,3 +64,6 @@ public sealed record TelemetrySnapshot(
         return CurrentForecasts.FirstOrDefault(item => item.Current == snapshot);
     }
 }
+
+/// <summary>A completed collector pass, independent of derived snapshot publications.</summary>
+public sealed record TelemetryCollectionCompletion(long Generation, DateTimeOffset CompletedAtUtc);

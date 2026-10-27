@@ -117,8 +117,8 @@ Component versions are independent of the base telemetry database's `user_versio
 ### Accounting, forecasting and TT implementation checklist
 
 Planned 27 October 2026 against clean local `main` at
-`e609aebee78712dd26c2eae040005e6dcf2377f3`. This is a plan: no application changes,
-new runtime validation or installation were performed in this planning pass. The
+`e609aebee78712dd26c2eae040005e6dcf2377f3`. The original planning pass changed
+documentation only; the stage statuses below record subsequent implementation. The
 [research evidence index](.codex/docs/research/2026-10-27/SOURCE_INDEX.md) preserves
 the supplied documents and maps recommendations to existing owners. Their contents
 are research inputs, not instructions to execute. Pending decisions and candidates
@@ -172,6 +172,12 @@ Owners: `WindowsResourcePolicy`, `App`, `MainWindow`, `TelemetryCoordinator`,
 `CodexObservatoryService`, SQLite stores/providers and `CalibrationProcessService`.
 Memo §11 supplies the mechanisms; their relative runtime cost remains to be measured.
 
+Stage 1 is in progress. The first slice implements normal interactive scheduling,
+retryable/visible EcoQoS state and generation-specific coalesced fleet refreshes.
+All 652 Core tests and the Windows app build pass; the app has been installed and
+restarted. Broader measurements, restore acceptance and the remaining work-reduction
+items are still open. See [current validation evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
+
 - [ ] **PERF-001 — Establish measurements and targets.** Compare startup, warm idle,
   active append, backlog, hide/restore during work and reset boundary. Separate
   parent/worker CPU, private commit, working set, live heap, GC pauses and physical
@@ -184,11 +190,13 @@ Memo §11 supplies the mechanisms; their relative runtime cost remains to be mea
   cooperative bounded collection. Track desired/applied native policy separately;
   report failures and retry failed transitions. Verify restore/shutdown during work
   and injected policy failures.
-- [ ] **PERF-003 — Make completion side effects generation-specific.** Replace scans
+- [x] **PERF-003 — Make completion side effects generation-specific.** Replace scans
   of historical `Refresh completed` display text with typed completion identity.
   Allow one fleet read in flight, coalesce superseded requests before expensive
   reads where possible and preserve freshness expiry. Derived snapshots must not
   repeat a completed collection's fleet scan or reclamation.
+  Implemented with typed completion identity and the coalesced fleet reader;
+  [652-test/build and installed evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 - [ ] **PERF-004 — Preserve presentation state and reduce rendering.** Pause hidden
   subscriptions/timers, retain lightweight navigation/filter state and selectively
   evict heavy history. Cache summaries by selection/data generation, coalesce visual

@@ -59,12 +59,12 @@ public sealed partial class DiagnosticsPage : Page
         SourceItems.ItemsSource = diagnostics.Sources;
         QuotaItems.ItemsSource = diagnostics.QuotaWindows;
         EmptySourcesText.Visibility = diagnostics.Sources.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-        EventsText.Text = snapshot.Events.Count == 0
+        EventsText.Text = App.SchedulingDiagnostic + "\n\n" + (snapshot.Events.Count == 0
             ? "No refresh events in this snapshot."
             : string.Join(
                 "\n\n",
                 snapshot.Events.OrderByDescending(x => x.TimestampUtc).Take(50)
-                    .Select(x => $"{x.TimestampUtc.ToLocalTime():g} · {x.Type}\n{x.Description}"));
+                    .Select(x => $"{x.TimestampUtc.ToLocalTime():g} · {x.Type}\n{x.Description}")));
     }
 
     private async void OnRefreshClicked(object sender, RoutedEventArgs e)
