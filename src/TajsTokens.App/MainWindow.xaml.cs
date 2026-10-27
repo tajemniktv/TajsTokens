@@ -150,7 +150,7 @@ public sealed partial class MainWindow : Window
         {
             ContentFrame.Tag = e.Parameter;
             AppNavigation.IsBackEnabled = ContentFrame.CanGoBack;
-            string tag = e.SourcePageType == typeof(CodexIntelligencePage) ? "codex-intelligence" :
+            string tag = e.SourcePageType == typeof(CodexIntelligencePage) ? Equals(e.Parameter, "planning") ? "session-plan" : "codex-intelligence" :
                 e.SourcePageType == typeof(ForecastsPage) && Equals(e.Parameter, "model-lab") ? "model-lab" :
                 e.SourcePageType == typeof(ForecastsPage) ? "forecasts" :
                 e.SourcePageType == typeof(CodexPage) ? "codex" :
@@ -190,6 +190,7 @@ public sealed partial class MainWindow : Window
         Type pageType = page switch
         {
             "codex-intelligence" => typeof(CodexIntelligencePage),
+            "session-plan" => typeof(CodexIntelligencePage),
             "codex-cli" => typeof(CodexCliHarnessPage),
             "codex" => typeof(CodexPage),
             "codex-data" => typeof(CodexDataExplorerPage),
@@ -203,7 +204,7 @@ public sealed partial class MainWindow : Window
             _ => typeof(CodexIntelligencePage),
         };
 
-        Navigate(pageType, page == "model-lab" ? "model-lab" : null);
+        Navigate(pageType, page == "model-lab" ? "model-lab" : page == "session-plan" ? "planning" : null);
     }
 
     private sealed record WindowSizeState(int Width, int Height, bool Maximized);

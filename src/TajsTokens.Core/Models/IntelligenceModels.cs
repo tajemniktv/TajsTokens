@@ -141,7 +141,11 @@ public sealed record ScenarioRequest(
     double IntensityMultiplier = 1.0,
     string? Model = null,
     string? ReasoningEffort = null,
-    string? AccountKey = null);
+    string? AccountKey = null)
+{
+    /// <summary>Optional live anchor restriction, supplied by the product boundary, never inferred from tokens.</summary>
+    public IReadOnlyList<QuotaHistoryCohort> Cohorts { get; init; } = [];
+}
 
 public sealed record ScenarioHistorySample(
     QuotaWindowKind Kind,
@@ -165,13 +169,20 @@ public sealed record ScenarioWindowEstimate(
     double? LowerQuotaDeltaPercent,
     double? UpperQuotaDeltaPercent,
     double Confidence,
-    string Explanation);
+    string Explanation)
+{
+    public QuotaHistoryCohort? Cohort { get; init; }
+    public ForecastSupportReason SupportReasons { get; init; }
+}
 
 public sealed record ScenarioEstimate(
     ScenarioRequest Request,
     ScenarioWindowEstimate FiveHour,
     ScenarioWindowEstimate Weekly,
-    string Methodology);
+    string Methodology)
+{
+    public DateTimeOffset? EvaluatedAtUtc { get; init; }
+}
 
 public sealed record IntelligenceDashboard(
     IntelligenceQuery Query,

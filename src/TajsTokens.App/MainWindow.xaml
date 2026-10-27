@@ -23,7 +23,8 @@
                 <NavigationViewItem Content="Chats and work" Tag="codex" Icon="Library" />
                 <NavigationViewItem Content="Advanced" Icon="Repair" SelectsOnInvoked="False">
                     <NavigationViewItem.MenuItems>
-                        <NavigationViewItem Content="Workload planner" Tag="forecasts" />
+                        <NavigationViewItem Content="Session planner" Tag="session-plan" />
+                        <NavigationViewItem Content="Forecast and workload history" Tag="forecasts" />
                         <NavigationViewItem Content="Quota history details" Tag="analytics" />
                         <NavigationViewItem Content="Diagnostics" Tag="diagnostics" />
                         <NavigationViewItem Content="Model lab" Tag="model-lab" />

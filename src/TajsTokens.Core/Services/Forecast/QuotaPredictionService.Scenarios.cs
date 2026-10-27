@@ -35,7 +35,7 @@ public static partial class QuotaPredictionService
             "Account-local conditional estimates from authoritative meter intervals, including unchanged readings. " +
             "Active-session counts describe recent observed activity, not simultaneous compute or a causal agent-cost conversion. " +
             "A workload ridge candidate must beat the elapsed-time baseline on earlier chronological outcomes. " +
-            "No universal token-to-quota conversion or calibrated exhaustion probability is assumed.");
+            "No universal token-to-quota conversion or calibrated exhaustion probability is assumed.") { EvaluatedAtUtc = now };
 
         ScenarioWindowEstimate Build(QuotaWindowKind kind)
         {
@@ -43,15 +43,16 @@ public static partial class QuotaPredictionService
                 x.Kind == kind && x.AccountKey == request.AccountKey && x.EndUtc <= now && x.EndUtc > x.StartUtc &&
                 double.IsFinite(x.QuotaDeltaPercent) && x.QuotaDeltaPercent is >= 0 and <= 100 &&
                 x.RootAgents >= 0 && x.Subagents >= 0 &&
+                (request.Cohorts.Count == 0 || x.Cohort is not null && request.Cohorts.Contains(x.Cohort)) &&
                 (x.ResetUtc is null || x.EndUtc <= x.ResetUtc)).OrderBy(x => x.StartUtc).ToArray();
 
-            ScenarioWindowEstimate Unknown(string reason, int count)
+            ScenarioWindowEstimate Unknown(string reason, int count, ForecastSupportReason support = ForecastSupportReason.InsufficientHistory)
             {
-                return new ScenarioWindowEstimate(kind, false, count, null, null, null, 0, reason);
+                return new ScenarioWindowEstimate(kind, false, count, null, null, null, 0, reason) { SupportReasons = support };
             }
 
             if (samples.Length > 0 && now - samples.Max(x => x.EndUtc) > TimeSpan.FromDays(30))
-                return Unknown("History is stale; a usable interval within 30 days is required.", samples.Length);
+                return Unknown("History is stale; a usable interval within 30 days is required.", samples.Length, ForecastSupportReason.StaleMeter);
             ScenarioHistorySample? latest = samples.MaxBy(x => x.EndUtc);
             samples = samples.Where(x => x.Source == latest?.Source && x.AccountKey == latest?.AccountKey && x.Cohort == latest?.Cohort)
                 .ToArray();
@@ -71,13 +72,13 @@ public static partial class QuotaPredictionService
             if (request.IntensityMultiplier != 1)
                 return Unknown(
                     "Intensity multipliers have no observed source contract or validated response curve. Use intensity 1 for an evidence-backed conditional estimate.",
-                    samples.Length);
+                    samples.Length, ForecastSupportReason.OutsideObservedSupport);
             if (request.DurationHours < samples.Min(Hours) || request.DurationHours > samples.Max(Hours) ||
                 request.RootAgents < samples.Min(x => x.RootAgents) || request.RootAgents > samples.Max(x => x.RootAgents) ||
                 request.Subagents < samples.Min(x => x.Subagents) || request.Subagents > samples.Max(x => x.Subagents))
                 return Unknown(
                     "Requested duration or active-session counts are outside observed support; extrapolation is unavailable.",
-                    samples.Length);
+                    samples.Length, ForecastSupportReason.OutsideObservedSupport);
 
             var trials = new List<(ScenarioHistorySample Sample, double BaselineError, double RidgeError, double SelectedError)>();
             foreach (ScenarioHistorySample target in samples)
@@ -121,7 +122,12 @@ public static partial class QuotaPredictionService
                 (radius is null
                     ? "Uncertainty is learning: fewer than 8 comparable held-out chronological blocks. "
                     : "Empirical 80%-target band from earlier held-out chronological blocks; coverage can change with workload. ") +
-                "Unchanged meters are precision-limited, not exact zero burn. Session counts are not measured concurrency; no confidence probability is assigned.");
+                "Unchanged meters are precision-limited, not exact zero burn. Session counts are not measured concurrency; no confidence probability is assigned.")
+            {
+                Cohort = latest?.Cohort,
+                SupportReasons = (radius is null ? ForecastSupportReason.InsufficientIntervalEvidence : ForecastSupportReason.None) |
+                    (selectedRidge ? ForecastSupportReason.None : trials.Count >= 6 ? ForecastSupportReason.ChallengerNotBetter : ForecastSupportReason.InsufficientHistory),
+            };
         }
     }
 

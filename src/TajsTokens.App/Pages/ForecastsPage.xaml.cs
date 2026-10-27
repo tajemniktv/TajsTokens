@@ -19,7 +19,6 @@ namespace TajsTokens.App.Pages;
 
 public sealed partial class ForecastsPage : Page
 {
-    private long _estimateGeneration;
     private long _evaluationGeneration;
     private IReadOnlyList<EvaluationRow> _evaluationRows = [];
 
@@ -54,7 +53,7 @@ public sealed partial class ForecastsPage : Page
         object? normalTab = _normalTab;
         _modelLab = Equals(e.Parameter, "model-lab");
         ForecastTabs.Items.Clear();
-        foreach (PivotItem tab in _modelLab ? new[] { EvaluationTab } : new[] { OutlookTab, PlanTab, UsageTab, HistoryTab })
+        foreach (PivotItem tab in _modelLab ? new[] { EvaluationTab } : new[] { OutlookTab, UsageTab, HistoryTab })
             ForecastTabs.Items.Add(tab);
         ForecastTabs.SelectedItem = _modelLab ? EvaluationTab : normalTab ?? OutlookTab;
         PageTitle.Text = _modelLab ? "Model lab" : "Forecasts";
@@ -79,7 +78,6 @@ public sealed partial class ForecastsPage : Page
     {
         _isLoaded = false;
         Interlocked.Increment(ref _loadGeneration);
-        Interlocked.Increment(ref _estimateGeneration);
         Interlocked.Increment(ref _evaluationGeneration);
         CancellationTokenSource? cancellation = Interlocked.Exchange(ref _pageCancellation, null);
         cancellation?.Cancel();
@@ -690,126 +688,6 @@ public sealed partial class ForecastsPage : Page
         };
     }
 
-    private async void OnRecentPatternClicked(object sender, RoutedEventArgs e)
-    {
-        CancellationTokenSource? cancellation = _pageCancellation;
-        if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested) return;
-        (double, double, string, string) original = (RootAgentsBox.Value, SubagentsBox.Value, ModelBox.Text, ReasoningBox.Text);
-        RecentPatternButton.IsEnabled = false;
-        RecentPatternText.Text = "Reading recent local activity…";
-        try
-        {
-            RecentScenarioPattern pattern =
-                await App.Services.Intelligence.GetRecentScenarioPatternAsync(DateTimeOffset.UtcNow, cancellation.Token);
-            if (!_isLoaded || cancellation.IsCancellationRequested) return;
-            if (original != (RootAgentsBox.Value, SubagentsBox.Value, ModelBox.Text, ReasoningBox.Text))
-            {
-                RecentPatternText.Text = "Inputs changed while loading; your edits were preserved. Click again to load a recent pattern.";
-                return;
-            }
-            if (pattern.Available && (pattern.RootSessions > RootAgentsBox.Maximum || pattern.SubagentSessions > SubagentsBox.Maximum))
-            {
-                RecentPatternText.Text =
-                    "Recent session counts exceed this planner's input range; no values were silently clamped. Enter a hypothetical workload manually.";
-                return;
-            }
-            RecentPatternText.Text = pattern.Explanation;
-            if (!pattern.Available) return;
-            RootAgentsBox.Value = pattern.RootSessions;
-            SubagentsBox.Value = pattern.SubagentSessions;
-            ModelBox.Text = pattern.Model ?? string.Empty;
-            ReasoningBox.Text = pattern.ReasoningEffort ?? string.Empty;
-            Interlocked.Increment(ref _estimateGeneration);
-            ScenarioInfo.Severity = InfoBarSeverity.Informational;
-            ScenarioInfo.Title = "Review the recent pattern";
-            ScenarioInfo.Message = "Inputs updated, not an estimate. Choose a duration and select Estimate quota use.";
-            ScenarioMethodText.Text = string.Empty;
-        }
-        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
-        {
-        }
-        catch (Exception exception)
-        {
-            if (_isLoaded && !cancellation.IsCancellationRequested)
-                RecentPatternText.Text = "Recent pattern unavailable: " + Summarize(exception.Message);
-        }
-        finally
-        {
-            RecentPatternButton.IsEnabled = true;
-        }
-    }
-
-    private async void OnEstimateClicked(object sender, RoutedEventArgs e)
-    {
-        CancellationTokenSource? cancellation = _pageCancellation;
-        if (!_isLoaded || cancellation is null || cancellation.IsCancellationRequested)
-        {
-            return;
-        }
-
-        long generation = Interlocked.Increment(ref _estimateGeneration);
-        try
-        {
-            string?[] accounts = App.Services.Telemetry.Latest.QuotaLanes.Where(lane => lane.IsFresh)
-                .Select(lane => lane.Snapshot?.AccountKey).Distinct().ToArray();
-            if (accounts.Length != 1 || accounts[0] is null)
-            {
-                ScenarioInfo.IsOpen = true;
-                ScenarioInfo.Severity = InfoBarSeverity.Warning;
-                ScenarioInfo.Title = "Current quota account unavailable";
-                ScenarioInfo.Message =
-                    "Refresh quota and retry. A scenario needs a fresh Codex response with a known backend account; saved history alone cannot establish the current account.";
-                ScenarioMethodText.Text = string.Empty;
-                return;
-            }
-            var request = new ScenarioRequest(
-                ReadNumber(DurationBox, 2),
-                (int)Math.Round(ReadNumber(RootAgentsBox, 1)),
-                (int)Math.Round(ReadNumber(SubagentsBox, 0)),
-                1,
-                NullIfWhiteSpace(ModelBox.Text),
-                NullIfWhiteSpace(ReasoningBox.Text),
-                accounts[0]);
-            DateTimeOffset historyFrom = DateTimeOffset.UtcNow.AddDays(-ParseHistoryDays());
-            ScenarioInfo.IsOpen = true;
-            ScenarioInfo.Severity = InfoBarSeverity.Informational;
-            ScenarioInfo.Title = "Estimating…";
-            ScenarioInfo.Message = "Fitting account-local history for both quota windows.";
-            ScenarioMethodText.Text = string.Empty;
-
-            ScenarioEstimate estimate = await Task.Run(
-                () => App.Services.Intelligence.EstimateScenarioAsync(request, historyFrom, cancellation.Token),
-                cancellation.Token);
-            if (!_isLoaded || cancellation.IsCancellationRequested || generation != Volatile.Read(ref _estimateGeneration))
-            {
-                return;
-            }
-
-            bool bothReady = estimate.FiveHour.HasEnoughHistory && estimate.Weekly.HasEnoughHistory;
-            bool anyReady = estimate.FiveHour.HasEnoughHistory || estimate.Weekly.HasEnoughHistory;
-            ScenarioInfo.Severity = bothReady ? InfoBarSeverity.Success : InfoBarSeverity.Warning;
-            ScenarioInfo.Title = bothReady ? "History-based scenario"
-                : anyReady ? "Scenario available for one window" : "Scenario unavailable for this request";
-            ScenarioInfo.Message = $"5h: {FormatEstimate(estimate.FiveHour)}\nWeekly: {FormatEstimate(estimate.Weekly)}";
-            ScenarioMethodText.Text = estimate.Methodology;
-        }
-        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
-        {
-        }
-        catch (Exception exception)
-        {
-            if (!_isLoaded || generation != Volatile.Read(ref _estimateGeneration))
-            {
-                return;
-            }
-            ScenarioInfo.IsOpen = true;
-            ScenarioInfo.Severity = InfoBarSeverity.Error;
-            ScenarioInfo.Title = "Scenario unavailable";
-            ScenarioInfo.Message = Summarize(exception.Message);
-            ScenarioMethodText.Text = string.Empty;
-        }
-    }
-
     private int ParseHistoryDays()
     {
         if (HistoryRangeCombo.SelectedItem is ComboBoxItem item && int.TryParse(item.Tag?.ToString(), out int days))
@@ -817,29 +695,6 @@ public sealed partial class ForecastsPage : Page
             return Math.Clamp(days, 1, 3650);
         }
         return 30;
-    }
-
-    private static double ReadNumber(NumberBox box, double fallback)
-    {
-        return double.IsFinite(box.Value) ? box.Value : fallback;
-    }
-
-    private static string? NullIfWhiteSpace(string value)
-    {
-        return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-    }
-
-    private static string FormatEstimate(ScenarioWindowEstimate estimate)
-    {
-        if (!estimate.HasEnoughHistory || estimate.ExpectedQuotaDeltaPercent is null)
-        {
-            return $"unavailable · {estimate.Explanation}";
-        }
-
-        string range = estimate.LowerQuotaDeltaPercent is not null && estimate.UpperQuotaDeltaPercent is not null
-            ? $"[{estimate.LowerQuotaDeltaPercent:0.#}–{estimate.UpperQuotaDeltaPercent:0.#}pp]"
-            : "uncertainty learning";
-        return $"{estimate.ExpectedQuotaDeltaPercent:0.#}pp conditional estimate · {range} · {estimate.SampleCount} samples";
     }
 
     private static string FormatSurvivalRate(IReadOnlyList<ForecastSnapshot> snapshots)

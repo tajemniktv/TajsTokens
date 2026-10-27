@@ -54,7 +54,8 @@ public static class CodexIntelligenceProjection
             bool fresh = telemetry.IsQuotaSnapshotFresh(q);
             CurrentQuotaForecast? matched = telemetry.FindCurrentForecast(q);
             return matched is not null
-                ? matched with { Forecast = fresh && matched.IsFresh ? matched.Forecast : null }
+                ? matched with { State = fresh ? matched.State : TelemetryHealthState.Stale,
+                    Forecast = fresh && matched.IsFresh ? matched.Forecast : null }
                 : new CurrentQuotaForecast(
                     q,
                     fresh ? TelemetryHealthState.Live : TelemetryHealthState.Stale,

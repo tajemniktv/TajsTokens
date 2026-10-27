@@ -26,11 +26,21 @@ public sealed class CodexIntelligenceEngine(
     public CodexIntelligenceSnapshot Current => CodexIntelligenceProjection.Live(current());
 
     public Task<RecentScenarioPattern> GetRecentScenarioPatternAsync(DateTimeOffset nowUtc, CancellationToken token)
-        => intelligence.GetRecentScenarioPatternAsync(nowUtc, token);
+        => Task.Run(() => intelligence.GetRecentScenarioPatternAsync(nowUtc, token), token);
 
     public Task<ScenarioEstimate> SimulateAsync(ScenarioRequest request, DateTimeOffset historyFromUtc, CancellationToken token)
     {
-        return intelligence.EstimateScenarioAsync(request, historyFromUtc, token);
+        CodexIntelligenceSnapshot live = Current;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        QuotaHistoryCohort[] cohorts = live.Current.Where(x => x.IsFresh &&
+                live.CurrentState.IsQuotaSnapshotFresh(x.Current) && x.Current.AccountKey == request.AccountKey &&
+                x.Current.Authority == QuotaObservationAuthority.ProviderAuthoritative &&
+                x.Current.CapturedAtUtc <= now && now - x.Current.CapturedAtUtc <= TimeSpan.FromHours(6) &&
+                x.Current.ResetsAtUtc > now && live.CurrentState.FindQuotaLane(x.Current)?.NotReportedByProvider != true)
+            .Select(x => QuotaHistoryPolicy.Cohort(x.Current)).Distinct().ToArray();
+        if (string.IsNullOrWhiteSpace(request.AccountKey) || cohorts.Length == 0)
+            throw new InvalidOperationException("A fresh provider meter with a known account and future reset is required for planning.");
+        return Task.Run(() => intelligence.EstimateScenarioAsync(request with { Cohorts = cohorts }, historyFromUtc, token), token);
     }
 
     public Task<CodexIntelligenceSnapshot> QueryAsync(CodexSelection selection, CancellationToken token)

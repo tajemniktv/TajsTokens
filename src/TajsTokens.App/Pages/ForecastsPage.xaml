@@ -181,50 +181,6 @@
                     </StackPanel>
                 </ScrollViewer>
             </PivotItem>
-            <PivotItem x:Name="PlanTab" Header="Plan a workload">
-                <ScrollViewer>
-                    <StackPanel MaxWidth="760" HorizontalAlignment="Left" Spacing="16" Padding="4,12,4,20">
-                        <TextBlock Text="Explore a workload" FontSize="22" FontWeight="SemiBold" />
-                        <TextBlock
-                            Text="Estimate quota use from comparable activity in your own history. If there is not enough evidence, no estimate is shown."
-                            Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
-                        <NumberBox x:Name="DurationBox" Header="How long will you work? · hours" Value="0.5" Minimum="0.1" Maximum="168"
-                                   SpinButtonPlacementMode="Compact" />
-                        <Button x:Name="RecentPatternButton" Content="Use recent local work pattern" Click="OnRecentPatternClicked" />
-                        <TextBlock x:Name="RecentPatternText"
-                                   Text="Optional: fill editable session counts and exclusive model/effort from recent local activity. This does not predict that you will continue working."
-                                   Style="{StaticResource CaptionStyle}" />
-                        <Expander Header="Advanced workload shape" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                            <StackPanel Spacing="12">
-                                <TextBlock
-                                    Text="Default: one active chat, no subagents. Adjust only when you expect a different work pattern."
-                                    Style="{StaticResource SubtitleStyle}" />
-                                <NumberBox x:Name="RootAgentsBox" Header="Active chats (root sessions)" Value="1" Minimum="0" Maximum="32"
-                                           SpinButtonPlacementMode="Compact" />
-                                <NumberBox x:Name="SubagentsBox" Header="Active subagents" Value="0" Minimum="0" Maximum="64"
-                                           SpinButtonPlacementMode="Compact" />
-                                <TextBlock Text="Counts mean recently token-active sessions, not simultaneous model computation."
-                                           Style="{StaticResource CaptionStyle}" />
-                            </StackPanel>
-                        </Expander>
-                        <Expander Header="Match a model or reasoning effort" HorizontalAlignment="Stretch"
-                                  HorizontalContentAlignment="Stretch">
-                            <StackPanel Spacing="12">
-                                <TextBox x:Name="ModelBox" Header="Model · optional" PlaceholderText="Exact model name" />
-                                <TextBox x:Name="ReasoningBox" Header="Reasoning effort · optional" PlaceholderText="For example, high" />
-                            </StackPanel>
-                        </Expander>
-                        <Button Content="Estimate quota use" Click="OnEstimateClicked" Style="{StaticResource AccentButtonStyle}" />
-                        <InfoBar x:Name="ScenarioInfo" IsOpen="True" IsClosable="False" Title="Ready to estimate"
-                                 Message="Choose the workload above, then estimate quota use. Unsupported requests will show what evidence is missing instead of a guessed number." />
-                        <Expander Header="How this estimate works" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
-                            <TextBlock x:Name="ScenarioMethodText"
-                                       Text="Estimates use source-isolated authoritative intervals and historical workload support. Unsupported intensity scaling is not applied."
-                                       Foreground="{ThemeResource TextFillColorSecondaryBrush}" TextWrapping="Wrap" />
-                        </Expander>
-                    </StackPanel>
-                </ScrollViewer>
-            </PivotItem>
             <PivotItem x:Name="EvaluationTab" Header="Model evaluation">
                 <ListView x:Name="EvaluationList" Padding="4,12,4,0" SelectionMode="None" HorizontalContentAlignment="Stretch"
                           AutomationProperties.Name="Models in selected evaluation cohort">

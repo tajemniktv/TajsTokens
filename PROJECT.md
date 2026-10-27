@@ -96,6 +96,8 @@ Fixed-horizon uncertainty uses earlier matured outcomes (non-overlapping errors 
 
 User should be able to have a "planner", that allows to see whether their current usage will last for: x hours, with y model, with z effort.
 
+The primary Planning tab owns the editable session scenario: duration, optional model/effort, recent-local-work autofill, active-session counts and an independent 1–30 day history lookback. Both windows report conditional consumption and estimated fit against matching fresh account/source/plan/limit cohorts. Unsupported windows remain explicit. A calibrated band crossing available allowance means fit is uncertain; a point-only fit remains conditional. Sessions crossing a reset retain supported consumption estimates but make no post-reset capacity or current-window fit claim. Input edits and quota-anchor changes invalidate results. Forecast/workload history and Model Lab remain separate destinations, not duplicate planners.
+
 ## Quota Accounting
 
 The current implementation keeps reported account quota, locally observed native Codex tokens, API-equivalent price weights and inferred quota cost separate. A source account key scopes the quota observations that supplied it; it does not retroactively assign local rollouts to the current login.

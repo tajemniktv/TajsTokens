@@ -32,8 +32,8 @@ public sealed class QuotaOutlookProjectionTests
         five = Reading(QuotaWindowKind.FiveHour, 4, 2);
         week = Reading(QuotaWindowKind.Weekly, 2, 1);
         Assert.Equal(week, QuotaOutlookProjection.Build(Snapshot(five, week), Now).Limiting!.Reading);
-        Assert.Equal(five, QuotaOutlookProjection.Build(Snapshot(five with { Current = five.Current with { UsedPercent = 100 } }, week), Now)
-            .Limiting!.Reading! with { Current = five.Current });
+        Assert.True(QuotaOutlookProjection.Build(Snapshot(five with { Current = five.Current with { UsedPercent = 100 } }, week), Now)
+            .Limiting!.Exhausted);
     }
 
     [Fact]

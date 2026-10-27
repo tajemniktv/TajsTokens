@@ -43,6 +43,7 @@ public sealed partial class CodexIntelligencePage : Page
             _loaded = false;
             App.Services.Telemetry.SnapshotUpdated -= OnTelemetry;
             _request?.Cancel();
+            InvalidatePlan();
         };
     }
 
@@ -72,6 +73,7 @@ public sealed partial class CodexIntelligencePage : Page
     private async void OnAccountChanged(object sender, SelectionChangedEventArgs e)
     {
         if (!_loaded || _populatingAccounts) return;
+        InvalidatePlan();
         RenderCurrent();
         await LoadAsync();
     }
@@ -82,6 +84,7 @@ public sealed partial class CodexIntelligencePage : Page
         {
             if (!_loaded) return;
             PopulateAccounts();
+            RefreshPlanAnchors();
             if (_snapshot is { } snapshot)
             {
                 CodexIntelligenceSnapshot live = App.Services.CodexIntelligence.Current;
@@ -314,53 +317,6 @@ public sealed partial class CodexIntelligencePage : Page
             Groups.SelectedItem is GroupRow { Source.Dimension: "Chat" } row ? row.Source.Key : _snapshot?.Selection.ThreadId);
     }
 
-    private async void OnSimulate(object sender, RoutedEventArgs e)
-    {
-        if (_snapshot is not { } snapshot) return;
-        if (snapshot.Selection.Project is not null || snapshot.Selection.ThreadId is not null ||
-            snapshot.Selection.ToUtc < DateTimeOffset.UtcNow.AddMinutes(-5))
-        {
-            ScenarioText.Text =
-                "Select current account/model history without project/chat filters. No quota attribution exists for those narrower scopes.";
-            return;
-        }
-        if (!double.IsFinite(PlanHours.Value) || !double.IsFinite(PlanRoots.Value) || !double.IsFinite(PlanChildren.Value))
-        {
-            ScenarioText.Text = "Enter finite duration and agent counts.";
-            return;
-        }
-        var button = (Button)sender;
-        button.IsEnabled = false;
-        using var request = new CancellationTokenSource(TimeSpan.FromMinutes(2));
-        try
-        {
-            ScenarioEstimate result = await App.Services.CodexIntelligence.SimulateAsync(
-                new ScenarioRequest(
-                    PlanHours.Value,
-                    (int)PlanRoots.Value,
-                    (int)PlanChildren.Value,
-                    Model: snapshot.Selection.Model,
-                    AccountKey: snapshot.Selection.AccountKey),
-                snapshot.Selection.FromUtc,
-                request.Token);
-            if (!_loaded || !ReferenceEquals(_snapshot?.Ledger, snapshot.Ledger)) return;
-            ScenarioText.Text = string.Join(
-                                    "\n",
-                                    new[] { result.FiveHour, result.Weekly }.Select(x =>
-                                        $"{x.Kind}: {x.ExpectedQuotaDeltaPercent?.ToString("0.##") ?? "unavailable"} pp · {x.SampleCount} samples · {x.Explanation}")) +
-                                "\n" + result.Methodology;
-        }
-        catch (Exception error)
-        {
-            if (_loaded && ReferenceEquals(_snapshot?.Ledger, snapshot.Ledger))
-                ScenarioText.Text = "Scenario unavailable: " + error.GetBaseException().Message;
-        }
-        finally
-        {
-            button.IsEnabled = true;
-        }
-    }
-
     private async void OnAnalyze(object sender, RoutedEventArgs e)
     {
         if (_snapshot is not { } snapshot) return;
@@ -467,8 +423,7 @@ public sealed partial class CodexIntelligencePage : Page
         }
         // A separate band and one compatible lane: never superimpose token and quota scales,
         // connect sources, or interpret a reset drop as negative consumption.
-        QuotaSnapshot? anchor = _snapshot.Current.FirstOrDefault()?.Current ??
-                                _snapshot.QuotaTimeline.Where(x => x.Authority == QuotaObservationAuthority.ProviderAuthoritative)
+        QuotaSnapshot? anchor = _snapshot.QuotaTimeline.Where(x => x.Authority == QuotaObservationAuthority.ProviderAuthoritative)
                                     .MaxBy(x => x.CapturedAtUtc);
         QuotaSnapshot[] quota = anchor is null
             ? []

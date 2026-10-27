@@ -103,6 +103,7 @@
                                 </Grid>
                                 <TextBlock x:Name="WorkValue" Style="{StaticResource HeroMetricStyle}" />
                                 <TextBlock x:Name="WorkDetail" Style="{StaticResource SubtitleStyle}" />
+                                <HyperlinkButton Content="Inspect quota changes" Click="OnQuotaHistory" HorizontalAlignment="Left" />
                                 <Canvas x:Name="Timeline" Height="180" SizeChanged="OnTimelineSizeChanged"
                                         AutomationProperties.Name="Observed workload over the selected UTC range" />
                                 <TextBlock x:Name="TimelineLegend" Style="{StaticResource CaptionStyle}" />
@@ -147,22 +148,33 @@
             <TabViewItem Header="Planning" IsClosable="False">
                 <ScrollViewer HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Spacing="16" Padding="0,16,12,20" MaxWidth="1000" HorizontalAlignment="Left">
-                        <TextBlock Text="If this work continues" Style="{StaticResource SectionTitleStyle}" />
-                        <TextBlock Text="A scenario is your assumption about future work, not a prediction that you will keep working."
+                        <TextBlock Text="Will my next session fit?" Style="{StaticResource SectionTitleStyle}" />
+                        <TextBlock Text="A conditional account-wide scenario. Work-history filters below the live header do not allocate quota to projects or chats."
                                    Style="{StaticResource SubtitleStyle}" />
                         <Border Style="{StaticResource CardStyle}">
                             <StackPanel Spacing="12">
-                                <TextBlock Text="Plan a session" Style="{StaticResource SectionTitleStyle}" />
-                                <TextBlock
-                                    Text="Uses the selected account, model and history. Project/chat-specific quota estimates are not available."
-                                    Style="{StaticResource CaptionStyle}" />
-                                <NumberBox x:Name="PlanHours" Header="Duration (hours)" Value="0.5" Minimum="0.05" Maximum="24" />
-                                <NumberBox x:Name="PlanRoots" Header="Root agents" Value="1" Minimum="1" Maximum="32" />
-                                <NumberBox x:Name="PlanChildren" Header="Subagents" Value="0" Minimum="0" Maximum="100" />
-                                <Button Content="Estimate quota usage" Click="OnSimulate" />
-                                <TextBlock x:Name="ScenarioText" TextWrapping="Wrap" />
+                                <NumberBox x:Name="PlanHours" Header="Duration (hours)" Value="1" Minimum="0.05" Maximum="168" ValueChanged="OnPlanNumberChanged" />
+                                <TextBox x:Name="PlanModel" Header="Model · optional exact name" TextChanged="OnPlanTextChanged" />
+                                <TextBox x:Name="PlanEffort" Header="Reasoning effort · optional" TextChanged="OnPlanTextChanged" />
+                                <Button x:Name="RecentPatternButton" Content="Use recent local work pattern" Click="OnRecentPattern" />
+                                <TextBlock x:Name="RecentPatternText" Text="Optional editable suggestion from recent local activity; it does not establish account ownership." Style="{StaticResource CaptionStyle}" />
+                                <Expander Header="Session counts and history" HorizontalContentAlignment="Stretch" HorizontalAlignment="Stretch">
+                                    <StackPanel Spacing="10">
+                                        <NumberBox x:Name="PlanRoots" Header="Active root chats" Value="1" Minimum="0" Maximum="32" ValueChanged="OnPlanNumberChanged" />
+                                        <NumberBox x:Name="PlanChildren" Header="Active subagents" Value="0" Minimum="0" Maximum="64" ValueChanged="OnPlanNumberChanged" />
+                                        <NumberBox x:Name="PlanHistoryDays" Header="History lookback (days)" Value="30" Minimum="1" Maximum="30" ValueChanged="OnPlanNumberChanged" />
+                                        <TextBlock Text="Counts mean recently token-active sessions, not simultaneous model computation. History lookback is independent of the work-history range." Style="{StaticResource CaptionStyle}" />
+                                    </StackPanel>
+                                </Expander>
+                                <Button Content="Estimate session fit" Click="OnSimulate" />
+                                <TextBlock x:Name="ScenarioText" Text="Choose a session, then estimate its fit against both allowances." TextWrapping="Wrap" />
                             </StackPanel>
                         </Border>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <HyperlinkButton Content="Forecast and workload history" Click="OnForecastHistory" />
+                            <HyperlinkButton Content="Model lab" Click="OnModelLab" />
+                            <HyperlinkButton Content="Inspect quota changes" Click="OnQuotaHistory" />
+                        </StackPanel>
                         <Expander Header="Current forecasts and uncertainty" HorizontalAlignment="Stretch"
                                   HorizontalContentAlignment="Stretch" IsExpanded="True">
                             <TextBlock x:Name="ForecastText" Style="{StaticResource TechnicalTextStyle}" />
