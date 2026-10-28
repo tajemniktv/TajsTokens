@@ -26,7 +26,8 @@ public sealed class SqliteCodexObservatoryReadModel(string databasePath)
     public async Task<IReadOnlyDictionary<string, CodexNativeTokenTotals>> GetRecentSessionTokensAsync(
         DateTimeOffset fromUtc,
         IReadOnlyCollection<string> sessionIds,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        DateTimeOffset? toUtc = null)
     {
         ArgumentNullException.ThrowIfNull(sessionIds);
         string[] ids = sessionIds.Where(id => !string.IsNullOrWhiteSpace(id))
@@ -42,10 +43,12 @@ public sealed class SqliteCodexObservatoryReadModel(string databasePath)
                                      SUM(non_reasoning_output_tokens), SUM(reasoning_output_tokens),
                                      SUM(reported_total_tokens)
                               FROM codex_native_token_events
-                              WHERE session_id IN ({parameters}) AND observed_at_utc >= $from
+                              WHERE session_id IN ({parameters}) AND source_timestamp_quality = 'Valid'
+                                AND source_event_at_utc >= $from AND source_event_at_utc <= $to
                               GROUP BY session_id
                               """;
         command.Parameters.AddWithValue("$from", fromUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$to", (toUtc ?? DateTimeOffset.UtcNow).ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
         for (int index = 0; index < ids.Length; index++) command.Parameters.AddWithValue($"$session{index}", ids[index]);
         var result = new Dictionary<string, CodexNativeTokenTotals>(StringComparer.OrdinalIgnoreCase);
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);

@@ -120,4 +120,25 @@ For machine-readable local workload totals, run:
 dotnet run --project tools/TajsTokens.ForecastEvaluation -- --daily-json "$env:LOCALAPPDATA/Programs/TajemnikTV/TajsTokens/data/telemetry.db" 30
 ```
 
-The optional final number is 1–366 UTC days. Output is `tajstokens.daily-tokens.v1` JSON with retained native event counts and disjoint token categories by UTC day. Missing days mean no retained observations, **not** verified zero use. The report excludes paths, prompts, session IDs and account keys; it does not attribute local work to the current Codex account or include remote hosts.
+The optional final number is 1–366 UTC days. Output is `tajstokens.daily-tokens.v2`
+JSON with selected local native increment counts and disjoint token categories by
+verified source UTC day. Legacy observed time and collection time do not substitute
+for a missing/malformed/unverified source date. Explicit zero observations remain
+distinct from unavailable dates. Missing days mean no retained observations,
+**not** verified zero use.
+
+The separate `allTimeCoverage` object covers the entire selected local native
+ledger, outside the requested date range. It reports increment counts and amounts
+with verified/unverified time and missing model metadata; the latter groups can
+overlap. It excludes retired snapshots and original-input interpretation variants,
+which are evidence rather than additive increments. Known occurrence replay and
+representation equivalence prevent duplicates within their proven scope;
+unverified cross-source/global equivalence remains unresolved. Observatory's
+all-time token card exposes the same coverage. Fleet's recent token count uses
+verified source dates within its explicit snapshot bounds.
+
+The report opens the app-owned database read-only, refuses unsupported observatory
+schemas instead of inventing legacy dates, and requires schema 9 through the current
+supported component version. It excludes paths, prompts, session IDs and account
+keys; it does not attribute local work to the current Codex account or include
+remote hosts. V1 exports remain historical artifacts with their former date basis.

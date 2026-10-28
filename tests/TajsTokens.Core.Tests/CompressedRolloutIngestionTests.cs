@@ -67,6 +67,7 @@ public sealed class CompressedRolloutIngestionTests : IDisposable
         AssertFacts(before, await NativeFacts());
         Assert.Equal(0L, await Scalar("SELECT COUNT(*) FROM codex_source_retirements"));
         Assert.Equal(0, (await restarted.IngestAsync(file, default)).RecordsScanned);
+        await AssertSelectedCoverage(total + 100);
     }
 
     [Theory]
@@ -101,6 +102,7 @@ public sealed class CompressedRolloutIngestionTests : IDisposable
         Assert.Equal(total + 100, await Total());
         Assert.Equal(total + 100, await Scalar("SELECT SUM(json_extract(evidence_json,'$.ReportedTotalTokens')) FROM codex_retired_numeric_observations WHERE observation_kind='native-token'"));
         Assert.Equal(1L, await Scalar("SELECT COUNT(*) FROM codex_source_retirements"));
+        await AssertSelectedCoverage(total + 100);
     }
 
     [Theory]
@@ -443,6 +445,17 @@ public sealed class CompressedRolloutIngestionTests : IDisposable
     }
     private static Task Compress(string file, byte[] bytes) => File.WriteAllBytesAsync(file, Compressed(bytes));
     private async Task<long> Total() => Convert.ToInt64(await Scalar("SELECT COALESCE(SUM(reported_total_tokens),0) FROM codex_native_token_events"));
+    private async Task AssertSelectedCoverage(long expected)
+    {
+        var summary = await _store.GetSummaryAsync(default);
+        Assert.Equal(expected, summary.NativeTokens.ReportedTotal);
+        Assert.NotNull(summary.TokenCoverage);
+        Assert.Equal(expected, summary.TokenCoverage.VerifiedTimeTokens + summary.TokenCoverage.UnverifiedTimeTokens);
+        var report = await new SqliteCodexDailyReportReader(_database).ReadAsync(
+            DateTimeOffset.Parse("2026-08-30T00:00:00Z"), DateTimeOffset.Parse("2026-09-02T00:00:00Z"), default);
+        Assert.Equal(summary.TokenCoverage, report.AllTimeCoverage);
+        Assert.Equal(expected, report.Days.Sum(x => x.ReportedTotal));
+    }
     private async Task<object?> Scalar(string sql)
     {
         await using var connection = new SqliteConnection("Data Source=" + _database);

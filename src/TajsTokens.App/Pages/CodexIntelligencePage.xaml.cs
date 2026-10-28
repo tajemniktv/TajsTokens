@@ -224,9 +224,12 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
             _historyLoadedAt = DateTimeOffset.UtcNow;
             _snapshot = CodexIntelligenceProjection.WithLiveContext(snapshot, App.Services.CodexIntelligence.Current, selection.AccountKey);
             StatusText.Text = $"{selection.FromUtc:yyyy-MM-dd} → {selection.ToUtc:yyyy-MM-dd} UTC · captured {snapshot.AsOfUtc.ToLocalTime():g}";
+            string apiReference = !snapshot.ApiEquivalent.IsComplete && snapshot.ApiEquivalent.PricedReportedTokens == 0
+                ? $"API reference unavailable ({snapshot.ApiEquivalent.UnpricedReportedTokens:N0} unpriced tokens)"
+                : $"API reference: ${snapshot.ApiEquivalent.WeightedAmount:N2}{(snapshot.ApiEquivalent.IsComplete ? "" : " (priced portion)")}";
             SummaryText.Text =
                 $"{snapshot.Ledger.Sum(x => x.Workload.ReportedTotalTokens):N0} observed tokens · {snapshot.Ledger.Select(x => x.ThreadId).Distinct().Count():N0} chats\n" +
-                $"API reference: ${snapshot.ApiEquivalent.WeightedAmount:N2}{(snapshot.ApiEquivalent.IsComplete ? "" : " (partial)")} · TT: research only";
+                $"{apiReference} · TT: research only";
             ProviderText.Text = CodexServerCollectionScope.DescribeLatest(snapshot.ProviderEvidence) + "\n\n" + string.Join(
                 "\n",
                 snapshot.ProviderEvidence.GroupBy(x => (x.Surface, x.ThreadId, x.CorrelatedAccountKey, x.ClientVersion))

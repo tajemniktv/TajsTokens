@@ -393,12 +393,83 @@ dataset and stays unknown in its report. ING-002's acquisition evidence remains
 separate, as do EVID-004's all-time/untimed quantity presentation and SHIP-004's
 user visual acceptance. See the linked record for exact hashes, times and limits.
 
+## Answer-specific support (EVID-004)
+
+The active native increment table remains the all-time quantity projection. It is
+not replaced by dated forecast rows, provider snapshots, original-input variants or
+retired-generation snapshots. Unknown model/effort/role/account does not erase a
+valid amount. The original nullable counter journal still distinguishes absent
+fields from reported zeros; normalized increments are not relabelled as original
+input. The earlier component-10/11 migration/replay/retirement evidence above still
+applies; this slice introduces **no durable schema migration**.
+
+All-time Observatory totals now carry coverage for verified/unverified source time
+and missing model metadata, with overlapping counts and amounts. Its SQL computes
+the six totals and coverage in one native-table aggregate rather than six repeated
+total scans. The card says all time/local retained work and shows the amount
+without verified time; its tooltip states scope, overlaps and unresolved global
+equivalence. The summary includes undated amounts without inventing a date or
+current-login ownership. API-reference presentation shows unavailable when every
+nonzero quantity is unpriced, and labels a mixed amount as the priced portion;
+token quantities remain visible.
+
+Two dated readers still used legacy `observed_at_utc`: standalone daily JSON and
+Fleet's recent native tokens. Both now require `source_timestamp_quality='Valid'`
+and `source_event_at_utc`; Fleet uses explicit lower/upper snapshot bounds. Daily
+JSON **`tajstokens.daily-tokens.v2`** groups verified source UTC days and keeps
+all-time coverage in a separate, explicitly unbounded object. Missing days remain
+unobserved rather than confirmed zero. Legacy observed/capture timestamps do not
+substitute for source dates. Its read-only path refuses component versions below
+9 or above the supported observatory version before interpreting dates. Historical
+v1 exports retain their former date basis; they were not rewritten.
+
+The **767-test Core suite** passed (1m49s). Added checks exercise unknown
+role/model/effort with supported direct token/quota predictions; replayed native
+amounts; unassigned local work under a current-login quota selection; verified,
+missing, malformed, legacy and future time; observed zero versus missing date;
+read-only older/newer-schema refusal; and numeric-only daily export. Existing
+compression/archive/rewrite tests now also compare displayed all-time coverage
+with the daily projection after adoption and retirement. Counter-input null/zero,
+first collection, variant/collision, rollback and migration tests remain in the full
+suite. Forecast algorithms and thresholds did not change.
+
+The final Windows build passed with zero warnings/errors (43.89s), installed the
+daily build and restarted **PID 34520**. Installed hashes:
+
+- Infrastructure: `29B3BC36233DB2656EF6AD70116B5A611F346CED0B5AB36D72C6BDF043E99268`.
+- App: `EB82BE1A95E62AAE02E1219EC1F56DDE260E064717354708345D796506D52F1A`.
+
+The installed `--daily-json` command completed at
+`2026-10-28T08:25:42.4901889Z` with an empty error stream. For its 30-day request,
+24 observed UTC days contained 22,513 selected dated increments and 4,571,116,363
+tokens. Its separate all-time coverage held 96,259 increments: 90,407 verified-time
+increments/13,440,002,115 tokens and 5,852 unverified-time increments/804,485,477
+tokens; no missing-model increments were present in that runtime sample. The
+unknown-model cases are synthetic regression evidence, not a claim about that
+sample. The report explicitly left account attribution unknown.
+
+A subsequent read-only backup/current comparison preserved all 96,259 original
+native rows and 303 journal rows without numeric/chronology changes or removals.
+Seven newly collected native/journal rows were added by normal ongoing ingestion;
+no generation was retired. Component versions stayed telemetry 16, observatory 11,
+state-index 8. Artifacts are `.codex/temp/stage2/answer-scope-installed.json`,
+`answer-scope-preservation.json`, and the `answer-scope-*.log` validation logs;
+they contain aggregates rather than source payloads or account/session identifiers.
+
+Unified Computer Use read the installed window and screenshot. A Windows Security
+passkey prompt still covered the app, so UI interaction stopped without any input.
+The new all-time card, tooltip and unavailable-valuation visual cases remain
+unconfirmed under SHIP-004; headless semantic/runtime proof does not close that
+visual gate. The window was not manipulated through the authentication prompt.
+
 ## Remaining boundaries
 
 This closes installed component support, advancing ingestion and the tested
 refusal/recovery boundary and the supported compressed-ingestion cases above.
 It does not prove a complete native corpus was available/recovered, complete
-cross-source reconciliation, all untimed/all-time presentation states or programme-
-wide user visual acceptance. Those remain under EVID-004 and SHIP-004.
+cross-source reconciliation or programme-wide user visual acceptance. The known
+retention/answer cases above are implemented; global equivalence/completeness is
+not inferred from their sums. SHIP-004 visual acceptance and PERF-001 aggregate
+resource acceptance remain open.
 The quantity/retention definition in PROJECT.md explicitly
 distinguishes these gaps from implemented behavior.

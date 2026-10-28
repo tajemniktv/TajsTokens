@@ -111,8 +111,8 @@ public sealed partial class CodexFleetPage : Page
             CodexLiveFleetSnapshot fleet = await fleetTask;
             Task<IReadOnlyDictionary<string, CodexNativeTokenTotals>> recentTask = Task.Run(
                 () => App.Services.ObservatoryReadModel.GetRecentSessionTokensAsync(
-                    DateTimeOffset.UtcNow.AddMinutes(-15),
-                    fleet.Threads.Select(thread => thread.Thread.ThreadId).ToArray(), cancellationToken), cancellationToken);
+                    fleet.CapturedAtUtc.AddMinutes(-15),
+                    fleet.Threads.Select(thread => thread.Thread.ThreadId).ToArray(), cancellationToken, fleet.CapturedAtUtc), cancellationToken);
             await Task.WhenAll(new Task[] { sessionsTask, recentTask }.Concat(remoteTasks));
             cancellationToken.ThrowIfCancellationRequested();
             if (!IsLoaded) return;

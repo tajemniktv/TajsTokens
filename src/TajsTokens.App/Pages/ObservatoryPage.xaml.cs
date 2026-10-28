@@ -211,6 +211,10 @@ public sealed partial class ObservatoryPage : Page
 
                 SessionCountText.Text = data.Summary.SessionCount.ToString("N0");
                 NativeTokensText.Text = FormatCount(data.Summary.NativeTokens.ReportedTotal);
+                NativeTokenScopeText.Text = data.Summary.TokenCoverage is { } coverage
+                    ? $"Local retained work · {FormatCount(coverage.UnverifiedTimeTokens)} without verified time"
+                    : "Local retained work · time coverage unavailable";
+                ToolTipService.SetToolTip(NativeTokenScopeText, data.Summary.TokenCoverage?.Describe());
                 StorageText.Text = FormatBytes(data.Summary.RolloutBytes);
 
                 ProviderHealthSnapshot? rolloutSource = App.Services.Telemetry.Latest.Sources.FirstOrDefault(source =>

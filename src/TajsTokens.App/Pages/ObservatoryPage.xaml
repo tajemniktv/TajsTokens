@@ -42,8 +42,9 @@
             </Border>
             <Border Grid.Column="1" Padding="14" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
                 <StackPanel>
-                    <TextBlock Text="Native Codex tokens" Opacity="0.65" />
+                    <TextBlock Text="Native tokens · all time" Opacity="0.65" />
                     <TextBlock x:Name="NativeTokensText" Text="—" FontSize="22" FontWeight="SemiBold" />
+                    <TextBlock x:Name="NativeTokenScopeText" Text="Local retained work" Opacity="0.65" TextWrapping="Wrap" />
                 </StackPanel>
             </Border>
             <Border Grid.Column="2" Padding="14" CornerRadius="12" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">

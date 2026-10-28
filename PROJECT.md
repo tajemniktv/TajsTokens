@@ -531,7 +531,7 @@ acceptance stays open under PERF-001 while this prerequisite evidence work proce
   and compatible-history counts. No threshold or model-selection change was made.
   The 762-test Core suite, Windows build and installed diagnostic passed;
   [reproduction and limits](docs/source-notes/FORECAST_THRESHOLD_STUDY.md#eligibility-follow-up-evid-003).
-- [ ] **EVID-004 — Separate retention from answer requirements.** Keep valid amounts
+- [x] **EVID-004 — Separate retention from answer requirements.** Keep valid amounts
   with unknown role/model/time/account, preserving missing versus zero. Prove unknown
   role does not disable token accounting/direct pace, untimed data stays out of dated
   forecasts, unknown model retains quantities and unassigned work never inherits
@@ -553,9 +553,19 @@ acceptance stays open under PERF-001 while this prerequisite evidence work proce
   suite plus a precision regression and Windows build passed. Installed migration
   preserved 95,995 existing native rows and all 39 prior journal rows;
   [validation](docs/source-notes/STAGE2_EVIDENCE_VALIDATION.md#superseded-numeric-retention-component-11).
-  This supplies
-  the storage prerequisite for ING-002; complete EVID-004 scope/answer and replay
-  acceptance remain open. ING-002 subsequently enabled verified compressed replacement.
+  ING-002 subsequently enabled verified compressed replacement. **Answer acceptance:**
+  all-time native totals keep amounts with unverified time/model and expose their
+  overlapping coverage. Dated daily/Fleet readers now require verified source time;
+  neither collection time nor legacy observed time supplies a date. Daily JSON v2
+  separates its date range from all-time coverage and refuses unsupported schemas.
+  Missing role/model/effort does not veto direct token or quota pace; current login
+  does not assign native ownership. Unpriced quantities remain visible without an
+  invented zero API valuation. Replay, compressed/archive adoption and genuine
+  retirement preserve one selected amount while retaining alternatives separately.
+  The 767-test Core suite, final Windows build and installed v2 report passed.
+  All 96,259 pre-deployment native rows and 303 journal rows retained their original
+  amounts and chronology. Cross-source/global equivalence remains unresolved;
+  [scope and evidence](docs/source-notes/STAGE2_EVIDENCE_VALIDATION.md#answer-specific-support-evid-004).
 
 **Exit:** trace a displayed amount to observations and reproduce it after replay,
 duplicate discovery, compression and supported migration. Late imports improve
@@ -775,9 +785,9 @@ Installed **A-01** chronology acceptance has the stated runtime evidence. Contin
 Stage 2 with the accepted **ING-001** identity/checkpoint contract, component-10
 original counter-input journal, component-11 superseded numeric retention and the
 **ING-002** compressed ingestion and **EVID-002** scoped reconciliation slices.
-**EVID-003** now supplies eligibility explanations and the retained 67-case breakdown.
-Finish **EVID-004** scope/answer acceptance.
-Deliver **PACE-001–004** as a
+**EVID-003** supplies eligibility explanations and the retained 67-case breakdown;
+**EVID-004** supplies the stated retention/answer and selected-generation acceptance.
+Continue with **PACE-001–004** as a
 separate reviewable slice using the established quota contract; public TT selection
 does not block that correctness repair.
 

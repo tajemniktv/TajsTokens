@@ -124,6 +124,7 @@ public sealed class SqliteCodexObservatoryReadModelTests
                                    VALUES
                                        ('usage-1', 'child', '2026-09-01T04:00:00.0000000+00:00', 'token_count', 'fixture', NULL),
                                        ('usage-2', 'child', '2026-09-01T04:30:00.0000000+00:00', 'task_complete', 'fixture', NULL);
+                                   UPDATE codex_native_token_events SET source_event_at_utc=observed_at_utc, source_timestamp_quality='Valid';
                                    """;
                 await seed.ExecuteNonQueryAsync(CancellationToken.None);
             }

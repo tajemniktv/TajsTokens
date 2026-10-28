@@ -12,7 +12,11 @@ public sealed record CodexDailyTokenReport(
     DateTimeOffset ToUtc,
     string Coverage,
     string AccountAttribution,
-    IReadOnlyList<CodexDailyTokenRow> Days);
+    IReadOnlyList<CodexDailyTokenRow> Days)
+{
+    /// <summary>Entire selected local ledger, not restricted to the dated report range.</summary>
+    public CodexNativeTokenCoverage? AllTimeCoverage { get; init; }
+}
 
 public sealed record CodexDailyTokenRow(
     DateOnly DayUtc,

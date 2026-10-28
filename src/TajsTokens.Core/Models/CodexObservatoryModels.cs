@@ -103,7 +103,22 @@ public sealed record CodexRolloutStorageSummary(
 public sealed record CodexObservatorySummary(
     long SessionCount,
     CodexNativeTokenTotals NativeTokens,
-    long RolloutBytes);
+    long RolloutBytes)
+{
+    public CodexNativeTokenCoverage? TokenCoverage { get; init; }
+}
+
+/// <summary>All-time selected local increments, not a complete account or a sum of alternate representations.</summary>
+public sealed record CodexNativeTokenCoverage(long Events, long VerifiedTimeEvents, long VerifiedTimeTokens,
+    long UnverifiedTimeEvents, long UnverifiedTimeTokens, long MissingModelEvents, long MissingModelTokens)
+{
+    public string Describe() => $"{Events:N0} selected local increments, all time; " +
+        $"{UnverifiedTimeTokens:N0} tokens in {UnverifiedTimeEvents:N0} increments without verified source time; " +
+        $"{MissingModelTokens:N0} tokens in {MissingModelEvents:N0} increments without a model. " +
+        "These groups can overlap. Undated amounts remain in all-time totals and stay out of dated history. " +
+        "Current login does not assign ownership; local history is not complete account usage. " +
+        "Known occurrence replay and representation alternatives are counted once; unproven cross-source equivalence remains unresolved.";
+}
 
 public sealed record CodexParserResumeState(
     string SourceIdentity,

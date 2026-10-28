@@ -23,7 +23,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 /// </summary>
 public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObservatoryStore, IDisposable
 {
-    private const int ObservatorySchemaVersion = 11;
+    internal const int ObservatorySchemaVersion = 11;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _initializeGate = new(1, 1);
     private volatile bool _initialized;
@@ -1000,16 +1000,15 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
         SqliteCommand command = connection.CreateCommand();
-        command.CommandText = """
+        command.CommandText = $"""
                               SELECT
                                   (SELECT COUNT(*) FROM sessions s WHERE EXISTS(SELECT 1 FROM rollout_files f WHERE f.session_id = s.session_id)),
-                                  COALESCE((SELECT SUM(t.uncached_input_tokens) FROM codex_native_token_events t), 0),
-                                  COALESCE((SELECT SUM(t.cache_read_tokens) FROM codex_native_token_events t), 0),
-                                  COALESCE((SELECT SUM(t.cache_write_tokens) FROM codex_native_token_events t), 0),
-                                  COALESCE((SELECT SUM(t.non_reasoning_output_tokens) FROM codex_native_token_events t), 0),
-                                  COALESCE((SELECT SUM(t.reasoning_output_tokens) FROM codex_native_token_events t), 0),
-                                  COALESCE((SELECT SUM(t.reported_total_tokens) FROM codex_native_token_events t), 0),
-                                  COALESCE((SELECT SUM(f.size_bytes) FROM rollout_files f), 0);
+                                  COALESCE(SUM(uncached_input_tokens), 0), COALESCE(SUM(cache_read_tokens), 0),
+                                  COALESCE(SUM(cache_write_tokens), 0), COALESCE(SUM(non_reasoning_output_tokens), 0),
+                                  COALESCE(SUM(reasoning_output_tokens), 0), COALESCE(SUM(reported_total_tokens), 0),
+                                  COALESCE((SELECT SUM(f.size_bytes) FROM rollout_files f), 0),
+                                  {SqliteCodexNativeTokenCoverage.Columns}
+                              FROM codex_native_token_events;
                               """;
 
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -1023,7 +1022,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                 reader.GetInt64(4),
                 reader.GetInt64(5),
                 reader.GetInt64(6)),
-            reader.GetInt64(7));
+            reader.GetInt64(7)) { TokenCoverage = SqliteCodexNativeTokenCoverage.Read(reader, 8) };
     }
 
     public async Task<IReadOnlyList<CodexSessionOverview>> GetSessionOverviewsAsync(int take, CancellationToken cancellationToken)
