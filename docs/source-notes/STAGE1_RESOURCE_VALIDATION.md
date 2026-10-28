@@ -883,3 +883,68 @@ PID 44524; installed Infrastructure SHA-256 is
 The installed Overview remained responsive and reported subsequent provider quota
 updates. This confirms the app continues operating; it does not prove detailed
 calibration completed within its slice budget or close the aggregate RAM gate.
+
+### Current-prediction dependency closure
+
+The completed frozen-input worker pass after the cache synchronization change
+still performed 352,962 fit-cache misses. A single current token prediction was
+replaying every earlier prediction, often for a distinct actual elapsed horizon.
+The bounded cache did not prevent those repeated fits; cheaper disk writes alone
+did not resolve the calculations. Miss counts are not unique-fit counts.
+
+Current predictions now calculate the dependency closure of the existing model:
+each candidate uses 120 matured training rows; selection uses 48 earlier candidate
+estimates; the current uncertainty band additionally needs the selected predictions
+of those 48 points. Another 48-point window supplies those selections' estimates.
+Only the required feature origins are materialized. Token targets still use the
+complete original time grid and evidence, and each feature retains its original
+lookback and relevant older session prefixes. No horizon rounding, training-span
+reduction, threshold change or model promotion was introduced. Exhaustive replay
+and score reports remain exhaustive, and an internal exhaustive current path is
+retained as a numerical oracle. Unexpected token/feature eligibility disagreement
+falls back to that path.
+
+Warmup selections/bands are incomplete and must not be reused. The existing
+evaluation-local cache now stores only candidate estimates, keyed by exact row and
+ordered training identities plus the actual horizon. Compact row keys use lossless
+numeric feature-value identities with a bounded reference fast path. Equivalent
+features across late-evidence generations can reuse estimates; changed features or
+training targets invalidate them. Input-list replacement clears them. This replaces retained
+JSON rows/full Point values; entry bounds and the separate persistent numeric fit
+cache remain. An adjacent-query regression first reproduced 192 redundant fits;
+the corrected cache produced the identical prediction with zero additional fits.
+
+Both completed worker runs used the same consistent app-owned database snapshot,
+fixed quota anchor, original GC settings and starting fit-cache copy:
+
+| Calculation | Wall seconds | CPU seconds | Cumulative allocation, decimal GB | Sampled private peak, MiB |
+|---|---:|---:|---:|---:|
+| Exhaustive current prediction | 455.77 | 418.25 | 76.63 | 273.73 |
+| Dependency closure + candidate reuse | 94.29 | 96.48 | 15.14 | 269.56 |
+
+The complete forecast/workload result hash matched exactly:
+`9562905b9205ee2f2e4ed214cdbc2405e527545d0dfcd4cbcbee4f1bfb461bc6`.
+The runs returned one account forecast and a 21,964-event token-workload projection.
+These are isolated unthrottled computational comparisons, not installed-background
+completion or a combined RAM acceptance result. The remaining 96.5 CPU-seconds and
+36,938 fit misses still matter under the worker's actual slice budget. Evidence:
+`worker-cache-normal.jsonl` and `worker-current-final.jsonl` locally.
+
+New tests compare the entire current prediction/composition to exhaustive results
+for retrospective and collection-qualified availability, late backfills, mixed
+models/efforts, nonmonotonic queries, gaps/short history and irregular or one-tick
+horizon perturbations. They retain selected models, point estimates, bands and
+explanations exactly. The direct-current fit-count test bounds its two candidates
+to the dependency windows. These establish computational equivalence under the
+tested conditions, not new forecasting-accuracy or population-validation claims.
+Complete chronological composed reports were also compared with the saved
+pre-change Core assembly (SHA-256
+`00EF07483D08FFA385A50F16227F85C1D3946FA4B2B6854396583C1D718C0456`).
+All four timely/late × retrospective/strict cases matched in full, covering 3,993
+scored trials and their errors, selection, uncertainty and support/availability
+fields. Small regular-grid comparisons were not uniformly faster; this is a
+targeted operational optimization, not a universal speedup. Aggregate evidence is
+`current-composed-parity.jsonl`. All 707 Core tests passed, none skipped (1m40s).
+The serial Windows build/install passed with zero warnings/errors (53.69s),
+restarting the daily app as PID 44984. Installed Core SHA-256:
+`EE61E4936862FFF7AAE6F81B929B47413304F094C5386BA92B30C01C1AFFEF5D`.

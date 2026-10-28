@@ -186,7 +186,10 @@ The overview now requests ledger/quota evidence without predictive metadata or
 context; forecast/calibration reads retain their existing inputs. Hidden eviction
 also releases the navigation shell and preserves pane/expansion state. The Windows
 segment heap is enabled within the existing supported OS range; measured savings
-are workload-qualified, not a new memory guarantee. All 691 Core tests and the
+are workload-qualified, not a new memory guarantee. Current token predictions now
+evaluate their exact training/selection/band dependency closure; full replay reports
+remain exhaustive. A frozen worker comparison retained its complete output hash
+while reducing wall time from 455.8 to 94.3 seconds. All 707 Core tests and the
 Windows build/install pass. Resource acceptance and
 numerical budgets remain open under PERF-001. See
 [current validation evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
@@ -275,8 +278,12 @@ numerical budgets remain open under PERF-001. See
   for rebuildable fits, following matching-row benchmarks; source/checkpoint
   durability is unchanged. Separate input revisions exclude derived writes and no-op
   maintenance, while expiry/future collection/rolling windows invalidate reuse.
+  Current token predictions build only the features and candidate estimates needed
+  by the existing 120-row training and two 48-point selection/band windows. Complete
+  replay remains the numerical oracle; exact elapsed horizons and evidence remain
+  unchanged. Compact candidate-estimate reuse excludes incomplete warmup selections.
   Shared worker feature reads preserve the original account/window/source rules
-  and fall back at read bounds or concurrent evidence changes. Full suite: 682
+  and fall back at read bounds or concurrent evidence changes. Full suite: 707
   passed; Windows build/install passed;
   [matching-output and resource evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 - [x] **PERF-008 — Bound maintenance and queries.** Put legacy privacy scrubs under
