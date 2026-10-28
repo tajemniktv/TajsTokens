@@ -13,6 +13,8 @@ namespace TajsTokens.Core.Interfaces;
 public interface ISystemTrayService : IDisposable
 {
     event EventHandler? OpenDashboardRequested;
+    event EventHandler? OpenPlanningRequested;
+    event EventHandler? OpenStatusDetailsRequested;
     event EventHandler? RefreshRequested;
     event EventHandler? ExitRequested;
     event Action<bool>? NotificationsEnabledChanged;

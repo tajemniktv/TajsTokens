@@ -28,6 +28,8 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
     private const uint CommandNotifications = 1003;
     private const uint CommandStartup = 1004;
     private const uint CommandExit = 1005;
+    private const uint CommandPlanning = 1006;
+    private const uint CommandStatusDetails = 1007;
 
     private const uint WmNull = 0x0000;
     private const uint WmApp = 0x8000;
@@ -48,6 +50,7 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
     private const uint NifShowTip = 0x00000080;
     private const uint NiifInfo = 0x00000001;
     private const uint MfString = 0x00000000;
+    private const uint MfGrayed = 0x00000001;
     private const uint MfChecked = 0x00000008;
     private const uint MfUnchecked = 0x00000000;
     private const uint MfSeparator = 0x00000800;
@@ -67,6 +70,7 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
     private bool _disposed;
     private nint _instanceHandle;
     private string? _lastAppliedTip;
+    private IReadOnlyList<string> _summaryRows = [];
     private bool _launchAtLogin;
     private bool _notificationsEnabled;
     private nint _sharedFallbackIconHandle;
@@ -79,6 +83,8 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
     }
 
     public event EventHandler? OpenDashboardRequested;
+    public event EventHandler? OpenPlanningRequested;
+    public event EventHandler? OpenStatusDetailsRequested;
     public event EventHandler? RefreshRequested;
     public event EventHandler? ExitRequested;
     public event Action<bool>? NotificationsEnabledChanged;
@@ -144,7 +150,7 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
         int? normalizedPercent = status.ConstrainedRemainingPercent is int percent
             ? Math.Clamp(percent, 0, 100)
             : null;
-        string constrained = normalizedPercent is int value ? $" · constrained {value}%" : string.Empty;
+        string constrained = status.SummaryRows.Count == 0 && normalizedPercent is int value ? $" · constrained {value}%" : string.Empty;
         string nextTip = Truncate(status.Tooltip + constrained, 127);
         var nextKey = new StatusIconKey(normalizedPercent, status.IsFresh);
 
@@ -161,6 +167,7 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
             // taskbars, TaskbarCreated must re-add the newest tooltip rather than the last one that
             // happened to modify successfully.
             _currentTip = nextTip;
+            _summaryRows = status.SummaryRows;
             _desiredIconKey = nextKey;
 
             if (_currentIconKey == nextKey && string.Equals(_lastAppliedTip, nextTip, StringComparison.Ordinal))
@@ -438,7 +445,14 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
 
         try
         {
+            IReadOnlyList<string> summary;
+            lock (_statusIconSync) summary = _summaryRows;
+            foreach (string row in summary.Take(6))
+                _ = AppendMenuW(menu, MfString | MfGrayed, 0, Truncate(row.ReplaceLineEndings(" "), 140).Replace("&", "&&", StringComparison.Ordinal));
+            if (summary.Count > 0) _ = AppendMenuW(menu, MfSeparator, 0, null);
             _ = AppendMenuW(menu, MfString, CommandOpen, "Open TajsTokens");
+            _ = AppendMenuW(menu, MfString, CommandPlanning, "Plan a session");
+            _ = AppendMenuW(menu, MfString, CommandStatusDetails, "Why this status?");
             _ = AppendMenuW(menu, MfString, CommandRefresh, "Refresh telemetry");
             _ = AppendMenuW(menu, MfSeparator, 0, null);
             _ = AppendMenuW(
@@ -470,6 +484,12 @@ public sealed class WindowsSystemTrayService : ISystemTrayService
             {
                 case CommandOpen:
                     OpenDashboardRequested?.Invoke(this, EventArgs.Empty);
+                    break;
+                case CommandPlanning:
+                    OpenPlanningRequested?.Invoke(this, EventArgs.Empty);
+                    break;
+                case CommandStatusDetails:
+                    OpenStatusDetailsRequested?.Invoke(this, EventArgs.Empty);
                     break;
                 case CommandRefresh:
                     RefreshRequested?.Invoke(this, EventArgs.Empty);

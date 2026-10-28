@@ -8,6 +8,7 @@ using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using TajsTokens.App.Services;
+using TajsTokens.App.Pages;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 using TajsTokens.Core.Services;
@@ -66,6 +67,8 @@ public partial class App : Application
         _dogfoodLifetime = new DogfoodLifetime(() => RunOnDispatcher(RequestExit), () => RunOnDispatcher(RequestDashboard));
 
         _trayService.OpenDashboardRequested += (_, _) => RequestDashboard();
+        _trayService.OpenPlanningRequested += (_, _) => { RequestDashboard(); Navigate(typeof(CodexIntelligencePage), "planning"); };
+        _trayService.OpenStatusDetailsRequested += (_, _) => { RequestDashboard(); Navigate(typeof(CodexIntelligencePage), "status"); };
         _trayService.RefreshRequested += (_, _) => _ = RefreshFromTrayAsync();
         _trayService.ExitRequested += (_, _) => RequestExit();
         _trayService.NotificationsEnabledChanged += OnNotificationsEnabledChanged;
@@ -80,6 +83,8 @@ public partial class App : Application
         _ = ReconcileStartupRegistrationAsync();
 
         Services.Telemetry.SnapshotUpdated += OnSnapshotUpdated;
+        Services.WorkloadReferences.Updated += QueueTrayPresentation;
+        _ = LoadWorkloadReferencesAsync();
         Services.SettingsChanged += OnSettingsChanged;
         Services.LocalLimitsApi.Configure(Services.Settings.LocalLimitsApiEnabled,
             Services.Settings.LocalLimitsApiPort, Services.Settings.LocalLimitsApiToken);
@@ -149,6 +154,14 @@ public partial class App : Application
                     "TajsTokens startup registration failed",
                     exception.Message.ReplaceLineEndings(" ")));
         }
+    }
+
+    private async Task LoadWorkloadReferencesAsync()
+    {
+        try { await Task.Run(() => Services.WorkloadReferences.ReadAsync(_lifetimeCancellation.Token)); }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested) { }
+        catch (Exception e) when (e is not OutOfMemoryException)
+        { QueueTrayPresentation(); } // Native quantities and quota remain available without a selected basis.
     }
 
     private void StartPeriodicCollector()
@@ -453,6 +466,7 @@ public partial class App : Application
         _periodicCancellation?.Dispose();
         _periodicCancellation = null;
         Services.Telemetry.SnapshotUpdated -= OnSnapshotUpdated;
+        Services.WorkloadReferences.Updated -= QueueTrayPresentation;
         Services.SettingsChanged -= OnSettingsChanged;
         Services.LocalLimitsApi.Dispose();
         Services.Calibration.Dispose();

@@ -12,6 +12,11 @@ public sealed class WorkloadReferenceService(SqliteTelemetryRepository repositor
     public const string ApprovedBasisId = "tt-joint:00dac6d4779ceff3507bce2570ac4a7fe30876e53e0fc033d1ae41540a46f6fa";
     private readonly SemaphoreSlim _initialization = new(1, 1);
     private bool _initialized;
+    private WorkloadReferenceState? _current;
+    private readonly SemaphoreSlim _reads = new(1, 1);
+    private string? _publishedRevision;
+    public WorkloadReferenceState? Current => Volatile.Read(ref _current);
+    public event Action? Updated;
 
     public static async Task<(ApiPriceCatalogSnapshot Prices, TtJointWorkloadBasis Basis)> ReadApprovedAsync(CancellationToken token)
     {
@@ -69,6 +74,7 @@ public sealed class WorkloadReferenceService(SqliteTelemetryRepository repositor
                 OverrideSourceKey = role == ApiPriceOrigin.LocalOverride ? key : selected.OverrideSourceKey,
                 FallbackSourceKey = role == ApiPriceOrigin.CommunityFallback ? key : selected.FallbackSourceKey,
             }, token, expectedPreviousId: selected.SelectionId);
+        await ReadAsync(token);
         return attempt;
     }
 
@@ -90,6 +96,7 @@ public sealed class WorkloadReferenceService(SqliteTelemetryRepository repositor
             throw new ArgumentException("Extension must preserve the currently selected parent.");
         await repository.SaveWorkloadReferenceSelectionAsync(selected with { SelectedAtUtc = DateTimeOffset.UtcNow, Basis = basis }, token,
             expectedPreviousId: selected.SelectionId);
+        await ReadAsync(token);
     }
 
     public async Task SetOptionalSourcesAsync(bool useOverrides, bool useFallback, bool legacyFallback, CancellationToken token)
@@ -104,9 +111,32 @@ public sealed class WorkloadReferenceService(SqliteTelemetryRepository repositor
         await repository.SaveWorkloadReferenceSelectionAsync(selected with { SelectedAtUtc = DateTimeOffset.UtcNow,
             OverrideSourceKey = useOverrides ? selected.OverrideSourceKey ?? "local-overrides" : null,
             FallbackSourceKey = fallback }, token, expectedPreviousId: selected.SelectionId);
+        await ReadAsync(token);
     }
 
     public async Task<WorkloadReferenceState> ReadAsync(CancellationToken token, bool initialize = true)
+    {
+        WorkloadReferenceState state;
+        bool changed;
+        await _reads.WaitAsync(token);
+        try
+        {
+            state = await ReadCoreAsync(token, initialize);
+            string revision = JsonSerializer.Serialize(new { Selection = state.Selection?.SelectionId, state.Issue,
+                Price = Identity(state.Prices), Overrides = Identity(state.Overrides), Fallback = Identity(state.Fallback) });
+            changed = revision != _publishedRevision;
+            Volatile.Write(ref _current, state);
+            _publishedRevision = revision;
+        }
+        finally { _reads.Release(); }
+        if (changed) Updated?.Invoke();
+        return state;
+
+        static object? Identity(ApiPriceCatalogSource? source) => source is null ? null :
+            new { source.LastGood?.SnapshotId, source.LastState, source.InvalidStoredSnapshot };
+    }
+
+    private async Task<WorkloadReferenceState> ReadCoreAsync(CancellationToken token, bool initialize)
     {
         if (initialize) await InitializeAsync(token);
         var state = await repository.ReadWorkloadReferenceSelectionAsync(token);

@@ -74,6 +74,8 @@ public sealed record CodexIntelligenceSnapshot(
     public CodexModelCatalogView ModelCatalog { get; init; } = CodexModelCatalogView.Empty;
     public WorkloadReferenceResult? Reference { get; init; }
     public DateTimeOffset? DatasetCapturedAtUtc { get; init; }
+    public CodexMeasuredWork? RetainedWork { get; init; }
+    public IReadOnlyList<CodexStatusChange> StatusChanges { get; init; } = [];
 }
 
 public sealed record CodexChatAccounting(

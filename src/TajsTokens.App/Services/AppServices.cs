@@ -93,7 +93,7 @@ public sealed class AppServices
             Intelligence,
             () => Telemetry.Latest,
             modelCatalogHistory: Repository.ReadModelCatalogHistoryAsync,
-            workloadReferences: token => WorkloadReferences.ReadAsync(token));
+            workloadReferences: token => WorkloadReferences.ReadAsync(token), currentReferences: () => WorkloadReferences.Current);
         AlertEngine = new QuotaAlertEngine(Settings.LowQuotaThresholds);
         LocalLimitsApi = new LocalLimitsHttpServer(() =>
             LocalLimitsProjection.Build(Telemetry.Latest, Settings.LocalLimitsApiToken, DateTimeOffset.UtcNow));

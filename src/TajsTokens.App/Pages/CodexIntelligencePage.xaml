@@ -58,6 +58,7 @@
                                                TextWrapping="Wrap" />
                                     <TextBlock x:Name="OutlookDetail" Text="A current, compatible forecast will appear here."
                                                TextWrapping="Wrap" />
+                                    <TextBlock x:Name="StatusChangeSummary" Style="{StaticResource CaptionStyle}" TextWrapping="Wrap" />
                                     <Button Content="Plan another work session" Click="OnPlan" HorizontalAlignment="Left" />
                                     <HyperlinkButton Content="Forecast details and uncertainty" Click="OnPlan" HorizontalAlignment="Left"
                                                      Padding="0" />
@@ -195,8 +196,8 @@
                             <HyperlinkButton Content="Model lab" Click="OnModelLab" />
                             <HyperlinkButton Content="Inspect quota changes" Click="OnQuotaHistory" />
                         </StackPanel>
-                        <Expander Header="Current forecasts and uncertainty" HorizontalAlignment="Stretch"
-                                  HorizontalContentAlignment="Stretch" IsExpanded="True">
+                        <Expander x:Name="CurrentStatusDetails" Header="Current status and reasons" HorizontalAlignment="Stretch"
+                                  HorizontalContentAlignment="Stretch">
                             <TextBlock x:Name="ForecastText" Style="{StaticResource TechnicalTextStyle}" />
                         </Expander>
                     </StackPanel>

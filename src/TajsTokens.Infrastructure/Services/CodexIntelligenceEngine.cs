@@ -23,9 +23,49 @@ public sealed class CodexIntelligenceEngine(
     IIntelligenceService intelligence,
     Func<TelemetrySnapshot> current,
     Func<CancellationToken, Task<CodexModelCatalogHistory>>? modelCatalogHistory = null,
-    Func<CancellationToken, Task<WorkloadReferenceState>>? workloadReferences = null) : ICodexIntelligence
+    Func<CancellationToken, Task<WorkloadReferenceState>>? workloadReferences = null,
+    Func<WorkloadReferenceState?>? currentReferences = null) : ICodexIntelligence
 {
-    public CodexIntelligenceSnapshot Current => CodexIntelligenceProjection.Live(current());
+    private readonly object _statusGate = new();
+    private IReadOnlyList<TokenUsage>? _statusTokens;
+    private string? _statusBasis;
+    private string? _statusSource;
+    private CodexMeasuredWork? _retainedWork;
+    private CodexProductStatus? _previousStatus;
+    private IReadOnlyList<CodexStatusChange> _lastChanges = [];
+
+    public CodexIntelligenceSnapshot Current
+    {
+        get
+        {
+            var telemetry = current();
+            var references = currentReferences?.Invoke();
+            var now = DateTimeOffset.UtcNow;
+            var live = CodexIntelligenceProjection.Live(telemetry);
+            lock (_statusGate)
+            {
+                string? basis = references?.Selection?.Basis.BasisId;
+                string? source = telemetry.TokenGeneration?.Source + "/" + telemetry.TokenGeneration?.Quality;
+                if (_retainedWork is null || !ReferenceEquals(_statusTokens, telemetry.TokenUsages) || basis != _statusBasis || source != _statusSource)
+                {
+                    _retainedWork = CodexProductProjection.RetainedWork(telemetry, references);
+                    _statusTokens = telemetry.TokenUsages; _statusBasis = basis; _statusSource = source;
+                }
+                live = live with { RetainedWork = CodexProductProjection.WithFreshness(_retainedWork, telemetry, now) };
+                if (references is not null)
+                {
+                    var reference = new WorkloadReferenceResult(references, live.RetainedWork.Tt, null, null);
+                    live = live with { Reference = reference,
+                        Manifest = CodexIntelligenceProjection.Manifest(live.Selection, live.Manifest.Id, reference) };
+                }
+                var product = CodexProductProjection.Build(live, now);
+                var changes = CodexProductProjection.Changes(_previousStatus, product);
+                if (changes.Count > 0) _lastChanges = changes;
+                _previousStatus = product;
+                return live with { StatusChanges = _lastChanges };
+            }
+        }
+    }
 
     public Task<RecentScenarioPattern> GetRecentScenarioPatternAsync(DateTimeOffset nowUtc, CancellationToken token)
         => Task.Run(() => intelligence.GetRecentScenarioPatternAsync(nowUtc, token), token);

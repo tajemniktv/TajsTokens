@@ -25,6 +25,8 @@ public static class CodexIntelligenceProjection
         return history with
         {
             Current = live.Current.Where(x => Matches(x.Current)).ToArray(),
+            RetainedWork = live.RetainedWork,
+            StatusChanges = live.StatusChanges.Where(x => accountKey is null || x.AccountKey is null || x.AccountKey == accountKey).ToArray(),
             CurrentState = live.CurrentState with
             {
                 QuotaSnapshots = live.CurrentState.QuotaSnapshots.Where(Matches).ToArray(),
@@ -102,6 +104,7 @@ public static class CodexIntelligenceProjection
         var components = new SortedDictionary<string, string>(StringComparer.Ordinal)
         {
             ["projection"] = Version,
+            ["product-status"] = CodexProductProjection.Version,
             ["joint-workload"] = CodexJointWorkload.Version,
             ["workload"] = TokenWorkloadPredictionService.PolicyVersion,
             ["accounting"] = QuotaAccountingModel.Version,

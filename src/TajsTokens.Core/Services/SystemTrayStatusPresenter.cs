@@ -19,65 +19,54 @@ public static class SystemTrayStatusPresenter
         string quota = status.Tooltip.StartsWith("TajsTokens · ", StringComparison.Ordinal)
             ? status.Tooltip["TajsTokens · ".Length..]
             : status.Tooltip;
-        return status with { Tooltip = $"TajsTokens · {recentlyWorkingThreads} recent turn(s) · {quota}" };
+        return status with { Tooltip = $"TajsTokens · {quota} · {recentlyWorkingThreads} recent turn(s)" };
     }
 
     public static SystemTrayStatus Build(CodexIntelligenceSnapshot snapshot)
     {
-        return Build(snapshot.CurrentState);
+        var product = CodexProductProjection.Build(snapshot, DateTimeOffset.UtcNow);
+        bool multiple = snapshot.Current.Select(x => x.Current.AccountKey).Distinct().Count() > 1;
+        var remaining = product.Allowances.Windows.Where(x => !x.NotReported && x.Reading?.Current.UsedPercent is >= 0 and <= 100)
+            .Select(x => x.Reading!.Current.RemainingPercent!.Value).ToArray();
+        var rows = product.Allowances.Windows.Select(x =>
+        {
+            string value = x.NotReported ? "not reported" : x.Reading?.Current.UsedPercent is >= 0 and <= 100
+                ? $"{x.Reading.Current.RemainingPercent:0.#}% left" : "unavailable";
+            return $"{QuotaOutlookProjection.Name(x.Kind)}: {value} · {CodexProductProjection.CompactOutlook(x)}";
+        }).ToList();
+        rows.Add(product.Allowances.Summary);
+        rows.Add($"{product.Work.Scope}: {CodexProductProjection.Tokens(product.Work.NativeTokens)} · {CodexProductProjection.Tt(product.Work.Tt)}");
+        rows.Add(CodexProductProjection.WorkLabel(product.Work));
+        if (product.Changes.Count > 0) rows.Add("Changed: " + product.Changes[0].Summary);
+        string quota = multiple ? "multiple accounts" : string.Join(" · ", product.Allowances.Windows.Select(x =>
+            (x.Kind == QuotaWindowKind.FiveHour ? "5h " : "week ") + (x.NotReported ? "not reported" :
+                x.Reading?.Current.UsedPercent is >= 0 and <= 100 ? $"{x.Reading.Current.RemainingPercent:0}%" : "?")));
+        string runway = product.Allowances.Limiting is { } limiting ? (limiting.Exhausted ? "provider reported · " : "conditional · ") + CodexProductProjection.CompactOutlook(limiting)
+            : "runway unavailable";
+        bool Fresh(AllowanceOutlook x) =>
+            x.Reading is { IsFresh: true } r && r.Current.CapturedAtUtc <= product.AsOfUtc &&
+            product.AsOfUtc - r.Current.CapturedAtUtc <= TimeSpan.FromHours(6);
+        bool fresh = !multiple && product.Allowances.Windows.All(x => x.NotReported || Fresh(x));
+        string health = multiple ? "account scope" : fresh ? "live" : product.Allowances.Windows.Any(Fresh) ? "partial"
+            : snapshot.Current.Count > 0 ? "stale" : "quota unavailable";
+        return new SystemTrayStatus("", null, fresh, "")
+        {
+            Tooltip = $"TajsTokens · {quota} · {health}\n{runway}\nLocal retained · {CodexProductProjection.Tt(product.Work.Tt)}",
+            IsFresh = fresh, HealthLabel = health,
+            ConstrainedRemainingPercent = multiple || remaining.Length == 0 ? null : (int)Math.Round(remaining.Min(), MidpointRounding.AwayFromZero),
+            SummaryRows = rows.AsReadOnly(),
+        };
     }
 
     public static SystemTrayStatus Build(TelemetrySnapshot snapshot)
     {
-        return Build(CodexIntelligenceProjection.CurrentState(snapshot));
+        return Build(CodexIntelligenceProjection.Live(snapshot));
     }
 
     public static SystemTrayStatus Build(CodexCurrentState snapshot)
     {
-        QuotaSnapshot? fiveHour = LatestQuota(snapshot, QuotaWindowKind.FiveHour);
-        QuotaSnapshot? weekly = LatestQuota(snapshot, QuotaWindowKind.Weekly);
-        double[] remainingValues = new[] { fiveHour?.RemainingPercent, weekly?.RemainingPercent }
-            .Where(value => value is not null)
-            .Select(value => value!.Value)
-            .ToArray();
-
-        int? constrained = remainingValues.Length == 0
-            ? null
-            : (int)Math.Round(remainingValues.Min(), MidpointRounding.AwayFromZero);
-
-        bool anyFreshLane = snapshot.QuotaLanes.Count == 0
-            ? snapshot.QuotaDataFresh
-            : snapshot.QuotaLanes.Any(lane => lane.IsFresh);
-        bool allFreshLanes = snapshot.QuotaLanes.Count == 0
-            ? snapshot.QuotaDataFresh
-            : snapshot.QuotaLanes.Count > 0 && snapshot.QuotaLanes.All(lane => lane.IsFresh || lane.NotReportedByProvider);
-        string health = allFreshLanes
-            ? "live"
-            : anyFreshLane
-                ? "partial"
-                : snapshot.QuotaSnapshots.Count > 0
-                    ? "stale"
-                    : "quota unavailable";
-
-        string tooltip =
-            $"TajsTokens · 5h {FormatQuota(snapshot, QuotaWindowKind.FiveHour, fiveHour)} · week {FormatQuota(snapshot, QuotaWindowKind.Weekly, weekly)} · {health}";
-        return new SystemTrayStatus(tooltip, constrained, allFreshLanes, health);
-    }
-
-    private static QuotaSnapshot? LatestQuota(CodexCurrentState snapshot, QuotaWindowKind kind)
-    {
-        return snapshot.QuotaSnapshots
-            .Where(item => item.Kind == kind && snapshot.FindQuotaLane(item)?.NotReportedByProvider != true)
-            .OrderByDescending(item => item.CapturedAtUtc)
-            .FirstOrDefault();
-    }
-
-    private static string FormatQuota(CodexCurrentState telemetry, QuotaWindowKind kind, QuotaSnapshot? snapshot)
-    {
-        return telemetry.QuotaLanes.Any(lane => lane.Kind == kind && lane.NotReportedByProvider)
-            ? "not reported"
-            : snapshot?.RemainingPercent is double remaining
-                ? $"{remaining:0}%"
-                : "?";
+        return Build(TelemetrySnapshot.Empty with { CapturedAtUtc = snapshot.CapturedAtUtc,
+            QuotaSnapshots = snapshot.QuotaSnapshots, QuotaLanes = snapshot.QuotaLanes,
+            QuotaDataFresh = snapshot.QuotaDataFresh, Sources = snapshot.Sources });
     }
 }

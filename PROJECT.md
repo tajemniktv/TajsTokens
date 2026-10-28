@@ -847,14 +847,24 @@ shared projection and the existing Planning page; no duplicate planner/estimator
   pace. Missing/partial local work does not hide a supported quota answer. Changed
   model/effort task usage and quota fit remain unsupported; reset crossings cannot
   claim post-reset capacity. Full Core validation (893 tests), Windows installation,
-  native-frame reference checks and installed parity pass. Manual Planning layout,
-  edited-model results and hidden-input restoration are awaiting the user's check.
+  native-frame reference checks and installed parity pass. The user passed Planning
+  layout and edited-model results; hidden-input restoration remains pending.
   [Contract and verification](docs/source-notes/STAGE6_CONTINUATION.md#recent-work-planning-integration-fore-003).
 - [ ] **FORE-004 — Extend one product snapshot.** Overview/Planning and then tray show
   allowance, measured tokens/TT, conditional runway and inspectable change reasons.
   Carry exact/bounded/partial/unsupported/stale/uncalibrated states with compact
   source/freshness labels. Preserve account selection, filters and anchor invalidation;
   no page-specific math or invented generic confidence number.
+  Implemented in the shared `CodexProductProjection` over the existing snapshot.
+  Overview/Planning use selected-history quantities; tray uses explicitly labelled
+  all-retained local totals from the existing compact native generation. Frozen TT,
+  source health, conditional runway and bounded current change reasons remain
+  separate. The tray menu links to the existing planner/status disclosure. Cached
+  TT uses native-generation arrays and basis identity; the tray reads no ledger or
+  calibration dataset. Full Core validation (905 tests), the isolated Windows build
+  and native numeric/refusal checks pass. Installation and manual tray acceptance
+  remain open while the installed Planning build's hide/restore check is pending.
+  See [contract and evidence](docs/source-notes/STAGE6_CONTINUATION.md#shared-product-status-fore-004).
 - [ ] **FORE-005 — Earn horizon-specific selection.** Evaluate 5/15/30/120-minute
   targets and supported reset leads with rolling origins, timely inputs/labels and
   overlap-safe tuning/holdout boundaries. Compare direct/composed on matched outcomes
@@ -948,11 +958,13 @@ provider scope and answer-specific eligibility slices have their stated installe
 evidence. **PACE-001–004** implement and evaluate the elapsed-time correction.
 Stage 4's **SCORE-001–003** joint projection, frozen basis/archive and qualified
 scoring are installed. **CAT-001** discovery and picker interaction are verified,
-including hidden-dashboard input restoration. The latest full suite passed 893
-tests and the Windows build installed successfully; user visual acceptance remains
-separate.
+including hidden-dashboard input restoration. The latest full suite passed 905
+tests and the Windows build passed with deployment disabled. The installed Planning
+build remains unchanged while its manual hide/restore check is open; user visual
+acceptance remains separate.
 
-**Continue with Stage 6 / FORE-004 while FORE-003's manual check is pending.** The user selected the exact
+**FORE-004 is validated in an isolated build; continue FORE-005 while its installation
+and the remaining host checks are pending.** The user selected the exact
 [price policy and frozen TT basis](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md).
 CAT-002 and D-01 are integrated and installed: immutable selections, independent
 price imports, measured TT and explicit original-score saving. Automated checks,
@@ -970,7 +982,11 @@ bounded joint-path comparison is installed in explicit research; it does not ear
 live selection. FORE-003's recent native work/TT, same-token reference edits and
 independent account-pace answer are implemented and installed through the existing
 Planning flow, retaining the separate count comparator. Automated/installed checks
-pass; the requested manual Planning and input-restoration check remains open.
+pass; the user passed Planning rendering/edited-model results, while the separate
+input-restoration check remains open. FORE-004's shared status, retained native/TT
+scope, change reasons and tray navigation are implemented and pass automated/native
+checks. The isolated build preserves the running Planning version; install it after
+the current hide/restore check, then request physical tray/Overview acceptance.
 Programme-wide acceptance gates, user visual acceptance and the PERF-001
 resource-budget decision remain open.
 

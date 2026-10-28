@@ -32,9 +32,10 @@ public sealed partial class CodexIntelligencePage
 
     private void RenderDashboard()
     {
-        CodexIntelligenceSnapshot live = CodexIntelligenceProjection.WithLiveContext(
-            App.Services.CodexIntelligence.Current, App.Services.CodexIntelligence.Current, SelectedAccountKey);
-        AccountOutlook outlook = QuotaOutlookProjection.Build(live, DateTimeOffset.UtcNow);
+        var current = App.Services.CodexIntelligence.Current;
+        CodexIntelligenceSnapshot live = CodexIntelligenceProjection.WithLiveContext(current, current, SelectedAccountKey);
+        var product = CodexProductProjection.Build(CodexIntelligenceProjection.WithLiveContext(_snapshot ?? live, current, SelectedAccountKey), DateTimeOffset.UtcNow);
+        AccountOutlook outlook = product.Allowances;
         QuotaEmpty.Visibility = live.Current.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         QuotaEmpty.Text = "No current reading for this account. Selected work remains available below.";
         AccountScopeText.Text = SelectedAccountKey is null
@@ -54,13 +55,14 @@ public sealed partial class CodexIntelligencePage
         if (QuotaTiles.ItemsSource is not QuotaTile[] previous || !previous.SequenceEqual(tiles)) QuotaTiles.ItemsSource = tiles;
         OutlookValue.Text = outlook.Summary;
         OutlookDetail.Text = string.Join("\n", outlook.Windows.Where(x => x.Reading is not null)
-            .Select(x => $"{QuotaOutlookProjection.Name(x.Kind)}: {x.Detail}"));
+            .Select(x => $"{QuotaOutlookProjection.Name(x.Kind)} · {CodexProductProjection.PaceLabel(x)}"));
+        StatusChangeSummary.Text = product.Changes.FirstOrDefault()?.Summary ?? "";
+        ForecastText.Text = CodexProductProjection.Details(product);
         if (_snapshot is not { } snapshot) return;
-        TtValue.Text = snapshot.Reference?.TtSummary ?? "TT unavailable";
-        TtBasisLabel.Text = snapshot.Reference?.BasisLabel ?? "No usable selected TT basis";
-        PlanMeasuredWork.Text = "Selected history: " + Compact(snapshot.Ledger.Sum(x => x.Workload.ReportedTotalTokens)) +
-            " tokens · " + (snapshot.Reference?.TtSummary ?? "TT unavailable") + ". Measured work, separate from quota fit.\n" +
-            (snapshot.Reference?.BasisLabel ?? "No usable selected TT basis");
+        TtValue.Text = CodexProductProjection.Tt(product.Work.Tt);
+        TtBasisLabel.Text = CodexProductProjection.WorkLabel(product.Work);
+        PlanMeasuredWork.Text = product.Work.Scope + ": " + CodexProductProjection.Tokens(product.Work.NativeTokens) +
+            " · " + CodexProductProjection.Tt(product.Work.Tt) + "\n" + CodexProductProjection.WorkLabel(product.Work);
         string?[] filters = new[]
         {
             snapshot.Selection.Model,
@@ -69,16 +71,12 @@ public sealed partial class CodexIntelligencePage
             snapshot.Selection.AccountKey is not null ? "Selected account" : null,
         }.Where(x => x is not null).ToArray();
         SelectionExpander.Header = filters.Length == 0 ? "History range · all local work" : "History filters · " + string.Join(" · ", filters);
-        TokenWorkloadForecast? work = snapshot.Workload;
-        TokenHorizonPrediction? prediction = work?.Predictions.OrderBy(x => Math.Abs(x.HorizonHours - .25)).FirstOrDefault();
-        NowcastSummary.Text = work?.IsStale == true ? "Local workload telemetry is stale; no active nowcast."
-            : prediction is null ? "Local workload nowcast is not available for this scope."
-            : $"Local workload · ~{Compact((long)Math.Clamp(prediction.ExpectedTokens, 0, long.MaxValue))} tokens over the next {prediction.HorizonHours * 60:g} minutes. Separate from quota cost.";
+        NowcastSummary.Text = CodexProductProjection.NowcastSummary(product);
 
-        WorkRange.Text = $"Selected history · {snapshot.Selection.FromUtc:dd MMM}–{snapshot.Selection.ToUtc.AddTicks(-1):dd MMM yyyy} UTC";
+        WorkRange.Text = product.Work.Scope;
         if (ReferenceEquals(_workLedger, snapshot.Ledger)) return;
         _workLedger = snapshot.Ledger;
-        WorkValue.Text = Compact(snapshot.Ledger.Sum(x => x.Workload.ReportedTotalTokens)) + " tokens";
+        WorkValue.Text = CodexProductProjection.Tokens(product.Work.NativeTokens);
         CodexLedgerGroup? leading = snapshot.Breakdown.Where(x => x.Dimension == "Model").MaxBy(x => x.Tokens);
         WorkDetail.Text = $"{snapshot.Ledger.Select(x => x.ThreadId).Distinct().Count():N0} chats · " +
                           (leading is null ? "No recorded work in this selection." : $"most work on {leading.Key}");

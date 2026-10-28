@@ -56,6 +56,7 @@ public sealed partial class CodexIntelligencePage
         InvalidatePlan();
         var attempt = await App.Services.WorkloadReferences.ImportAsync(file, role switch
         { 1 => ApiPriceOrigin.LocalOverride, 2 => ApiPriceOrigin.CommunityFallback, _ => ApiPriceOrigin.OfficialCurated }, default);
+        InvalidatePlan();
         await LoadAsync();
         if (_loaded) ReferenceActionStatus.Text = attempt.State == ApiPriceImportState.Accepted
             ? "Price snapshot imported. TT basis unchanged." : "Import unavailable or invalid. Last good snapshot retained.";
@@ -67,6 +68,7 @@ public sealed partial class CodexIntelligencePage
         if (!_loaded || file is null) return;
         InvalidatePlan();
         await App.Services.WorkloadReferences.SelectBasisAsync(file, default);
+        InvalidatePlan();
         await LoadAsync();
         if (_loaded) ReferenceActionStatus.Text = "TT basis selected for future views. Saved calculations are unchanged.";
     });
@@ -74,7 +76,7 @@ public sealed partial class CodexIntelligencePage
     private async void OnDisableOptionalPrices(object sender, RoutedEventArgs e) => await RunReferenceAction(async () =>
     {
         InvalidatePlan();
-        await App.Services.WorkloadReferences.SetOptionalSourcesAsync(false, false, false, default); await LoadAsync();
+        await App.Services.WorkloadReferences.SetOptionalSourcesAsync(false, false, false, default); InvalidatePlan(); await LoadAsync();
         if (_loaded) ReferenceActionStatus.Text = "Overrides and fallback disabled. TT basis unchanged.";
     });
 
@@ -82,7 +84,7 @@ public sealed partial class CodexIntelligencePage
     {
         InvalidatePlan();
         await App.Services.WorkloadReferences.SetOptionalSourcesAsync(_snapshot?.Reference?.Sources.Selection?.OverrideSourceKey is not null,
-            true, true, default); await LoadAsync();
+            true, true, default); InvalidatePlan(); await LoadAsync();
         if (_loaded) ReferenceActionStatus.Text = "Legacy fallback enabled and labelled. TT basis unchanged.";
     });
 

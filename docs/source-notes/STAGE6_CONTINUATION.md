@@ -352,3 +352,89 @@ token; WAPE/share and effective-size differences are numerical rounding only.
 The context evidence and research-only challenger decision remain unchanged.
 Manual Planning rendering, edited-model results and hidden-input restoration have
 been requested and remain separate acceptance checks.
+
+The user subsequently passed Planning rendering and the changed-model reference
+check. The separate hidden-input restoration check remains pending.
+
+## Shared product status (FORE-004)
+
+`codex-product-status/v1` extends the existing intelligence snapshot with compact
+retained measured work and bounded current change reasons. One pure projection
+supplies Overview, Planning and tray: reported allowance, conditional reset/runway
+outlook, native tokens, frozen TT support and source freshness. Existing forecast
+selection and numeric estimates remain unchanged. Details retain calculation
+receipts, fixed-horizon diagnostics and local-nowcast explanations; no generic
+confidence number is added.
+
+Overview/Planning preserve the selected history range and its exact/bounded/partial/
+unavailable TT assessment. The tray is explicitly **All retained local work**,
+including undated amounts. Its quantities come from the existing native model/
+category aggregates; model/category pairings remain intact, while effort is unknown.
+An effort-dependent basis therefore can remain partial. No hourly marginal is used
+to invent joint model/category work, and no account is assigned to local totals.
+Fallback data does not masquerade as native measured work. Missing native evidence
+and an explicitly empty native generation remain distinct.
+
+The intelligence engine caches the retained TT assessment by native array identity,
+source/quality and frozen basis ID. Context-only updates reuse the assessment;
+changed amounts/labels, restored source arrays or a changed basis regenerate it.
+Current reads use in-memory telemetry and the selected reference cache, without a
+ledger/training read. The existing reference owner publishes its cache on startup
+and explicit/read actions, not a new polling loop. Price-only imports do not change
+frozen TT. The current manifest also names the selected basis. There is no new
+durable schema, collector, service process or history retained for status comparison.
+
+Source freshness uses the actual successful source-scan clock, separately from
+last token collection and selected-query read time. Age can withhold a current
+outlook without deleting retained amounts. Stale/flat/invalid/unreported windows
+remain explicit; future or mismatched forecast anchors are withheld. Multiple
+accounts cannot supply a mixed-window conclusion. Account filters preserve current
+scope while work-history filters do not allocate account quota.
+
+The engine retains only the latest compact comparison frame and its last change
+receipt. Reasons distinguish a changed provider reading, a new account/source/plan/
+window or reset, recalculated pace/runway, native retained revisions, source health
+and TT basis/coverage changes. A local total change is not labelled account burn;
+a reset difference is not consumption; a TT revaluation is not a provider policy
+change. Account-specific reasons follow account selection. No automatic regime
+alert or causal provider-change claim is introduced.
+
+Normal pages show compact pace/range and change rows; methods stay behind **Current
+status and reasons**. The tray's existing menu adds at most six read-only summary
+rows, **Plan a session** and **Why this status?**, both routing to the existing page.
+Tooltip length still follows the native shell limit; the full menu/details preserve
+information that cannot fit in a hover label. Native icon ownership/recovery remains
+unchanged. Physical interaction and visual acceptance require the user's host check.
+
+### Native numerical check and limitations
+
+A read-only transaction over the app-owned active native table compared the compact
+13-model projection with independent row-wise arithmetic over **98,062 retained
+increments**. Both produced **14,554,192,603 reported native tokens**, including
+undated amounts. Five source rows had category/total differences, represented by
+four inconsistent model aggregates. The strict TT scorer consequently withheld a
+whole score; the native total remained available. Older unsupported model weights
+are also present. This is an observed scope/quantity limitation, not permission to
+replace reported totals with category sums, discard legacy work or invent prices.
+It does not invalidate a separately qualified selected-history TT score.
+
+The probe deliberately makes no live collector-freshness claim. Its private numeric
+report SHA-256 is
+`85cedc90dd934af38007897f534e95b12f578d0f1e653743d59cbe51565198c0`.
+It exports only aggregate numeric/status evidence, not source paths, session IDs,
+content or credentials. Synthetic tests separately cover model/category pairing,
+effort-dependent partial support, empty/missing/fallback generations, stale scan
+clocks, filtered history, account boundaries, same-basis metadata repairs, reset/
+runway reasons, cache reuse/regeneration and reference-cache notification ordering.
+
+The final full Core suite passed **905 tests** (2m 4s); the Windows solution build
+passed with zero warnings/errors (15.16s) using `-p:DogfoodEnabled=false`. Source
+Core SHA-256 is
+`ef322c8b7c5d9f96bc35ce70578581377f087d9287bbc916ced6535123fbf785`;
+app assembly SHA-256 is
+`ee50bf86e9ac770cbcfc1e07759a87dbb9f4ef97b08edf9f4fe828158cd46700`.
+No installed runtime or presentation claim follows from this isolated build.
+The daily app remains PID 25524 with Core SHA-256
+`2794a69be93d5a4c1647ff07fca0598072a8d66031a69ced388e5398457a5753`.
+Its Planning rendering/model-edit check passed; hide/restore is still pending.
+The status/tray slice awaits installation and a subsequent physical host check.

@@ -234,6 +234,13 @@ claim fit against post-reset capacity. Details belong under the plan disclosure.
 Check mode/context/input restoration after hiding the dashboard for over 30 seconds;
 the user performs host UI checks. See [contracts and numerical evidence](source-notes/STAGE6_CONTINUATION.md#recent-work-planning-integration-fore-003).
 
+The tray's context menu also presents shared account outlooks and **All retained
+local work** totals; these can differ from a date-filtered dashboard selection.
+**Plan a session** opens the same planner. **Why this status?** opens its current
+status/reasons disclosure. Verify the physical menu, hover text, keyboard/mouse
+activation and navigation manually after installation. Source-only builds using
+`-p:DogfoodEnabled=false` do not close these host checks or installed-version gates.
+
 ## Recent joint continuation research
 
 To inspect the fixed 30-minute/two-hour joint continuation context comparison:

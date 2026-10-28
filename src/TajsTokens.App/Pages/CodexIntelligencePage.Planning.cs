@@ -16,9 +16,11 @@ public sealed partial class CodexIntelligencePage
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
-        _planningNavigation = Equals(e.Parameter, "planning");
+        _planningNavigation = Equals(e.Parameter, "planning") || Equals(e.Parameter, "status");
+        _statusNavigation = Equals(e.Parameter, "status");
         if (_planningNavigation) Views.SelectedIndex = 2;
         else Views.SelectedIndex = 0;
+        if (_statusNavigation) CurrentStatusDetails.IsExpanded = true;
     }
 
     private QuotaSnapshot[] PlanAnchors() => App.Services.CodexIntelligence.Current.Current

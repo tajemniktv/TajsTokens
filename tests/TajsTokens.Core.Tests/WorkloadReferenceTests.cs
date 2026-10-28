@@ -155,4 +155,28 @@ public sealed class WorkloadReferenceTests : IDisposable
         Assert.Equal(11, await Execute("SELECT version FROM intelligence_schema", true));
         Assert.Equal(1, await Execute("SELECT COUNT(*) FROM api_price_catalog_snapshots", true));
     }
+
+    [Fact]
+    public async Task LiveReferenceCachePublishesBeforeNotificationAndOnlyForChangedSelectionOrSourceState()
+    {
+        var repository = new SqliteTelemetryRepository(Database); await repository.InitializeAsync(default);
+        var service = new WorkloadReferenceService(repository); int events = 0;
+        service.Updated += () => { Assert.NotNull(service.Current); Interlocked.Increment(ref events); };
+        Assert.Null(service.Current);
+        var initial = await service.ReadAsync(default);
+        Assert.Equal(initial, service.Current); Assert.Equal(1, events);
+        await Task.WhenAll(Enumerable.Range(0, 10).Select(_ => service.ReadAsync(default)));
+        Assert.Equal(1, events);
+        string invalid = Path.Combine(_directory, "bad-live.json"); await File.WriteAllTextAsync(invalid, "{}");
+        await service.ImportAsync(invalid, ApiPriceOrigin.OfficialCurated, default);
+        Assert.Equal(ApiPriceImportState.Invalid, service.Current!.Prices!.LastState);
+        Assert.Equal(initial.Selection!.Basis.BasisId, service.Current.Selection!.Basis.BasisId); Assert.Equal(2, events);
+        var extension = initial.Selection.Basis.Extend([new(new("future", null), TtTokenCategory.UncachedInput, 2)], "fixture");
+        string file = Path.Combine(_directory, "live-basis.json"); await File.WriteAllTextAsync(file, JsonSerializer.Serialize(extension));
+        await service.SelectBasisAsync(file, default);
+        Assert.Equal(extension.BasisId, service.Current.Selection!.Basis.BasisId); Assert.Equal(3, events);
+        using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => service.ReadAsync(cancelled.Token));
+        Assert.Equal(extension.BasisId, service.Current.Selection.Basis.BasisId); Assert.Equal(3, events);
+    }
 }

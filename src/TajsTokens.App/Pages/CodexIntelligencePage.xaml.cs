@@ -130,22 +130,6 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
                 snapshot.Current.Select(x =>
                     $"REPORTED {x.Current.Kind}: {x.Current.UsedPercent?.ToString("0.##") ?? "unknown"}% used · {x.State} · captured {x.Current.CapturedAtUtc.ToLocalTime():g} · reset {x.Current.ResetsAtUtc?.ToLocalTime().ToString("g") ?? "unknown"}" +
                     EvenBurn(x.Current)));
-        ForecastText.Text = string.Join(
-            "\n",
-            snapshot.Current.Select(x =>
-                $"ESTIMATED {x.Current.Kind}: {x.Forecast?.ProjectedRemainingAtResetPercent?.ToString("0.##") ?? "unavailable"}% remaining at reset · sustainable {x.Forecast?.SustainablePercentPerHour?.ToString("0.##") ?? "unknown"} pp/hour\n{x.HistoryPolicy}\n{x.Diagnostic}" +
-                (x.Forecast?.Evidence?.HorizonPredictions is { } horizons
-                    ? "\n" + string.Join(
-                        "\n",
-                        horizons.Select(h =>
-                            $"At {h.TargetUtc.ToLocalTime():g}: {h.ExpectedUsagePercent:0.##} pp · {h.Model} · {h.ValidationSamples} validation samples · {h.Explanation}"))
-                    : "")));
-        if (snapshot.Workload is { } work)
-            ForecastText.Text += "\n" + string.Join(
-                "\n",
-                work.Predictions.Select(x => $"LOCAL NOWCAST {x.HorizonHours * 60:g} min: {x.ExpectedTokens:N0} tokens · {x.Explanation}"));
-        if (string.IsNullOrWhiteSpace(ForecastText.Text))
-            ForecastText.Text = "No compatible forecast for this scope. Historical selections are not live predictions.";
         RenderDashboard();
         RenderManifest();
     }

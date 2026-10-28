@@ -24,7 +24,10 @@ public static class QuotaOutlookProjection
             return Window(kind, absent ? null : reading, absent, now);
         }).ToArray();
         if (live.Current.Select(x => x.Current.AccountKey).Distinct().Count() > 1)
-            return new AccountOutlook(windows, null, "Multiple account readings · select an account before comparing allowances");
+            return new AccountOutlook(windows.Select(x => x with { Reading = null, Supported = false, Exhausted = false,
+                NotReported = false, Status = "Select account", Conclusion = "Select one account",
+                Detail = "Multiple accounts are present; windows are not borrowed across accounts." }).ToArray(), null,
+                "Multiple account readings · select an account before comparing allowances");
         AllowanceOutlook? limiting = windows.Where(x => x.Supported)
             .OrderBy(x => x.Exhausted ? 0 : x.Reading?.Forecast?.SurvivesUntilReset == false ? 1 : 2)
             .ThenBy(x => !x.Exhausted && x.Reading?.Forecast?.SurvivesUntilReset == false
@@ -62,6 +65,9 @@ public static class QuotaOutlookProjection
         if (q.ResetsAtUtc is not { } reset || reset <= now)
             return Unknown("Reset unavailable", "A future reported reset is needed for a reset outlook.");
         Forecast? f = reading.Forecast;
+        if (f is not null && (f.Kind != kind || f.GeneratedAtUtc > now || f.GeneratedAtUtc < q.CapturedAtUtc ||
+                f.Evidence?.PaceReceipt is { } receipt && (receipt.Cohort != QuotaHistoryPolicy.Cohort(q) || receipt.AnchorEffectiveAtUtc != q.CapturedAtUtc)))
+            return Unknown("Forecast anchor changed", "The calculation does not match the current meter; a fresh anchored forecast is required.");
         if (f?.IsQuantizedFlat == true || f?.State == ForecastState.IdleWithinMeterPrecision)
             return Unknown("Below meter precision", "No movement visible at meter precision. Zero burn and survival until reset are not established.");
         if (f is null || f.State == ForecastState.Learning || f.SurvivesUntilReset is null)
