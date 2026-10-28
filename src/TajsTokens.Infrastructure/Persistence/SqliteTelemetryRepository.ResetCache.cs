@@ -56,6 +56,7 @@ public sealed partial class SqliteTelemetryRepository
 
     public async Task<int> RefreshQuotaResetEventsAsync(CancellationToken cancellationToken)
     {
+        using var work = WorkDiagnostics.Measure(WorkPhase.ResetRefresh);
         await InitializeIntelligenceAsync(cancellationToken);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
@@ -78,13 +79,18 @@ public sealed partial class SqliteTelemetryRepository
                       !reader.IsDBNull(3) && ParseUtc(reader.GetString(3)) > now;
             pending = reader.GetInt32(1);
         }
-        if (!rebuild && pending == 0) return 0;
-        int count = await RefreshResetEventsAsync(connection, transaction, rebuild, now, cancellationToken);
+        if (!rebuild && pending == 0)
+        {
+            work?.Complete(rows: 0, committedTransactions: 0, cacheHits: 1);
+            return 0;
+        }
+        var result = await RefreshResetEventsAsync(connection, transaction, rebuild, now, cancellationToken);
         transaction.Commit();
-        return count;
+        work?.Complete(rows: result.RowsRead, committedTransactions: 1, cacheHits: 0);
+        return result.Detected;
     }
 
-    private static async Task<int> RefreshResetEventsAsync(
+    private static async Task<(int Detected, int RowsRead)> RefreshResetEventsAsync(
         SqliteConnection connection, SqliteTransaction transaction, bool rebuild,
         DateTimeOffset now, CancellationToken token)
     {
@@ -155,7 +161,7 @@ public sealed partial class SqliteTelemetryRepository
         write.Parameters.AddWithValue("$future", future is { } next ? SerializeUtc(next) : DBNull.Value);
         write.Parameters.AddWithValue("$now", SerializeUtc(now));
         await write.ExecuteNonQueryAsync(token);
-        return count;
+        return (count, rows.Count);
 
         async Task ReadRowsAsync()
         {

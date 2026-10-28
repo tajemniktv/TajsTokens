@@ -6,6 +6,7 @@
 
 using System.Globalization;
 using System.Text.Json;
+using TajsTokens.Core.Services;
 using Microsoft.Data.Sqlite;
 using TajsTokens.Infrastructure.Services;
 
@@ -76,6 +77,7 @@ internal sealed class SqliteCodexStateIndexStore
             }
 
             _initialized = false;
+            using var initialization = WorkDiagnostics.Measure(WorkPhase.StateIndexInitialization);
             _initializedDatabase.Reopen(_connectionString);
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
@@ -247,6 +249,7 @@ internal sealed class SqliteCodexStateIndexStore
 
             _initializedDatabase.MarkInitialized();
             _initialized = true;
+            initialization?.Complete();
         }
         finally
         {

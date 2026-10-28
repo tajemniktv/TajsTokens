@@ -10,6 +10,7 @@ using System.Text;
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
+using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Ingestion;
 
 #endregion
@@ -58,6 +59,7 @@ internal sealed class SqliteCodexIngestionBatchWriter(
         await _writeGate.WaitAsync(cancellationToken);
         try
         {
+            using var work = WorkDiagnostics.Measure(WorkPhase.SemanticBatch);
             await using var connection = new SqliteConnection(_connectionString);
             await connection.OpenAsync(cancellationToken);
             await EnsureRevisionStoreAsync(connection, cancellationToken);
@@ -78,6 +80,8 @@ internal sealed class SqliteCodexIngestionBatchWriter(
             bumpRevision.CommandText = "UPDATE codex_native_accounting_revision SET revision = revision + 1 WHERE id = 1;";
             await bumpRevision.ExecuteNonQueryAsync(cancellationToken);
             transaction.Commit();
+            work?.Complete(rows: records.Count, committedTransactions: 1);
+            work?.Dispose(); // The following token transaction has its own phase and owner.
 
             // Counter observations remain ordered through the SQLite store in one bounded token
             // transaction, including each reducer decision and next state. Replay is safe because every

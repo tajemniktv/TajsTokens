@@ -11,7 +11,9 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
+using Microsoft.UI.Xaml.Media;
 using TajsTokens.App.Pages;
+using TajsTokens.Core.Services;
 
 #endregion
 
@@ -30,6 +32,8 @@ public sealed partial class MainWindow : Window
     private readonly DispatcherTimer _historyEvictionTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private readonly List<WeakReference<IHistoryPresentation>> _historyPages = [];
     private int _historyReleasePasses;
+    private WorkMeasurement? _pendingFirstFrame;
+    private EventHandler<object>? _firstFrameHandler;
     public string PresentationDiagnostic
     {
         get
@@ -55,7 +59,7 @@ public sealed partial class MainWindow : Window
                 if (reference.TryGetTarget(out var page)) page.ReleaseHistory();
             _historyReleasePasses++;
         };
-        Closed += (_, _) => _historyEvictionTimer.Stop();
+        Closed += (_, _) => { _historyEvictionTimer.Stop(); CancelFirstFrameMeasurement(); };
         try
         {
             if (File.Exists(_windowStatePath))
@@ -125,6 +129,7 @@ public sealed partial class MainWindow : Window
     public void SetDashboardVisible(bool visible)
     {
         if (_dashboardVisible == visible) return;
+        CancelFirstFrameMeasurement();
         _dashboardVisible = visible;
         long generation = ++_viewGeneration;
         if (!visible)
@@ -137,16 +142,36 @@ public sealed partial class MainWindow : Window
         else if (visible)
         {
             _historyEvictionTimer.Stop();
+            WorkMeasurement? firstFrame = WorkDiagnostics.Measure(WorkPhase.DashboardFirstFrame);
+            _pendingFirstFrame = firstFrame;
             // Show/activate the shell first; history queries and page construction follow on a
             // later dispatcher turn and never hold the native tray callback open.
-            DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
+            if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
             {
                 if (!_dashboardVisible || generation != _viewGeneration) return;
                 AppNavigation.Content = ContentFrame;
                 if (ContentFrame.CurrentSourcePageType is null) Navigate(typeof(CodexIntelligencePage));
                 AppNavigation.IsBackEnabled = ContentFrame.CanGoBack;
-            });
+                if (firstFrame is not null && ReferenceEquals(_pendingFirstFrame, firstFrame))
+                {
+                    _firstFrameHandler = (_, _) =>
+                    {
+                        if (!ReferenceEquals(_pendingFirstFrame, firstFrame)) return;
+                        if (_dashboardVisible && generation == _viewGeneration) firstFrame.Complete();
+                        CancelFirstFrameMeasurement();
+                    };
+                    CompositionTarget.Rendering += _firstFrameHandler;
+                }
+            })) CancelFirstFrameMeasurement();
         }
+    }
+
+    private void CancelFirstFrameMeasurement()
+    {
+        if (_firstFrameHandler is not null) CompositionTarget.Rendering -= _firstFrameHandler;
+        _firstFrameHandler = null;
+        _pendingFirstFrame?.Dispose();
+        _pendingFirstFrame = null;
     }
 
     private void OnBackRequested(NavigationView sender, NavigationViewBackRequestedEventArgs args)

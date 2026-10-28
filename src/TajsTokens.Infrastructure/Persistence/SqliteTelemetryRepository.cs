@@ -484,12 +484,14 @@ public sealed partial class SqliteTelemetryRepository(string databasePath, TimeP
         try
         {
             if (_initialized && _initializedDatabase.IsCurrent) return;
+            using var initialization = WorkDiagnostics.Measure(WorkPhase.BaseStorageInitialization);
             _initialized = false;
             _intelligenceInitialized = false;
             _initializedDatabase.Reopen(_connectionString);
             await InitializeCoreAsync(cancellationToken);
             _initializedDatabase.MarkInitialized();
             _initialized = true;
+            initialization?.Complete();
         }
         finally { _initializeGate.Release(); }
     }

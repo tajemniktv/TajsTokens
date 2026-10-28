@@ -8,6 +8,7 @@ using System.Globalization;
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
+using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Ingestion;
 using TajsTokens.Infrastructure.Persistence;
 
@@ -43,6 +44,7 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
 
     public async Task<CodexTokenAccountingSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
     {
+        using var work = WorkDiagnostics.Measure(WorkPhase.NativeProjection);
         await _cacheGate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -50,6 +52,7 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
             if (identity.StartsWith("fallback", StringComparison.Ordinal)) identity = Guid.NewGuid().ToString("N");
             if (_databaseIdentity != identity)
             {
+                if (_cachedSnapshot is not null) WorkDiagnostics.Log.CacheInvalidated((int)WorkPhase.NativeProjection, 1);
                 _cachedSnapshot = null;
                 _cachedStamp = null;
                 _revisionStoreInitialized = false;
@@ -75,11 +78,13 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
                 if (_cachedStamp.Revision != stamp.Revision)
                     _cachedSnapshot = _cachedSnapshot with { Revision = stamp.Revision };
                 _cachedStamp = stamp;
+                work?.Complete(rows: 0, committedTransactions: 1, cacheHits: 1);
                 return _cachedSnapshot;
             }
 
             // Both expensive projections share one read transaction, so model totals and hourly
             // buckets describe the same committed SQLite generation even if ingestion writes nearby.
+            if (_cachedSnapshot is not null) WorkDiagnostics.Log.CacheInvalidated((int)WorkPhase.NativeProjection, 2);
             IReadOnlyList<TokenUsage> usage = await LoadModelUsageAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
             IReadOnlyList<TokenTimeBucket> hourly =
                 await LoadHourlyUsageAsync(connection, transaction, cancellationToken).ConfigureAwait(false);
@@ -97,6 +102,7 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
                 Revision: stamp.Revision);
             _cachedStamp = stamp;
             _cachedSnapshot = snapshot;
+            work?.Complete(rows: usage.Count + hourly.Count, committedTransactions: 1, cacheHits: 0);
             return snapshot;
         }
         finally

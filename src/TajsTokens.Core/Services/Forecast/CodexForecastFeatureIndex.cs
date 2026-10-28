@@ -17,6 +17,7 @@ internal sealed class CodexForecastFeatureIndex
 
     public CodexForecastFeatureIndex(CodexForecastDataset data)
     {
+        using var preparation = WorkDiagnostics.Measure(WorkPhase.FeatureIndexPreparation);
         _data = data;
         _tokens = data.Tokens.Select((row, ordinal) => (Row: row, Ordinal: ordinal)).OrderBy(x => x.Row.ObservedAtUtc).ToArray();
         _tokenTimes = _tokens.Select(x => x.Row.ObservedAtUtc).ToArray();
@@ -26,6 +27,7 @@ internal sealed class CodexForecastFeatureIndex
         _metadataTimes = _metadata.Select(x => x.ObservedAtUtc!.Value).ToArray();
         _sessions = data.Workload.Select((row, ordinal) => (Row: row, Ordinal: ordinal))
             .GroupBy(x => x.Row.SessionId).ToDictionary(x => x.Key, x => x.ToArray());
+        preparation?.Complete(rows: data.Tokens.Count + data.Workload.Count + data.Context.Count, cacheHits: 0);
     }
 
     public CodexForecastFeatures Build(DateTimeOffset origin, ForecastReplayAvailability availability)

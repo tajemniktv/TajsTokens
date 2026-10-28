@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
+using TajsTokens.Core.Services;
 
 namespace TajsTokens.Infrastructure.Services;
 
@@ -57,6 +58,7 @@ public sealed class CalibrationProcessService : ICodexCalibrationService, IDispo
                 attempted = true;
             }
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, _lifetime.Token);
+            using var work = WorkDiagnostics.Measure(WorkPhase.CalibrationSlice);
             // Completed fits are committed separately, so later slices can reuse partial progress.
             // At the 0.5% cap a useful historical pass takes minutes. A tiny wall timeout would
             // repeatedly discard dataset preparation before reaching any reusable fit.
@@ -93,7 +95,9 @@ public sealed class CalibrationProcessService : ICodexCalibrationService, IDispo
                 string json = await output;
                 await errors; // Observed and discarded: never log content-bearing errors.
                 if (process.ExitCode != 0) throw new IOException("Calibration worker stopped without a complete result; quota-pace outlook retained.");
-                return JsonSerializer.Deserialize<CodexCalibrationResult>(json);
+                CodexCalibrationResult? result = JsonSerializer.Deserialize<CodexCalibrationResult>(json);
+                work?.Complete(cacheHits: result?.CacheHits ?? -1);
+                return result;
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && !_lifetime.IsCancellationRequested)
             {

@@ -7,6 +7,7 @@
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
+using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Ingestion;
 using TajsTokens.Infrastructure.Persistence;
 
@@ -178,7 +179,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
         long minimumUpdatedAtMs = !reconciliationDue
             ? Math.Max(0, Math.Max(watermark, _discoveryWatermark) - StateOverlapMs)
             : 0;
-        CodexStateCatalogBatch? catalog = await _stateCatalog.TryReadSinceAsync(minimumUpdatedAtMs, cancellationToken);
+        CodexStateCatalogBatch? catalog = await ReadCatalogAsync(minimumUpdatedAtMs);
         if (catalog is null)
         {
             return null;
@@ -190,7 +191,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
             !string.Equals(_lastStateCatalogPath, catalog.DatabasePath, StringComparison.OrdinalIgnoreCase))
         {
             minimumUpdatedAtMs = 0;
-            catalog = await _stateCatalog.TryReadSinceAsync(0, cancellationToken);
+            catalog = await ReadCatalogAsync(0);
             if (catalog is null) return null;
         }
 
@@ -359,6 +360,14 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
             PrefixBytesHashed = hashedBytes, CompleteRecordBytesDecoded = decodedBytes,
             CheckpointWrites = checkpointWrites,
         };
+
+        async Task<CodexStateCatalogBatch?> ReadCatalogAsync(long minimum)
+        {
+            using var work = WorkDiagnostics.Measure(WorkPhase.CatalogRead);
+            CodexStateCatalogBatch? result = await _stateCatalog.TryReadSinceAsync(minimum, cancellationToken);
+            work?.Complete(rows: result?.Threads.Count ?? 0);
+            return result;
+        }
     }
 
     private async Task<bool> CanCommitFingerprintAsync(
@@ -532,6 +541,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
 
     private IReadOnlyList<string> DiscoverFiles(CancellationToken cancellationToken = default)
     {
+        using var work = WorkDiagnostics.Measure(WorkPhase.FilesystemDiscovery);
         var files = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var options = new EnumerationOptions
         {
@@ -571,7 +581,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
             }
         }
 
-        return files
+        string[] ordered = files
             .OrderByDescending(file =>
             {
                 try
@@ -584,6 +594,8 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
                 }
             })
             .ToArray();
+        work?.Complete(rows: ordered.Length);
+        return ordered;
     }
 
     private static IEnumerable<string> GetDefaultRoots()

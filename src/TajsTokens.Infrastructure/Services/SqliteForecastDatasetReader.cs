@@ -29,6 +29,7 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
         bool includeQuota = true,
         bool includeLedger = false)
     {
+        using var measurement = WorkDiagnostics.Measure(WorkPhase.DatasetRead);
         if (fromUtc >= toUtc) throw new ArgumentException("A non-empty chronological range is required.");
         await using var connection = new SqliteConnection(
             new SqliteConnectionStringBuilder { DataSource = databasePath, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString());
@@ -249,6 +250,7 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
         }
         if (context.Count > 500000) throw new InvalidOperationException("Context replay exceeds 500,000 rows; narrow the range.");
         transaction.Commit();
+        measurement?.Complete(rows: quota.Count + workload.Count + tokens.Count + context.Count, committedTransactions: 1);
         return new CodexForecastDataset(
             quota,
             workload,

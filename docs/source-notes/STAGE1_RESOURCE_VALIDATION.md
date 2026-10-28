@@ -323,3 +323,68 @@ set and zero additional logical bytes during this interval. Final combined priva
 commit was **530.9 MiB**. This is still too high for a solved background-resource
 claim; it motivates the remaining qualified calibration scheduling work. It is not
 a controlled memory-improvement ratio against the earlier naturally occurring phases.
+
+## Opt-in phase diagnostics and installed profile
+
+`TajsTokens-Work` is an opt-in EventSource with fixed numeric phase identifiers,
+operation pairing, elapsed time and aggregate work counters. It carries no paths,
+session/account/model identifiers or source payloads. Disabled scopes allocate
+nothing. Unknown counters remain -1 (null in the report), distinct from measured
+zero. A completed scope means its owner returned normally, not that a forecast was
+fresh or statistically validated. Nested timings overlap.
+
+Use the standalone offline reporter; it does not enter the app dependency graph:
+
+```powershell
+dotnet build tools/performance/TajsTokens.PerformanceReport
+artifacts/tools/dotnet-trace collect -p <pid> --providers TajsTokens-Work --buffersize 16 --rundown false --duration 00:00:35 --output .codex/temp/stage1/app.nettrace
+dotnet run --project tools/performance/TajsTokens.PerformanceReport --no-build --no-restore -- .codex/temp/stage1/app.nettrace
+```
+
+Attach separately to the parent and worker. Attaching halfway through a scope can
+miss its start or both boundaries; an empty custom-provider capture is an error,
+never evidence of zero work. The reporter emits only aggregate custom-provider
+fields and checks source errors/events lost. External EventPipe capture required
+self-describing EventSource format on this installed runtime; the reader matches
+event names because EventPipe assigns self-describing event IDs. An in-process
+listener alone did not establish external-capture compatibility.
+
+External synthetic verification captured 268 starts and completions, no unfinished
+scopes, source errors or lost events. It observed 258 token transactions and 512
+submitted observations across two single/batched comparisons of 128 observations.
+This verifies diagnostics plumbing, not a production performance improvement.
+
+The installed visible/active-append capture at 01:05 local on 2026-10-28 contained
+one collection (3,685.8 ms), one catalog read (1.36 ms, two rows), two rollout passes
+(85.65 ms, 43 records, 81,996 complete-record bytes), four prefix checks (19.94 ms,
+24,592,739 logical hash bytes), two semantic commits (34.31 ms) and two token commits
+(10.38 ms, seven submitted observations). Projection took 306.57 ms for 910 result
+rows; the fleet read took 32.14 ms for 426 unique returned thread turns. These are
+small samples, not representative p95 budgets. Fleet rows count distinct returned
+turn evidence; feature-index preparation measures index construction, not all
+feature evaluation. First-frame timing begins at app visibility transition and
+ends at the first Rendering callback after attachment; physical input/IPC delivery
+and later selected-history completion are outside that measurement.
+
+Runtime metrics were collected separately with dotnet-counters 10.0.750501. Across
+34 one-second parent intervals: 66,911,608 allocated bytes, 1.094 CPU seconds and
+27.24 ms aggregate GC pause time (largest one-second pause aggregate 21.48 ms).
+Last-collection heap minus fragmentation was approximately 31.3 MiB; GC committed
+memory was 101.5 MiB. The worker exited during its capture: nine one-second intervals
+contained 319,352,768 allocated bytes, 2.734 CPU seconds and 5.218 seconds aggregate
+GC pause time (largest one-second pause aggregate 698.9 ms). Last-collection occupied
+heap estimate was 228.9 MiB, GC committed memory 249.1 MiB. Last-collection occupancy
+is not exact current live heap; a one-second pause aggregate is not one GC pause.
+The worker phase capture contained no boundaries and cannot time its calibration.
+A managed stack in a later slice showed `PredictHorizonCore` filtering full token
+prefixes inside composed quota validation. This and allocation pressure motivate
+qualified preparation reuse; neither observation proves every calibration cost.
+
+Profiling adds buffers/overhead. Its working set/commit is not an unprofiled resource
+acceptance result. Process logical I/O and hash counters remain separate from
+physical disk traffic. PERF-001 and PERF-007 remain open.
+
+Validation: 671 Core tests passed, Windows app build/install passed with zero warnings
+or errors, and the offline reporter built successfully. The installed version was
+replaced by this instrumented build. Qodo review could not complete because its
+service returned an API compatibility failure; no Qodo coverage is claimed.

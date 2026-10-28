@@ -88,6 +88,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         IReadOnlyList<QuotaLaneState> quotaLanes, DateTimeOffset nowUtc,
         CancellationToken cancellationToken, bool includeWorkload)
     {
+        using var measurement = includeWorkload ? WorkDiagnostics.Measure(WorkPhase.QuotaCalibration) : null;
         await EnsureInitializedAsync(cancellationToken);
         var results = new List<CurrentQuotaForecast>();
         var datasets = new Dictionary<(string Provider, string Profile, string Account, DateTimeOffset At), CodexForecastDataset>();
@@ -258,6 +259,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             }
         }
 
+        measurement?.Complete(rows: results.Count);
         return results;
     }
 
@@ -538,6 +540,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
 
     public async Task<TokenWorkloadForecast> ForecastTokenWorkloadAsync(DateTimeOffset nowUtc, CancellationToken cancellationToken)
     {
+        using var work = WorkDiagnostics.Measure(WorkPhase.WorkloadCalibration);
         await EnsureInitializedAsync(cancellationToken);
         using var observatory = new SqliteCodexObservatoryStore(_databasePath);
         await observatory.InitializeAsync(cancellationToken);
@@ -548,7 +551,9 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
             nowUtc,
             cancellationToken,
             includeQuota: false);
-        return TokenWorkloadPredictionService.Predict(data, nowUtc, cancellationToken);
+        TokenWorkloadForecast result = TokenWorkloadPredictionService.Predict(data, nowUtc, cancellationToken);
+        work?.Complete(rows: data.Tokens.Count);
+        return result;
     }
 
     public async Task<ForecastEvaluationReport> EvaluateForecastsAsync(

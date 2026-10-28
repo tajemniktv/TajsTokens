@@ -8,6 +8,7 @@ using System.Globalization;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Models;
+using TajsTokens.Core.Services;
 
 #endregion
 
@@ -48,6 +49,7 @@ public sealed class CodexThreadObservabilityService
     /// </summary>
     public async Task<CodexLiveFleetSnapshot> ReadLiveFleetAsync(CancellationToken cancellationToken)
     {
+        using var work = WorkDiagnostics.Measure(WorkPhase.FleetRead);
         DateTimeOffset now = DateTimeOffset.UtcNow;
         CodexThreadSearchResult catalog = await SearchThreadsAsync(null, 1_000, cancellationToken);
         var warnings = new List<string>(catalog.Warnings);
@@ -174,6 +176,7 @@ public sealed class CodexThreadObservabilityService
             .ThenByDescending(thread => thread.LastObservedAtUtc)
             .Take(150)
             .ToArray();
+        work?.Complete(rows: latestTurns.Count);
         return new CodexLiveFleetSnapshot(now, threads, warnings, historyAvailable, truncated);
     }
 

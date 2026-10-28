@@ -9,6 +9,7 @@ using System.Diagnostics;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
+using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 
 #endregion
@@ -91,6 +92,7 @@ public sealed class TelemetryCoordinator
 
     private async Task<TelemetrySnapshot> RefreshCoreAsync(RefreshTrigger trigger, CancellationToken cancellationToken)
     {
+        using var work = WorkDiagnostics.Measure(WorkPhase.Collection);
         // The production app runs detailed fits in an isolated, bounded worker in both modes.
         // Quota collection and the foreground dispatcher never wait for that worker.
         bool deferForecasts = _calibrationService is not null || _isBackground();
@@ -570,6 +572,7 @@ public sealed class TelemetryCoordinator
             if (persistenceAvailable && _serverEvidence is not null)
                 _ = CollectServerEvidenceAsync(cancellationToken);
 
+            work?.Complete();
             return publishedSnapshot;
         }
         finally

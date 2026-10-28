@@ -11,6 +11,7 @@ using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
+using TajsTokens.Core.Services;
 
 #endregion
 
@@ -45,6 +46,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             }
 
             _initialized = false;
+            using var initialization = WorkDiagnostics.Measure(WorkPhase.ObservatoryInitialization);
             _initializedDatabase.Reopen(_connectionString);
             // Ingestion can be the first reader after an upgrade. The telemetry owner must
             // migrate shared quota tables before any observatory writes use those columns.
@@ -428,6 +430,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
 
             _initializedDatabase.MarkInitialized();
             _initialized = true;
+            initialization?.Complete();
         }
         finally
         {
@@ -588,6 +591,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
     public async Task ApplyCumulativeTokenObservationsAsync(IReadOnlyList<CodexTokenCountObservation> observations, CancellationToken cancellationToken)
     {
         if (observations.Count == 0) return;
+        using var work = WorkDiagnostics.Measure(WorkPhase.TokenBatch);
         await EnsureInitializedAsync(cancellationToken);
         await using var connection = new SqliteConnection(_connectionString);
         await connection.OpenAsync(cancellationToken);
@@ -598,6 +602,7 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
             await ApplyTokenObservationAsync(connection, transaction, observation, cancellationToken);
         }
         transaction.Commit();
+        work?.Complete(rows: observations.Count, committedTransactions: 1);
     }
 
     private static async Task ApplyTokenObservationAsync(SqliteConnection connection, SqliteTransaction transaction,

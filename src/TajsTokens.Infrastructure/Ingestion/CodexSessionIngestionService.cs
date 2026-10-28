@@ -12,6 +12,7 @@ using System.Text.Json;
 using Microsoft.Win32.SafeHandles;
 using TajsTokens.Core.Interfaces;
 using TajsTokens.Core.Models;
+using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 
 #endregion
@@ -82,8 +83,10 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
 
     public async Task<CodexIngestionResult> IngestAsync(string filePath, CancellationToken cancellationToken)
     {
+        using var work = WorkDiagnostics.Measure(WorkPhase.RolloutIngestion);
         if (!File.Exists(filePath))
         {
+            work?.Complete(rows: 0, logicalBytes: 0, committedTransactions: 0);
             return CodexIngestionResult.Empty;
         }
 
@@ -114,6 +117,8 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
 
         async Task<string> HashThroughAsync(long offset)
         {
+            using var verification = WorkDiagnostics.Measure(WorkPhase.PrefixVerification);
+            long before = prefixBytesHashed;
             if (prefixStream.Position > offset)
             {
                 prefixStream.Position = 0;
@@ -130,6 +135,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                 prefixHash.AppendData(hashBuffer, 0, read);
                 prefixBytesHashed += read;
             }
+            verification?.Complete(logicalBytes: prefixBytesHashed - before);
             return Convert.ToHexString(prefixHash.GetCurrentHash());
         }
 
@@ -289,6 +295,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         else _verifiedPrefixes.Remove(filePath);
 
         int normalized = _observatoryStore is null ? recordsScanned : normalizedRecords;
+        work?.Complete(rows: recordsScanned, logicalBytes: completeRecordBytesDecoded);
         return new CodexIngestionResult(recordsScanned, normalized, state.OwnSessionId ?? existing?.LastSessionId)
         {
             SourceIdentity = sourceIdentity,

@@ -177,8 +177,10 @@ are implemented. Normal interactive scheduling, retryable/visible EcoQoS, coales
 fleet reads, independent discovery/catch-up, precise projection invalidation, no-op
 write suppression, guarded initialization, indexed reset tails and ordered token
 batching are installed. Retained presentation inputs, qualified short history reuse
-and hidden-history eviction are also installed. All 670 Core tests and the Windows
-build pass. Broader measurements and calibration reuse remain open. See
+and hidden-history eviction are also installed. Opt-in aggregate phase diagnostics
+and an offline EventPipe reporter are validated; the installed sample identifies
+workload-prefix preparation and worker allocation pressure for PERF-007. All 671
+Core tests and the Windows build pass. Broader measurements and calibration reuse remain open. See
 [current validation evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 
 - [ ] **PERF-001 — Establish measurements and targets.** Compare startup, warm idle,

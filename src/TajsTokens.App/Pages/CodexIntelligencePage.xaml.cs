@@ -172,6 +172,7 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
     public void ReleaseHistory()
     {
         if (_loaded) return;
+        if (_snapshot is not null) WorkDiagnostics.Log.CacheInvalidated((int)WorkPhase.SelectedHistory, 3);
         _snapshot = null;
         _historyGeneration = null;
         _workLedger = null;
@@ -187,6 +188,7 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
         _request?.Cancel();
         var request = new CancellationTokenSource();
         _request = request;
+        using var work = WorkDiagnostics.Measure(WorkPhase.SelectedHistory);
         try
         {
             CodexSelection selection = ReadSelection();
@@ -198,6 +200,7 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
                 DateTimeOffset.UtcNow - _historyLoadedAt is var age && age >= TimeSpan.Zero && age < TimeSpan.FromSeconds(30))
             {
                 HistoryCacheHits++;
+                work?.Complete(rows: 0, cacheHits: 1);
                 RenderCurrent();
                 return;
             }
@@ -258,6 +261,7 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
             RenderCurrent();
             RenderGroups();
             RenderTimeline();
+            work?.Complete(rows: snapshot.Ledger.Count, cacheHits: 0);
         }
         catch (OperationCanceledException) when (request.IsCancellationRequested)
         {
