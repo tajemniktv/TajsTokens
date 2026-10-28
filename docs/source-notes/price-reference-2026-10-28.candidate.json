@@ -1,0 +1,65 @@
+{
+  "Contract": "api-price-reference-candidate/v1",
+  "Status": "Proposed; not active",
+  "LocallyCollectedAtUtc": "2026-10-28T11:09:02.566018+00:00",
+  "Currency": "USD",
+  "RateUnit": "per-1000000-tokens",
+  "Product": "api-text-reference",
+  "Tier": "standard",
+  "ContextBand": "input-at-most-272000",
+  "CacheWritePolicy": "30m",
+  "EffectiveFromUtc": null,
+  "EffectiveToUtc": null,
+  "Provenance": "Locally curated numeric facts from official model/pricing pages; effective dates remain unknown.",
+  "Sources": [
+    "https://developers.openai.com/api/docs/pricing",
+    "https://developers.openai.com/api/docs/guides/prompt-caching"
+  ],
+  "Rates": [
+    {
+      "Model": "gpt-6-astra",
+      "UncachedInput": 10,
+      "CacheRead": 1,
+      "CacheWrite": 12.5,
+      "NonReasoningOutput": 50,
+      "ReasoningOutput": 50,
+      "Source": "https://developers.openai.com/api/docs/models/gpt-6-astra"
+    },
+    {
+      "Model": "gpt-6.1-sol",
+      "UncachedInput": 2,
+      "CacheRead": 0.1,
+      "CacheWrite": 2.5,
+      "NonReasoningOutput": 10,
+      "ReasoningOutput": 10,
+      "Source": "https://developers.openai.com/api/docs/models/gpt-6.1-sol"
+    },
+    {
+      "Model": "gpt-6.1-terra",
+      "UncachedInput": 1,
+      "CacheRead": 0.05,
+      "CacheWrite": 1.25,
+      "NonReasoningOutput": 5,
+      "ReasoningOutput": 5,
+      "Source": "https://developers.openai.com/api/docs/models/gpt-6.1-terra"
+    },
+    {
+      "Model": "gpt-6-sol",
+      "UncachedInput": 2,
+      "CacheRead": 0.2,
+      "CacheWrite": 2.5,
+      "NonReasoningOutput": 10,
+      "ReasoningOutput": 10,
+      "Source": "https://developers.openai.com/api/docs/models/gpt-6-sol"
+    },
+    {
+      "Model": "gpt-6-luna",
+      "UncachedInput": 0.1,
+      "CacheRead": 0.01,
+      "CacheWrite": 0.125,
+      "NonReasoningOutput": 0.5,
+      "ReasoningOutput": 0.5,
+      "Source": "https://developers.openai.com/api/docs/models/gpt-6-luna"
+    }
+  ]
+}

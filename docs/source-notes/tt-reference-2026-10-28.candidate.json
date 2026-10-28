@@ -1,0 +1,303 @@
+{
+  "Contract": "tt-joint-basis/v1",
+  "Dimensions": 1,
+  "Convention": "Proposed TT-2026-10-28 standard reference: frozen official model/category tariff weights; standard speed, short context and 30m cache writes, regardless of actual execution conditions. Native disjoint counts only; no extra effort multiplier. One million uncached GPT-6.1 Sol input tokens define one TT. This is a reference-consumption index, not billing, quota or physical compute.",
+  "WeightUnit": "USD per 1000000 reference tokens; common scale cancels in TT normalization",
+  "Vintage": "2026-10-28",
+  "SourceSnapshotIds": [
+    "price-candidate:d2a13f4e571b6d72557b08191ee13802e67089f8b676a171eaecfd7cb2914026"
+  ],
+  "ParentBasisId": null,
+  "BasisId": "tt-joint:00dac6d4779ceff3507bce2570ac4a7fe30876e53e0fc033d1ae41540a46f6fa",
+  "Weights": [
+    {
+      "Coordinate": {
+        "Model": "gpt-6-astra",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 0,
+      "Weight": 10
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6-astra",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 1,
+      "Weight": 1
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6-astra",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 2,
+      "Weight": 12.5
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6-astra",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 3,
+      "Weight": 50
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6-astra",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 4,
+      "Weight": 50
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6-luna",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 0,
+      "Weight": 0.1
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6-luna",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 1,
+      "Weight": 0.01
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6-luna",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 2,
+      "Weight": 0.125
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6-luna",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 3,
+      "Weight": 0.5
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6-luna",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 4,
+      "Weight": 0.5
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6-sol",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 0,
+      "Weight": 2
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6-sol",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 1,
+      "Weight": 0.2
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6-sol",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 2,
+      "Weight": 2.5
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6-sol",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 3,
+      "Weight": 10
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6-sol",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 4,
+      "Weight": 10
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6.1-sol",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 0,
+      "Weight": 2
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6.1-sol",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 1,
+      "Weight": 0.1
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6.1-sol",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 2,
+      "Weight": 2.5
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6.1-sol",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 3,
+      "Weight": 10
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6.1-sol",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 4,
+      "Weight": 10
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6.1-terra",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 0,
+      "Weight": 1
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6.1-terra",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 1,
+      "Weight": 0.05
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6.1-terra",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 2,
+      "Weight": 1.25
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6.1-terra",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 3,
+      "Weight": 5
+    },
+    {
+      "Coordinate": {
+        "Model": "gpt-6.1-terra",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 4,
+      "Weight": 5
+    }
+  ],
+  "Reference": [
+    {
+      "Coordinate": {
+        "Model": "gpt-6.1-sol",
+        "ReasoningEffort": null,
+        "ExecutionTier": null,
+        "Product": null,
+        "ContextBand": null
+      },
+      "Category": 0,
+      "Tokens": 1000000
+    }
+  ],
+  "ReferenceScore": 2000000
+}

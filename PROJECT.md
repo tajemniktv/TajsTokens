@@ -654,6 +654,11 @@ TT evaluator, existing model metadata, `ApiPriceWorkload` and product snapshot.
   exact schedule/weights, reference basket, units/vintage, support/equivalence,
   speed normalization and extension rules. TT is a frozen reference-consumption
   index. Defining a basket does not require running paid synthetic tasks.
+  A [concrete dated proposal](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md)
+  now specifies exact five-model weights, standard/short/30m reference semantics,
+  a one-million-uncached-GPT-6.1-Sol basket and explicit activation/extensions/
+  restatements. Read-only preview: 608.26452665 proposed TT over 3,984,535,029 selected
+  native tokens, with no unmapped rows. This is a proposal; no public basis is active.
 - [x] **SCORE-002 — Version the joint-coordinate basis.** Reuse immutability,
   normalization and hashing while preserving the old five-category research basis
   and artifacts. Identity covers dimensions, weights, basket and semantics. Preserve
@@ -704,6 +709,10 @@ TT evaluator, existing model metadata, `ApiPriceWorkload` and product snapshot.
   snapshots, separate overrides/labelled fallbacks, last-known-good recovery and
   stale/missing states. Current/date-effective API-equivalent valuation remains
   separate from subscription usage and frozen TT.
+  The [source/policy proposal and candidate snapshot](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md)
+  recommend explicit official-snapshot imports, separate overrides/fallbacks,
+  last-known-good retention, a 30-day stale label and no invented effective dates.
+  Selection remains pending before activation/automatic refresh.
 - [ ] **D-01 — Clarify versions and expose measured TT.** Distinguish evaluator
   `tt-lab/v4-blocks`, research `tt-category-basis/v1` and the new public basis.
   Show observed TT with basis/coverage beside native tokens even when conversion is
