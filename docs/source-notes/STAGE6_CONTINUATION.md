@@ -1,6 +1,7 @@
 # Recent joint-work continuation inputs (FORE-001)
 
-`recent-joint-continuation/v1` extends the existing workload-composition owner.
+`recent-joint-continuation/v1` initially extended the existing workload-composition owner;
+the Planning integration below advances it to `v2-finite-decimals` for reference scoring.
 It preserves observed model/effort/category cells and scales their amounts by
 `forecast horizon / elapsed context`. It does not multiply independently averaged
 volume and composition, fit a tariff or require quota conversion/TT availability.
@@ -269,3 +270,85 @@ JSON dates to a native executable, since default string conversion loses fractio
 This slice adds explicit research commands and an immutable workload-path helper.
 It changes no dashboard flow or selected live algorithm; Stage 5's presentation
 acceptance remains separate from the forthcoming Planning/tray integration.
+
+## Recent-work Planning integration (FORE-003)
+
+The existing Planning tab now starts with **Recent work** and retains **Session
+counts · comparator** as a second mode. Duration, model/effort suggestions and exact
+new names remain editable. Recent mode uses an explicit 30-minute/two-hour context;
+two hours remains the initial choice. Counts and the independent 1–30 day lookback
+continue to control the existing count scenario, including its chronological
+selection and support checks. The recent-pattern button restores the native mixture
+in recent mode and fills classified active-session counts in comparator mode.
+
+`ICodexIntelligence.PlanRecentWorkAsync` reads only the bounded local ledger context,
+without account or work-history filters, and uses the existing continuation and
+reference owners. The result includes the origin/context receipt, original frozen
+TT assessment, optional same-token revaluation and two independently scoped quota
+answers. No new collector, persistence schema, observations, forecast model or
+automatic research promotion is introduced.
+
+Model/effort edits preserve all five category amounts for reference revaluation.
+They neither predict how many tokens a different model needs for the same task nor
+assign an effort multiplier. Unknown tariff coordinates remain partial; positive
+coordinate overflow prevents relabelling the aggregate as a chosen model. Original
+observations and saved TT calculations remain unchanged. Future conditional work
+has only a current snapshot-reference valuation, never a fabricated date-effective
+price or billed amount.
+
+The quota answer is explicitly separate: continue a matching fresh provider
+account's supported current pace at a constant rate for the requested duration.
+Its calculation receipt must match the current account/source/plan/window anchor.
+Flat, stale, missing, ambiguous-account and incompatible inputs remain unavailable;
+local work/TT can still be useful. Conversely, missing local work does not suppress
+an independent supported quota answer. A model/effort edit withholds edited-task
+quota fit. No uncertainty band is transferred from a different horizon/reset
+target. Reset-crossing sessions retain conditional consumption but make no current-
+window fit or post-reset capacity claim.
+
+Results use short native/TT and window rows, with clocks, price references, pace
+receipts and assumptions under **Plan details and assumptions**. Edits, account/
+quota-anchor changes and reference actions invalidate asynchronous results. Mode,
+context, comparator inputs and disclosure state join the existing lightweight
+hidden-dashboard restoration; no result graph/page is retained after unloading.
+Actual layout and hide/restore behavior still require the user's manual check.
+
+### Fractional conditional amounts
+
+The native-frame check exposed an arithmetic refusal at five minutes: independently
+scaled finite decimals could need more precision when the exact reference scorer
+summed them. `v2-finite-decimals` therefore represents conditional category amounts
+with at most nine fractional token digits, reduced at extreme magnitudes to retain
+decimal summation headroom. Reported projected totals are the sum of these finite
+categories. This changes only the new explicit continuation representation; native
+observations, exact reference arithmetic, the existing scalar projection and the
+contiguous-block sampler remain unchanged. It is representation rounding, not
+predictive uncertainty or a change in tariff weights.
+
+An independent Python decimal check reconstructed 16 native-frame cases: both
+contexts, 5/15/30/120-minute horizons and unchanged/changed-model reference cases.
+It matched recorded/projected amounts within `1e-6` token, original/revalued TT
+within `1e-10` TT and the declared synthetic constant-pace fixture within `1e-9` pp,
+with zero mismatches. The fixture quota lane is deliberately synthetic and is never
+assigned to the native workload. The source frame is the same private 187-row
+frame documented above; the approved frozen basis is unchanged. Targeted tests also
+cover extreme native magnitudes, late/unknown collection, missing/zero/incomplete
+work, partial tariffs, overflow, account isolation, actual production pace receipts,
+stale/absent windows, cancellation and reset crossings.
+
+The final full Core suite passed **893 tests** (2m 23s). The Windows build passed
+with zero warnings/errors (1m 14.72s), installed/restarted PID 25524 and created
+backup `20261028T190010076Z-5b694bcd`. All 16 installed native-frame/synthetic-meter
+cases match the build exactly. Installed Core SHA-256 is
+`2794a69be93d5a4c1647ff07fca0598072a8d66031a69ced388e5398457a5753`;
+app assembly SHA-256 is
+`40f38ba54b2f5b17370663dacbe134d1705dde44c917bb42cccce993b9fe45e5`.
+
+Rerunning the two fixed collection-qualified context comparisons preserves all
+availability, target and block/reset support counts (24 older / 8 recent score
+rows). Relative to the retained v1 reports, maximum native-token MAE differences
+are below `1.4e-8` token and signed accumulated-error differences below `2.1e-7`
+token; WAPE/share and effective-size differences are numerical rounding only.
+The context evidence and research-only challenger decision remain unchanged.
+Manual Planning rendering, edited-model results and hidden-input restoration have
+been requested and remain separate acceptance checks.

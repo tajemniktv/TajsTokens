@@ -15,6 +15,7 @@ public interface ICodexIntelligence
 {
     CodexIntelligenceSnapshot Current { get; }
     Task<RecentScenarioPattern> GetRecentScenarioPatternAsync(DateTimeOffset nowUtc, CancellationToken token);
+    Task<RecentWorkPlan> PlanRecentWorkAsync(RecentWorkPlanRequest request, CancellationToken token);
     Task<CodexIntelligenceSnapshot> QueryAsync(CodexSelection selection, CancellationToken token);
     Task<CodexIntelligenceSnapshot> AnalyzeAsync(CodexIntelligenceSnapshot snapshot, CancellationToken token);
     Task<ScenarioEstimate> SimulateAsync(ScenarioRequest request, DateTimeOffset historyFromUtc, CancellationToken token);

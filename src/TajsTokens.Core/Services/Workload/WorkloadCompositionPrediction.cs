@@ -14,12 +14,13 @@ namespace TajsTokens.Core.Services;
 public static partial class WorkloadCompositionPrediction
 {
     public const string Version = "recent-workload-composition/v3-joint";
-    public const string ContinuationVersion = "recent-joint-continuation/v1";
+    public const string ContinuationVersion = "recent-joint-continuation/v2-finite-decimals";
     public const string ContinuationMethodology = "Installation-local recorded joint model/effort/category amounts continued at their observed elapsed-time intensity. " +
         "Observation interval is (origin-context,origin]; horizon is (origin,origin+horizon]. " +
         "Elapsed context includes quiet time and tool waits; no future sleep or extra effort multiplier is assumed. " +
         "No fitting or training span for this deterministic continuation; quota calibration, if used, has a separate preceding training span. " +
         "Native pairings and unknown/overflow mass remain together. Missing context is unavailable, not zero; explicit zero observations remain distinct. " +
+        "Conditional category amounts use at most nine fractional token digits (fewer for extreme magnitudes) for exact decimal summation; observed amounts are unchanged. " +
         "Collection-qualified mode excludes unknown/late collection and all future events. Staleness/coverage remain inspectable; absence of recorded tokens does not establish idleness or account completeness. " +
         "This is a conditional workload projection, not expected habitual activity, a task-equivalent changed-model prediction or calibrated distribution.";
 
@@ -60,9 +61,10 @@ public static partial class WorkloadCompositionPrediction
         CodexJointWorkload observed = CodexJointWorkloadBuilder.Build(rows);
         CodexJointWorkload? projected = observed.ReportedTokens == 0
             ? new(CodexJointWorkload.Version, CodexJointQuantityKind.ConditionalProjection, observed.Cells, observed.Overflow, 0, 0)
-            : CodexJointWorkloadBuilder.Project(observed, amount!.Value);
+            : CodexJointWorkloadBuilder.ProjectFinite(observed, amount!.Value);
         if (projected is null) return new(null, receipt with { Status = "projection-unavailable" });
-        receipt = receipt with { Status = "conditional-continuation" };
+        amount = (double)projected.ReportedTokens;
+        receipt = receipt with { Status = "conditional-continuation", ProjectedTokens = amount };
         double[] categories = Enumerable.Range(0, 5).Select(c => (double)(projected.Cells.Sum(x => TtJointWorkloadBasis.Amount(x, (TtTokenCategory)c)) +
             (projected.Overflow is { } overflow ? TtJointWorkloadBasis.Amount(overflow, (TtTokenCategory)c) : 0))).ToArray();
         IReadOnlyDictionary<string, double> Shares(Func<CodexPredictiveTokenEvent, string?> field) => rows

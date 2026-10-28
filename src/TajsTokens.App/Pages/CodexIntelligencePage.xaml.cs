@@ -41,6 +41,7 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
         Loaded += async (_, _) =>
         {
             _loaded = true;
+            UpdatePlanMode();
             App.Services.Telemetry.SnapshotUpdated += OnTelemetry;
             PopulateAccounts();
             RefreshPlanAnchors();

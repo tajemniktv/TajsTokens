@@ -69,19 +69,30 @@ public static class CodexJointWorkloadBuilder
     }
 
     public static CodexJointWorkload? Project(CodexJointWorkload observed, double expectedTokens)
+        => ProjectCore(observed, expectedTokens, false);
+
+    // Finite conditional quantities must be summable exactly by the reference scorer.
+    // Existing scalar projections retain their original representation.
+    internal static CodexJointWorkload? ProjectFinite(CodexJointWorkload observed, double expectedTokens)
+        => ProjectCore(observed, expectedTokens, true);
+
+    private static CodexJointWorkload? ProjectCore(CodexJointWorkload observed, double expectedTokens, bool finite)
     {
         if (!double.IsFinite(expectedTokens) || expectedTokens < 0 || expectedTokens >= (double)decimal.MaxValue ||
             !observed.IsComplete || observed.ReportedTokens <= 0) return null;
         decimal scale = (decimal)expectedTokens / observed.ReportedTokens;
+        int digits = finite ? decimal.Truncate((decimal)expectedTokens).ToString(System.Globalization.CultureInfo.InvariantCulture).Length : 0;
+        int places = Math.Min(9, Math.Max(0, 27 - digits));
+        decimal Amount(decimal value) => finite ? decimal.Round(value * scale, places, MidpointRounding.ToEven) : value * scale;
         CodexJointWorkloadCell Scale(CodexJointWorkloadCell cell)
         {
-            decimal input = cell.UncachedInput * scale, cache = cell.CacheRead * scale, write = cell.CacheWrite * scale,
-                output = cell.NonReasoningOutput * scale, reasoning = cell.ReasoningOutput * scale;
+            decimal input = Amount(cell.UncachedInput), cache = Amount(cell.CacheRead), write = Amount(cell.CacheWrite),
+                output = Amount(cell.NonReasoningOutput), reasoning = Amount(cell.ReasoningOutput);
             return cell with { UncachedInput = input, CacheRead = cache, CacheWrite = write, NonReasoningOutput = output,
                 ReasoningOutput = reasoning, ReportedTotal = input + cache + write + output + reasoning };
         }
         return new(CodexJointWorkload.Version, CodexJointQuantityKind.ConditionalProjection, observed.Cells.Select(Scale).ToArray(),
-            observed.Overflow is { } overflow ? Scale(overflow) : null, observed.MissingModelTokens * scale, observed.MissingEffortTokens * scale);
+            observed.Overflow is { } overflow ? Scale(overflow) : null, Amount(observed.MissingModelTokens), Amount(observed.MissingEffortTokens));
     }
 
     internal static CodexJointWorkload CombineConditional(IEnumerable<(CodexJointWorkload Workload, decimal Scale)> parts)

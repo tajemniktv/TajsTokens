@@ -157,26 +157,37 @@
                     <StackPanel Spacing="16" Padding="0,16,12,20" MaxWidth="1000" HorizontalAlignment="Left">
                         <TextBlock Text="Will my next session fit?" Style="{StaticResource SectionTitleStyle}" />
                         <TextBlock x:Name="PlanMeasuredWork" Style="{StaticResource SubtitleStyle}" TextWrapping="Wrap" />
-                        <TextBlock Text="A conditional account-wide scenario. Work-history filters below the live header do not allocate quota to projects or chats."
+                        <TextBlock Text="Continue recent local work, or compare a session-count scenario. Quota stays account-wide."
                                    Style="{StaticResource SubtitleStyle}" />
                         <Border Style="{StaticResource CardStyle}">
                             <StackPanel Spacing="12">
+                                <ComboBox x:Name="PlanMode" Header="Plan from" SelectedIndex="0" SelectionChanged="OnPlanSelectionChanged">
+                                    <ComboBoxItem Content="Recent work" />
+                                    <ComboBoxItem Content="Session counts · comparator" />
+                                </ComboBox>
                                 <NumberBox x:Name="PlanHours" Header="Duration (hours)" Value="1" Minimum="0.05" Maximum="168" ValueChanged="OnPlanNumberChanged" />
+                                <ComboBox x:Name="PlanContext" Header="Recent context" SelectedIndex="1" SelectionChanged="OnPlanSelectionChanged">
+                                    <ComboBoxItem Content="30 minutes" />
+                                    <ComboBoxItem Content="2 hours" />
+                                </ComboBox>
                                 <AutoSuggestBox x:Name="PlanModel" Header="Model · optional exact name" TextChanged="OnPlanTextChanged" />
                                 <AutoSuggestBox x:Name="PlanEffort" Header="Reasoning effort · optional" TextChanged="OnPlanTextChanged" />
                                 <TextBlock x:Name="ModelDiscoveryText" Text="Model access is unverified." Style="{StaticResource SubtitleStyle}" TextWrapping="Wrap" />
                                 <Button x:Name="RecentPatternButton" Content="Use recent local work pattern" Click="OnRecentPattern" />
-                                <TextBlock x:Name="RecentPatternText" Text="Optional editable suggestion from recent local activity; it does not establish account ownership." Style="{StaticResource CaptionStyle}" />
-                                <Expander Header="Session counts and history" HorizontalContentAlignment="Stretch" HorizontalAlignment="Stretch">
+                                <TextBlock x:Name="RecentPatternText" Text="Recent mode keeps the native mixture. Model/effort edits revalue the same tokens only." Style="{StaticResource CaptionStyle}" TextWrapping="Wrap" />
+                                <Expander x:Name="PlanCounts" Header="Count comparator and history" HorizontalContentAlignment="Stretch" HorizontalAlignment="Stretch">
                                     <StackPanel Spacing="10">
                                         <NumberBox x:Name="PlanRoots" Header="Active root chats" Value="1" Minimum="0" Maximum="32" ValueChanged="OnPlanNumberChanged" />
                                         <NumberBox x:Name="PlanChildren" Header="Active subagents" Value="0" Minimum="0" Maximum="64" ValueChanged="OnPlanNumberChanged" />
                                         <NumberBox x:Name="PlanHistoryDays" Header="History lookback (days)" Value="30" Minimum="1" Maximum="30" ValueChanged="OnPlanNumberChanged" />
-                                        <TextBlock Text="Counts mean recently token-active sessions, not simultaneous model computation. History lookback is independent of the work-history range." Style="{StaticResource CaptionStyle}" />
+                                        <TextBlock Text="Used in Session counts mode. Counts are token-active sessions; lookback is independent of work-history filters." Style="{StaticResource CaptionStyle}" TextWrapping="Wrap" />
                                     </StackPanel>
                                 </Expander>
                                 <Button Content="Estimate session fit" Click="OnSimulate" />
                                 <TextBlock x:Name="ScenarioText" Text="Choose a session, then estimate its fit against both allowances." TextWrapping="Wrap" />
+                                <Expander x:Name="PlanDetails" Header="Plan details and assumptions" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                    <TextBlock x:Name="PlanDetailsText" Text="Estimate a plan to inspect its inputs and scope." Style="{StaticResource TechnicalTextStyle}" TextWrapping="Wrap" />
+                                </Expander>
                             </StackPanel>
                         </Border>
                         <StackPanel Orientation="Horizontal" Spacing="8">

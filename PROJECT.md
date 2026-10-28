@@ -218,6 +218,16 @@ User should be able to have a "planner", that allows to see whether their curren
 
 The primary Planning tab owns the editable session scenario: duration, optional model/effort, recent-local-work autofill, active-session counts and an independent 1–30 day history lookback. Both windows report conditional consumption and estimated fit against matching fresh account/source/plan/limit cohorts. Unsupported windows remain explicit. A calibrated band crossing available allowance means fit is uncertain; a point-only fit remains conditional. Sessions crossing a reset retain supported consumption estimates but make no post-reset capacity or current-window fit claim. Input edits and quota-anchor changes invalidate results. Forecast/workload history and Model Lab remain separate destinations, not duplicate planners.
 
+Recent-work mode starts with the existing two-hour elapsed context, with an explicit
+30-minute alternative. Native joint amounts and frozen TT continue together for the
+requested duration; installation-local work remains separate from the selected account.
+Model/effort edits hold the category amounts fixed for TT/API-reference revaluation,
+with changed-model task/quota predictions explicitly unsupported. The independent quota
+answer holds the fresh account's supported current pace constant, without borrowing a
+reset or other-horizon uncertainty band. The existing count-based scenario remains an
+explicit comparator and owns the count/lookback controls. Input, account-anchor and
+reference edits invalidate displayed plans; details stay behind a disclosure.
+
 ## Quota Accounting
 
 The current implementation keeps reported account quota, locally observed native Codex tokens, API-equivalent price weights and inferred quota cost separate. A source account key scopes the quota observations that supplied it; it does not retroactively assign local rollouts to the current login.
@@ -832,6 +842,14 @@ shared projection and the existing Planning page; no duplicate planner/estimator
   same-token revaluation from changed-model task prediction. Keep count scenarios as
   comparators, mark unsupported edits and matching account/window scope, and retain
   restrictions on post-reset capacity/current-window fit for reset-crossing sessions.
+  Implementation adds recent native work/TT and same-token reference edits through
+  `ICodexIntelligence`, retaining the existing count comparator and independent account
+  pace. Missing/partial local work does not hide a supported quota answer. Changed
+  model/effort task usage and quota fit remain unsupported; reset crossings cannot
+  claim post-reset capacity. Full Core validation (893 tests), Windows installation,
+  native-frame reference checks and installed parity pass. Manual Planning layout,
+  edited-model results and hidden-input restoration are awaiting the user's check.
+  [Contract and verification](docs/source-notes/STAGE6_CONTINUATION.md#recent-work-planning-integration-fore-003).
 - [ ] **FORE-004 — Extend one product snapshot.** Overview/Planning and then tray show
   allowance, measured tokens/TT, conditional runway and inspectable change reasons.
   Carry exact/bounded/partial/unsupported/stale/uncalibrated states with compact
@@ -930,16 +948,16 @@ provider scope and answer-specific eligibility slices have their stated installe
 evidence. **PACE-001–004** implement and evaluate the elapsed-time correction.
 Stage 4's **SCORE-001–003** joint projection, frozen basis/archive and qualified
 scoring are installed. **CAT-001** discovery and picker interaction are verified,
-including hidden-dashboard input restoration. The latest full suite passed 877
+including hidden-dashboard input restoration. The latest full suite passed 893
 tests and the Windows build installed successfully; user visual acceptance remains
 separate.
 
-**Continue with Stage 6 / FORE-003.** The user selected the exact
+**Continue with Stage 6 / FORE-004 while FORE-003's manual check is pending.** The user selected the exact
 [price policy and frozen TT basis](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md).
 CAT-002 and D-01 are integrated and installed: immutable selections, independent
 price imports, measured TT and explicit original-score saving. Automated checks,
 installed numeric/recovery checks and Overview/Planning rendering passed. The native
-native picker import subsequently passed the user's manual check. CAL-001 rendering
+picker import subsequently passed the user's manual check. CAL-001 rendering
 also passed; the user requested less prose. CAL-001 is installed:
 joint coverage and identification diagnostics expose sparse prefixes and local-work/
 meter mismatches. CAL-002's restrained joint challenger is installed in explicit
@@ -949,9 +967,10 @@ separate uncertainty types/metrics. Independent numerical checks and the user's
 manual summary/details check pass. FORE-001's explicit continuation contract and
 matched context comparison are installed, with unchanged defaults. FORE-002's
 bounded joint-path comparison is installed in explicit research; it does not earn
-live selection. FORE-003 now integrates useful recent native work/TT and supported
-planning edits through the existing flow, retaining direct quota answers and the
-separate count-based comparator.
+live selection. FORE-003's recent native work/TT, same-token reference edits and
+independent account-pace answer are implemented and installed through the existing
+Planning flow, retaining the separate count comparator. Automated/installed checks
+pass; the requested manual Planning and input-restoration check remains open.
 Programme-wide acceptance gates, user visual acceptance and the PERF-001
 resource-budget decision remain open.
 

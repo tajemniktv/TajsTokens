@@ -4,7 +4,8 @@ public sealed partial class CodexIntelligencePage : IDashboardPresentation
 {
     private bool _planningNavigation;
     private Microsoft.UI.Xaml.FrameworkElement[] Inputs => [FromDate, ToDate, Model, Project, Thread, Dimension,
-        PlanHours, PlanModel, PlanEffort, PlanRoots, PlanChildren, PlanHistoryDays, Views, SelectionExpander, QuotaEvidence,
+        PlanHours, PlanModel, PlanEffort, PlanRoots, PlanChildren, PlanHistoryDays, PlanMode, PlanContext, PlanCounts, PlanDetails,
+        Views, SelectionExpander, QuotaEvidence,
         ReferenceExpander, PriceImportRole];
     private sealed record InputState(DashboardInput[] Values, string? AccountKey, bool Planning);
 

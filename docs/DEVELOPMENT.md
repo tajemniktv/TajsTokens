@@ -223,6 +223,17 @@ Planning. More than four active joint coordinates remain unsupported; infeasible
 unbounded and numerically uncertain results are preserved. Source notes document
 the declared numerical tolerance and independent exact-rational checks.
 
+## Recent-work planner checks
+
+Open Overview → Planning. Recent work continues the selected elapsed context into
+conditional native tokens/TT, alongside an independent account-pace fit check.
+Changing model/effort offers same-token reference revaluation; it must not claim
+changed-task quota fit. Session counts · comparator retains counts, model/effort
+history matching and the separate history lookback. A reset-crossing plan must not
+claim fit against post-reset capacity. Details belong under the plan disclosure.
+Check mode/context/input restoration after hiding the dashboard for over 30 seconds;
+the user performs host UI checks. See [contracts and numerical evidence](source-notes/STAGE6_CONTINUATION.md#recent-work-planning-integration-fore-003).
+
 ## Recent joint continuation research
 
 To inspect the fixed 30-minute/two-hour joint continuation context comparison:

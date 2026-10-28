@@ -6,6 +6,13 @@ public static class WorkloadReferenceProjection
 {
     public static WorkloadReferenceResult Build(WorkloadReferenceState sources, CodexJointWorkload joint,
         IReadOnlyList<CodexLedgerEntry> ledger, DateTimeOffset atUtc)
+        => Build(sources, joint, ledger, atUtc, true);
+
+    public static WorkloadReferenceResult BuildConditional(WorkloadReferenceState sources, CodexJointWorkload joint, DateTimeOffset atUtc)
+        => Build(sources, joint, [], atUtc, false);
+
+    private static WorkloadReferenceResult Build(WorkloadReferenceState sources, CodexJointWorkload joint,
+        IReadOnlyList<CodexLedgerEntry> ledger, DateTimeOffset atUtc, bool includeDateEffective)
     {
         var selection = sources.Selection;
         TtScoreAssessment? tt = selection is null ? null : TtJointScoring.Evaluate(selection.Basis, joint);
@@ -25,6 +32,7 @@ public static class WorkloadReferenceProjection
         var dated = !hasEffectiveDates ? cells : ledger.Select(x => new ApiPriceWorkloadItem(x.Workload.Model, x.Workload.UncachedInputTokens,
             x.Workload.CacheReadTokens, x.Workload.CacheWriteTokens, x.Workload.NonReasoningOutputTokens,
             x.Workload.ReasoningOutputTokens, x.Workload.ReportedTotalTokens, x.ObservedAtUtc)).ToArray();
-        return new(sources, tt, Calculate(cells, ApiPriceTimeMode.SnapshotReference), Calculate(dated, ApiPriceTimeMode.DateEffective));
+        return new(sources, tt, Calculate(cells, ApiPriceTimeMode.SnapshotReference),
+            includeDateEffective ? Calculate(dated, ApiPriceTimeMode.DateEffective) : null);
     }
 }

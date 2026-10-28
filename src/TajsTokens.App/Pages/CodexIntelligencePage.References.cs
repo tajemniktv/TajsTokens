@@ -53,6 +53,7 @@ public sealed partial class CodexIntelligencePage
         int role = PriceImportRole.SelectedIndex;
         string? file = await PickReferenceFileAsync();
         if (!_loaded || file is null) return;
+        InvalidatePlan();
         var attempt = await App.Services.WorkloadReferences.ImportAsync(file, role switch
         { 1 => ApiPriceOrigin.LocalOverride, 2 => ApiPriceOrigin.CommunityFallback, _ => ApiPriceOrigin.OfficialCurated }, default);
         await LoadAsync();
@@ -64,6 +65,7 @@ public sealed partial class CodexIntelligencePage
     {
         string? file = await PickReferenceFileAsync();
         if (!_loaded || file is null) return;
+        InvalidatePlan();
         await App.Services.WorkloadReferences.SelectBasisAsync(file, default);
         await LoadAsync();
         if (_loaded) ReferenceActionStatus.Text = "TT basis selected for future views. Saved calculations are unchanged.";
@@ -71,12 +73,14 @@ public sealed partial class CodexIntelligencePage
 
     private async void OnDisableOptionalPrices(object sender, RoutedEventArgs e) => await RunReferenceAction(async () =>
     {
+        InvalidatePlan();
         await App.Services.WorkloadReferences.SetOptionalSourcesAsync(false, false, false, default); await LoadAsync();
         if (_loaded) ReferenceActionStatus.Text = "Overrides and fallback disabled. TT basis unchanged.";
     });
 
     private async void OnLegacyPrices(object sender, RoutedEventArgs e) => await RunReferenceAction(async () =>
     {
+        InvalidatePlan();
         await App.Services.WorkloadReferences.SetOptionalSourcesAsync(_snapshot?.Reference?.Sources.Selection?.OverrideSourceKey is not null,
             true, true, default); await LoadAsync();
         if (_loaded) ReferenceActionStatus.Text = "Legacy fallback enabled and labelled. TT basis unchanged.";

@@ -30,6 +30,26 @@ public sealed class CodexIntelligenceEngine(
     public Task<RecentScenarioPattern> GetRecentScenarioPatternAsync(DateTimeOffset nowUtc, CancellationToken token)
         => Task.Run(() => intelligence.GetRecentScenarioPatternAsync(nowUtc, token), token);
 
+    public Task<RecentWorkPlan> PlanRecentWorkAsync(RecentWorkPlanRequest request, CancellationToken token)
+    {
+        RecentWorkPlanBuilder.Validate(request);
+        return Task.Run(async () =>
+        {
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            CodexIntelligenceSnapshot live = Current;
+            // Account selection scopes quota, never installation-local workload. No page/history filters enter here.
+            var data = await datasetReader().ReadLedgerAndQuotaAsync("codex", "default", now.AddHours(-request.ContextHours),
+                now.AddTicks(1), token, includeQuota: false);
+            data = data with { Tokens = data.Ledger.Select(x => x.Workload).ToArray() };
+            WorkloadReferenceState references;
+            try { references = workloadReferences is null ? new(null, null) : await workloadReferences(token); }
+            catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+            catch (Exception e) when (e is not OutOfMemoryException) { references = new(null, null, Issue: "reference-selection-unavailable"); }
+            token.ThrowIfCancellationRequested();
+            return RecentWorkPlanBuilder.Build(data, live, request, references, now);
+        }, token);
+    }
+
     public Task<ScenarioEstimate> SimulateAsync(ScenarioRequest request, DateTimeOffset historyFromUtc, CancellationToken token)
     {
         CodexIntelligenceSnapshot live = Current;
