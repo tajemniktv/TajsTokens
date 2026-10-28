@@ -166,6 +166,12 @@ public sealed partial class UsagePage : Page
             : rows.OrderBy(x => x.Label, StringComparer.OrdinalIgnoreCase)).ToArray();
         DrillButton.IsEnabled = false;
         DetailText.Text = "";
+        if (_restoredRow is { } saved)
+        {
+            _restoredRow = null;
+            RowsList.SelectedItem = RowsList.Items.Cast<UsageRow>().FirstOrDefault(row =>
+                (row.Label, row.Start, row.End, row.ThreadId) == saved);
+        }
     }
 
     private void OnColumnsChanged(object sender, RoutedEventArgs e)

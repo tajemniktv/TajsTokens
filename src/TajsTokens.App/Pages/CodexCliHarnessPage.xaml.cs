@@ -34,7 +34,8 @@ public sealed partial class CodexCliHarnessPage : Page
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         _loaded = true;
-        RenderSettings();
+        if (!_inputsInitialized) RenderSettings();
+        _inputsInitialized = true;
     }
 
     private void OnUnloaded(object sender, RoutedEventArgs e)

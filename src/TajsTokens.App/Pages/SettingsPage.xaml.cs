@@ -33,7 +33,8 @@ public sealed partial class SettingsPage : Page
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        RenderSettings();
+        if (!_inputsInitialized) RenderSettings();
+        _inputsInitialized = true;
         await RenderObservedAccountsAsync();
     }
 

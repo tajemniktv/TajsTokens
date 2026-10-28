@@ -65,6 +65,7 @@ public sealed partial class CodexSourcesPage : Page, IHistoryPresentation
             string text when !string.IsNullOrWhiteSpace(text) => text,
             _ => null,
         };
+        _navigationThread = _initialThreadId;
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)

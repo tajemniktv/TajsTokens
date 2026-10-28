@@ -46,6 +46,23 @@ public sealed partial class CodexDataExplorerPage : Page, IHistoryPresentation
     {
         if (_loaded) return;
         _loaded = true;
+        if (_restoredExplorer is { } restored)
+        {
+            _restoredExplorer = null;
+            // Restore before attaching the child, so its Loaded query uses saved filters.
+            ExplorerFrame.Navigated += RestoreExplorerInputs;
+            try { ExplorerFrame.Navigate(restored.Type, _threadId); }
+            finally { ExplorerFrame.Navigated -= RestoreExplorerInputs; }
+            SourcesButton.IsEnabled = restored.Type != typeof(CodexSourcesPage);
+            RawButton.IsEnabled = restored.Type != typeof(CodexStateDbExplorerPage);
+            return;
+
+            void RestoreExplorerInputs(object sender, NavigationEventArgs args)
+            {
+                if (restored.Inputs is not null && args.Content is IDashboardPresentation presentation)
+                    presentation.RestoreInputs(restored.Inputs);
+            }
+        }
         ShowSources();
     }
 

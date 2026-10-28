@@ -630,3 +630,32 @@ Windows build/install with zero warnings/errors (72.50s). The offline reporter
 also built successfully. The user chose dashboard unloading after 30 seconds
 hidden, preserving lightweight state; implementation and runtime acceptance of
 that policy are the next PERF-004 extension. Numerical memory budgets remain open.
+
+## Hidden dashboard unloading
+
+The approved policy now detaches immediately and, after 30 seconds continuously
+hidden/minimized, captures page-owned presentation inputs and drops the frame,
+its cached pages and generated history. Short hides reuse the same view. The
+native window/navigation shell stays alive for the tray and restore path. No
+forced GC or process memory cap was added.
+
+Snapshots are process-local typed records containing scalar values, selection
+identities, static input indexes and navigation entries; they retain no controls,
+pages, callbacks or history row arrays. Account/source/database/table selections
+use identities rather than row indexes. Nested usage scopes and raw/source explorer
+inputs are included. New explicit thread/planner/model-lab navigation takes
+precedence where its parameter differs from the suspended view. Back/Forward
+entries are copied without retaining transition objects.
+
+Unsaved settings preserve the baseline used for optimistic-save conflict detection.
+Settings and CLI inputs also survive brief hides instead of being overwritten by
+Loaded. Fresh history uses the existing cancellation/generation-qualified readers.
+Derived history, evaluation results, CLI stdout/stderr and raw comparison baselines
+are released; restoring them does not silently present old results as current.
+
+All 686 Core tests passed, none skipped (1m19s). The serial Windows solution build
+passed with zero warnings/errors; a final form-lifecycle correction was followed
+by another successful Windows build/install (52.52s), restarting the daily app as
+PID 7984. Core tests do not exercise WinUI state restoration. Manual planner/form,
+Back/Forward, restore timing and combined-memory acceptance remain pending under
+PERF-004/PERF-001. Agent Computer Use remains stopped; the user performs UI actions.

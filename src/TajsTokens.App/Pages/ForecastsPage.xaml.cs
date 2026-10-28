@@ -600,7 +600,9 @@ public sealed partial class ForecastsPage : Page, IHistoryPresentation
                         $"Fitted destination scale {score.Scale:0.####}. {report.QuotaTransfer!.Methodology}")))
                 .ToArray();
             EvaluationGroup.ItemsSource = _evaluationRows.Select(x => x.Group).Distinct().OrderBy(x => x).ToArray();
-            EvaluationGroup.SelectedIndex = _evaluationRows.Count > 0 ? 0 : -1;
+            EvaluationGroup.SelectedItem = EvaluationGroup.Items.Cast<string>().FirstOrDefault(group => group == _restoredEvaluationGroup)
+                ?? EvaluationGroup.Items.Cast<string>().FirstOrDefault();
+            _restoredEvaluationGroup = null;
             RenderEvaluationGroup();
         }
         catch (OperationCanceledException) when (cancellation.IsCancellationRequested)

@@ -172,8 +172,9 @@ Owners: `WindowsResourcePolicy`, `App`, `MainWindow`, `TelemetryCoordinator`,
 `CodexObservatoryService`, SQLite stores/providers and `CalibrationProcessService`.
 Memo §11 supplies the mechanisms; their relative runtime cost remains to be measured.
 
-Stage 1 is in progress: PERF-002–008 and P-01
-are implemented. Normal interactive scheduling, retryable/visible EcoQoS, coalesced
+Stage 1 is in progress: PERF-002–003, PERF-005–008 and P-01
+are implemented; PERF-004's approved dashboard-unload extension awaits runtime acceptance.
+Normal interactive scheduling, retryable/visible EcoQoS, coalesced
 fleet reads, independent discovery/catch-up, precise projection invalidation, no-op
 write suppression, guarded initialization, indexed reset tails and ordered token
 batching are installed. Retained presentation inputs, qualified short history reuse
@@ -213,7 +214,7 @@ numerical budgets remain open under PERF-001. See
   repeat a completed collection's fleet scan or reclamation.
   Implemented with typed completion identity and the coalesced fleet reader;
   [652-test/build and installed evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
-- [x] **PERF-004 — Preserve presentation state and reduce rendering.** Pause hidden
+- [ ] **PERF-004 — Preserve presentation state and reduce rendering.** Pause hidden
   subscriptions/timers, retain lightweight navigation/filter state and selectively
   evict heavy history. Cache summaries by selection/data generation, coalesce visual
   snapshots and update changed properties. Keep alert transitions lossless and
@@ -224,8 +225,13 @@ numerical budgets remain open under PERF-001. See
   hidden release and qualified cache-hit counters were observed;
   [evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
   The user approved releasing the dashboard frame after 30 seconds hidden while
-  preserving lightweight inputs/navigation. That extension is being implemented;
-  its restore correctness and reclaimed memory remain to be measured.
+  preserving lightweight inputs/navigation. That extension now captures page-owned
+  scalar inputs/selection identities and Back/Forward entries, releases the frame
+  and its page cache, and rebuilds on restore. Brief hides retain the same view.
+  Unsaved settings retain their original conflict-detection baseline. History,
+  generated visuals, CLI run output and raw comparison evidence are rebuildable;
+  they are not retained as presentation inputs. Manual state/restore acceptance
+  and reclaimed memory still need measurement; PERF-004 is reopened for that pass.
 - [x] **PERF-005 — Separate discovery from catch-up.** Deferred/missing/mismatched
   rollouts must not force full discovery every poll. Use bounded fair retries and
   filesystem-fallback budgets, independent relationship reconciliation and correct

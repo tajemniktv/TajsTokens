@@ -15,7 +15,8 @@ public sealed partial class CodexIntelligencePage
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
-        if (Equals(e.Parameter, "planning")) Views.SelectedIndex = 2;
+        _planningNavigation = Equals(e.Parameter, "planning");
+        if (_planningNavigation) Views.SelectedIndex = 2;
         else Views.SelectedIndex = 0;
     }
 

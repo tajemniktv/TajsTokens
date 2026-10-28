@@ -108,7 +108,8 @@ public sealed partial class CodexStateDbExplorerPage : Page, IHistoryPresentatio
             {
                 DatabaseComboBox.ItemsSource = candidates;
                 DatabaseComboBox.SelectedItem = selected;
-                string? comparisonPath = (ComparisonComboBox.SelectedItem as CodexStateDatabaseCandidate)?.Path;
+                string? comparisonPath = (ComparisonComboBox.SelectedItem as CodexStateDatabaseCandidate)?.Path ?? _restoredComparisonPath;
+                _restoredComparisonPath = null;
                 ComparisonComboBox.ItemsSource = candidates;
                 ComparisonComboBox.SelectedItem = candidates.FirstOrDefault(candidate =>
                     string.Equals(candidate.Path, comparisonPath, StringComparison.OrdinalIgnoreCase));
@@ -354,7 +355,9 @@ public sealed partial class CodexStateDbExplorerPage : Page, IHistoryPresentatio
                     $"{index.Name} ({string.Join(", ", index.Columns)})"));
         SqlText.Text = string.IsNullOrWhiteSpace(table.Sql) ? "SQL: (not provided)" : table.Sql;
 
-        _pageIndex = 0;
+        _pageIndex = _restoredRawPage is { } restored && restored.Table == table.Name
+            ? Math.Clamp(restored.Page, 0, (int)Math.Min(int.MaxValue, Math.Max(0, (table.RowCount - 1) / 50))) : 0;
+        _restoredRawPage = null;
         await LoadPageAsync(table.Name);
     }
 

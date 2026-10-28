@@ -27,8 +27,12 @@ public sealed partial class MainWindow : Window
     private bool _ready;
     private bool _dashboardVisible;
     private long _viewGeneration;
-    private readonly Frame _contentFrame;
-    private Frame ContentFrame => _contentFrame;
+    private Frame? _contentFrame;
+    private Frame ContentFrame => _contentFrame ?? throw new InvalidOperationException("Dashboard is unloaded.");
+    private readonly Dictionary<Type, object> _pageInputs = [];
+    private readonly List<WeakReference<Page>> _pages = [];
+    private (Type Type, object? Parameter)? _suspendedPage;
+    private (Type Type, object? Parameter)[] _backStack = [], _forwardStack = [];
     private readonly DispatcherTimer _historyEvictionTimer = new() { Interval = TimeSpan.FromSeconds(30) };
     private readonly List<WeakReference<IHistoryPresentation>> _historyPages = [];
     private int _historyReleasePasses;
@@ -40,7 +44,7 @@ public sealed partial class MainWindow : Window
         {
             CodexIntelligencePage? overview = _historyPages.Select(reference =>
                 reference.TryGetTarget(out var page) ? page : null).OfType<CodexIntelligencePage>().FirstOrDefault();
-            return $"Presentation: {(_dashboardVisible ? "active" : "paused")}; {_historyReleasePasses} hidden history release pass(es)." +
+            return $"Presentation: {(_dashboardVisible ? "active" : _contentFrame is null ? "unloaded" : "paused")}; {_historyReleasePasses} hidden dashboard release pass(es)." +
                 (overview is null ? "" : $" Overview: {overview.HistoryReadCount} history read(s), {overview.HistoryCacheHits} qualified cache hit(s).");
         }
     }
@@ -54,10 +58,28 @@ public sealed partial class MainWindow : Window
         {
             _historyEvictionTimer.Stop();
             if (_dashboardVisible) return;
-            _historyPages.RemoveAll(reference => !reference.TryGetTarget(out _));
+            if (_contentFrame is not { } frame) return;
+            _pages.RemoveAll(reference => !reference.TryGetTarget(out _));
+            foreach (var reference in _pages)
+                if (reference.TryGetTarget(out var page) && page is IDashboardPresentation presentation)
+                    _pageInputs[page.GetType()] = presentation.CaptureInputs();
+            if (frame.Content is Page current && current is IDashboardPresentation currentPresentation)
+                _pageInputs[current.GetType()] = currentPresentation.CaptureInputs();
+            _suspendedPage = frame.CurrentSourcePageType is { } type ? (type, frame.Tag) : null;
+            _backStack = frame.BackStack.Select(entry => (entry.SourcePageType, (object?)entry.Parameter)).ToArray();
+            _forwardStack = frame.ForwardStack.Select(entry => (entry.SourcePageType, (object?)entry.Parameter)).ToArray();
             foreach (var reference in _historyPages)
                 if (reference.TryGetTarget(out var page)) page.ReleaseHistory();
+            frame.Navigated -= OnNavigated;
+            frame.CacheSize = 0;
+            frame.Content = null;
+            frame.BackStack.Clear();
+            frame.ForwardStack.Clear();
+            _contentFrame = null;
+            _pages.Clear();
+            _historyPages.Clear();
             _historyReleasePasses++;
+            WorkDiagnostics.Log.CacheInvalidated((int)WorkPhase.DashboardFirstFrame, 3);
         };
         Closed += (_, _) => { _historyEvictionTimer.Stop(); CancelFirstFrameMeasurement(); };
         try
@@ -120,7 +142,7 @@ public sealed partial class MainWindow : Window
 
     public void Navigate(Type pageType, object? parameter = null)
     {
-        if (ContentFrame is null) return;
+        EnsureDashboard();
         if (ContentFrame.CurrentSourcePageType == pageType && Equals(ContentFrame.Tag, parameter)) return;
         ContentFrame.Tag = parameter;
         ContentFrame.Navigate(pageType, parameter);
@@ -134,8 +156,8 @@ public sealed partial class MainWindow : Window
         long generation = ++_viewGeneration;
         if (!visible)
         {
-            // Detaching runs the existing Unloaded cancellation/subscription lifecycle. Retain
-            // the same frame, navigation stack and inputs; evict heavy history after a short hide.
+            // Detaching runs existing Unloaded cancellation/subscription cleanup immediately.
+            // Brief hides reuse the view; the timer later retains only inputs/navigation.
             AppNavigation.Content = null;
             _historyEvictionTimer.Start();
         }
@@ -149,6 +171,7 @@ public sealed partial class MainWindow : Window
             if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () =>
             {
                 if (!_dashboardVisible || generation != _viewGeneration) return;
+                EnsureDashboard();
                 AppNavigation.Content = ContentFrame;
                 if (ContentFrame.CurrentSourcePageType is null) Navigate(typeof(CodexIntelligencePage));
                 AppNavigation.IsBackEnabled = ContentFrame.CanGoBack;
@@ -164,6 +187,19 @@ public sealed partial class MainWindow : Window
                 }
             })) CancelFirstFrameMeasurement();
         }
+    }
+
+    private void EnsureDashboard()
+    {
+        if (_contentFrame is not null) return;
+        var frame = new Frame { CacheSize = 6 };
+        _contentFrame = frame;
+        frame.Navigated += OnNavigated;
+        if (_suspendedPage is { } current) Navigate(current.Type, current.Parameter);
+        foreach (var entry in _backStack) frame.BackStack.Add(new PageStackEntry(entry.Type, entry.Parameter, null));
+        foreach (var entry in _forwardStack) frame.ForwardStack.Add(new PageStackEntry(entry.Type, entry.Parameter, null));
+        _suspendedPage = null;
+        _backStack = _forwardStack = [];
     }
 
     private void CancelFirstFrameMeasurement()
@@ -186,6 +222,14 @@ public sealed partial class MainWindow : Window
         try
         {
             ContentFrame.Tag = e.Parameter;
+            if (e.Content is Page current)
+            {
+                _pages.RemoveAll(reference => !reference.TryGetTarget(out _));
+                if (!_pages.Any(reference => reference.TryGetTarget(out var page) && ReferenceEquals(page, current)))
+                    _pages.Add(new(current));
+                if (_pageInputs.Remove(current.GetType(), out object? inputs) && current is IDashboardPresentation presentation)
+                    presentation.RestoreInputs(inputs);
+            }
             _historyPages.RemoveAll(reference => !reference.TryGetTarget(out _));
             if (e.Content is IHistoryPresentation history && !_historyPages.Any(reference =>
                     reference.TryGetTarget(out var page) && ReferenceEquals(page, history)))
