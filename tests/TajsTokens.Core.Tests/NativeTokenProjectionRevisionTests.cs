@@ -78,11 +78,13 @@ public sealed class NativeTokenProjectionRevisionTests
         await replacement.AddAsync(220);
         var provider = new SqliteNativeCodexAccountingProvider(first.Database);
         var before = await provider.GetSnapshotAsync(default);
+        Assert.False(string.IsNullOrEmpty(before.StorageGeneration));
         // Restore uses a different physical generation with the same monotonic revision values.
         SqliteConnection.ClearAllPools();
         File.Move(replacement.Database, first.Database, true);
         var after = await provider.GetSnapshotAsync(default);
         Assert.Equal(before.Revision, after.Revision);
+        Assert.NotEqual(before.StorageGeneration, after.StorageGeneration);
         Assert.Equal(220, Assert.Single(after.Usage).Breakdown.Total);
     }
 

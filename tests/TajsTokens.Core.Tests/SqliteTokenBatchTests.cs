@@ -43,7 +43,9 @@ public sealed class SqliteTokenBatchTests
                 results.Add(await new SqliteNativeCodexAccountingProvider(database).GetSnapshotAsync(default));
             }
             Assert.Equal(expectedTotal, results[0].Usage.Sum(x=>x.Breakdown.Total));
-            Assert.Equal(JsonSerializer.Serialize(results[0]),JsonSerializer.Serialize(results[1]));
+            Assert.NotEqual(results[0].StorageGeneration, results[1].StorageGeneration);
+            Assert.Equal(JsonSerializer.Serialize(results[0] with { StorageGeneration = null }),
+                JsonSerializer.Serialize(results[1] with { StorageGeneration = null }));
         }
         finally { SqliteConnection.ClearAllPools(); folder.Delete(true); }
     }

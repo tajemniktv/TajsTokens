@@ -46,25 +46,32 @@ public static class TokenWorkloadPredictionService
         CodexForecastDataset data, DateTimeOffset origin, double horizon,
         ForecastReplayAvailability availability, CancellationToken cancellationToken, ReplayCache? cache)
     {
-        CodexForecastDataset prefix = data with
+        CodexForecastFeatureIndex? preparedFeatures = null;
+        CodexForecastDataset prefix;
+        if (cache is not null)
+            (prefix, preparedFeatures) = cache.Prepare(data, origin, availability);
+        else
         {
-            Tokens = data.Tokens.Where(x => x.ObservedAtUtc <= origin).ToArray(),
-            Workload = data.Workload.Where(x => x.ObservedAtUtc <= origin).ToArray(),
-            Context = data.Context.Where(x => x.ObservedAtUtc <= origin).ToArray(),
-        };
-        if (availability == ForecastReplayAvailability.CollectedByOrigin)
-            prefix = prefix with
+            prefix = data with
             {
-                Tokens = prefix.Tokens.Where(x => x.CapturedAtUtc <= origin).ToArray(),
-                Workload = prefix.Workload.Where(x => x.CapturedAtUtc <= origin).ToArray(),
-                Context = prefix.Context.Where(x => x.CapturedAtUtc <= origin).ToArray(),
+                Tokens = data.Tokens.Where(x => x.ObservedAtUtc <= origin).ToArray(),
+                Workload = data.Workload.Where(x => x.ObservedAtUtc <= origin).ToArray(),
+                Context = data.Context.Where(x => x.ObservedAtUtc <= origin).ToArray(),
             };
+            if (availability == ForecastReplayAvailability.CollectedByOrigin)
+                prefix = prefix with
+                {
+                    Tokens = prefix.Tokens.Where(x => x.CapturedAtUtc <= origin).ToArray(),
+                    Workload = prefix.Workload.Where(x => x.CapturedAtUtc <= origin).ToArray(),
+                    Context = prefix.Context.Where(x => x.CapturedAtUtc <= origin).ToArray(),
+                };
+        }
         if (!prefix.Tokens.Any(x => x.ObservedAtUtc > origin.AddHours(-2))) return null;
         if (horizon <= .25 && !CodexNowcastActivity.Evaluate(prefix, origin, availability).SupportsNowcast) return null;
-        TokenHorizonPrediction? prediction = Evaluate(prefix, horizon, origin, cancellationToken, cache).Current;
+        TokenHorizonPrediction? prediction = Evaluate(prefix, horizon, origin, cancellationToken, cache, preparedFeatures).Current;
         return prediction is null
             ? null
-            : prediction with { Composition = WorkloadCompositionPrediction.Project(prefix, origin, prediction, availability) };
+            : prediction with { Composition = WorkloadCompositionPrediction.Project(data, origin, prediction, availability) };
     }
 
     public static TokenWorkloadForecast Predict(
@@ -168,7 +175,8 @@ public static class TokenWorkloadPredictionService
         double horizon,
         DateTimeOffset? now,
         CancellationToken cancellationToken,
-        ReplayCache? cache = null)
+        ReplayCache? cache = null,
+        CodexForecastFeatureIndex? preparedFeatures = null)
     {
         if (!double.IsFinite(horizon) || horizon <= 0 || horizon > 24 || TimeSpan.FromHours(horizon).Ticks == 0)
             throw new ArgumentOutOfRangeException(nameof(horizon));
@@ -206,6 +214,9 @@ public static class TokenWorkloadPredictionService
 
         CodexForecastFeatures Features(DateTimeOffset at)
         {
+            // The index is qualified by this replay's collection cutoff. Historical features
+            // retain the existing reconstructed semantics within that available prefix.
+            if (preparedFeatures is not null) return preparedFeatures.BuildReconstructedPrefix(at, cache!.CollectedBy);
             DateTimeOffset from = at.AddHours(-2);
             CodexPredictiveTokenEvent[] recentTokens = tokens[Through(from)..Through(at)];
             CodexWorkloadObservation[] recentWorkload = workload[UpperBound(workloadTimes, from)..UpperBound(workloadTimes, at)];
@@ -418,6 +429,77 @@ public static class TokenWorkloadPredictionService
     {
         private readonly Dictionary<string, Row> _rows = new(StringComparer.Ordinal);
         private readonly Dictionary<string, Point> _points = new(StringComparer.Ordinal);
+        private CodexForecastDataset? _source;
+        private PreparedHistory? _prepared;
+        internal int PreparationBuilds { get; private set; }
+        internal int FeatureBuilds => _prepared?.Features.BuildCount ?? 0;
+        internal DateTimeOffset? CollectedBy { get; private set; }
+
+        internal (CodexForecastDataset Prefix, CodexForecastFeatureIndex Features) Prepare(
+            CodexForecastDataset data, DateTimeOffset origin, ForecastReplayAvailability availability)
+        {
+            // Scope-local immutable inputs only. A different source list invalidates preparation;
+            // no timestamp/count-only key and no raw dataset survives a worker evaluation.
+            if (_source is null || !ReferenceEquals(_source.Tokens, data.Tokens) ||
+                !ReferenceEquals(_source.Workload, data.Workload) || !ReferenceEquals(_source.Context, data.Context))
+            {
+                _source = data;
+                _prepared = null;
+            }
+            if (_prepared is null)
+            {
+                _prepared = new PreparedHistory(data with
+                {
+                    Tokens = data.Tokens.OrderBy(x => x.ObservedAtUtc).ToArray(),
+                    Workload = data.Workload.Where(x => x.ObservedAtUtc is not null)
+                        .OrderBy(x => x.ObservedAtUtc).ToArray(),
+                    Context = data.Context.OrderBy(x => x.ObservedAtUtc).ToArray(),
+                });
+                PreparationBuilds++;
+            }
+            CollectedBy = availability == ForecastReplayAvailability.CollectedByOrigin ? origin : null;
+            return (_prepared.Prefix(data, origin, CollectedBy is not null), _prepared.Features);
+        }
+
+        private sealed class PreparedHistory
+        {
+            private readonly CodexPredictiveTokenEvent[] _tokens;
+            private readonly CodexWorkloadObservation[] _workload;
+            private readonly CodexContextObservation[] _context;
+            private readonly DateTimeOffset[] _tokenTimes, _workloadTimes, _contextTimes;
+            private readonly bool _tokensTimely, _workloadTimely, _contextTimely;
+            internal CodexForecastFeatureIndex Features { get; }
+
+            internal PreparedHistory(CodexForecastDataset data)
+            {
+                _tokens = (CodexPredictiveTokenEvent[])data.Tokens;
+                _workload = (CodexWorkloadObservation[])data.Workload;
+                _context = (CodexContextObservation[])data.Context;
+                _tokenTimes = _tokens.Select(x => x.ObservedAtUtc).ToArray();
+                _workloadTimes = _workload.Select(x => x.ObservedAtUtc!.Value).ToArray();
+                _contextTimes = _context.Select(x => x.ObservedAtUtc).ToArray();
+                _tokensTimely = _tokens.All(x => x.CapturedAtUtc <= x.ObservedAtUtc);
+                _workloadTimely = _workload.All(x => x.CapturedAtUtc <= x.ObservedAtUtc);
+                _contextTimely = _context.All(x => x.CapturedAtUtc <= x.ObservedAtUtc);
+                Features = new CodexForecastFeatureIndex(data with
+                {
+                    Tokens = _tokens.Where(x => x.ReportedTotalTokens >= 0).ToArray(),
+                });
+            }
+
+            internal CodexForecastDataset Prefix(CodexForecastDataset data, DateTimeOffset origin, bool collected)
+            {
+                IReadOnlyList<CodexPredictiveTokenEvent> tokens = new ArraySegment<CodexPredictiveTokenEvent>(_tokens, 0, UpperBound(_tokenTimes, origin));
+                IReadOnlyList<CodexWorkloadObservation> workload = new ArraySegment<CodexWorkloadObservation>(_workload, 0, UpperBound(_workloadTimes, origin));
+                IReadOnlyList<CodexContextObservation> context = new ArraySegment<CodexContextObservation>(_context, 0, UpperBound(_contextTimes, origin));
+                return data with
+                {
+                    Tokens = collected && !_tokensTimely ? tokens.Where(x => x.CapturedAtUtc <= origin).ToArray() : tokens,
+                    Workload = collected && !_workloadTimely ? workload.Where(x => x.CapturedAtUtc <= origin).ToArray() : workload,
+                    Context = collected && !_contextTimely ? context.Where(x => x.CapturedAtUtc <= origin).ToArray() : context,
+                };
+            }
+        }
 
         internal Row Intern(Row row)
         {

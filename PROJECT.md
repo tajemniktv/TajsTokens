@@ -179,7 +179,7 @@ write suppression, guarded initialization, indexed reset tails and ordered token
 batching are installed. Retained presentation inputs, qualified short history reuse
 and hidden-history eviction are also installed. Opt-in aggregate phase diagnostics
 and an offline EventPipe reporter are validated; the installed sample identifies
-workload-prefix preparation and worker allocation pressure for PERF-007. All 671
+workload-prefix preparation and worker allocation pressure for PERF-007. All 674
 Core tests and the Windows build pass. Broader measurements and calibration reuse remain open. See
 [current validation evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 
@@ -190,6 +190,9 @@ Core tests and the Windows build pass. Broader measurements and calibration reus
   transactions, invalidations, fleet queries, preparation and cache hits. Choose
   numerical budgets from that hardware/data baseline; `BytesObserved` is not a
   physical-I/O counter.
+  Aggregate phase capture and separate parent/worker allocation/GC samples are
+  recorded. Scenario comparisons, physical I/O and accepted numerical budgets
+  remain open; [measurement details](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 - [x] **PERF-002 — Repair interactive scheduling.** Remove the UI/tray process hard
   CPU cap and routine forced compacting GC, retaining worker containment and
   cooperative bounded collection. Track desired/applied native policy separately;
@@ -237,6 +240,12 @@ Core tests and the Windows build pass. Broader measurements and calibration reus
   cheap anchor/time-sensitive projection separate. Invalidate for account/source/
   cohort, parser/schema/settings, backfill/replacement, resets, moving windows and
   expiry; unchanged token counts alone are not a valid cache key.
+  Evaluation-local sorted workload prefixes and bounded feature reuse are
+  implemented, preserving enclosing-origin collection cutoffs and invalidating on
+  late evidence or replacement inputs. Persistent numeric fit recovery remains
+  in the existing cache. Full suite: 674 passed; Windows build/install passed.
+  Evidence/maturity scheduling and overlapping dataset
+  reads remain open; this item is not yet complete.
 - [x] **PERF-008 — Bound maintenance and queries.** Put legacy privacy scrubs under
   durable migration ownership and enforce privacy in writers. Guard initialization
   with database-replacement recovery. Inspect fleet/reset/cache-stamp query plans;

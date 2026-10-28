@@ -189,6 +189,52 @@ public sealed class BackgroundTelemetryCoordinatorTests
         }
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CalibrationFreshnessIncludesStorageReplacementEvenWhenRevisionIsEqual(bool replace)
+    {
+        string directory = Directory.CreateTempSubdirectory("tajstokens-worker-generation-").FullName;
+        using var lifetime = new CancellationTokenSource();
+        var intelligence = new ControlledIntelligence();
+        intelligence.Release.TrySetResult();
+        var calibration = new ControlledCalibration();
+        var tokens = new GenerationTokens();
+        try
+        {
+            var coordinator = new TelemetryCoordinator(tokens, new ChangingQuota(),
+                new SqliteTelemetryRepository(Path.Combine(directory, "test.db")), intelligenceService: intelligence,
+                calibrationService: calibration);
+            await coordinator.RefreshAsync(RefreshTrigger.Startup, lifetime.Token);
+            await calibration.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Task pending = coordinator.CalibrationCompletion;
+            if (replace) tokens.Generation = "replacement";
+            await coordinator.RefreshAsync(RefreshTrigger.Interval, lifetime.Token);
+            Assert.Equal(7, coordinator.Latest.TokenGeneration!.Revision);
+            Assert.Equal(tokens.Generation, coordinator.Latest.TokenGeneration.StorageGeneration);
+            calibration.Result.TrySetResult(new CodexCalibrationResult([], new TokenWorkloadForecast(
+                DateTimeOffset.UtcNow, null, 0, 0, [], "fixture")));
+            await pending.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(replace, coordinator.Latest.TokenForecast!.IsStale);
+            await coordinator.BackgroundForecastCompletion.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            lifetime.Cancel();
+            calibration.Result.TrySetResult(null);
+            SqliteConnection.ClearAllPools();
+            Directory.Delete(directory, true);
+        }
+    }
+
+    private sealed class GenerationTokens : ICodexTokenAccountingProvider
+    {
+        public string Generation { get; set; } = "original";
+        public Task<CodexTokenAccountingSnapshot> GetSnapshotAsync(CancellationToken token) =>
+            Task.FromResult(new CodexTokenAccountingSnapshot("fixture", "fixture", [], [], Revision: 7)
+            { StorageGeneration = Generation });
+    }
+
     private sealed class ControlledCalibration : ICodexCalibrationService
     {
         public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);

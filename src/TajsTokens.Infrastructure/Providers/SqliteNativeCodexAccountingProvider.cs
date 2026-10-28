@@ -41,6 +41,7 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
     private AccountingStamp? _cachedStamp;
     private bool _revisionStoreInitialized;
     private string? _databaseIdentity;
+    private string? _storageGeneration;
 
     public async Task<CodexTokenAccountingSnapshot> GetSnapshotAsync(CancellationToken cancellationToken)
     {
@@ -62,6 +63,7 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
                 SqliteConnection.ClearPool(oldReader);
                 SqliteConnection.ClearPool(oldWriter);
                 _databaseIdentity = identity;
+                _storageGeneration = Guid.NewGuid().ToString("N");
             }
             await EnsureRevisionStoreAsync(cancellationToken).ConfigureAwait(false);
 
@@ -99,7 +101,7 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
                 usage,
                 hourly,
                 AsOfUtc: asOfUtc,
-                Revision: stamp.Revision);
+                Revision: stamp.Revision) { StorageGeneration = _storageGeneration };
             _cachedStamp = stamp;
             _cachedSnapshot = snapshot;
             work?.Complete(rows: usage.Count + hourly.Count, committedTransactions: 1, cacheHits: 0);

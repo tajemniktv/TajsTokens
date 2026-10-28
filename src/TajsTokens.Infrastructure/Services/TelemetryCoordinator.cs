@@ -403,7 +403,7 @@ public sealed class TelemetryCoordinator
                         accounting.AsOfUtc,
                         accounting.Revision,
                         accounting.Reconciliation,
-                        accounting.Diagnostic);
+                        accounting.Diagnostic) { StorageGeneration = accounting.StorageGeneration };
                 }
                 else if (tokenGeneration is not null)
                 {
@@ -683,6 +683,7 @@ public sealed class TelemetryCoordinator
                 }
                 bool sameTokens = basis.TokenGeneration is { Revision: { } before } &&
                     latest.TokenGeneration is { Revision: { } after } && before == after &&
+                    basis.TokenGeneration.StorageGeneration == latest.TokenGeneration.StorageGeneration &&
                     basis.TokenGeneration.Source == latest.TokenGeneration.Source && latest.TokenDataFresh;
                 var updated = latest with
                 {

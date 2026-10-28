@@ -388,3 +388,57 @@ Validation: 671 Core tests passed, Windows app build/install passed with zero wa
 or errors, and the offline reporter built successfully. The installed version was
 replaced by this instrumented build. Qodo review could not complete because its
 service returned an API compatibility failure; no Qodo coverage is claimed.
+
+## Workload replay preparation
+
+The existing evaluation-local replay cache now owns one sorted input preparation
+and an indexed, bounded feature cache. It uses binary prefix views for timely
+evidence and filters late/unknown collection times where needed. The existing
+feature builder, prequential fit, selection and uncertainty calculations still
+own the answers. Numeric feature retention is capped at 8,192 entries; hitting
+the cap falls back to computation, not truncated history.
+
+Historical workload features retain the existing semantics: they reconstruct an
+earlier event-time origin from evidence available at the enclosing prediction
+origin. A collected-by-origin replay does not silently become a different
+historical training model. Timely observations cannot alter earlier features as
+that enclosing cutoff advances; newly available late evidence advances a
+conservative generation and invalidates feature reuse. Unknown capture stays
+excluded. Reconstructed and collection-qualified inputs use separate keys.
+Replacing any source feature list rebuilds preparation even at identical counts.
+This scope retains no raw dataset across refreshes or worker exits. Existing
+exact-input durable numeric fits continue to preserve interrupted-slice progress.
+
+A synthetic comparison loaded the installed pre-change Core assembly and the new
+assembly in separate processes. Both used the existing shared replay cache, the
+same 360 timely token observations, 90 metadata rows, 40 chronological prediction
+origins, two horizons and a two-origin warmup. All 80 serialized predictions had
+the same SHA-256 in both binaries. First order: 107,931,232 -> 72,213,528 allocated
+bytes and 372.90 -> 233.64 ms. Reversed process order: 107,931,232 -> 73,948,728 bytes
+and 555.43 -> 399.91 ms. That is 31–33% fewer allocated bytes and 28–37% less elapsed
+time in this bounded synthetic fixture. It does not establish the same improvement
+for the retained 120-day installed corpus or lower steady private commit. The
+local reflection probe and aggregate outputs are in `.codex/temp/stage1/`.
+
+Regression coverage compares cached and independent predictions across horizons,
+reverse origins, late token/metadata/context collection, unknown collection times
+and same-count model/value replacement. Existing chronological model/backtest
+tests remain part of the full Core suite.
+
+An additional freshness correction carries an opaque process-local storage
+generation from the native projection into coordinator token provenance. Database
+replacement can reuse a revision number; a delayed calibration must then mark its
+workload stale. Tests cover equal revisions with and without replacement and the
+real physical-replacement provider path. This identity is not a durable evidence
+identifier and does not change retained accounting.
+
+PERF-007 remains open for evidence/maturity scheduling and overlapping dataset
+read reuse. PERF-001 retains its scenario/physical-I/O/numerical-budget gate.
+
+Validation for this slice: all 674 Core tests passed (none skipped); the serial
+Windows solution build/install completed in 59.45 seconds with zero warnings or
+errors and restarted the installed app as PID 14172. Computer Use was stopped by
+the user before the additional first-frame capture, so no new UI timing result is
+claimed. The initial full-suite run exposed two comparisons that included distinct
+opaque fixture-database identities; those now assert different identities and
+compare the accounting payload separately. The final full-suite run passed.

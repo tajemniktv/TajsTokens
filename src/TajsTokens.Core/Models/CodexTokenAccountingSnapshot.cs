@@ -19,7 +19,11 @@ public sealed record CodexTokenAccountingSnapshot(
     bool IsFallback = false,
     string? Diagnostic = null,
     DateTimeOffset? AsOfUtc = null,
-    long? Revision = null);
+    long? Revision = null)
+{
+    // Opaque process-local storage identity. Restored databases can reuse revision numbers.
+    public string? StorageGeneration { get; init; }
+}
 
 /// <summary>
 ///     Content-free comparison between the native projection and the optional Tokscale reference.

@@ -46,6 +46,7 @@ public sealed record TokenAccountingGenerationState(
     CodexAccountingReconciliation? Reconciliation = null,
     string? Diagnostic = null)
 {
+    public string? StorageGeneration { get; init; }
     public bool IsFresh => State == TelemetryHealthState.Live;
     public bool IsFallback => Quality == TelemetryDataQuality.Fallback;
 }
