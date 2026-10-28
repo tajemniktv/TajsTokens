@@ -223,6 +223,19 @@ Planning. More than four active joint coordinates remain unsupported; infeasible
 unbounded and numerically uncertain results are preserved. Source notes document
 the declared numerical tolerance and independent exact-rational checks.
 
+## Recent joint continuation research
+
+To inspect the fixed 30-minute/two-hour joint continuation context comparison:
+
+```powershell
+dotnet run --project tools/TajsTokens.ForecastEvaluation -c Debug --no-build --no-restore -- --continuation-contexts-strict "$env:LOCALAPPDATA/Programs/TajemnikTV/TajsTokens/data/telemetry.db" 2026-10-22T00:00:00Z 2026-10-28T16:40:00Z
+```
+
+`--continuation-contexts` gives reconstructed replay instead. These read-only
+reports keep availability, matched targets, local-token errors and composition
+errors separate. Neither chooses a released context default. See the
+[continuation contract and fixed comparisons](source-notes/STAGE6_CONTINUATION.md).
+
 ## Daily installation
 
 A successful default local app build publishes, installs and restarts `%LOCALAPPDATA%\Programs\TajemnikTV\TajsTokens\current`. Persistent database/settings live in sibling `data`; the prior binary is kept in `previous`, and deployment backups are in `backups`. The build does not delete `data`.

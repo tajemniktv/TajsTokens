@@ -43,6 +43,14 @@ internal sealed class CodexForecastFeatureIndex
         => BuildCore(origin, lookbackHours, availability,
             availability == ForecastReplayAvailability.CollectedByOrigin ? origin : null);
 
+    internal CodexPredictiveTokenEvent[] TokenWindow(DateTimeOffset origin, double contextHours, ForecastReplayAvailability availability)
+    {
+        if (!double.IsFinite(contextHours) || contextHours <= 0 || contextHours > 168) throw new ArgumentOutOfRangeException(nameof(contextHours));
+        return _tokens[Through(_tokenTimes, origin.AddHours(-contextHours))..Through(_tokenTimes, origin)]
+            .Where(x => availability == ForecastReplayAvailability.ReconstructedEventTime || x.Row.CapturedAtUtc <= origin)
+            .OrderBy(x => x.Ordinal).Select(x => x.Row).ToArray();
+    }
+
     // Token replay has always reconstructed historical features from evidence available at
     // the enclosing prediction origin. Do not silently substitute each historical origin's
     // collection cutoff, which would change its training contract.

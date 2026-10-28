@@ -805,10 +805,16 @@ supported recent-work requests into the existing Planning flow.
 Owners: workload/composition helpers, forecast/scenario owner, `ICodexIntelligence`,
 shared projection and the existing Planning page; no duplicate planner/estimator.
 
-- [ ] **FORE-001 — Define continuation inputs.** Separate observation interval, recent
+- [x] **FORE-001 — Define continuation inputs.** Separate observation interval, recent
   context, training span and horizon. Specify joint mixture/intensity and included
   tool waits/idle time. Compare a small fixed set of existing recent/time-weighted
   contexts; do not globally change two hours to twelve or assume future sleep.
+  The existing composition owner now provides a joint elapsed-context continuation
+  and receipt with separate observation/training/horizon clocks. Matched 30-minute/
+  two-hour context comparisons cover both fixed ranges and availability modes;
+  the recent shorter-context signal is mixed with availability/older-period limits.
+  Both continue into FORE-002/005; the released default is unchanged.
+  [Contract, counts, errors and installed parity](docs/source-notes/STAGE6_CONTINUATION.md).
 - [ ] **FORE-002 — Evaluate one joint-path challenger.** Compare corrected direct
   pace, recent joint-workload continuation through supported conversion and a small
   contiguous-block resampling candidate. Preserve pairings, bursts/pauses and volume/
@@ -917,11 +923,11 @@ provider scope and answer-specific eligibility slices have their stated installe
 evidence. **PACE-001–004** implement and evaluate the elapsed-time correction.
 Stage 4's **SCORE-001–003** joint projection, frozen basis/archive and qualified
 scoring are installed. **CAT-001** discovery and picker interaction are verified,
-including hidden-dashboard input restoration. The latest full suite passed 859
+including hidden-dashboard input restoration. The latest full suite passed 866
 tests and the Windows build installed successfully; user visual acceptance remains
 separate.
 
-**Continue with Stage 6 / FORE-001.** The user selected the exact
+**Continue with Stage 6 / FORE-002.** The user selected the exact
 [price policy and frozen TT basis](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md).
 CAT-002 and D-01 are integrated and installed: immutable selections, independent
 price imports, measured TT and explicit original-score saving. Automated checks,
@@ -933,8 +939,9 @@ meter mismatches. CAL-002's restrained joint challenger is installed in explicit
 research, with mixed chronological results and unchanged live selection. CAL-003/004
 are installed: bounded conditional scenario diagnostics, explicit refusals and
 separate uncertainty types/metrics. Independent numerical checks and the user's
-manual summary/details check pass. Stage 6 must define continuation intervals and
-evaluate bounded joint-path candidates before changing a default or live selection.
+manual summary/details check pass. FORE-001's explicit continuation contract and
+matched context comparison are installed, with unchanged defaults. FORE-002 now
+evaluates a bounded joint-path challenger before any changed default or live selection.
 Programme-wide acceptance gates, user visual acceptance and the PERF-001
 resource-budget decision remain open.
 

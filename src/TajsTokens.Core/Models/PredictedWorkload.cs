@@ -19,4 +19,6 @@ public sealed record PredictedWorkload(
 {
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public CodexJointWorkload? JointWorkload { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public WorkloadContinuationReceipt? Continuation { get; init; }
 }
