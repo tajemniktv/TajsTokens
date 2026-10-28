@@ -18,11 +18,19 @@ namespace TajsTokens.Core.Services;
 /// </summary>
 public static class QuotaPaceModels
 {
+    public const string ProductionFallback = "time-ewma-2h";
+    public const string CalculationVersion = "quota-pace-calculation/v1";
     public static readonly string[] Candidates =
     [
         "persistence", "legacy-ewma", "time-ewma-2h", "time-ewma-6h", "epoch", "recent-30m", "recent-2h", "recent-6h", "recent-24h",
         "damped-2h", "damped-6h",
     ];
+
+    // Legacy remains an explicit research comparator, never a selectable production model.
+    public static IReadOnlyList<string> ProductionCandidates { get; } =
+        Array.AsReadOnly(Candidates.Where(x => x != "legacy-ewma").ToArray());
+
+    public static bool IsProductionEligible(string model) => ProductionCandidates.Contains(model);
 
     public static double ProjectRemaining(IReadOnlyList<QuotaSnapshot> epoch, string model, double leadHours)
     {
@@ -42,8 +50,13 @@ public static class QuotaPaceModels
     }
 
     public static double Estimate(IReadOnlyList<QuotaSnapshot> epoch, string model)
+        => Measure(epoch, model).Rate;
+
+    private sealed record Measurement(double Rate, double Numerator, double Hours, int First, int Intervals);
+
+    private static Measurement Measure(IReadOnlyList<QuotaSnapshot> epoch, string model)
     {
-        if (epoch.Count < 2 || model == "persistence") return 0;
+        if (epoch.Count < 2 || model == "persistence") return new(0, 0, 0, 0, 0);
         QuotaSnapshot latest = epoch[^1];
         if (model is "time-ewma-2h" or "time-ewma-6h")
         {
@@ -52,6 +65,7 @@ public static class QuotaPaceModels
             double tau = model == "time-ewma-2h" ? 2d : 6d;
             double weightedMovement = 0d;
             double exposure = 0d;
+            int intervals = 0;
             for (int i = 1; i < epoch.Count; i++)
             {
                 double hours = (epoch[i].CapturedAtUtc - epoch[i - 1].CapturedAtUtc).TotalHours;
@@ -60,8 +74,9 @@ public static class QuotaPaceModels
                 double weight = Math.Exp(-age / tau) * tau * (1 - Math.Exp(-hours / tau));
                 weightedMovement += Math.Max(0, epoch[i].UsedPercent!.Value - epoch[i - 1].UsedPercent!.Value) / hours * weight;
                 exposure += weight;
+                intervals++;
             }
-            return exposure > 0 ? weightedMovement / exposure : 0;
+            return new(exposure > 0 ? weightedMovement / exposure : 0, weightedMovement, exposure, 0, intervals);
         }
         if (model == "legacy-ewma")
         {
@@ -74,7 +89,7 @@ public static class QuotaPaceModels
                 double next = Math.Max(0, (epoch[i].UsedPercent!.Value - epoch[i - 1].UsedPercent!.Value) / hours);
                 rate = rate is null ? next : alpha * next + (1 - alpha) * rate;
             }
-            return rate ?? 0;
+            return new(rate ?? 0, 0, 0, 0, epoch.Count - 1); // Legacy has no production calculation receipt.
         }
         double lookback = model switch
         {
@@ -86,14 +101,48 @@ public static class QuotaPaceModels
             _ => throw new ArgumentException("Unknown pace model", nameof(model)),
         };
         QuotaSnapshot first = epoch[0];
+        int firstIndex = 0;
         // Include the observation bracketing the lookback, rather than interpolating a
         // fictitious meter observation or dividing a full delta by a truncated duration.
-        foreach (QuotaSnapshot point in epoch.Take(epoch.Count - 1))
+        for (int i = 0; i < epoch.Count - 1; i++)
         {
-            if ((latest.CapturedAtUtc - point.CapturedAtUtc).TotalHours >= lookback) first = point;
+            QuotaSnapshot point = epoch[i];
+            if ((latest.CapturedAtUtc - point.CapturedAtUtc).TotalHours >= lookback) { first = point; firstIndex = i; }
             else break;
         }
         double elapsed = (latest.CapturedAtUtc - first.CapturedAtUtc).TotalHours;
-        return elapsed > 0 ? Math.Max(0, (latest.UsedPercent!.Value - first.UsedPercent!.Value) / elapsed) : 0;
+        double movement = Math.Max(0, latest.UsedPercent!.Value - first.UsedPercent!.Value);
+        return new(elapsed > 0 ? movement / elapsed : 0, movement, elapsed, firstIndex, epoch.Count - firstIndex - 1);
+    }
+
+    public static QuotaPaceReceipt Receipt(IReadOnlyList<QuotaSnapshot> inputs, QuotaSnapshot anchor,
+        DateTimeOffset generatedAtUtc, string model, string reason, bool supported)
+    {
+        if (!IsProductionEligible(model)) throw new ArgumentException("Ineligible production pace model.", nameof(model));
+        var measurement = supported ? Measure(inputs, model) : new Measurement(0, 0, 0, 0, 0);
+        DateTimeOffset from = inputs.Count > 0 ? inputs[measurement.First].CapturedAtUtc : anchor.CapturedAtUtc;
+        DateTimeOffset to = inputs.Count > 0 ? inputs[^1].CapturedAtUtc : anchor.CapturedAtUtc;
+        double? clock = anchor.ResetsAtUtc is { } reset && reset > generatedAtUtc ? (reset - generatedAtUtc).TotalHours : null;
+        double? remaining = anchor.UsedPercent is { } used && double.IsFinite(used) && used is >= 0 and <= 100
+            ? anchor.RemainingPercent : null;
+        int unknownCollection = 0, laterCollected = 0;
+        for (int i = measurement.First; i < inputs.Count; i++)
+        {
+            if (inputs[i].CollectedAtUtc is null) unknownCollection++;
+            if (inputs[i].CollectedAtUtc > (inputs[i].ReplayMeasuredAtUtc ?? inputs[i].CapturedAtUtc)) laterCollected++;
+        }
+        return new(CalculationVersion, model, ProductionFallback, reason, QuotaHistoryPolicy.Cohort(anchor), anchor.ObservationId,
+            anchor.CapturedAtUtc, anchor.HasSourceTimestamp ? anchor.ReplayMeasuredAtUtc ?? anchor.CapturedAtUtc : null,
+            anchor.CollectedAtUtc, generatedAtUtc, from, to, inputs.Count - measurement.First, measurement.Intervals,
+            unknownCollection, laterCollected, supported,
+            supported && measurement.Hours > 0 ? measurement.Numerator : null,
+            supported && measurement.Hours > 0 ? measurement.Hours : null, supported ? measurement.Rate : null,
+            remaining, clock, clock is { } hours ? remaining / hours : null,
+            "Installation-observed compatible meter lane; not local-work attribution or proof of account completeness. " +
+            "Observed integer steps have rounding/lag uncertainty; no exact consumption or calibrated probability is inferred. " +
+            "Fresh later flat readings add elapsed exposure; same-clock cached copies add no interval. " +
+            "Collection-qualified replay can move the effective clock; the original measurement time is retained separately. " +
+            (model == "persistence" ? "Persistence predicts no displayed movement, not measured zero burn." :
+                "Rate spreads displayed movement over observation intervals; unknown backend delay remains unresolved."));
     }
 }

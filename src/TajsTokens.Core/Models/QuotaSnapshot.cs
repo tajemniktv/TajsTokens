@@ -31,6 +31,10 @@ public sealed record QuotaSnapshot(
     public DateTimeOffset? CollectedAtUtc { get; init; }
     public bool HasSourceTimestamp { get; init; }
 
+    /// <summary>Ephemeral replay provenance when collection qualification moves the effective clock.</summary>
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? ReplayMeasuredAtUtc { get; init; }
+
     public double? RemainingPercent => UsedPercent is null
         ? null
         : Math.Clamp(100d - UsedPercent.Value, 0d, 100d);

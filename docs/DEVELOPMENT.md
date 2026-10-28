@@ -51,10 +51,36 @@ dotnet run --project tools/TajsTokens.ForecastEvaluation/TajsTokens.ForecastEval
 
 Use an existing app-owned numeric snapshot or substitute the installed telemetry
 path above; the fixture path is local and is not distributed. The full study now
-identifies itself as `forecast-threshold-study/v2-eligibility` because its formerly
-combined workload reason is split into explicit combinations. This changes
-diagnostics, not forecast thresholds or model selection. Historical v1 artifacts
-remain historical results.
+identifies itself as `forecast-threshold-study/v3-eligible-pace`; eligibility is
+`forecast-eligibility/v2-pace-boundaries`. V2 split the formerly combined workload
+reason; the current versions also preserve intervening plan/window boundaries and
+use the repaired production pace eligibility. Historical v1/v2 artifacts retain
+their original policies and results.
+
+## Pace validation
+
+Use the same explicit past UTC range with `--pace-validation`:
+
+```powershell
+dotnet run --project tools/TajsTokens.ForecastEvaluation/TajsTokens.ForecastEvaluation.csproj -c Debug --no-build --no-restore -- --pace-validation .codex/temp/stage1/worker-fixture/telemetry.db 2026-09-27T00:00:00Z 2026-10-27T14:58:00Z > .codex/temp/stage3-pace-validation.json
+```
+
+Substitute an existing app-owned snapshot or the installed telemetry path; no
+fixture is distributed. This read-only report compares predefined pace candidates
+at 5/15/30/120-minute, eligible 24-hour and near-reset targets, reserving the final
+fifth of origins for later-period comparison. Fixed-horizon rows are arithmetic
+candidate comparisons, rather than the complete workload/composed selector;
+`production-reset` replays the actual repaired reset selector. Local active/burst/
+quiet/missing-evidence states and reset-lead partitions remain separate. They do
+not assign local work to the quota account or prove idleness.
+
+Point/band availability, missing targets, signed error, MAE/RMSE, missed observed
+movement and non-overlapping support have explicit denominators. Positive signed
+error is optimistic remaining allowance. Use `overall` rows for cohort-wide
+support; do not add their counts to partitions or sum non-overlapping support across
+state/lead groups. The command changes no observations, settings or selected model.
+See [the Stage 3 evidence](source-notes/STAGE3_PACE_VALIDATION.md) for assumptions,
+current results, policy versions and remaining limits.
 
 ## Ingestion performance fixtures
 

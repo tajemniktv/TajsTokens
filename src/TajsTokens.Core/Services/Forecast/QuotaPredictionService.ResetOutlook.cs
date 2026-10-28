@@ -14,7 +14,7 @@ namespace TajsTokens.Core.Services;
 // Reset-horizon head of the forecast owner; short-horizon competition remains in the other partial.
 public static partial class QuotaPredictionService
 {
-    public const string ResetOutlookPolicyVersion = "quota-walk-forward/v4";
+    public const string ResetOutlookPolicyVersion = "quota-walk-forward/v5-elapsed-pace";
 
     public static Forecast BuildResetOutlook(IReadOnlyList<QuotaSnapshot> snapshots, DateTimeOffset nowUtc,
         CancellationToken cancellationToken = default, ForecastEvaluationOptions? options = null)
@@ -29,9 +29,9 @@ public static partial class QuotaPredictionService
         Dictionary<string, IReadOnlyList<QuotaForecastTrial>>? paceTrials)
     {
         options = (options ?? ForecastEvaluationOptions.Default).Validate();
-        var candidates = paceTrials ?? QuotaPaceModels.Candidates.ToDictionary(model => model,
+        var candidates = paceTrials ?? QuotaPaceModels.ProductionCandidates.ToDictionary(model => model,
             model => QuotaForecastCalibration.Replay(stream, model, null, token, options));
-        IReadOnlyList<QuotaForecastTrial> adaptive = QuotaForecastCalibration.ReplayAdaptive(candidates, "legacy-ewma", options);
+        IReadOnlyList<QuotaForecastTrial> adaptive = QuotaForecastCalibration.ReplayAdaptive(candidates, QuotaPaceModels.ProductionFallback, options);
         return origins.ToDictionary(origin => origin, origin => BuildResetOutlookCore(
             stream.Where(x => x.CapturedAtUtc <= origin).ToArray(), origin, token, options, candidates, adaptive));
     }
@@ -51,7 +51,7 @@ public static partial class QuotaPredictionService
             throw new ArgumentException("Forecast snapshots must belong to one quota window/provider/profile.", nameof(snapshots));
         string model = QuotaForecastCalibration.DefaultModel(latest);
 
-        ForecastEvidence Evidence(int count, double hours, string description)
+        ForecastEvidence Evidence(int count, double hours, string description, IReadOnlyList<QuotaSnapshot>? inputs = null)
         {
             return new ForecastEvidence(
                 ResetOutlookPolicyVersion,
@@ -69,6 +69,7 @@ public static partial class QuotaPredictionService
                 AnchorLimitId = QuotaHistoryPolicy.Cohort(latest).LimitId,
                 AnchorPlanType = latest.PlanType,
                 HistoryPolicy = QuotaHistoryPolicy.Version,
+                PaceReceipt = QuotaPaceModels.Receipt(inputs ?? [latest], latest, nowUtc, model, description, false),
             };
         }
 
@@ -89,7 +90,7 @@ public static partial class QuotaPredictionService
             return Unknown("The current meter is missing or invalid.", support: ForecastSupportReason.MissingMeter);
         if (latest.ResetsAtUtc is not DateTimeOffset reset || reset <= nowUtc)
             return Unknown("A future authoritative reset is required; expired generations are not extended.", support: ForecastSupportReason.MissingOrExpiredReset);
-        if (nowUtc - latest.CapturedAtUtc > TimeSpan.FromHours(6))
+        if (nowUtc - (latest.ReplayMeasuredAtUtc ?? latest.CapturedAtUtc) > TimeSpan.FromHours(6))
             return Unknown("The anchor is too old for a current pace projection.", support: ForecastSupportReason.StaleMeter);
         double remaining = latest.RemainingPercent!.Value;
         double hoursToReset = (reset - nowUtc).TotalHours;
@@ -97,14 +98,14 @@ public static partial class QuotaPredictionService
 
         // A rate never bridges distinct source lanes. Drops/invalid values/metadata changes
         // terminate the whole segment. Reused reset identities cannot resurrect old slopes.
-        QuotaSnapshot[] stream = eligible.Where(x => QuotaHistoryPolicy.Cohort(x) == QuotaHistoryPolicy.Cohort(latest)).ToArray();
+        QuotaSnapshot[] stream = QuotaHistoryPolicy.PaceRows(eligible, QuotaHistoryPolicy.Cohort(latest));
         IReadOnlyList<QuotaSnapshot>? epoch = QuotaForecastCalibration.SplitEpochs(stream).LastOrDefault();
         if (epoch is null || epoch[^1] != latest) return Unknown("No unambiguous current segment is available.", sustainable);
         double observedHours = (latest.CapturedAtUtc - epoch[0].CapturedAtUtc).TotalHours;
         ForecastEvidence evidence = Evidence(
             epoch.Count,
             observedHours,
-            "Conditional pace projection, not an exhaustion probability. Too few completed same-source reset generations at comparable lead to calibrate uncertainty.");
+            "Conditional pace projection, not an exhaustion probability. Too few completed same-source reset generations at comparable lead to calibrate uncertainty.", epoch);
         if (remaining <= 0)
             return new Forecast(
                 latest.Kind,
@@ -119,6 +120,7 @@ public static partial class QuotaPredictionService
                 Evidence: evidence with
                 {
                     UncertaintyDescription = "The current provider meter is already exhausted; this is not a predicted future ETA.",
+                    PaceReceipt = QuotaPaceModels.Receipt(epoch, latest, nowUtc, model, "The reported meter is already exhausted; no future rate or ETA is estimated.", false),
                 });
         if (epoch.Count < 2 || observedHours < 0.25)
             return new Forecast(
@@ -134,6 +136,7 @@ public static partial class QuotaPredictionService
                     UncertaintyDescription =
                     "Learning: at least 15 minutes of compatible same-source observations are needed. Poll count alone is not independent evidence.",
                     SupportReasons = ForecastSupportReason.InsufficientHistory,
+                    PaceReceipt = QuotaPaceModels.Receipt(epoch, latest, nowUtc, model, "Less than 15 minutes of compatible elapsed history; poll count cannot replace exposure.", false),
                 });
         bool flat = epoch.All(x => Math.Abs(x.UsedPercent!.Value - used) < 0.000001);
         if (flat)
@@ -153,17 +156,16 @@ public static partial class QuotaPredictionService
                     UncertaintyDescription =
                     "No movement is visible at meter precision. Neither exact zero burn nor survival until reset is established.",
                     SupportReasons = ForecastSupportReason.FlatMeter,
+                    PaceReceipt = QuotaPaceModels.Receipt(epoch, latest, nowUtc, model, "All readings are flat within meter precision; neither measured zero burn nor survival is established.", false),
                 });
 
         double lead = (reset - latest.CapturedAtUtc).TotalHours;
-        Dictionary<string, IReadOnlyList<QuotaForecastTrial>> candidates = replayCandidates ?? QuotaPaceModels.Candidates.ToDictionary(
+        Dictionary<string, IReadOnlyList<QuotaForecastTrial>> candidates = replayCandidates ?? QuotaPaceModels.ProductionCandidates.ToDictionary(
             candidate => candidate,
             candidate => QuotaForecastCalibration.Replay(stream, candidate, null, cancellationToken, options));
-        model = QuotaForecastCalibration.SelectModel(candidates, latest.CapturedAtUtc, reset, lead, model, options);
+        var selection = QuotaForecastCalibration.SelectModelDetailed(candidates, latest.CapturedAtUtc, reset, lead, model, options);
+        model = selection.Model;
         double rate = QuotaPaceModels.Estimate(epoch, model);
-        double elapsed = Math.Max(0, (nowUtc - latest.CapturedAtUtc).TotalHours);
-        double remainingNow = QuotaPaceModels.ProjectRemaining(epoch, model, elapsed);
-        sustainable = remainingNow / hoursToReset;
         double? pressure = sustainable > 0 ? rate / sustainable : null;
         double margin = QuotaPaceModels.ProjectRemaining(epoch, model, lead);
         bool survives = margin > 0 || rate <= 0;
@@ -185,6 +187,7 @@ public static partial class QuotaPredictionService
         evidence = evidence with
         {
             Model = model,
+            PaceReceipt = QuotaPaceModels.Receipt(epoch, latest, nowUtc, model, selection.Reason, true),
             SupportReasons = radius is null ? ForecastSupportReason.InsufficientIntervalEvidence : ForecastSupportReason.None,
             CalibrationEpochs = errors.Count,
             HistoricalAbsoluteErrorPercent = errors.Count > 0 ? errors.Average() : null,

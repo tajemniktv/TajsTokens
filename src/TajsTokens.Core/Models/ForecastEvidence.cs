@@ -27,6 +27,8 @@ public sealed record ForecastEvidence(
     public string? AnchorPlanType { get; init; }
     public string? HistoryPolicy { get; init; }
     public CodexInferenceManifest? InferenceManifest { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public QuotaPaceReceipt? PaceReceipt { get; init; }
 }
 
 /// <summary>Conditional meter-level prediction. Bands describe held-out errors, not exhaustion probability.</summary>
@@ -47,6 +49,8 @@ public sealed record QuotaHorizonPrediction(
 {
     public ForecastSupportReason SupportReasons { get; init; }
     public CodexNumericInference? Inference { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public QuotaPaceReceipt? PaceReceipt { get; init; }
 }
 
 /// <summary>Exact selected numeric calculation, not training data or a claim of causal feature weights.</summary>

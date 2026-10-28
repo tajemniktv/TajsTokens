@@ -12,7 +12,7 @@ namespace TajsTokens.Core.Services;
 
 public static class QuotaCostObservationBuilder
 {
-    public const string Version = "quota-cost-observations/v3";
+    public const string Version = "quota-cost-observations/v4-elapsed-pace";
 
     public const string CoverageBoundary =
         "Construction counts eligible-epoch interior start candidates, not raw quota readings or independent outcomes. " +
@@ -40,8 +40,10 @@ public static class QuotaCostObservationBuilder
         var coverage = new List<QuotaCostConstructionCoverage>();
         CodexForecastFeatureIndex? featureIndex = null;
         IReadOnlyList<QuotaHistoryDecision> history = QuotaHistoryPolicy.Describe(data.Quota, data.CapturedAtUtc);
+        var meterRows = QuotaHistoryPolicy.ReplayRows(history).ToLookup(x => QuotaHistoryPolicy.MeterIdentity(QuotaHistoryPolicy.Cohort(x)));
         foreach (IGrouping<QuotaHistoryCohort, QuotaHistoryDecision> stream in QuotaHistoryPolicy.Streams(history))
-        foreach (IReadOnlyList<QuotaSnapshot> epoch in QuotaForecastCalibration.SplitEpochs(QuotaHistoryPolicy.ReplayRows(stream)))
+        foreach (IReadOnlyList<QuotaSnapshot> epoch in QuotaForecastCalibration.SplitEpochs(
+                     QuotaHistoryPolicy.PaceRows(meterRows[QuotaHistoryPolicy.MeterIdentity(stream.Key)], stream.Key)))
         foreach (double horizon in horizons ?? [0.5, 2d])
         {
             DateTimeOffset? previousEnd = null;
@@ -183,7 +185,7 @@ public static class QuotaCostObservationBuilder
                         lower,
                         upper,
                         rounded ? "app-server-rounding-envelope" : "unknown-precision-1pp-endpoint-sensitivity",
-                        start.RemainingPercent!.Value - QuotaPaceModels.ProjectRemaining(prefix, "legacy-ewma", hours),
+                        start.RemainingPercent!.Value - QuotaPaceModels.ProjectRemaining(prefix, QuotaPaceModels.ProductionFallback, hours),
                         categories,
                         features,
                         runtime.Length > 0 ? runtime.Average(x => (double)x.TimeToFirstTokenMilliseconds!.Value) : null,

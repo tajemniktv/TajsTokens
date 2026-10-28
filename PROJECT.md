@@ -577,28 +577,55 @@ Owners: `QuotaPaceModels`, `QuotaForecastCalibration`, forecast/reset-outlook ow
 and shared intelligence presentation. Keep prediction accuracy separate from repair
 of the known observation/polling defect.
 
-- [ ] **PACE-001 — Replace the defective production fallback.** Start from existing
+- [x] **PACE-001 — Replace the defective production fallback.** Start from existing
   recent-bracket/time-weighted candidates with elapsed-time, precision and freshness
   semantics. Retain legacy EWMA for reproducible research and exclude it from
   production eligibility after repair. Correctness and challenger promotion are
   separate gates: sparse calibration must not reactivate the invalid fallback.
   Do not hardcode the incident's rate, add an arbitrary floor or hide it with smoothing.
-- [ ] **PACE-002 — Verify observation mechanics.** Cover the retained incident,
+  **Implemented:** reset v5 and fixed-horizon v6 use the existing elapsed-time
+  `time-ewma-2h` fallback; production candidate/selector paths exclude legacy EWMA
+  even when explicitly supplied as a fallback. Explicit legacy research replay and
+  old forecast evidence remain available. Cost baseline/version tags advance with
+  the correction. Two hours remains provisional, not a universal context decision.
+- [x] **PACE-002 — Verify observation mechanics.** Cover the retained incident,
   identical endpoints/elapsed time with sparse/dense cached polls, startup, rounded
   jumps, all-flat periods, resets, stale collection and ongoing/missing local work.
   Distinguish cached duplicates from genuinely fresh later flat readings; neither
   establishes exact zero burn. State rounding/lag assumptions.
-- [ ] **PACE-003 — Carry a calculation receipt.** Include anchor/cohort, measurement/
+  **Verified:** retained incident, sparse/dense fresh flat polls, same-clock cached
+  copies, startup, all-flat/invalid/reset cases, stale measurements imported later,
+  ongoing/missing local work and source/account/bucket boundaries. Returning plan
+  regimes retain the intervening boundary rather than resurrecting an old slope;
+  independent buckets stay independent. Rounded movement is spread across observed
+  intervals; backend lag and exact physical consumption remain unknown.
+- [x] **PACE-003 — Carry a calculation receipt.** Include anchor/cohort, measurement/
   collection times, interval/counts, estimator/version, numerator/denominator,
   fallback and coverage. Explain changed answers. Sustainable budget remains
   remaining allowance divided by clock time to reset, separate from consumption.
-- [ ] **PACE-004 — Evaluate corrected defaults.** Compare later outcomes by horizon,
+  **Implemented:** closed v1 receipts persist in forecast diagnostics, round-trip
+  through the repository and appear in history/telemetry details. They reconstruct
+  rate numerator/exposure and the independent reported-remaining/clock-time budget.
+  Unsupported/invalid measurements and old captures retain explicit missingness.
+- [x] **PACE-004 — Evaluate corrected defaults.** Compare later outcomes by horizon,
   reset lead and active/burst/idle/missing-source state with availability, point and
   signed error. Preserve completed-compatible-cycle requirements for reset bands.
   Supported conditional points remain visible without invented calibrated probability.
+  **Evaluated:** read-only fixed-candidate and actual reset-selector replay at
+  5/15/30/120-minute, eligible 24-hour and near-reset targets, with later final fifth,
+  state/reset-lead partitions, availability, signed/absolute/squared error, missed
+  movement and non-overlapping support. The largest weekly cohort improves at
+  15/30/120 minutes versus legacy but worsens at 24 hours (seven matched/one
+  non-overlapping outcome); five minutes has one match and final reset truth is
+  absent there. This repairs mechanics without claiming universal accuracy or
+  selecting a new window. Completed-compatible-cycle reset bands remain unchanged.
 
 **Exit:** polling frequency cannot manufacture the reproduced decay. Report future
 accuracy separately; the incident's old high rate is not an acceptance target.
+The 774-test Core suite, Windows build, installed score reproduction and persisted
+receipt reconstruction passed. Native amounts/original chronology were preserved;
+[policy, results and limits](docs/source-notes/STAGE3_PACE_VALIDATION.md). SHIP-004
+receipt visual acceptance and PERF-001 resource acceptance remain separate.
 
 #### Stage 4 — joint workload, catalogs and a public TT basis
 
@@ -787,15 +814,22 @@ original counter-input journal, component-11 superseded numeric retention and th
 **ING-002** compressed ingestion and **EVID-002** scoped reconciliation slices.
 **EVID-003** supplies eligibility explanations and the retained 67-case breakdown;
 **EVID-004** supplies the stated retention/answer and selected-generation acceptance.
-Continue with **PACE-001–004** as a
-separate reviewable slice using the established quota contract; public TT selection
-does not block that correctness repair.
+**PACE-001–004** now implement and evaluate the elapsed-time correction under the
+established quota contract. Continue Stage 4 with **SCORE-001** joint evidence and
+the explicit public-basis/catalog decisions. No public TT ruler is activated yet.
 
 ### Existing implementation baseline and known gaps
 
 Overview keeps current account allowances above the selected history views. Date, model, project and chat filters do not erase live context or allocate account quota to filtered work. Explicit account selection never substitutes another account's current reading. The shared outlook prioritizes exhausted meters, then earliest exhaustion before reset, then pressure against each window's sustainable pace. Both reported windows need fresh supported assessments for an overall sustainable-pace conclusion; partial and unreported windows remain explicit. Reset estimates and fixed-horizon predictions retain separate targets and uncertainty.
 
-Known limitation [PACE-001](docs/source-notes/WEEKLY_PACE_INVESTIGATION.md): the reset fallback `legacy-ewma` weights each adjacent poll equally. Rounded-meter jumps can briefly inflate its rate, while unchanged polls decay it toward zero even during ongoing work. Startup polls affect that decay. Retained-anchor and ongoing-work regressions reproduce the defect; its conditional survival state is not validated by flat readings. The investigation leaves the live policy unchanged. Corrective work must address observation/poll semantics and compare later reset-horizon outcomes, rather than retain a desired old rate or equate a flat meter with idle activity.
+[PACE-001](docs/source-notes/WEEKLY_PACE_INVESTIGATION.md) is repaired by the
+[Stage 3 elapsed-time policy](docs/source-notes/STAGE3_PACE_VALIDATION.md).
+Production selection excludes legacy per-poll EWMA; its old rates remain explicit
+research evidence. Current forecasts carry calculation receipts and keep reported
+sustainable budget separate from consumption estimates. Later-period accuracy is
+still horizon-dependent: sparse five-minute/reset labels and poor long-horizon
+constant-pace extrapolation do not establish a universal window or calibrated
+survival probability. Flat meters and missing local activity never prove idleness.
 
 The tray/UI process keeps normal scheduling and has no hard CPU cap or routine forced compacting GC. EcoQoS remains a background hint with retryable native transitions exposed in Diagnostics; detailed calibration retains its separate worker budget. Typed collector completion generations coalesce supplementary fleet reads, and cached fleet status ages by clock time independently of database changes. Hidden dashboards still release their page cache and active queries/timers, retaining navigation destinations rather than selected history; PERF-004 owns preserving useful lightweight presentation state. Quota collection and alerts continue, with a full configured polling delay after each pass. Compact quota-pace outlooks remain independent of detailed calibration and never load its training dataset. Full source discovery now follows its reconciliation cadence independently of bounded pending rollout retries; a persistent failure remains explicit without forcing full discovery every poll.
 

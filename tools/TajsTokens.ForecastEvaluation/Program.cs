@@ -19,7 +19,7 @@ if (args.Length == 2 && args[0] == "--benchmark-ingestion-prefix")
     return;
 }
 
-if (args.Length == 4 && args[0] is "--threshold-study" or "--eligibility")
+if (args.Length == 4 && args[0] is "--threshold-study" or "--eligibility" or "--pace-validation")
 {
     CultureInfo.CurrentCulture = CultureInfo.InvariantCulture;
     DateTimeOffset from = DateTimeOffset.Parse(args[2], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal).ToUniversalTime();
@@ -29,7 +29,8 @@ if (args.Length == 4 && args[0] is "--threshold-study" or "--eligibility")
     using var cancellation = new CancellationTokenSource();
     Console.CancelKeyPress += (_, e) => { e.Cancel = true; cancellation.Cancel(); };
     CodexForecastDataset dataset = await new SqliteForecastDatasetReader(args[1]).ReadAsync("codex", "default", from, to, cancellation.Token);
-    object report = args[0] == "--eligibility" ? ForecastThresholdStudy.ExplainEligibility(dataset, cancellation.Token) :
+    object report = args[0] == "--pace-validation" ? ForecastThresholdStudy.ValidatePace(dataset, cancellation.Token) :
+        args[0] == "--eligibility" ? ForecastThresholdStudy.ExplainEligibility(dataset, cancellation.Token) :
         ForecastThresholdStudy.Evaluate(dataset, cancellation.Token, Console.Error.WriteLine);
     Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { requestedFromUtc = from, requestedToUtc = to, report },
         new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web) { WriteIndented = true }));

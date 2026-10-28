@@ -26,26 +26,27 @@ public sealed class WeeklyPaceRegressionTests
     }
 
     [Fact]
-    public void RetainedAnchorsReplayTheSameFallbackWithoutAnEstimatorSwitch()
+    public void RetainedLegacyRatesRemainReproducibleAsExplicitResearch()
     {
         using JsonDocument fixture = Fixture();
         QuotaSnapshot[] quota = Readings(fixture);
         foreach (JsonElement expected in fixture.RootElement.GetProperty("forecasts").EnumerateArray())
         {
             DateTimeOffset at = expected.GetProperty("capturedAtUtc").GetDateTimeOffset();
-            Forecast forecast = QuotaPredictionService.BuildResetOutlook(quota.Where(x => x.CapturedAtUtc <= at).ToArray(),
-                expected.GetProperty("generatedAtUtc").GetDateTimeOffset());
-            Assert.Equal(expected.GetProperty("model").GetString(), forecast.Evidence!.Model);
-            Assert.Equal(expected.GetProperty("policy").GetString(), forecast.Evidence.PolicyVersion);
-            Assert.Equal(expected.GetProperty("burnRatePercentPerHour").GetDouble(), forecast.BurnRatePercentPerHour!.Value, 9);
-            Assert.Equal(expected.GetProperty("sustainablePercentPerHour").GetDouble(), forecast.SustainablePercentPerHour!.Value, 9);
-            Assert.Equal(expected.GetProperty("remainingAtResetPercent").GetDouble(), forecast.ProjectedRemainingAtResetPercent!.Value, 9);
-            Assert.Equal(expected.GetProperty("observationCount").GetInt32(), forecast.Evidence.ObservationCount);
-            Assert.Equal(expected.GetProperty("observedHours").GetDouble(), forecast.Evidence.ObservedHours, 9);
-            Assert.Equal(expected.GetProperty("survivesUntilReset").GetBoolean(), forecast.SurvivesUntilReset);
-            Assert.Equal(0, forecast.Evidence.CalibrationEpochs);
-            Assert.Null(forecast.Evidence.RemainingAtResetLowerPercent);
-            Assert.Null(forecast.Evidence.RemainingAtResetUpperPercent);
+            QuotaSnapshot[] prefix = quota.Where(x => x.CapturedAtUtc <= at).ToArray();
+            Assert.Equal(expected.GetProperty("burnRatePercentPerHour").GetDouble(), QuotaPaceModels.Estimate(prefix, "legacy-ewma"), 9);
+            Assert.Equal(expected.GetProperty("remainingAtResetPercent").GetDouble(),
+                QuotaPaceModels.ProjectRemaining(prefix, "legacy-ewma", (prefix[^1].ResetsAtUtc!.Value - at).TotalHours), 9);
+            Assert.Equal(expected.GetProperty("observationCount").GetInt32(), prefix.Length);
+            Assert.Equal(expected.GetProperty("observedHours").GetDouble(), (at - prefix[0].CapturedAtUtc).TotalHours, 9);
+
+            Forecast corrected = QuotaPredictionService.BuildResetOutlook(prefix, expected.GetProperty("generatedAtUtc").GetDateTimeOffset());
+            Assert.Equal("time-ewma-2h", corrected.Evidence!.Model);
+            Assert.Equal(QuotaPaceModels.Estimate(prefix, "time-ewma-2h"), corrected.BurnRatePercentPerHour);
+            Assert.Equal(0, corrected.Evidence.CalibrationEpochs);
+            Assert.Null(corrected.Evidence.RemainingAtResetLowerPercent);
+            Assert.Null(corrected.Evidence.RemainingAtResetUpperPercent);
+            Assert.False(corrected.SurvivesUntilReset);
         }
     }
 
@@ -104,16 +105,16 @@ public sealed class WeeklyPaceRegressionTests
             CurrentQuotaForecast forecast = Assert.Single(await service.BuildBackgroundForecastsAsync(
                 [new QuotaLaneState(QuotaWindowKind.Weekly, "codex", "default", quota[^1], TelemetryHealthState.Live)],
                 quota[^1].CapturedAtUtc, default));
-            // This records the defect: a conditional legacy arithmetic result can look safe
-            // despite ongoing work. It is not a validated idle or survival conclusion.
-            Assert.Equal("legacy-ewma", forecast.Forecast!.Evidence!.Model);
-            Assert.InRange(forecast.Forecast.BurnRatePercentPerHour!.Value, .10, .11);
-            Assert.True(forecast.Forecast.SurvivesUntilReset);
+            Assert.Equal("time-ewma-2h", forecast.Forecast!.Evidence!.Model);
+            Assert.InRange(forecast.Forecast.BurnRatePercentPerHour!.Value, 2.61, 2.62);
+            Assert.False(forecast.Forecast.SurvivesUntilReset);
             Assert.False(forecast.Forecast.IsQuantizedFlat);
             Assert.Equal(0, forecast.Forecast.Confidence);
             Assert.Equal(0, forecast.Forecast.Evidence.CalibrationEpochs);
             Assert.Null(forecast.Forecast.Evidence.HorizonPredictions);
             Assert.Null(forecast.Forecast.Evidence.NominalIntervalCoverage);
+            var persisted = Assert.Single(await repository.GetRecentForecastSnapshotsAsync(QuotaWindowKind.Weekly, "codex", "default", 1, default));
+            Assert.Equal(forecast.Forecast.Evidence.PaceReceipt, persisted.Forecast.Evidence!.PaceReceipt);
 
             Forecast entirelyFlat = QuotaPredictionService.BuildResetOutlook(
                 quota.Select(x => x with { UsedPercent = 45 }).ToArray(), quota[^1].CapturedAtUtc);

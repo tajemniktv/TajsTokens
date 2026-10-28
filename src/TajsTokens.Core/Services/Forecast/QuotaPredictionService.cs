@@ -19,8 +19,8 @@ public sealed record QuotaPredictionTrial(QuotaForecastTrial Observation, QuotaH
 /// </summary>
 public static partial class QuotaPredictionService
 {
-    public const string PolicyVersion = "quota-workload/v5-blocks";
-    public const string FallbackModel = "time-ewma-2h";
+    public const string PolicyVersion = "quota-workload/v6-eligible-pace";
+    public const string FallbackModel = QuotaPaceModels.ProductionFallback;
     public const int MinimumSelectionSamples = 6;
     public const int MinimumIntervalSamples = 20;
 
@@ -33,13 +33,12 @@ public static partial class QuotaPredictionService
         if (anchor.Authority != QuotaObservationAuthority.ProviderAuthoritative || anchor.CapturedAtUtc > now ||
             now - anchor.CapturedAtUtc > TimeSpan.FromHours(6) || anchor.ResetsAtUtc is not { } reset || reset <= now ||
             anchor.UsedPercent is not { } used || !double.IsFinite(used) || used is < 0 or > 100) return [];
-        IEnumerable<QuotaSnapshot> prefix = data.Quota.Where(x => SameStream(x, anchor) && x.CapturedAtUtc < anchor.CapturedAtUtc &&
+        IEnumerable<QuotaSnapshot> prefix = data.Quota.Where(x => QuotaHistoryPolicy.SameMeter(QuotaHistoryPolicy.Cohort(x), QuotaHistoryPolicy.Cohort(anchor)) && x.CapturedAtUtc < anchor.CapturedAtUtc &&
                                                                   (x.CollectedAtUtc is null || x.CollectedAtUtc <= anchor.CapturedAtUtc))
             .Append(anchor);
         CodexForecastDataset local = data with
         {
-            Quota = QuotaHistoryPolicy.ReplayRows(
-                QuotaHistoryPolicy.Streams(QuotaHistoryPolicy.Describe(prefix, now)).SelectMany(x => x)),
+            Quota = QuotaHistoryPolicy.PaceRows(QuotaHistoryPolicy.ReplayRows(QuotaHistoryPolicy.Describe(prefix, now)), QuotaHistoryPolicy.Cohort(anchor)),
         };
         IReadOnlyList<QuotaSnapshot>? epoch = QuotaForecastCalibration.SplitEpochs(local.Quota).LastOrDefault();
         if (epoch is null || epoch[^1] != anchor || epoch.Count < 2 ||
@@ -111,13 +110,19 @@ public static partial class QuotaPredictionService
         options = (options ?? ForecastEvaluationOptions.Default).Validate();
         featureIndex ??= new CodexForecastFeatureIndex(data);
         // The caller supplies one source/account/window stream. SplitEpochs rejects mixed streams.
-        Dictionary<string, Dictionary<DateTimeOffset, QuotaForecastTrial>> models = QuotaPaceModels.Candidates.ToDictionary(
+        Dictionary<string, Dictionary<DateTimeOffset, QuotaForecastTrial>> models = QuotaPaceModels.ProductionCandidates.ToDictionary(
             model => model,
             model => (paceTrials?.GetValueOrDefault(model) ?? QuotaForecastCalibration.Replay(data.Quota, model, horizon, cancellationToken, options))
                 .ToDictionary(x => x.OriginUtc));
         QuotaForecastTrial[] labels = models[FallbackModel].Values.OrderBy(x => x.OriginUtc).ToArray();
         Dictionary<DateTimeOffset, QuotaSnapshot>
             anchors = data.Quota.GroupBy(x => x.CapturedAtUtc).ToDictionary(x => x.Key, x => x.Last());
+        var receiptPrefixes = new Dictionary<DateTimeOffset, IReadOnlyList<QuotaSnapshot>>();
+        foreach (var epoch in QuotaForecastCalibration.SplitEpochs(data.Quota))
+        {
+            QuotaSnapshot[] rows = epoch.ToArray();
+            for (int i = 0; i < rows.Length; i++) receiptPrefixes[rows[i].CapturedAtUtc] = new ArraySegment<QuotaSnapshot>(rows, 0, i + 1);
+        }
         var featureRows = new Dictionary<DateTimeOffset, CodexForecastFeatures>();
         foreach (QuotaForecastTrial label in labels)
         {
@@ -138,7 +143,7 @@ public static partial class QuotaPredictionService
             live = PredictAt(
                 current,
                 horizon,
-                QuotaPaceModels.Candidates.ToDictionary(
+                QuotaPaceModels.ProductionCandidates.ToDictionary(
                     model => model,
                     model => QuotaPaceModels.ProjectRemaining(epoch, model, horizon)),
                 null).Prediction;
@@ -168,7 +173,7 @@ public static partial class QuotaPredictionService
                 }
                 QuotaSnapshot[] prefix = epoch.TakeWhile(x => x.CapturedAtUtc <= target.Origin).ToArray();
                 double lead = (target.Outcome - target.Origin).TotalHours;
-                Dictionary<string, double> estimates = QuotaPaceModels.Candidates.ToDictionary(
+                Dictionary<string, double> estimates = QuotaPaceModels.ProductionCandidates.ToDictionary(
                     model => model,
                     model => QuotaPaceModels.ProjectRemaining(prefix, model, lead));
                 // PredictAt selects only matured points/labels. Do not append this extra query
@@ -185,7 +190,7 @@ public static partial class QuotaPredictionService
                     anchor.UsedPercent is not >= 0 or >= 100) continue;
                 IReadOnlyList<QuotaSnapshot>? epoch = QuotaForecastCalibration.SplitEpochs(data.Quota.Where(x => x.CapturedAtUtc <= origin)).LastOrDefault();
                 if (epoch is null || epoch[^1] != anchor || origin - epoch[0].CapturedAtUtc < TimeSpan.FromMinutes(15)) continue;
-                Dictionary<string, double> estimates = QuotaPaceModels.Candidates.ToDictionary(model => model,
+                Dictionary<string, double> estimates = QuotaPaceModels.ProductionCandidates.ToDictionary(model => model,
                     model => QuotaPaceModels.ProjectRemaining(epoch, model, horizon));
                 // Query-only origins never become training labels or alter later selection history.
                 matched[origin] = PredictAt(anchor, horizon, estimates, null).Prediction;
@@ -206,7 +211,7 @@ public static partial class QuotaPredictionService
 
             if (matured.Length >= options.SelectionSamples)
             {
-                string best = QuotaPaceModels.Candidates.MinBy(model => Error(model, matured))!;
+                string best = QuotaPaceModels.ProductionCandidates.MinBy(model => Error(model, matured))!;
                 if (Error(best, matured) + .05 * options.ImprovementMultiplier < Error(FallbackModel, matured) * (1 - .1 * options.ImprovementMultiplier)) selected = best;
             }
             double baseline = estimates[selected];
@@ -272,6 +277,14 @@ public static partial class QuotaPredictionService
                         [],
                         0,
                         anchor.RemainingPercent.Value),
+                PaceReceipt = QuotaPaceModels.Receipt(
+                    receiptPrefixes[anchor.CapturedAtUtc],
+                    anchor, anchor.CapturedAtUtc, selected,
+                    (useWorkload ? "Pace component before the selected workload correction. " : "Selected pace component. ") +
+                    (matured.Length < options.SelectionSamples
+                        ? $"Corrected fallback: {matured.Length} matured non-overlapping outcomes; need {options.SelectionSamples} for challenger selection."
+                        : selected == FallbackModel ? "No eligible challenger earned the required error improvement."
+                        : "Eligible challenger earned the required improvement on matured non-overlapping outcomes."), true),
             };
             return new Point(label, result, baseline, workload);
         }
@@ -286,11 +299,6 @@ public static partial class QuotaPredictionService
             previousEnd = point.Label!.OutcomeUtc;
             yield return point;
         }
-    }
-
-    private static bool SameStream(QuotaSnapshot x, QuotaSnapshot y)
-    {
-        return QuotaHistoryPolicy.Cohort(x) == QuotaHistoryPolicy.Cohort(y);
     }
 
     private sealed record Point(

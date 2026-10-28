@@ -13,13 +13,16 @@ public static partial class ForecastThresholdStudy
     private static IEnumerable<OriginInputs> PrepareOrigins(CodexForecastDataset data)
     {
         QuotaSnapshot[] strict = QuotaHistoryPolicy.AvailableRows(data.Quota, ForecastReplayAvailability.CollectedByOrigin);
-        var cohorts = QuotaHistoryPolicy.Streams(QuotaHistoryPolicy.Describe(strict, data.CapturedAtUtc))
+        var decisions = QuotaHistoryPolicy.Describe(strict, data.CapturedAtUtc);
+        var meterRows = QuotaHistoryPolicy.ReplayRows(decisions).ToLookup(x => QuotaHistoryPolicy.MeterIdentity(QuotaHistoryPolicy.Cohort(x)));
+        var cohorts = QuotaHistoryPolicy.Streams(decisions)
             .Where(x => x.Key.AccountKey is not null && x.First().Observation.Authority == QuotaObservationAuthority.ProviderAuthoritative)
             .OrderBy(x => x.Key.Kind).ThenBy(x => x.Min(r => r.Observation.CapturedAtUtc));
         int index = 0;
         foreach (var cohort in cohorts)
         {
-            QuotaSnapshot[] quota = QuotaHistoryPolicy.ReplayRows(cohort);
+            QuotaSnapshot[] quota = QuotaHistoryPolicy.PaceRows(
+                meterRows[QuotaHistoryPolicy.MeterIdentity(cohort.Key)], cohort.Key);
             var epochs = QuotaForecastCalibration.SplitEpochs(quota);
             var prefixes = new Dictionary<DateTimeOffset, QuotaSnapshot[]>();
             foreach (var epoch in epochs)
@@ -150,7 +153,7 @@ public static partial class ForecastThresholdStudy
         QuotaSnapshot[] strict = QuotaHistoryPolicy.AvailableRows(data.Quota, ForecastReplayAvailability.CollectedByOrigin);
         var decisions = QuotaHistoryPolicy.Describe(strict, data.CapturedAtUtc);
         QuotaHistoryDecision[] eligible = decisions.Where(x => x.Eligible).ToArray();
-        return new("forecast-eligibility/v1", Fingerprint(data), data.CapturedAtUtc,
+        return new("forecast-eligibility/v2-pace-boundaries", Fingerprint(data), data.CapturedAtUtc,
             [new("discovery-encoding", "physical-sources", null, null, new Dictionary<string, int>()),
              new("decoding", "physical-sources", null, null, new Dictionary<string, int>()),
              new("quota-collection-availability", "quota-readings", data.Quota.Count, strict.Length,

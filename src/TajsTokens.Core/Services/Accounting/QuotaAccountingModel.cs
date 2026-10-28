@@ -13,7 +13,7 @@ namespace TajsTokens.Core.Services;
 /// <summary>Frozen-prefix cost calibration, deliberately separate from future-workload forecasting.</summary>
 public static class QuotaAccountingModel
 {
-    public const string Version = "quota-cost-evaluation/v5-blocks";
+    public const string Version = "quota-cost-evaluation/v6-elapsed-pace";
 
     public const string Methodology = "Evaluation only: actual interval workload is an oracle cost input, NOT an end-to-end forecast. " +
                                       "Disjoint targets within each cohort/horizon; overlapping sources and horizons are never pooled. " +

@@ -211,7 +211,7 @@ public sealed class QuotaResetOutlookTests
     }
 
     [Fact]
-    public void BuildForecast_MixedFlatAndMovingIntervals_RetainsFlatSamplesInEwma()
+    public void BuildForecast_MixedFlatAndMovingIntervals_RetainsElapsedFlatExposure()
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
         DateTimeOffset reset = now.AddHours(4);
@@ -225,7 +225,8 @@ public sealed class QuotaResetOutlookTests
         Forecast forecast = QuotaPredictionService.BuildResetOutlook(snapshots, now);
 
         Assert.False(forecast.IsQuantizedFlat);
-        Assert.InRange(forecast.BurnRatePercentPerHour!.Value, 8.99, 9.01);
+        // Two equal one-hour intervals have exponential exposure weights in ratio exp(-1/2):1.
+        Assert.Equal(20 / (1 + Math.Exp(-.5)), forecast.BurnRatePercentPerHour!.Value, 9);
     }
 
     [Fact]

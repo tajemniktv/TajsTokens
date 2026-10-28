@@ -35,6 +35,7 @@ public sealed record QuotaForecastTrial(
 /// </summary>
 public static class QuotaForecastCalibration
 {
+    public sealed record ModelSelection(string Model, int ComparedCandidates, string Reason);
     public const int MinimumCalibrationGroups = 8;
 
     public const double NominalCoverage = 0.8;
@@ -46,7 +47,7 @@ public static class QuotaForecastCalibration
     // Keep the incumbent until comparable, matured account-local target outcomes support a switch.
     public static string DefaultModel(QuotaSnapshot anchor)
     {
-        return "legacy-ewma";
+        return QuotaPaceModels.ProductionFallback;
     }
 
     public static string SelectModel(
@@ -55,13 +56,20 @@ public static class QuotaForecastCalibration
         DateTimeOffset reset,
         double lead,
         string fallback, ForecastEvaluationOptions? options = null)
+        => SelectModelDetailed(candidates, origin, reset, lead, fallback, options).Model;
+
+    public static ModelSelection SelectModelDetailed(
+        IReadOnlyDictionary<string, IReadOnlyList<QuotaForecastTrial>> candidates,
+        DateTimeOffset origin, DateTimeOffset reset, double lead, string fallback, ForecastEvaluationOptions? options = null)
     {
         options = (options ?? ForecastEvaluationOptions.Default).Validate();
-        (string Model, double Error)[] scores = candidates.Select(pair => (Model: pair.Key,
+        fallback = QuotaPaceModels.IsProductionEligible(fallback) ? fallback : QuotaPaceModels.ProductionFallback;
+        (string Model, double Error)[] scores = candidates.Where(x => QuotaPaceModels.IsProductionEligible(x.Key)).Select(pair => (Model: pair.Key,
                 Errors: CalibrationErrors(pair.Value, origin, reset, lead, options)))
             .Where(x => x.Errors.Count >= options.CalibrationGroups)
             .Select(x => (x.Model, Error: x.Errors.Average())).ToArray();
-        if (scores.Length == 0) return fallback;
+        if (scores.Length == 0) return new(fallback, 0,
+            $"Corrected fallback: no eligible candidate has {options.CalibrationGroups} prior compatible calibration groups at comparable lead; legacy EWMA is ineligible.");
         double best = scores.Min(x => x.Error);
         // A 10% practical-equivalence band avoids changing models for tiny noisy wins.
         string[] preferred = new[]
@@ -77,9 +85,11 @@ public static class QuotaForecastCalibration
             "recent-24h",
             "damped-2h",
             "damped-6h",
-            "legacy-ewma",
         };
-        return preferred.First(model => scores.Any(x => x.Model == model && x.Error <= best * (1 + .1 * options.ImprovementMultiplier) + .1 * options.ImprovementMultiplier));
+        string selected = preferred.First(model => scores.Any(x => x.Model == model && x.Error <= best * (1 + .1 * options.ImprovementMultiplier) + .1 * options.ImprovementMultiplier));
+        return new(selected, scores.Length, selected == fallback
+            ? $"Corrected fallback retained within the practical-equivalence error band across {scores.Length} qualified candidates."
+            : $"Eligible challenger selected from {scores.Length} qualified candidates using prior matured, compatible errors at comparable lead.");
     }
 
     public static IReadOnlyList<QuotaForecastTrial> ReplayAdaptive(
@@ -89,7 +99,7 @@ public static class QuotaForecastCalibration
     {
         options = (options ?? ForecastEvaluationOptions.Default).Validate();
         if (stream.Count == 0) return [];
-        Dictionary<string, IReadOnlyList<QuotaForecastTrial>> candidates = QuotaPaceModels.Candidates.ToDictionary(
+        Dictionary<string, IReadOnlyList<QuotaForecastTrial>> candidates = QuotaPaceModels.ProductionCandidates.ToDictionary(
             model => model,
             model => Replay(stream, model, horizonHours, cancellationToken, options));
         string fallback = DefaultModel(stream[^1]);
@@ -101,6 +111,11 @@ public static class QuotaForecastCalibration
         string fallback, ForecastEvaluationOptions? options = null)
     {
         options = (options ?? ForecastEvaluationOptions.Default).Validate();
+        candidates = candidates.Where(x => QuotaPaceModels.IsProductionEligible(x.Key)).ToDictionary(x => x.Key, x => x.Value);
+        if (candidates.Count == 0) return [];
+        fallback = QuotaPaceModels.IsProductionEligible(fallback) && candidates.ContainsKey(fallback) ? fallback :
+            candidates.ContainsKey(QuotaPaceModels.ProductionFallback) ? QuotaPaceModels.ProductionFallback :
+            QuotaPaceModels.ProductionCandidates.First(candidates.ContainsKey);
         var selected = new List<QuotaForecastTrial>();
         Dictionary<string, Dictionary<DateTimeOffset, QuotaForecastTrial>> lookup = candidates.ToDictionary(
             x => x.Key,

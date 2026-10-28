@@ -289,7 +289,8 @@ public sealed partial class ForecastsPage : Page, IHistoryPresentation
                              $"Trend: {f.Trend ?? "not established"}\n\n" +
                              (f.Evidence is { } evidence
                                  ? $"Uncertainty\n{evidence.UncertaintyDescription}\n\nModel: {evidence.Model}\nPolicy: {evidence.PolicyVersion}\n" +
-                                   $"Bucket: {evidence.AnchorLimitId ?? "not recorded"} · plan: {evidence.AnchorPlanType ?? "not recorded"}\nHistory policy: {evidence.HistoryPolicy ?? "legacy"}\n"
+                                   $"Bucket: {evidence.AnchorLimitId ?? "not recorded"} · plan: {evidence.AnchorPlanType ?? "not recorded"}\nHistory policy: {evidence.HistoryPolicy ?? "legacy"}\n" +
+                                   (evidence.PaceReceipt is { } receipt ? $"\n{receipt.Describe()}\n" : "\nLegacy capture: calculation receipt unavailable.\n")
                                  : "Legacy estimate: no recorded uncertainty method.\n") +
                              (f.Evidence?.HorizonPredictions is { Count: > 0 } horizons
                                  ? string.Join(

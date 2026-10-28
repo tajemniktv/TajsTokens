@@ -22,6 +22,19 @@ public static class QuotaHistoryPolicy
 {
     public const string Version = "quota-history/v1";
 
+    /// <summary>Same meter identity across plan/window regimes; other concurrent buckets are independent.</summary>
+    public static bool SameMeter(QuotaHistoryCohort x, QuotaHistoryCohort y) =>
+        x.Provider == y.Provider && x.Profile == y.Profile && x.Kind == y.Kind && x.Source == y.Source &&
+        x.AccountKey == y.AccountKey && x.LimitId == y.LimitId && x.SessionId == y.SessionId;
+
+    public static QuotaHistoryCohort MeterIdentity(QuotaHistoryCohort cohort) => cohort with { PlanType = null, WindowMinutes = null };
+
+    /// <summary>Keep incompatible regime observations as boundaries rather than joining A→B→A history.</summary>
+    public static QuotaSnapshot[] PaceRows(IEnumerable<QuotaSnapshot> rows, QuotaHistoryCohort selected) => rows
+        .Where(x => SameMeter(Cohort(x), selected))
+        .Select(x => Cohort(x) == selected ? x : x with { UsedPercent = null })
+        .OrderBy(x => x.CapturedAtUtc).ToArray();
+
     public static QuotaHistoryCohort Cohort(QuotaSnapshot row)
     {
         return new QuotaHistoryCohort(
@@ -144,7 +157,7 @@ public static class QuotaHistoryPolicy
                 : rows
                     .Where(x => x.CollectedAtUtc is not null || x.Authority == QuotaObservationAuthority.ProviderAuthoritative)
                     .Select(x => x.CollectedAtUtc is { } collected && collected > x.CapturedAtUtc
-                        ? x with { CapturedAtUtc = collected }
+                        ? x with { CapturedAtUtc = collected, ReplayMeasuredAtUtc = x.ReplayMeasuredAtUtc ?? x.CapturedAtUtc }
                         : x))
             .OrderBy(x => x.CapturedAtUtc).ToArray();
     }

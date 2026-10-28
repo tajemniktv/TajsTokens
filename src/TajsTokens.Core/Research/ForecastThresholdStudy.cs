@@ -22,7 +22,7 @@ public sealed record ForecastThresholdReport(string Version, string DatasetIdent
 /// <summary>Explicit local research. Options never change released defaults or durable telemetry.</summary>
 public static partial class ForecastThresholdStudy
 {
-    public const string Version = "forecast-threshold-study/v2-eligibility";
+    public const string Version = "forecast-threshold-study/v3-eligible-pace";
     private sealed record Point(DateTimeOffset Origin, DateTimeOffset Reset, double? Prediction, double? Actual,
         DateTimeOffset? Outcome, double? Lower, double? Upper, double? Persistence, double? Pace,
         string Model, string Reason);

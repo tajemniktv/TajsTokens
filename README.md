@@ -4,7 +4,7 @@ TajsTokens is a local-first Windows companion for Codex quota, usage and activit
 
 ## Current features
 
-- Quota overview, history, alerts and tray status. Account allowances stay visible while filtering local work; reset-aware outlooks identify the tightest window and explain missing evidence separately from conditional pace estimates.
+- Quota overview, history, alerts and tray status. Account allowances stay visible while filtering local work; reset-aware outlooks use elapsed-time pace with an inspectable calculation receipt. Flat rounded readings do not establish zero burn, and missing evidence stays separate from conditional estimates.
 - Background collection uses reduced Windows resource priority. Hidden or minimized dashboards pause immediately and release their pages after 30 seconds, preserving inputs and navigation for reopening. Detailed calibration continues in a separate worker with a 0.5% background CPU budget, time limits, cooldowns and a reusable local numeric cache; quota polling, alerts and compact outlooks continue independently. Opening restores foreground resources before loading the dashboard.
 - Local Codex thread, subagent and tool inspection; Live fleet shows recent turn evidence, token increments and cache input mix. An [on-demand SSH check](docs/REMOTE_FLEET.md) shows host-qualified turn status for configured remote aliases and retains content-free checks for offline review without merging account quotas.
 - Usage breakdowns by model, project, session and time. The primary session planner checks both allowances with optional model/effort matching and recent-work autofill; forecast history, diagnostics and Model Lab remain available for deeper inspection.

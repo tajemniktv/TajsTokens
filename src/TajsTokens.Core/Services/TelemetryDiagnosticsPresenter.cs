@@ -69,7 +69,8 @@ public static class TelemetryDiagnosticsPresenter
             detail += $"\n\n{forecast.HistoryPolicy}";
             if (!string.IsNullOrWhiteSpace(forecast.Diagnostic)) detail += $"\n{forecast.Diagnostic}";
             if (forecast.Forecast?.Evidence is { } evidence)
-                detail += $"\nModel: {evidence.Model}\n{evidence.UncertaintyDescription}";
+                detail += $"\nModel: {evidence.Model}\n{evidence.UncertaintyDescription}\n" +
+                    (evidence.PaceReceipt?.Describe() ?? "Calculation receipt unavailable for this capture.");
         }
         else
         {

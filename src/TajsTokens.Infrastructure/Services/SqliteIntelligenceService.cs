@@ -157,7 +157,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                 current.Source,
                 current.AccountKey);
             IEnumerable<QuotaSnapshot> compatible = history
-                .Where(item => QuotaHistoryPolicy.Cohort(item) == QuotaHistoryPolicy.Cohort(current))
+                .Where(item => QuotaHistoryPolicy.SameMeter(QuotaHistoryPolicy.Cohort(item), QuotaHistoryPolicy.Cohort(current)))
                 .Where(item => item.CapturedAtUtc <= current.CapturedAtUtc)
                 .Where(item => item.CapturedAtUtc != current.CapturedAtUtc)
                 .Append(current);

@@ -1,6 +1,9 @@
 # PACE-001: weekly pace depends on rounded-meter poll count
 
-Status: reproduced; live estimator policy unchanged. This is an open fallback limitation, not a validated change in workload.
+Status: the original 27 October defect is reproduced below. The 28 October
+[Stage 3 repair](STAGE3_PACE_VALIDATION.md) replaces its production eligibility;
+legacy EWMA remains an explicit research comparator. The original incident's rates
+are historical evidence, not a target for the repaired forecast.
 
 ## Retained evidence
 
@@ -70,7 +73,7 @@ The unchanged integer meter does not establish exact zero consumption, and ongoi
 
 Compatibility context: the affected installed build supported observatory component 8 while its retained database was already at component 9. That mismatch blocks observatory initialization, including recent-work and native-ingestion paths. Integrating the schema-9 timestamp readers/writers restores compatibility without downgrading evidence or changing the quota-only EWMA mechanism above.
 
-## Regression and remaining decision
+## Original regression and remaining decision (27 October)
 
 `WeeklyPaceRegressionTests` covers exact retained-anchor replay; identical endpoint/elapsed-time comparisons with sparse and dense flat polling; and the production background service with ongoing recorded local work. It also verifies that an entirely flat segment remains unknown rather than becoming a measured zero burn or calibrated survival claim.
 
