@@ -654,11 +654,20 @@ TT evaluator, existing model metadata, `ApiPriceWorkload` and product snapshot.
   exact schedule/weights, reference basket, units/vintage, support/equivalence,
   speed normalization and extension rules. TT is a frozen reference-consumption
   index. Defining a basket does not require running paid synthetic tasks.
-- [ ] **SCORE-002 — Version the joint-coordinate basis.** Reuse immutability,
+- [x] **SCORE-002 — Version the joint-coordinate basis.** Reuse immutability,
   normalization and hashing while preserving the old five-category research basis
   and artifacts. Identity covers dimensions, weights, basket and semantics. Preserve
   original scores and explicitly chosen restatements. New prices/models never
   silently alter old weights or activate a new ruler.
+  **Implemented/installed:** `tt-joint-basis/v1` freezes sparse coordinate/category
+  weights, basket, active dimensions, convention, units, vintage and source references
+  under a canonical identity. Explicit additive extensions preserve parent weights
+  and normalization. Intelligence schema 8 adds a separate typed original/restated
+  score archive under the existing repository; the old research format is unchanged.
+  **798 Core tests**, zero-warning Windows build and installed-assembly archive
+  checks passed. All six existing research snapshots, 96,391 native rows and 435
+  counter-input rows survived the upgrade unchanged. Daily data has no joint-score
+  records or active public basis. [Contract and validation](docs/source-notes/STAGE4_JOINT_BASIS.md).
 - [ ] **SCORE-003 — Support exact, bounded and partial scoring.** Derive missing-field
   requirements from the requested score: equal-weight output splits can be exact;
   unknown cache splits can give finite bounds; unknown models retain covered
@@ -829,8 +838,10 @@ original counter-input journal, component-11 superseded numeric retention and th
 **PACE-001–004** now implement and evaluate the elapsed-time correction under the
 established quota contract. **SCORE-001** now carries selected joint evidence through
 the installed product and conditional forecast projections. Continue Stage 4 with
-the explicit public-basis/catalog decisions and versioned joint scoring. No public
-TT ruler is activated yet.
+the explicit public-basis/catalog decisions. **SCORE-002** now provides the frozen
+joint basis and original/restated archive. Continue **SCORE-003** with explicit
+bounded/partial scoring before the measured-TT presentation. No public TT ruler is
+activated yet.
 
 ### Existing implementation baseline and known gaps
 

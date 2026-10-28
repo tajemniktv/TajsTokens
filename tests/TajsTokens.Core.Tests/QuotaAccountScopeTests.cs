@@ -86,7 +86,7 @@ public sealed class QuotaAccountScopeTests : IDisposable
         Assert.Equal(1L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events WHERE event_id='legacy-event'"));
         await ExecuteAsync("DROP TRIGGER fail_reset_rebuild;");
         await new SqliteTelemetryRepository(Database).InitializeIntelligenceAsync(default);
-        Assert.Equal(7L, await ScalarAsync("SELECT version FROM intelligence_schema"));
+        Assert.Equal(8L, await ScalarAsync("SELECT version FROM intelligence_schema"));
         Assert.Equal(2L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events"));
         Assert.Equal(0L, await ScalarAsync("SELECT COUNT(*) FROM quota_reset_events WHERE event_id NOT LIKE 'quota-reset-v2-%'"));
         Assert.Equal(524L, await ScalarAsync("SELECT COUNT(*) FROM quota_snapshots"));
