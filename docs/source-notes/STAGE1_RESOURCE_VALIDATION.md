@@ -839,3 +839,47 @@ first frame, with zero lost events/source errors. It captured 23 starts/22 compl
 one operation extends outside the capture, not an established operation failure.
 Selected history completed in 658.307 ms, including its 498.050 ms evidence read.
 Evidence: `ledger-projection-hidden-300s.json` and `ledger-projection-restore-report.json`.
+
+### Rebuildable fit-cache synchronization
+
+A later worker capture found substantial retained numeric evidence, rather than
+establishing a cache leak: the graph enumerated about 193,000 quota snapshots,
+75,000 token events and 76,000 context observations. The diagnostic induced a GC
+and warned about lossy .NET 10 buffering; it is not normal-operation acceptance.
+Aggregate type counts are local in `current-worker-heap-types.txt`. A separate
+25-second counter capture observed 133–148 MB in generation 2, 28–90 MB on the
+large-object heap and 190–262 MB of committed GC memory. These counters have
+different collection times and must not be added to the process-private sample.
+
+Repeated worker and frozen-input benchmark stacks were in synchronous numeric fit
+cache writes. The existing WAL cache used SQLite's default FULL synchronization.
+An isolated 2,000-fit comparison with the existing writer, eviction and checksums
+measured FULL/NORMAL at 3,977.84/338.15 ms; reverse order measured NORMAL/FULL at
+1,684.05/3,902.49 ms. Each run retained 464 identical rows with the same SHA-256.
+Concurrent machine activity differed, so these are observed cache-write timings,
+not a calibrated whole-worker speedup. Reproduction outputs: `cache-sync-bench*.jsonl`.
+
+The cache now selects NORMAL only after confirming WAL mode. SQLite documents
+[atomic, consistent WAL transactions with reduced power-loss durability](https://www.sqlite.org/pragma.html#pragma_synchronous):
+a system crash or power failure can lose recent cache entries. This is acceptable
+for rebuildable, checksum-validated fits; missing/corrupt fits are recomputed.
+Telemetry, source evidence and checkpoint connection policies are unchanged.
+Other journal modes retain their previous synchronization setting. The existing
+focused tests cover reopen, exact numeric reuse/invalidation, corruption-as-miss,
+defensive copies, row/byte bounds and chronological cached/uncached report parity.
+
+The stronger-GC experiment was stopped during its first frozen-input baseline
+after 373.67 seconds/213.41 CPU-seconds. It did not produce a completed comparison;
+no result-parity or GC-setting benefit is claimed. The worker retains its existing
+256 MiB managed limit and GCConserveMemory=5. The consistent app-owned snapshot
+was opened read-only at its source and is local diagnostic input, never an export
+of native Codex stores. Full-pass completion under the actual slice budget remains
+distinct from cheaper cache writes and from RAM acceptance.
+
+This cache slice passed all 691 Core tests, none skipped (1m24s), and the serial
+Windows build/install with zero warnings/errors (56.26s). The app restarted as
+PID 44524; installed Infrastructure SHA-256 is
+`50B101A102501631011F150E098E5F8D0B734524C5AD6CA160AA978D74001BDA`.
+The installed Overview remained responsive and reported subsequent provider quota
+updates. This confirms the app continues operating; it does not prove detailed
+calibration completed within its slice budget or close the aggregate RAM gate.

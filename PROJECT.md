@@ -271,7 +271,9 @@ numerical budgets remain open under PERF-001. See
   Evaluation-local sorted workload prefixes and bounded feature reuse are
   implemented, preserving enclosing-origin collection cutoffs and invalidating on
   late evidence or replacement inputs. Persistent numeric fit recovery remains
-  in the existing cache. Separate input revisions exclude derived writes and no-op
+  in the existing cache. Its confirmed-WAL connection uses NORMAL synchronization
+  for rebuildable fits, following matching-row benchmarks; source/checkpoint
+  durability is unchanged. Separate input revisions exclude derived writes and no-op
   maintenance, while expiry/future collection/rolling windows invalidate reuse.
   Shared worker feature reads preserve the original account/window/source rules
   and fall back at read bounds or concurrent evidence changes. Full suite: 682

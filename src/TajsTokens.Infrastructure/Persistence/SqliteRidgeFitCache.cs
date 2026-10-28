@@ -31,8 +31,13 @@ public sealed class SqliteRidgeFitCache : IRidgeFitCache, IDisposable
         {
             _connection.Open();
             using SqliteCommand command = _connection.CreateCommand();
+            command.CommandText = "PRAGMA journal_mode=WAL;";
+            bool wal = string.Equals(command.ExecuteScalar() as string, "wal", StringComparison.OrdinalIgnoreCase);
+            // Fits are rebuildable, checksum-validated artifacts. In WAL mode NORMAL keeps
+            // transactions atomic without forcing every fit to storage. A power failure may
+            // lose recent fits; source evidence uses its separate, unchanged connection policy.
             command.CommandText = $"""
-                PRAGMA journal_mode=WAL;
+                {(wal ? "PRAGMA synchronous=NORMAL;" : "")}
                 PRAGMA journal_size_limit=1048576;
                 PRAGMA max_page_count={maxPages};
                 CREATE TABLE IF NOT EXISTS ridge_fits_v1 (key TEXT PRIMARY KEY, payload TEXT NOT NULL, checksum TEXT NOT NULL);
