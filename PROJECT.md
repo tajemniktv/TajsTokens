@@ -872,22 +872,25 @@ complete; one successful early slice does not validate later changes.
 #### Current implementation handoff
 
 The Stage 1 mechanisms are installed with their stated evidence; PERF-001 resource
-acceptance remains open. EVID-001 now defines the quantity/retention contract.
-Installed **A-01** chronology acceptance has the stated runtime evidence. Continue
-Stage 2 with the accepted **ING-001** identity/checkpoint contract, component-10
-original counter-input journal, component-11 superseded numeric retention and the
-**ING-002** compressed ingestion and **EVID-002** scoped reconciliation slices.
-**EVID-003** supplies eligibility explanations and the retained 67-case breakdown;
-**EVID-004** supplies the stated retention/answer and selected-generation acceptance.
-**PACE-001–004** now implement and evaluate the elapsed-time correction under the
-established quota contract. **SCORE-001** now carries selected joint evidence through
-the installed product and conditional forecast projections. Continue Stage 4 with
-the explicit public-basis/catalog decisions. **SCORE-002** now provides the frozen
-joint basis and original/restated archive. **SCORE-003** adds explicit exact/bounded/
-partial scoring and a read-only candidate tool. **CAT-001** now separates cached
-model discovery, local observations and unverified access. Continue Stage 4 with
-**CAT-002** and the explicit public-basis decisions before measured-TT presentation. No public
-TT ruler is activated yet.
+acceptance remains open. Stage 2's chronology, retention, compressed ingestion,
+provider scope and answer-specific eligibility slices have their stated installed
+evidence. **PACE-001–004** implement and evaluate the elapsed-time correction.
+Stage 4's **SCORE-001–003** joint projection, frozen basis/archive and qualified
+scoring are installed. **CAT-001** discovery and picker interaction are verified,
+including hidden-dashboard input restoration. The latest full suite passed 831
+tests and the Windows build installed successfully; user visual acceptance remains
+separate.
+
+**Current gate: Stage 4 decisions.** The
+[reviewable price/TT proposal](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md)
+specifies the exact candidate artifacts and previews. DEC-002 must select the price
+source/refresh/fallback policy before CAT-002 product integration. DEC-001/T-01 and
+DEC-005 must select the public basis and activation/extension/restatement policy
+before D-01 measured-TT presentation. The independent CAT-002 validation, valuation
+and versioned last-good archive mechanisms are installed; no price source or public
+TT basis is selected. Pending choices are not defaults. Finish these Stage 4 items
+before starting Stage 5, following the requested stage order. Programme-wide
+acceptance gates and the PERF-001 resource-budget decision remain open.
 
 ### Existing implementation baseline and known gaps
 
