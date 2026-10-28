@@ -188,9 +188,9 @@ Retirements before this capability remain unavailable; no history is invented.
 [Response observations](src/TajsTokens.Infrastructure/Persistence/SqliteCodexResponseEvidence.cs)
 already survive retirement with active/retired membership, and
 [server observations](src/TajsTokens.Infrastructure/Persistence/SqliteTelemetryRepository.ServerEvidence.cs)
-retain typed captures with collision checks. ING-002 still needs verified equivalent
-representation adoption and validation of candidate generations before replacing
-selected history; durable retention alone does not make corrupt decoding acceptable.
+retain typed captures with collision checks. ING-002 now verifies equivalent
+representation adoption and preflights compressed candidates before replacing
+selected history; failed candidates do not retire the selected generation.
 Broader EVID-004 scope/answer invariants remain separate from these storage changes.
 Existing-schema refusal and original times/amounts remain invariants.
 
@@ -432,9 +432,9 @@ avoid unnecessary body reads, writes and retraining.
 Owners: existing discovery/reader/ingestion/checkpoint path, SQLite writer/reducer,
 app-server evidence provider/parser, feature and coverage/study builders.
 
-Stage 2 now has the quantity/retention contract and installed chronology/schema
-evidence below. These do not establish every provider capability or implement
-immutable generation history; those gates remain explicit. Stage 1 resource
+Stage 2 now has the quantity/retention contract, superseded numeric preservation,
+compressed-ingestion recovery and scoped provider evidence below. These do not
+establish complete source inventory or cross-source billing equivalence. Stage 1 resource
 acceptance stays open under PERF-001 while this prerequisite evidence work proceeds.
 
 - [x] **A-01 — Close installed chronology/schema acceptance.** Verify the installed
@@ -511,12 +511,26 @@ acceptance stays open under PERF-001 while this prerequisite evidence work proce
   because a Windows Security passkey prompt reappeared on focus. No authentication
   action was taken. Cross-source billing equivalence and complete inventory remain
   unproven; these results do not promote supplemental counters or quota fits.
-- [ ] **EVID-003 — Explain every eligibility exclusion.** Extend structured support
+- [x] **EVID-003 — Explain every eligibility exclusion.** Extend structured support
   reasons into a waterfall with stage denominators, reason overlaps and sanitized
   examples: discovery/encoding, decoding, timely inputs, required role/model/effort/
   account, compatible training, mixture support and outcome availability. Split
   `origin-workload-unavailable` and classify the reported 67 cases on retained data;
   do not infer their distribution or lower all thresholds to make them disappear.
+  **Implemented:** the read-only `--eligibility` report shares study origins/splits,
+  feature calculation and production scenario selection. It reports shrinking stage
+  denominators, overlapping reasons, interval/origin training counts and sanitized
+  numeric examples. Discovery/decode denominators unavailable in the retained
+  dataset remain explicitly null; the ING-002 acquisition checks are separate.
+  A named frozen follow-up snapshot reproduces 67/116 final weekly exclusions:
+  63 have no retained dated events in the lookback and four contain only later-
+  collected events, with no unknown-role-only exclusions. All remaining 49 pass
+  training but fail duration support. The first half-hour example misses the
+  shortest training duration by about 1.35 seconds; FORE-003/005 owns any subsequent
+  support-policy change. Product explanations identify the unsupported coordinate
+  and compatible-history counts. No threshold or model-selection change was made.
+  The 762-test Core suite, Windows build and installed diagnostic passed;
+  [reproduction and limits](docs/source-notes/FORECAST_THRESHOLD_STUDY.md#eligibility-follow-up-evid-003).
 - [ ] **EVID-004 — Separate retention from answer requirements.** Keep valid amounts
   with unknown role/model/time/account, preserving missing versus zero. Prove unknown
   role does not disable token accounting/direct pace, untimed data stays out of dated
@@ -541,7 +555,7 @@ acceptance stays open under PERF-001 while this prerequisite evidence work proce
   [validation](docs/source-notes/STAGE2_EVIDENCE_VALIDATION.md#superseded-numeric-retention-component-11).
   This supplies
   the storage prerequisite for ING-002; complete EVID-004 scope/answer and replay
-  acceptance remain open, and compressed replacement is not enabled yet.
+  acceptance remain open. ING-002 subsequently enabled verified compressed replacement.
 
 **Exit:** trace a displayed amount to observations and reproduce it after replay,
 duplicate discovery, compression and supported migration. Late imports improve
@@ -761,7 +775,8 @@ Installed **A-01** chronology acceptance has the stated runtime evidence. Contin
 Stage 2 with the accepted **ING-001** identity/checkpoint contract, component-10
 original counter-input journal, component-11 superseded numeric retention and the
 **ING-002** compressed ingestion and **EVID-002** scoped reconciliation slices.
-Finish **EVID-003** eligibility explanations and **EVID-004** scope/answer acceptance.
+**EVID-003** now supplies eligibility explanations and the retained 67-case breakdown.
+Finish **EVID-004** scope/answer acceptance.
 Deliver **PACE-001–004** as a
 separate reviewable slice using the established quota contract; public TT selection
 does not block that correctness repair.

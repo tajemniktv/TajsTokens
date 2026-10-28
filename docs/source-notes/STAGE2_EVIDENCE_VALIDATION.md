@@ -375,12 +375,30 @@ They contain schemas or aggregate diagnostics, not source payloads, account keys
 thread/response IDs. Native files/credentials stayed read-only; no opt-in backend
 setting was enabled or fresh experimental backend request made by these audits.
 
+## Eligibility explanations (EVID-003)
+
+The [threshold-study follow-up](FORECAST_THRESHOLD_STUDY.md#eligibility-follow-up-evid-003)
+records the shared production/research selector, explicit stage units/denominators,
+overlapping input and training reasons, numeric examples and installed reproduction.
+The named later frozen dataset reproduces the 67/116 workload exclusions as 63
+origins without retained dated token events and four with only later-collected
+events; none is an unknown-role-only exclusion. The other 49 origins fail duration
+support after passing training, rather than failing session-count support. The
+historical v1 and later fixture identities remain distinct.
+
+The 762-test Core suite and Windows build passed; the build installed/restarted the
+daily app. No source data/schema, threshold or selected model changed. Historical
+physical discovery/decode coverage cannot be inferred from this retained forecast
+dataset and stays unknown in its report. ING-002's acquisition evidence remains
+separate, as do EVID-004's all-time/untimed quantity presentation and SHIP-004's
+user visual acceptance. See the linked record for exact hashes, times and limits.
+
 ## Remaining boundaries
 
 This closes installed component support, advancing ingestion and the tested
 refusal/recovery boundary and the supported compressed-ingestion cases above.
 It does not prove a complete native corpus was available/recovered, complete
 cross-source reconciliation, all untimed/all-time presentation states or programme-
-wide user visual acceptance. Those remain under EVID-003/004 and SHIP-004.
+wide user visual acceptance. Those remain under EVID-004 and SHIP-004.
 The quantity/retention definition in PROJECT.md explicitly
 distinguishes these gaps from implemented behavior.

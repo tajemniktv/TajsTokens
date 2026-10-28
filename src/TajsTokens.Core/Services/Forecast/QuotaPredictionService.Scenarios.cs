@@ -40,32 +40,18 @@ public static partial class QuotaPredictionService
 
         ScenarioWindowEstimate Build(QuotaWindowKind kind)
         {
-            ScenarioHistorySample[] samples = history.Where(x =>
-                x.Kind == kind && x.AccountKey == request.AccountKey && x.EndUtc <= now && x.EndUtc > x.StartUtc &&
-                double.IsFinite(x.QuotaDeltaPercent) && x.QuotaDeltaPercent is >= 0 and <= 100 &&
-                x.RootAgents >= 0 && x.Subagents >= 0 &&
-                (request.Cohorts.Count == 0 || x.Cohort is not null && request.Cohorts.Contains(x.Cohort)) &&
-                (x.ResetUtc is null || x.EndUtc <= x.ResetUtc)).OrderBy(x => x.StartUtc).ToArray();
+            ScenarioHistorySelection selection = ScenarioHistoryEligibility.Select(request, history, kind, now);
+            ScenarioHistorySample[] samples = selection.Samples.ToArray();
 
             ScenarioWindowEstimate Unknown(string reason, int count, ForecastSupportReason support = ForecastSupportReason.InsufficientHistory)
             {
-                return new ScenarioWindowEstimate(kind, false, count, null, null, null, 0, reason) { SupportReasons = support };
+                return new ScenarioWindowEstimate(kind, false, count, null, null, null, 0,
+                    reason + " " + selection.Describe()) { SupportReasons = support };
             }
 
-            if (samples.Length > 0 && now - samples.Max(x => x.EndUtc) > TimeSpan.FromDays(30))
+            if (selection.IsStale)
                 return Unknown("History is stale; a usable interval within 30 days is required.", samples.Length, ForecastSupportReason.StaleMeter);
-            ScenarioHistorySample? latest = samples.MaxBy(x => x.EndUtc);
-            samples = samples.Where(x => x.Source == latest?.Source && x.AccountKey == latest?.AccountKey && x.Cohort == latest?.Cohort)
-                .ToArray();
-            samples = samples.Where(x => x.EndUtc >= now.AddDays(-30) &&
-                                         (string.IsNullOrWhiteSpace(request.Model) || string.Equals(
-                                             x.DominantModel,
-                                             request.Model,
-                                             StringComparison.Ordinal)) &&
-                                         (string.IsNullOrWhiteSpace(request.ReasoningEffort) || string.Equals(
-                                             x.DominantReasoningEffort,
-                                             request.ReasoningEffort,
-                                             StringComparison.Ordinal))).ToArray();
+            ScenarioHistorySample? latest = selection.Latest;
             if (samples.Length < options.ScenarioSamples)
                 return Unknown(
                     $"Not enough matching history: need {options.ScenarioSamples} intervals; have {samples.Length}. Requested model/effort cohorts are never replaced silently.",
@@ -74,11 +60,16 @@ public static partial class QuotaPredictionService
                 return Unknown(
                     "Intensity multipliers have no observed source contract or validated response curve. Use intensity 1 for an evidence-backed conditional estimate.",
                     samples.Length, ForecastSupportReason.OutsideObservedSupport);
-            if (request.DurationHours < samples.Min(Hours) || request.DurationHours > samples.Max(Hours) ||
-                request.RootAgents < samples.Min(x => x.RootAgents) || request.RootAgents > samples.Max(x => x.RootAgents) ||
-                request.Subagents < samples.Min(x => x.Subagents) || request.Subagents > samples.Max(x => x.Subagents))
+            IReadOnlyList<string> supportReasons = ScenarioHistoryEligibility.RequestSupportReasons(request, samples);
+            if (supportReasons.Count > 0)
                 return Unknown(
-                    "Requested duration or active-session counts are outside observed support; extrapolation is unavailable.",
+                    "Requested " + string.Join(", ", supportReasons.Select(x => x switch
+                    {
+                        "duration-outside-support" => "duration",
+                        "root-sessions-outside-support" => "root-session count",
+                        "subagent-sessions-outside-support" => "subagent-session count",
+                        _ => "intensity",
+                    })) + (supportReasons.Count == 1 ? " is" : " are") + " outside observed support; extrapolation is unavailable.",
                     samples.Length, ForecastSupportReason.OutsideObservedSupport);
 
             var trials = new List<(ScenarioHistorySample Sample, double BaselineError, double RidgeError, double SelectedError)>();

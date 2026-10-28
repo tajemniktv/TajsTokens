@@ -35,6 +35,27 @@ The study opens telemetry read-only, writes aggregate JSON to standard output an
 
 The final fifth of candidate origins is reserved for comparison after choosing configurations on earlier matured outcomes. Report fixed-horizon, near-reset, scenario and composed-selection results separately. Composed availability is a conservative replay lower bound on constructed targets, not a measured live abstention rate. No source, identity, overlap, freshness or collection-time safeguard is tuned. Default evaluation options reproduce the released policy. See [the retained-data study](source-notes/FORECAST_THRESHOLD_STUDY.md) for observed limitations and interpretation.
 
+For a faster current-policy session-scenario eligibility report, use `--eligibility`
+with the same database and UTC range. It shares the study's origin selection,
+development/final split, target lookup, feature builder and production scenario
+selection. It reports sequential origin denominators, overlapping input reasons,
+training interval/origin pairs and bounded numeric examples. Missing acquisition
+denominators are null: this retained dataset cannot reconstruct source discovery,
+decoding failures or the reader's excluded untimed rows. Outcome availability is a
+separate branch from point eligibility. The command opens telemetry read-only and
+does not rerun the 17-configuration or composed-selection sweep.
+
+```powershell
+dotnet run --project tools/TajsTokens.ForecastEvaluation/TajsTokens.ForecastEvaluation.csproj -c Debug --no-build --no-restore -- --eligibility .codex/temp/stage1/worker-fixture/telemetry.db 2026-09-27T00:00:00Z 2026-10-27T14:58:00Z > .codex/temp/stage2/eligibility-frozen.json
+```
+
+Use an existing app-owned numeric snapshot or substitute the installed telemetry
+path above; the fixture path is local and is not distributed. The full study now
+identifies itself as `forecast-threshold-study/v2-eligibility` because its formerly
+combined workload reason is split into explicit combinations. This changes
+diagnostics, not forecast thresholds or model selection. Historical v1 artifacts
+remain historical results.
+
 ## Ingestion performance fixtures
 
 The existing evaluation executable also provides local synthetic ingestion benchmarks:

@@ -55,3 +55,81 @@ The 30-minute final comparison has 78 non-overlapping outcomes across 11 provisi
 - Source/identity/unit compatibility, freshness, overlap rejection, collection-time availability and assertion-specific safeguards were not tuned. No experimental configuration was promoted.
 
 A later policy decision needs confirmation on additional compatible later observations and should inspect error, answer availability and interval behavior together. Current data does not justify automatically lowering every barrier.
+
+## Eligibility follow-up (EVID-003)
+
+The `forecast-eligibility/v1` diagnostic reuses the threshold study's origin
+selection, split and target lookup, the existing feature builder and the production
+scenario history selector. The full study's diagnostic version is now
+`forecast-threshold-study/v2-eligibility`; the forecast rules and thresholds are
+unchanged. Scenario failures in the product identify unsupported duration/root/
+subagent coordinates and show compatible-history counts. Structured report reasons
+remain in the explicit local diagnostic, rather than exposing machine labels in
+the normal Planning flow.
+
+The follow-up reads the frozen app-owned numeric database at
+`.codex/temp/stage1/worker-fixture/telemetry.db`, using the original requested UTC
+range above. Its dataset identity is
+`d1ae955775835120e6470aee564962dd1deed3afc027fad5fc50d2d284365972`.
+This is a later retained snapshot, **not the original v1 dataset identity**. It
+reproduces the largest weekly cohort's 116 final candidate origins, 67 workload
+exclusions and 49 support exclusions for each of the two scenario horizons. This
+classification belongs to that explicitly identified follow-up, not a claim of
+byte-identical historical replay.
+
+The installed executable reproduced this report at `2026-10-28T08:06:54.9970127Z`;
+the final period begins at `2026-10-16T15:09:52.1742306Z`, matching the original
+study's reported split. The new fixture identity is still stated separately.
+
+| Largest weekly final cohort, each scenario horizon | Origins | Meaning |
+|---|---:|---|
+| Candidate origins | 116 | Denominator for 0.5h and 1h separately; do not add them. |
+| No retained dated token events in the two-hour origin lookback | 63 | Does not prove idleness, complete source discovery or absence of untimed evidence. |
+| Retained events exist, but all were collected after the origin | 4 | Valid retained amounts, unavailable for that historical prediction. |
+| Unknown collection time among those rejected origins | 0 | Explicitly separate from later collection. |
+| Unknown-role-only exclusions | 0 | The old combined label did not identify a role problem in these 67 cases. |
+| Timely inputs and required roles pass | 49 | All also pass compatible-training count/freshness selection. |
+| Duration outside observed training support | 49 | No root/subagent count rejection was emitted at this stage. |
+| Supported scenario point answers | 0 | Unchanged from the retained study. |
+
+`no-timely-token-events` and `no-classified-token-sessions` each occur 67 times;
+they describe the same origins and must not be added. One sanitized late-collection
+example contains 336 retained events and zero timely events. The first 30-minute
+support example has 92 matching intervals ranging from 0.5003742483 to
+0.6329527891 hours; its shortest interval exceeds the request by about 1.35 seconds.
+That demonstrates sensitivity to the strict observed-duration boundary, not proof
+that extrapolation or a new tolerance is valid. The corresponding one-hour request
+exceeds the upper bound. These findings inform FORE-003/005; no support boundary
+was relaxed to manufacture answers.
+
+Outcome availability is a parallel branch: 78/116 half-hour and 91/116 one-hour
+candidate origins have matching final outcomes, even though scenario points remain
+unsupported. Missing labels do not become workload-input failures. Bands and paired
+accuracy retain their own denominators. Training-selection counts use interval/origin
+pairs because one earlier interval may be assessed at many origins; these are not
+independent observations.
+
+The report also exposes quota collection/history/account stages, model/effort
+matching when explicitly requested, overlapping training exclusions and bounded
+numeric examples without source/account/session identifiers. Historical discovery
+and decoding denominators are **unknown/null**, rather than inferred from retained
+rows. Their independent implementation/runtime evidence remains under ING-002 in
+[Stage 2 validation](STAGE2_EVIDENCE_VALIDATION.md#compressed-rollout-ingestion-ing-002).
+The retained-reader boundary also excludes untimed rows from this forecast report;
+their amounts and all-time presentation remain EVID-004. Model/effort are unconstrained
+in these two study requests, so missing labels do not veto them. No current login
+is used to assign local work to a quota account.
+
+Reproduce with `--eligibility` in [development](../DEVELOPMENT.md#forecast-threshold-study).
+Local aggregate JSON and validation logs are under `.codex/temp/stage2/eligibility-*`.
+
+Validation passed: **762 Core tests** (1m49s), including direct original-selector
+parity, study/report denominator and point/band/paired-outcome agreement, late versus
+unknown collection, overlapping reasons, privacy and unconstrained versus explicit
+model/effort requests. The Windows build passed with zero warnings/errors (59.63s),
+installed the daily build and restarted PID 31304. Installed Core SHA-256:
+`CD1E3ACFC8829E06E77831D2CC007EFA8E2912DBA9CD37A9DEC56A06395CDC56`.
+The installed `--eligibility` command completed successfully against the frozen
+snapshot, with an empty error stream. This did not perform a new native-source or
+provider collection, change durable schemas, or establish visual acceptance of the
+updated Planning explanation. That UI pass remains separate under SHIP-004.

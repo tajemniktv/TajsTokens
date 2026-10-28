@@ -20,9 +20,9 @@ public sealed record ForecastThresholdReport(string Version, string DatasetIdent
     IReadOnlyList<ThresholdStudyScore> Scores, string Methodology);
 
 /// <summary>Explicit local research. Options never change released defaults or durable telemetry.</summary>
-public static class ForecastThresholdStudy
+public static partial class ForecastThresholdStudy
 {
-    public const string Version = "forecast-threshold-study/v1";
+    public const string Version = "forecast-threshold-study/v2-eligibility";
     private sealed record Point(DateTimeOffset Origin, DateTimeOffset Reset, double? Prediction, double? Actual,
         DateTimeOffset? Outcome, double? Lower, double? Upper, double? Persistence, double? Pace,
         string Model, string Reason);
@@ -53,32 +53,16 @@ public static class ForecastThresholdStudy
     {
         var scores = new List<ThresholdStudyScore>();
         var splits = new List<ThresholdStudySplit>();
-        QuotaSnapshot[] strict = QuotaHistoryPolicy.AvailableRows(data.Quota, ForecastReplayAvailability.CollectedByOrigin);
-        IGrouping<QuotaHistoryCohort, QuotaHistoryDecision>[] cohorts = QuotaHistoryPolicy.Streams(
-                QuotaHistoryPolicy.Describe(strict, data.CapturedAtUtc))
-            .Where(x => x.Key.AccountKey is not null && x.First().Observation.Authority == QuotaObservationAuthority.ProviderAuthoritative)
-            .OrderBy(x => x.Key.Kind).ThenBy(x => x.Min(r => r.Observation.CapturedAtUtc)).ToArray();
-        int index = 0;
-        foreach (IGrouping<QuotaHistoryCohort, QuotaHistoryDecision> cohort in cohorts)
+        foreach (OriginInputs input in PrepareOrigins(data))
         {
             token.ThrowIfCancellationRequested();
-            string id = $"cohort-{++index:00}";
+            var cohort = input.Cohort;
+            string id = input.Alias;
             progress?.Invoke($"{id}: {cohort.Key.Kind}, collection-time replay");
-            QuotaSnapshot[] quota = QuotaHistoryPolicy.ReplayRows(cohort);
+            QuotaSnapshot[] quota = input.Quota;
             CodexForecastDataset local = data with { Quota = quota };
-            IReadOnlyList<IReadOnlyList<QuotaSnapshot>> epochs = QuotaForecastCalibration.SplitEpochs(quota);
-            Dictionary<DateTimeOffset, QuotaSnapshot[]> prefixes = new();
-            foreach (IReadOnlyList<QuotaSnapshot> epoch in epochs)
-            {
-                DateTimeOffset? previous = null;
-                foreach (QuotaSnapshot q in epoch)
-                {
-                    if (q.CapturedAtUtc - epoch[0].CapturedAtUtc < TimeSpan.FromMinutes(15) || q.UsedPercent is not >= 0 or >= 100 ||
-                        previous is { } last && q.CapturedAtUtc - last < TimeSpan.FromMinutes(30)) continue;
-                    previous = q.CapturedAtUtc;
-                    prefixes[q.CapturedAtUtc] = epoch.TakeWhile(x => x.CapturedAtUtc <= q.CapturedAtUtc).ToArray();
-                }
-            }
+            IReadOnlyList<IReadOnlyList<QuotaSnapshot>> epochs = input.Epochs;
+            Dictionary<DateTimeOffset, QuotaSnapshot[]> prefixes = input.Prefixes;
             foreach (double? horizon in cohort.Key.Kind == QuotaWindowKind.Weekly ? new double?[] { .5, 2, 24, null } : [.5, 2, null])
             {
                 token.ThrowIfCancellationRequested();
@@ -148,9 +132,10 @@ public static class ForecastThresholdStudy
                     {
                         token.ThrowIfCancellationRequested();
                         CodexForecastFeatures f = features.Build(origin, ForecastReplayAvailability.CollectedByOrigin);
-                        if (f.ObservedTokenEvents == 0 || f.TokenActiveRootSessions + f.TokenActiveSubagentSessions == 0 || f.TokenActiveUnknownSessions > 0)
+                        IReadOnlyList<string> originReasons = ScenarioHistoryEligibility.OriginReasons(f);
+                        if (originReasons.Count > 0)
                         {
-                            results.Add(Make(origin, hours, null, null, null, "unavailable", "origin-workload-unavailable", labels, prefixes));
+                            results.Add(Make(origin, hours, null, null, null, "unavailable", string.Join("+", originReasons), labels, prefixes));
                             continue;
                         }
                         var request = new ScenarioRequest(hours, f.TokenActiveRootSessions, f.TokenActiveSubagentSessions,
