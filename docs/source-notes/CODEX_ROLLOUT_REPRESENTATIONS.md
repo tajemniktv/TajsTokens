@@ -3,7 +3,7 @@
 Design accepted for **ING-001** on 2026-10-28. [PROJECT.md](../../PROJECT.md)
 owns the product contract and remaining work. This note specifies the extension to
 the existing discovery, ingestion, checkpoint and SQLite owners; it does not claim
-compressed ingestion or immutable retention is already implemented.
+compressed ingestion or the complete immutable-retention contract is implemented.
 
 ## Evidence and compatibility
 
@@ -103,7 +103,11 @@ whole prefix or persist source text. Measure that cost before adding a seek inde
 ## Replacement, corruption and bounded reading
 
 Original content-free observations and superseded generation membership must be
-durable **before** ING-002 can change representation/replacement behavior. Keep
+durable **before** ING-002 can change representation/replacement behavior.
+Component 10 now journals new/recovered original counter inputs, and component 11
+preserves superseded numeric interpretations before active projection removal;
+[validation and limits](STAGE2_EVIDENCE_VALIDATION.md) remain separate from this design.
+Keep
 original nullable total/last snapshots, original times and capture identity apart
 from normalized deltas/latest counter state. Legacy deltas cannot reconstruct
 missing original snapshots; mark their original-input coverage unavailable.

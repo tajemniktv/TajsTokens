@@ -108,11 +108,69 @@ aggregate JSON are `.codex/temp/stage2/verify_counter_journal_install.py` and
 and ordinary new journal writes, not a user visual pass, compressed recovery or
 complete superseded projection retention.
 
+## Superseded numeric retention (component 11)
+
+`SqliteCodexSourceGeneration` now preserves available numeric evidence before
+removing an old active generation. The existing projection transaction owns both
+preservation and removal: any failed archive or delete rolls back both. The token
+reducer still has its existing subsequent transaction; this change does not claim
+atomic publication of an entire parsed file or validate a compressed candidate.
+
+The new retirement header records a safe file label, replacement source identity,
+actual retirement time, contract version and `superseded-source-identity` reason.
+Old generation membership retains session, physical size and last-seen values.
+These are known provenance fields; a physical identity change alone is not claimed
+to prove a semantic rewrite. Equivalent representation adoption remains ING-002.
+
+Closed SQL `json_object` allowlists preserve native disjoint increments and original
+times/quality, latest counter state with its cumulative/synthetic flag, quota
+observations, context observations, workload metadata and numeric timeline fields.
+Source JSON, arbitrary columns and free-form timeline summaries are excluded.
+Missing values remain JSON null and zero remains zero. Old normalized increments
+and counter state are labelled as such, not reconstructed original total/last
+inputs. Missing legacy source-generation association remains null. Existing raw
+counter and response journals survive independently.
+
+The archive is not added to normal accounting/forecast queries. Replacement removes
+the superseded active projections as before, and unrelated sources remain active.
+Repeated delivery of the same selected generation creates no new retirement;
+subsequent actual selections append independent retirement events without erasing
+earlier snapshots. Migration creates empty archive tables, without inventing past
+retirements or replacing existing observations.
+
+Seven focused cases exercise all six numeric kinds, exact stored floating-point
+values, original chronology and nullable
+values, contradictory quota snapshots, unknown legacy association, exclusion of
+free-form summary text, unrelated-source preservation, retry idempotence, later
+selections, migration, and rollback on either archive or deletion failure. The
+existing individual/batch ingestion rewrite cases additionally prove archived
+native totals equal the prior selected generation while current totals count once.
+The pre-existing legacy-delta retention gap is closed for future retirements;
+retirements that already happened cannot be reconstructed by this migration.
+
+The full **720-test** Core suite passed (1m41s); a subsequently added exact-
+floating-point regression passed separately. The Windows build passed with zero
+warnings/errors (56.81s), then normal deployment installed/restarted PID 17144.
+Installed infrastructure SHA-256:
+`EB35E2DC80AAAC4FF64009707DB9D23DE53B771EAD8248A190171F3E5F84BC85`.
+
+A read-only comparison against the normal component-10 pre-deployment backup
+verified installed component 11, **95,995** pre-existing native rows and **39**
+prior counter-input journal rows. There were zero removals or changes to the
+existing native amounts/chronology or complete journal rows. Two new native rows
+and two new journal rows were collected normally. The new retirement table was
+empty, as expected without forcing a user-source rewrite: installed migration and
+normal journal ingestion are runtime proof; archive/rollback/rewrite behavior is
+automated source proof, not a claimed installed-source rewrite experiment.
+The comparison helper is the same `compare_counter_journal_upgrade.py`, now taking
+the deployment backup directory name as an argument; aggregate output is
+`compare_counter_journal_upgrade.v10-v11.json` under `.codex/temp/stage2/`.
+
 ## Remaining boundaries
 
 This closes installed component support, advancing ingestion and the tested
 refusal/recovery boundary. It does not close compressed-history recovery,
-superseded-generation retention, reconciliation, all untimed/all-time presentation
+complete generation adoption/recovery, reconciliation, all untimed/all-time presentation
 states or programme-wide user visual acceptance. Those remain under ING-002,
 EVID-002/004 and SHIP-004. The quantity/retention definition in PROJECT.md explicitly
 distinguishes these gaps from implemented behavior.

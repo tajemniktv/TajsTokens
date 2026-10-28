@@ -131,8 +131,12 @@ public sealed class TokenCounterEvidenceTests : IDisposable
         Assert.Equal(1L, await Scalar("SELECT COUNT(*) FROM rollout_files"));
         Assert.Equal(tokens, await Scalar("SELECT SUM(reported_total_tokens) FROM codex_native_token_events"));
         Assert.Equal(firstCapture, await Scalar("SELECT MIN(input_first_captured_at_utc) FROM codex_token_counter_observations"));
+        Assert.Equal(1L, await Scalar("SELECT COUNT(*) FROM codex_source_retirements"));
+        Assert.Equal(1L, await Scalar("SELECT COUNT(*) FROM codex_retired_source_generations"));
+        Assert.Equal(tokens, await Scalar("SELECT SUM(json_extract(evidence_json,'$.ReportedTotalTokens')) FROM codex_retired_numeric_observations WHERE observation_kind='native-token'"));
         await ingestion.IngestAsync(file, default);
         Assert.Equal(rows * 2, await Scalar("SELECT COUNT(*) FROM codex_token_counter_observations"));
+        Assert.Equal(1L, await Scalar("SELECT COUNT(*) FROM codex_source_retirements"));
     }
 
     private CodexTokenCountObservation Observation(string id, CodexTokenUsageSnapshot? total, CodexTokenUsageSnapshot? last) =>

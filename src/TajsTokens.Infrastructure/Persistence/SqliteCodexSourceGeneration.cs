@@ -19,7 +19,8 @@ internal static class SqliteCodexSourceGeneration
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    // Both writer paths must retire a replaced logical path before reducing its new records.
+    // Both writer paths preserve numeric evidence and retire a replaced logical path before
+    // reducing its new records. Preservation and projection removal share this transaction.
     // Prefix-verified metadata upgrades retain their identity and never enter this deletion path.
     public static async Task RetirePreviousAsync(SqliteConnection connection, SqliteTransaction transaction,
         string safeFileLabel, string sourceIdentity, CancellationToken cancellationToken)
@@ -30,6 +31,9 @@ internal static class SqliteCodexSourceGeneration
         previous.Parameters.AddWithValue("$file", safeFileLabel);
         previous.Parameters.AddWithValue("$identity", sourceIdentity);
         if (await previous.ExecuteScalarAsync(cancellationToken) is null) return;
+
+        await SqliteCodexRetiredEvidence.PreserveAsync(connection, transaction,
+            safeFileLabel, sourceIdentity, cancellationToken);
 
         using SqliteCommand command = connection.CreateCommand();
         command.Transaction = transaction;

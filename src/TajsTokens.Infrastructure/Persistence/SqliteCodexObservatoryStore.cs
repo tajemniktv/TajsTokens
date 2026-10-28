@@ -23,7 +23,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 /// </summary>
 public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObservatoryStore, IDisposable
 {
-    private const int ObservatorySchemaVersion = 10;
+    private const int ObservatorySchemaVersion = 11;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _initializeGate = new(1, 1);
     private volatile bool _initialized;
@@ -407,6 +407,15 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                     "UPDATE observatory_schema SET version = 10 WHERE component = 'codex-observatory';",
                     cancellationToken);
                 version = 10;
+            }
+
+            if (version == 10)
+            {
+                await ExecuteMigrationAsync(connection,
+                    SqliteCodexRetiredEvidence.MigrationSql +
+                    "UPDATE observatory_schema SET version = 11 WHERE component = 'codex-observatory';",
+                    cancellationToken);
+                version = 11;
             }
 
             using SqliteCommand privacyVersion = connection.CreateCommand();

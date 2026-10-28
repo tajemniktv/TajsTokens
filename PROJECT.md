@@ -176,15 +176,23 @@ deltas. Recovery records its actual input-capture time separately from the known
 occurrence's original capture. Supported metadata repair preserves amounts and
 original observation/collection times. The shared
 [generation retirement](src/TajsTokens.Infrastructure/Persistence/SqliteCodexSourceGeneration.cs)
-currently deletes superseded native token/workload/quota/context projections and
-rollout/parser membership. This is distinct from age expiry and is not proof that
-a particular user's history was lost. [Response observations](src/TajsTokens.Infrastructure/Persistence/SqliteCodexResponseEvidence.cs)
+now preserves superseded numeric interpretations through an
+[allowlisted retirement snapshot](src/TajsTokens.Infrastructure/Persistence/SqliteCodexRetiredEvidence.cs)
+before removing active token/workload/quota/context/timeline projections and
+rollout/parser membership. Component 11 keeps replacement identity/reason, known
+old generation membership, original nullable quantities and chronology; unknown
+legacy generation association remains unknown. Preservation and removal share the
+existing transaction, and ordinary accounting reads only active projections.
+Counter resume state is retained as state, not relabelled as original input.
+Retirements before this capability remain unavailable; no history is invented.
+[Response observations](src/TajsTokens.Infrastructure/Persistence/SqliteCodexResponseEvidence.cs)
 already survive retirement with active/retired membership, and
 [server observations](src/TajsTokens.Infrastructure/Persistence/SqliteTelemetryRepository.ServerEvidence.cs)
-retain typed captures with collision checks. ING-001/002 and EVID-004 must extend
-durable numeric evidence and generation selection before changing replacement
-behavior. Compression must not make this gap worse or claim immutability already
-implemented. Existing-schema refusal and original times/amounts remain invariants.
+retain typed captures with collision checks. ING-002 still needs verified equivalent
+representation adoption and validation of candidate generations before replacing
+selected history; durable retention alone does not make corrupt decoding acceptable.
+Broader EVID-004 scope/answer invariants remain separate from these storage changes.
+Existing-schema refusal and original times/amounts remain invariants.
 
 ## Quota Intelligence
 
@@ -497,9 +505,16 @@ acceptance stays open under PERF-001 while this prerequisite evidence work proce
   The 714-test Core suite and Windows build passed; installed ingestion produced
   three associated journal rows. All 95,956 existing native rows retained their
   amounts and chronology across migration; [validation](docs/source-notes/STAGE2_EVIDENCE_VALIDATION.md#original-counter-input-journal-component-10).
-  Existing normalized history and other superseded numeric projections still need
-  durable retention/selection; this partial implementation does not close EVID-004
-  or enable compressed replacement.
+  Component 11 additionally preserves superseded native increments, counter state,
+  quota, context, workload and numeric timeline interpretations before projection
+  retirement, with allowlisted payloads, replacement provenance, original missingness
+  and rollback protection. Active totals exclude these snapshots. The 720-test full
+  suite plus a precision regression and Windows build passed. Installed migration
+  preserved 95,995 existing native rows and all 39 prior journal rows;
+  [validation](docs/source-notes/STAGE2_EVIDENCE_VALIDATION.md#superseded-numeric-retention-component-11).
+  This supplies
+  the storage prerequisite for ING-002; complete EVID-004 scope/answer and replay
+  acceptance remain open, and compressed replacement is not enabled yet.
 
 **Exit:** trace a displayed amount to observations and reproduce it after replay,
 duplicate discovery, compression and supported migration. Late imports improve
@@ -716,9 +731,10 @@ complete; one successful early slice does not validate later changes.
 The Stage 1 mechanisms are installed with their stated evidence; PERF-001 resource
 acceptance remains open. EVID-001 now defines the quantity/retention contract.
 Installed **A-01** chronology acceptance has the stated runtime evidence. Continue
-Stage 2 with the accepted **ING-001** identity/checkpoint contract and component-10
-original counter-input journal. Finish durable superseded evidence/selection under
-**EVID-004** before **ING-002** changes representation/replacement, then complete
+Stage 2 with the accepted **ING-001** identity/checkpoint contract, component-10
+original counter-input journal and component-11 superseded numeric retention.
+Implement **ING-002** verified representation adoption and candidate validation,
+then finish EVID-004 scope/answer/replay acceptance and complete
 source reconciliation and eligibility explanations. Deliver **PACE-001–004** as a
 separate reviewable slice using the established quota contract; public TT selection
 does not block that correctness repair.
