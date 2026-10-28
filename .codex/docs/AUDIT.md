@@ -6,12 +6,13 @@ Updated 13 October 2026. This combines the supplied **TajsTokens Architecture an
 
 ## Consolidated feature status
 
-Planning update, 27 October 2026: [PROJECT.md — Current work](../../PROJECT.md#current-work)
+Delivery crosswalk, planned 27 October with A-01/P-01 updates on 28 October 2026:
+[PROJECT.md — Current work](../../PROJECT.md#current-work)
 owns the accounting/forecasting/TT checklist derived from the
-[preserved research](research/2026-10-27/SOURCE_INDEX.md). This planning update does
-not newly validate the feature statuses below. A-01 remains installed acceptance;
+[preserved research](research/2026-10-27/SOURCE_INDEX.md). Other dated feature statuses
+below have not been revalidated by this crosswalk. A-01's scoped installed acceptance passed;
 T-01 is the public-basis decision; D-01 covers research/public version clarity;
-P-01 remains measured token-write throughput; PACE-001 is tracked under its existing
+P-01's measured ordered batching is implemented locally; PACE-001 is tracked under its existing
 ID in PROJECT.md and the pace investigation. Keep these IDs when implementation lands.
 
 | Audit capability | Status | TajsTokens now / remaining boundary |
@@ -28,10 +29,10 @@ ID in PROJECT.md and the pace investigation. Keep these IDs when implementation 
 | Model pricing | **Partial** | `ApiPriceWorkload` has a dated, fixed, exact-model standard/short-context API-equivalent rate card. Unknown models and unsupported cache-write rates stay unpriced. Dynamic dated catalogs, historical effective-rate selection, regional/tier handling, and labelled fallback estimates are open; API dollars must never be relabelled as subscription quota/credits. |
 | Burn/runout and learned quota-cost comparisons | **Partial** | The existing evaluation includes pace, persistence, total, category, model/effort, and optional API-price candidates with chronological held-out gates. Rohit's fitted model-family weights and OpenUsage's monthly-boundary/consumption-rate heuristic have **not** been run as separate baselines. They must not replace evaluated models or be presented as calibrated probabilities. |
 | Usage breakdown crash | **Done** | The navigation crash reported during this work was fixed with the initial live-fleet slice (`f6fde22`). This is a TajsTokens bug fix, not an upstream feature. |
-| Token event-time provenance (A-01) | **Done in PR #109; runtime acceptance open** | Source event time, first capture time and timestamp quality are distinct. Untimed token amounts remain in lifetime totals but do not enter dated accounting, forecasts or evaluation; verified replay enriches legacy metadata without restamping it. See the architecture finding below. |
+| Token event-time provenance (A-01) | **Implemented; scoped installed acceptance passed** | Source event time, first capture time and timestamp quality are distinct. Installed component support, advancing ingestion and isolated newer-version refusal/recovery passed on 28 October; broader recovery/presentation stays in the current checklist. See the architecture finding below. |
 | TT workload unit (T-01) | **Open decision** | `tt-lab/v4-blocks` is an aggregate, quota-cost-derived research evaluator using a `tt-category-basis/v1` basis, not a selected independent public TT unit or per-task ledger. |
 | TT version documentation (D-01) | **Partial** | The old `tt-lab/v3` text is now in `docs/archive/`, rather than current `PROJECT.md`; current docs still do not explain the evaluator-v4 versus basis-v1 distinction. Do not present archived v3 empirical results as v4 evidence. |
-| Token-write throughput (P-01) | **Open measurement** | Semantic projections are batched, then native token observations are applied serially with a store transaction per observation. No representative benchmark in this audit establishes a material bottleneck. |
+| Token-write throughput (P-01) | **Implemented locally after measurement** | Ordered native batches of 128 preserve reducer order and checkpoint-after-success. The 10,000-observation comparison measured 21.73 s → 2.20 s, with reverse-order, parity and failure/restart proof; [current evidence](../../docs/source-notes/STAGE1_RESOURCE_VALIDATION.md) qualifies the benchmark. |
 | Supported platforms (P-02) | **Partial** | README names Windows and the release artifact is Windows x64. The non-Windows app-project target still compiles only `CrossPlatformBuildPlaceholder.cs`; a successful non-Windows build is not a usable client. |
 | Claude Code telemetry, live Claude mod, Claude context API | **Excluded** | User chose Codex-first implementation; do not treat the original audit's Claude P0 as a remaining Codex task. Revisit only if provider scope changes, using provider-native semantics and privacy-preserving acquisition. |
 | Android companion, credit-reset purchases, unrestricted Stop | **Excluded** | Android widget patterns are a separate client project. Consuming reset credits writes to a private provider endpoint and is outside read-only telemetry. Killing arbitrary Codex processes is not a safe translation of Rohit's Stop action; any future cancellation needs verified ownership and a separate design. |
@@ -45,6 +46,15 @@ The review also found no confirmed counter-reset, compaction, graph-cycle, quota
 ### A-01: source time must not silently become collection time — implemented in PR #109
 
 The [rollout parser](../../src/TajsTokens.Infrastructure/Ingestion/CodexRolloutParser.cs) and [SQLite store](../../src/TajsTokens.Infrastructure/Persistence/SqliteCodexObservatoryStore.cs) now retain nullable source event time, first capture time and explicit quality separately. Missing/malformed timestamps preserve token amounts but cannot become dated history, forecasting or evaluation input. Schema 9 marks legacy chronology unverified; verified prefix replay enriches only supported source metadata under existing occurrence IDs. The automated regressions cover timestamp precedence, missing/malformed time, migration and replay without duplicated amounts or restamped capture time. Installed-data and visual acceptance are separate from those checks.
+
+28 October installed evidence: component 9 continued ingesting, with two advancing
+checkpoints and no changes to existing native amounts/original times in the observed
+interval. The installed worker refused an isolated newer component marker without
+altering rows, then recovered on the supported marker while withholding untimed
+amounts from forecasts. [Scope and hashes](../../docs/source-notes/STAGE2_EVIDENCE_VALIDATION.md)
+close A-01's current installed boundary; compressed-history recovery, superseded
+evidence retention and broader presentation remain open in PROJECT.md. This does
+not claim the user's entire pre-upgrade history was recovered.
 
 ### T-01: define TT before promoting the research scalar — open decision
 

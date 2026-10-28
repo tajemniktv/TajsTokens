@@ -42,13 +42,29 @@ Uncertainty language should be somewhat between "still learning" and "insufficie
 
 ## Source of Truth
 
-The source of truth is TajsTokens database, which collects data from multiple sources. These sources include in order of importance:
+The app-owned TajsTokens database holds observations and their selected
+interpretations. Native Codex files, databases and credentials remain read-only.
+Authority belongs to a **quantity and scope**, rather than a global source ranking.
+An authoritative allowance percentage does not establish a local token count,
+and a correct local token ledger does not establish account-wide quota cost.
 
-1. Json Rollouts
-2. Codex live quota meter
-3. Codex database
-4. Provider analytics
-5. Derived models
+The following is the required product contract. Mentioning an endpoint or DTO does
+not verify its availability or semantics in an installed client; EVID-002 owns that
+acceptance. Existing implementation and retention gaps are stated below.
+
+| Quantity | Basis for the displayed interpretation | Required scope and qualifications |
+|---|---|---|
+| Current allowance, reset and window availability | Compatible provider-authoritative `account/rateLimits/read` response; embedded rollout readings remain historical observations/fallback evidence | Provider/profile/account, named limit/lane, plan, window duration and reset. Absent, unsupported and stale windows stay distinct from zero. Named buckets are not additive. |
+| Historical quota readings | Retained app-server and rollout observations, qualified by the shared quota-history policy | Preserve source/event/collection times and stream boundaries. Repeated embedded readings can be cached; a later JSONL record is not proof of a fresh measurement. Rounded readings do not establish exact burn. |
+| Installation-local native token work | The selected native reducer ledger reconstructed from rollout counters and proven occurrence equivalence | Preserve reported counters, disjoint increments, counter epochs, lineage and integrity diagnostics. Local coverage does not imply account-wide completeness or current-login ownership. |
+| Completed-response native usage | Source response, turn and thread counters with their native IDs and semantics | Response amounts, turn cumulative and thread cumulative snapshots overlap. Reconcile verified identities/coverage before selection; their simultaneous presence does not authorize adding them or discarding all legacy increments. Currently supplemental evidence. |
+| Provider-estimated thread credits and dollars | The supported backend thread-usage report for its own named quantities | Preserve credit micros, estimated USD micros, nullable token groups, model/effort/speed and report scope independently. Native billed dollars, if later supported, need a separate field and contract. |
+| Provider account activity and daily token/credit reports | The supported report snapshot and its native period, units and freshness | Lifetime, daily and grouped totals can overlap. Repeated fetches are revisions/snapshots, not new increments. Provider-wide coverage can differ from locally available rollouts. Native dates do not invent per-event UTC times. |
+| Historical plan usage and task-attributed usage | Their separate supported provider contracts | Historical-period basis points retain period/plan, approximation and accounting-complete fields. Task percentages use their stated current-full-allowance basis; balance-usage credits remain a separate amount. Preserve requested-thread coverage and overlapping breakdown dimensions. |
+| Purchased-credit balances and spend controls | The provider's named limit/credit metadata snapshot | Preserve reported balance text/unit, `hasCredits`, unlimited state and control limits/used amounts. A balance is not estimated thread consumption or a token/quota conversion. |
+| API-equivalent valuation | A deterministic calculation under the stated price schedule and assumptions | Keep schedule/date/coverage separate from subscription usage and invoiced dollars. Current fixed prices remain the implementation until CAT-002 selects a versioned catalog. |
+| TT | A frozen, explicitly selected reference-consumption basis | T-01 must select/version the public convention. Current TT is research-only. Token evidence remains usable when TT coordinates or conversion are unavailable. |
+| Forecasts, quota conversion and inferred changes | Versioned derived calculations using compatible evidence and stated assumptions | Retain cutoff, horizon, training/selection support and uncertainty type. Results and selected interpretations can change without changing original observations. |
 
 ### Semantics
 
@@ -60,21 +76,110 @@ The source of truth is TajsTokens database, which collects data from multiple so
 
 ### Conflict handling
 
-The sources may and probably will conflict from time to time. WE (TajsTokens Database) will have to reconcile the data in our own yard. For example, for example the Codex live quota meter reports quota usage is at 50%, but from json rollout we observe that it's at 49%. In this specific case, codex live quota meter is most likely correct.
+Compare only compatible quantities, accounts, periods, units and definitions. For
+example, a fresh provider allowance of 50% takes precedence for current allowance
+over a cached embedded 49% reading; both observations remain evidence. Small
+transient differences, such as 1pp of quota or 5pp of forecast error, do not justify
+erasing contradictions or inventing precision.
 
-Provider analytics are probably gonna be the most delayed ones, but also they allow for some more details. They could be used as a supplementary mostly.
+A later provider report may become the best retrospective interpretation when it
+actually accounts for the same quantity/period with stronger completeness or
+finalization evidence. Retain its original and prior observations, revision lineage
+and selection reason; expose the selected interpretation by default and revisions
+on inspection. Reusing an observation ID with conflicting numeric content must
+produce a conflict/variant, not an unnoticed last-writer-wins replacement.
 
-If later provider reports are available, we will preserve the original observation, but let the later provider report become the best current interpretation. Never rewrite or delete what we actually observed. But if OpenAI later supplies a more authoritative finalized historical account for the same quantity, TajsTokens can use that as the best retrospective interpretation.
-And if they do get updated, we show latest/best value by default, with revisions available on demand.
-
-The principle "Raw evidence is preserved carefully; **product conclusions are allowed to be imperfect and revisable**." is surely correct.
-
-We can accept errors like forecast being off by 5pp, or temporarily misreporting quota usage by 1pp.
+**Content-free observations are preserved; product conclusions are revisable.**
 
 ### Provider Analytics
 
-New Provider analytics might be useful as supplementary data but shouldn't be taken at face value. Especially for live data - We might believe them after +6h, but still if they differ from our own observations, we should reconcile.
-We should use all the ones, that are available and reconcile them with the other sources.
+Provider analytics remain useful supplementary evidence. Delay can explain a
+difference, but elapsed time alone does not make a report finalized or compatible.
+Retain provider data-as-of/period, freshness and completeness flags where supplied.
+Successful parsing, a field name or a public upstream declaration does not verify
+the installed contract. Capability, account bracketing, pagination and scope limits
+remain visible; unavailable or partial data must not become a plausible zero.
+
+### Observation envelope and privacy
+
+Extend existing typed observations and SQLite owners. These provenance groups are
+required where supported; missing fields remain explicitly unknown, and existing
+rows must not be presented as already carrying the complete envelope:
+
+- **Source namespace:** provider, local installation/host and source store/root,
+  adapter and declared/observed client/schema versions. Namespace logical IDs before
+  comparing stores or hosts; a response ID alone is not a global billing identity.
+- **Occurrence and relationships:** source occurrence/generation, safe physical
+  label/representation, record identity and coordinate system, native thread/turn/
+  response/session IDs, and observed or inferred lineage. Missing parent/role does
+  not erase otherwise usable quantities. Encoding-neutral coordinates are ING-001;
+  current physical checkpoints must not be relabelled as decoded offsets.
+- **Times:** nullable source event time and quality, source-recording time only when
+  supplied, first collection time, and fetch-start/end or report data-as-of/period.
+  File modification time and later re-reading never manufacture original event or
+  collection times. Retrospective reconstruction and collection-qualified replay
+  retain their different availability rules.
+- **Amounts:** original nullable reported fields, native unit/scale and cumulative
+  versus increment/snapshot meaning; separate normalized disjoint quantities,
+  integrity/defaulting diagnostics and parser/normalization version. Missing is not
+  zero. Cached input and reasoning output retain their inclusion relationships.
+- **Account and interpretation:** native verified identity, bracket correlation,
+  user assertion with its actual assertion time/range, or unknown/conflicting
+  ownership. Preserve selected/alternate/superseded interpretation and the reason
+  for equivalence, conflict or exclusion. Account creation/current login never
+  retroactively assigns all local work to that account.
+- **Coverage:** supported surfaces/encodings, scan/request/period bounds, decode or
+  schema failures, freshness and explicit absent/unsupported/invalid/stale/zero
+  states. Report actual denominators and unknown coverage; avoid an invented
+  account-wide completeness percentage.
+
+Durable payloads use closed allowlisted DTOs for numeric/status/provenance fields,
+not source JSON extension data, prompts, code, tool text or credentials. Keep
+necessary private source locators under their existing local ownership; sanitize
+paths and identifiers in diagnostic/shareable artifacts. Reading local data,
+retaining it and exporting it remain separate boundaries. This contract introduces
+no new source access, credential copying, remote polling or raw-content retention.
+
+### Durable observations and rebuildable projections
+
+Retain original content-free numeric observations and first collection identity
+across replay and representation changes. Keep the original reported token counter
+snapshots separately from their normalized increments and latest reducer state.
+Equivalent copies/re-reads add provenance or last-seen state without adding usage
+or restamping first collection. A genuine rewrite retains the superseded evidence
+and selects a new generation; a representation change alone does not create one.
+Historical response/account reports remain snapshots with alternatives/revisions.
+
+Normalization, metadata enrichment, lineage/account assertions, eligibility and
+generation selection are interpretations with versioned inputs/reasons. Preserve
+prior values when interpreting/enriching evidence rather than rewriting its original
+numeric content. Missing optional model, effort, role, time or account can restrict
+an answer while its valid original amounts remain retained.
+
+The selected ledger, timelines, current session/parser/counter state, checkpoints,
+fingerprints, reset tails and model/fit caches are rebuildable projections or resume
+state. Replacing them is safe only after the required observations/provenance are
+durable, with selected-generation membership preventing double counting. A model's
+read bound/lookback is not evidence expiry. No automatic age expiry is introduced;
+explicit user data deletion and deliberate privacy/schema repair remain separate
+operations. Missing legacy provenance cannot be reconstructed as invented facts.
+
+**Current implementation boundary:** the store does not yet satisfy this entire
+retention contract. The [native writer](src/TajsTokens.Infrastructure/Persistence/SqliteCodexObservatoryStore.cs)
+keeps normalized increments and the latest reducer state (a cumulative watermark
+where available), not an
+append-only log of every legacy total/last counter input. Its supported metadata
+repair preserves amounts and original observation/collection times. The shared
+[generation retirement](src/TajsTokens.Infrastructure/Persistence/SqliteCodexSourceGeneration.cs)
+currently deletes superseded native token/workload/quota/context projections and
+rollout/parser membership. This is distinct from age expiry and is not proof that
+a particular user's history was lost. [Response observations](src/TajsTokens.Infrastructure/Persistence/SqliteCodexResponseEvidence.cs)
+already survive retirement with active/retired membership, and
+[server observations](src/TajsTokens.Infrastructure/Persistence/SqliteTelemetryRepository.ServerEvidence.cs)
+retain typed captures with collision checks. ING-001/002 and EVID-004 must extend
+durable numeric evidence and generation selection before changing replacement
+behavior. Compression must not make this gap worse or claim immutability already
+implemented. Existing-schema refusal and original times/amounts remain invariants.
 
 ## Quota Intelligence
 
@@ -314,18 +419,36 @@ avoid unnecessary body reads, writes and retraining.
 Owners: existing discovery/reader/ingestion/checkpoint path, SQLite writer/reducer,
 app-server evidence provider/parser, feature and coverage/study builders.
 
-- [ ] **A-01 — Close installed chronology/schema acceptance.** Verify the installed
+Stage 2 now has the quantity/retention contract and installed chronology/schema
+evidence below. These do not establish every provider capability or implement
+immutable generation history; those gates remain explicit. Stage 1 resource
+acceptance stays open under PERF-001 while this prerequisite evidence work proceeds.
+
+- [x] **A-01 — Close installed chronology/schema acceptance.** Verify the installed
   binary supports the retained component and ingestion advances. Preserve existing
   v8→v9 migration, newer-version refusal, nullable source time, original amounts and
-  first capture times. Source/test support already exists; installed recovery and
-  presentation remain separate gates.
-- [ ] **EVID-001 — Specify authority and retention per quantity.** Refine Source of
+  first capture times. Keep source/test, installed recovery and presentation
+  evidence separate.
+  Installed component 9 and advancing ingestion passed: two checkpoints advanced,
+  with original amounts/times unchanged. The installed headless worker refused a
+  newer marker, preserved rows, then recovered at the supported version while
+  withholding untimed evidence from forecasts. Existing migration/query regressions
+  passed in the 707-test suite. Recovery coverage and broader presentation remain
+  under ING-002/EVID-004/SHIP-004; [scope and evidence](docs/source-notes/STAGE2_EVIDENCE_VALIDATION.md).
+- [x] **EVID-001 — Specify authority and retention per quantity.** Refine Source of
   Truth above for current allowance, native tokens and each provider unit separately.
   Define content-free source fields: host/store/occurrence, logical IDs/lineage,
   event/recording/collection times, numeric semantics/normalization, account certainty,
   parser version, selected/alternate generations and coverage/conflict reasons.
   Specify immutable observations versus rebuildable/superseded projections before
   changing replacement/retention behavior.
+  Defined in [Source of Truth](#source-of-truth), including quantity-specific
+  authority, the allowlisted provenance envelope, original versus normalized
+  counters, first collection time, alternatives and selected-generation membership.
+  Current destructive retirement and latest-only counter state are stated as
+  implementation gaps; durable retention remains open under ING-001/002 and
+  EVID-004. Source cross-check and documentation consistency only; no runtime or
+  schema change is claimed by closing this specification item.
 - [ ] **ING-001 — Define encoding-neutral identity/checkpoints.** Specify logical
   equivalence, physical representation preference, decoded-byte offsets/hashes,
   resume state and migration of physical checkpoints. Cover siblings, archives,
@@ -353,6 +476,10 @@ app-server evidence provider/parser, feature and coverage/study builders.
   role does not disable token accounting/direct pace, untimed data stays out of dated
   forecasts, unknown model retains quantities and unassigned work never inherits
   current login. Include deduplicated all-time amounts only where scope permits.
+  Add durable allowlisted original counter inputs and superseded-generation
+  evidence before replacing destructive retirement. Preserve first collection and
+  distinguish unavailable legacy history from new observations; active projections
+  must select generations without counting alternatives twice.
 
 **Exit:** trace a displayed amount to observations and reproduce it after replay,
 duplicate discovery, compression and supported migration. Late imports improve
@@ -564,13 +691,17 @@ complete; one successful early slice does not validate later changes.
   procedures in development docs and evidence in source notes. Commit validated
   slices; push only when requested or previously authorized.
 
-#### First implementation slice
+#### Current implementation handoff
 
-Start **PERF-001 → PERF-002 → PERF-003**, retaining worker containment: measure,
-repair the interaction trap, then stop repeated completion side effects. Next close
-**A-01**, specify **EVID-001/ING-001** and implement **ING-002/EVID-003**. Deliver
-**PACE-001–004** as a separate reviewable slice using existing quota evidence; it
-need not await public TT selection. This planning task does not execute those changes.
+The Stage 1 mechanisms are installed with their stated evidence; PERF-001 resource
+acceptance remains open. EVID-001 now defines the quantity/retention contract.
+Installed **A-01** chronology acceptance has the stated runtime evidence. Continue
+Stage 2 with **ING-001** identity/checkpoint design. Extend durable
+original/superseded evidence under
+**EVID-004** before **ING-002** changes representation/replacement, then complete
+source reconciliation and eligibility explanations. Deliver **PACE-001–004** as a
+separate reviewable slice using the established quota contract; public TT selection
+does not block that correctness repair.
 
 ### Existing implementation baseline and known gaps
 
