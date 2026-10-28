@@ -24,6 +24,18 @@ The signal is restricted to the current user/session and the same installation d
 
 ## Explicit joint TT candidate scoring
 
+Price-file preview is also explicit and read-only; its final argument is the caller's
+source-age threshold, not an activated freshness policy:
+
+```powershell
+dotnet run --project tools/TajsTokens.ForecastEvaluation/TajsTokens.ForecastEvaluation.csproj -c Debug --no-build --no-restore -- --price-preview "$env:LOCALAPPDATA/Programs/TajemnikTV/TajsTokens/data/telemetry.db" docs/source-notes/price-reference-2026-10-28.candidate.json 2026-09-27T00:00:00Z 2026-10-27T14:58:00Z 30
+```
+
+`--price-import <initialized-app-db> <source-key> <file>` writes only the price archive
+and attempt state, with no activation; `--price-source <app-db> <source-key>` reads it.
+Use an isolated app-owned fixture while source-policy selection is pending. Bad
+imports return exit 2 and retain last good data. See the [price snapshot contract](source-notes/STAGE4_PRICE_CATALOG.md).
+
 To inspect retained model discovery alongside selected local observations, use:
 
 ```powershell

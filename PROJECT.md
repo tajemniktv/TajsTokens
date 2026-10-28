@@ -713,6 +713,16 @@ TT evaluator, existing model metadata, `ApiPriceWorkload` and product snapshot.
   recommend explicit official-snapshot imports, separate overrides/fallbacks,
   last-known-good retention, a 30-day stale label and no invented effective dates.
   Selection remains pending before activation/automatic refresh.
+  **Mechanisms implemented/installed; item remains open:** `api-price-catalog/v1`
+  validates immutable typed snapshots and coordinates/dates; `api-price-valuation/v1`
+  separates explicit snapshot-reference and qualified date-effective lookup, numeric
+  overrides and opt-in labelled fallbacks. Intelligence schema 10 preserves versions,
+  original times and last good data through failed imports. Explicit preview/import/
+  inspection commands do not select a source or mutate TT. **831 Core tests**, Windows
+  build and installed fixture recovery/write-guard checks passed. The proposed native
+  month previews at 1,216.5290533 reference USD; its 608.26452665 TT is unchanged.
+  Daily price/TT archives remain empty. Complete selected-policy integration after
+  DEC-002; [contract and evidence](docs/source-notes/STAGE4_PRICE_CATALOG.md).
 - [ ] **D-01 — Clarify versions and expose measured TT.** Distinguish evaluator
   `tt-lab/v4-blocks`, research `tt-category-basis/v1` and the new public basis.
   Show observed TT with basis/coverage beside native tokens even when conversion is

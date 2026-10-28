@@ -7,6 +7,23 @@ using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
+if (args.Length == 4 && args[0] == "--price-import")
+{
+    await ApiPriceCatalogCli.RunAsync(() => ApiPriceCatalogCli.ImportAsync(args[1], args[2], args[3]));
+    return;
+}
+if (args.Length == 6 && args[0] == "--price-preview")
+{
+    await ApiPriceCatalogCli.RunAsync(() => ApiPriceCatalogCli.PreviewAsync(args[1], args[2], args[3], args[4], args[5]));
+    return;
+}
+if (args.Length == 3 && args[0] == "--price-source")
+{
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(await new SqliteTelemetryRepository(args[1]).ReadPriceCatalogSourceAsync(args[2], default),
+        new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+    return;
+}
+
 if (args.Length == 5 && args[0] == "--score-joint")
 {
     await JointScoringCli.RunAsync(args[1], args[2], args[3], args[4]);

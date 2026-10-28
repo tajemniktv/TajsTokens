@@ -1,5 +1,6 @@
 using TajsTokens.Core.Models;
 using System.Numerics;
+using static TajsTokens.Core.Services.ExactTokenWeightArithmetic;
 
 namespace TajsTokens.Core.Services;
 
@@ -8,8 +9,6 @@ public static class TtJointScoring
 {
     public const string Version = "tt-joint-scoring/v1";
     private static readonly int[][] Groups = [[0, 1, 2], [3, 4]];
-    private static readonly BigInteger Scale = BigInteger.Pow(10, 28);
-    private static readonly BigInteger MaximumMantissa = (BigInteger.One << 96) - 1;
     private sealed record Row(BigInteger Lower, BigInteger? Upper, BigInteger Covered, decimal? Total, decimal Unmapped, bool Partial, bool Inconsistent);
 
     public static TtScoreAssessment Evaluate(TtJointWorkloadBasis basis, CodexJointWorkload workload)
@@ -126,43 +125,4 @@ public static class TtJointScoring
         return new(lower, upper, covered, knownTotal, unmapped, partial, false);
     }
 
-    // Exact finite-decimal products/sums keep tiny contributions instead of rounding them away.
-    // Only final TT formatting rounds: nearest/even for identified values, outward for feasible bounds.
-    private static BigInteger Scaled(decimal value)
-    {
-        int[] bits = decimal.GetBits(value); int scale = (bits[3] >> 16) & 255;
-        BigInteger n = (uint)bits[0] | ((BigInteger)(uint)bits[1] << 32) | ((BigInteger)(uint)bits[2] << 64);
-        return ((bits[3] & int.MinValue) != 0 ? -n : n) * BigInteger.Pow(10, 28 - scale);
-    }
-    private static BigInteger Product(decimal amount, decimal weight) => Scaled(amount) * Scaled(weight);
-    private static decimal ExactSum(IEnumerable<decimal> values)
-    {
-        BigInteger sum = values.Aggregate(BigInteger.Zero, (s, x) => s + Scaled(x));
-        bool negative = sum.Sign < 0; sum = BigInteger.Abs(sum); int scale = 28;
-        while (sum > MaximumMantissa && scale > 0)
-        {
-            sum = BigInteger.DivRem(sum, 10, out var remainder);
-            if (remainder != 0) throw new OverflowException("Exact quantity sum exceeds decimal precision.");
-            scale--;
-        }
-        if (sum > MaximumMantissa) throw new OverflowException();
-        return Decimal(sum, scale, negative);
-    }
-    private static decimal Ratio(BigInteger numerator, BigInteger denominator, int direction)
-    {
-        for (int scale = 28; scale >= 0; scale--)
-        {
-            BigInteger n = numerator * BigInteger.Pow(10, scale);
-            BigInteger q = BigInteger.DivRem(n, denominator, out var remainder);
-            if (direction > 0 && remainder > 0 || direction == 0 &&
-                (remainder * 2 > denominator || remainder * 2 == denominator && !q.IsEven)) q++;
-            if (q > MaximumMantissa) continue;
-            if (direction == 0 && numerator > 0 && q == 0) throw new OverflowException("Identified TT is below decimal precision.");
-            return Decimal(q, scale, false);
-        }
-        throw new OverflowException("TT exceeds decimal range.");
-    }
-    private static decimal Decimal(BigInteger value, int scale, bool negative) => new(
-        unchecked((int)(uint)(value & uint.MaxValue)), unchecked((int)(uint)((value >> 32) & uint.MaxValue)),
-        unchecked((int)(uint)((value >> 64) & uint.MaxValue)), negative, (byte)scale);
 }

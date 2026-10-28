@@ -18,7 +18,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 public sealed partial class SqliteTelemetryRepository(string databasePath, TimeProvider? timeProvider = null) : ITelemetryRepository, ISessionIngestionCheckpointStore
 {
     private const int CurrentSchemaVersion = 16;
-    private const int IntelligenceSchemaVersion = 9;
+    private const int IntelligenceSchemaVersion = 10;
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _intelligenceInitializeGate = new(1, 1);
@@ -1251,6 +1251,21 @@ public sealed partial class SqliteTelemetryRepository(string databasePath, TimeP
                         completed_at_utc TEXT NOT NULL, source_fetched_at_utc TEXT, definition_id TEXT, issue TEXT
                     );
                     UPDATE intelligence_schema SET version=9 WHERE component='phase4-intelligence';
+                    """, cancellationToken);
+            }
+            if (version < 10)
+            {
+                await ExecuteMigrationAsync(connection, """
+                    CREATE TABLE IF NOT EXISTS api_price_catalog_snapshots (
+                        source_key TEXT NOT NULL, snapshot_id TEXT NOT NULL, first_imported_at_utc TEXT NOT NULL,
+                        content_hash TEXT NOT NULL, payload TEXT NOT NULL, PRIMARY KEY(source_key,snapshot_id)
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_price_catalog_history ON api_price_catalog_snapshots(source_key,first_imported_at_utc DESC);
+                    CREATE TABLE IF NOT EXISTS api_price_catalog_import_state (
+                        source_key TEXT PRIMARY KEY, last_attempt_at_utc TEXT NOT NULL, state INTEGER NOT NULL,
+                        last_good_id TEXT, issue TEXT
+                    );
+                    UPDATE intelligence_schema SET version=10 WHERE component='phase4-intelligence';
                     """, cancellationToken);
             }
             _intelligenceInitialized = true;
