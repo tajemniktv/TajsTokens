@@ -52,6 +52,7 @@ public static class QuotaCostEvaluation
                 EvidenceCoverage = QuotaEvaluationCoverageBuilder.Build(data),
                 ConstructionCoverage = built.Coverage,
                 Identification = QuotaCostIdentification.Analyze(built.Observations, cancellationToken),
+                ScenarioSupport = QuotaScenarioSupport.Diagnose(built.Observations, cancellationToken),
             };
     }
 
@@ -60,11 +61,13 @@ public static class QuotaCostEvaluation
         string coverage,
         CancellationToken cancellationToken = default)
     {
-        return QuotaAccountingModel.Evaluate(
+        QuotaCostReport report = QuotaAccountingModel.Evaluate(
             rows,
             coverage,
             cancellationToken,
             rows.Any(x => x.ApiPriceWeight is not null) ? Candidates.Append("api-price").ToArray() : Candidates,
-            QuotaCostAblations.For) with { Version = Version, Methodology = Methodology };
+            QuotaCostAblations.For);
+        return report with { Version = Version, Methodology = Methodology,
+            Scores = report.Scores.Select(x => x with { Uncertainty = QuotaUncertaintyDiagnosticsBuilder.Build(x.Trials) }).ToArray() };
     }
 }

@@ -774,18 +774,31 @@ policies and bounded calibration worker. A TT scalar is not required for this ro
   gains are promising, older results are mixed and two-hour recent strict trials
   are unavailable. The challenger remains research-only; live selection is unchanged.
   [Methods, matched counts, independent numerical check and decision](docs/source-notes/STAGE5_IDENTIFICATION.md).
-- [ ] **CAL-003 — Make support scenario-specific.** Permit justified familiar-mixture
+- [x] **CAL-003 — Make support scenario-specific.** Permit justified familiar-mixture
   answers despite unidentified individual coefficients; bound/withhold unsupported
   edits. Prototype feasible-set diagnostics under explicit rounding/lag/attribution/
   mismatch assumptions. Report infeasible/unbounded results, never silently widen
   tolerances or fit missing external account activity as local prices.
-- [ ] **CAL-004 — Type and label uncertainty.** Keep measurement, identification and
+  Installed explicit research computes conditional bounds for small known-model
+  joint designs, preserving unbounded/infeasible/numerically uncertain results.
+  The prototype declares its four-active-coordinate/20-constraint limits and
+  numerical tolerance; it does not simplify larger designs into marginal fits.
+  Independent exact-rational checks agree on all 42 solved retained-data cases;
+  larger designs remain unsupported for later Planning integration.
+- [x] **CAL-004 — Type and label uncertainty.** Keep measurement, identification and
   predictive ranges distinct. Report envelope containment/intersection separately,
   assumptions, width and point-error bounds. Preserve the existing intersection
   disclaimer; it does not establish calibrated latent coverage or survival probability.
+  Explicit research now carries separate range kinds, intersection/containment,
+  counts, widths and conditional point-error bounds. Installed numeric parity and
+  independent summary calculations pass; user confirmed summary/details rendering.
+  [Scope, examples, refusals and verification](docs/source-notes/STAGE5_IDENTIFICATION.md).
 
 **Exit:** matched chronological outcomes justify richer conversion or it stays
 research-only. Supported direct quota answers remain available without local attribution.
+Stage 5 meets this exit with the challenger retained in research; no universal
+conversion or released-model promotion is selected. FORE-003 owns integrating
+supported recent-work requests into the existing Planning flow.
 
 #### Stage 6 — continuation and one integrated planning flow
 
@@ -904,11 +917,11 @@ provider scope and answer-specific eligibility slices have their stated installe
 evidence. **PACE-001–004** implement and evaluate the elapsed-time correction.
 Stage 4's **SCORE-001–003** joint projection, frozen basis/archive and qualified
 scoring are installed. **CAT-001** discovery and picker interaction are verified,
-including hidden-dashboard input restoration. The latest full suite passed 849
+including hidden-dashboard input restoration. The latest full suite passed 859
 tests and the Windows build installed successfully; user visual acceptance remains
 separate.
 
-**Continue with Stage 5 / CAL-003.** The user selected the exact
+**Continue with Stage 6 / FORE-001.** The user selected the exact
 [price policy and frozen TT basis](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md).
 CAT-002 and D-01 are integrated and installed: immutable selections, independent
 price imports, measured TT and explicit original-score saving. Automated checks,
@@ -917,8 +930,11 @@ native picker import subsequently passed the user's manual check. CAL-001 render
 also passed; the user requested less prose. CAL-001 is installed:
 joint coverage and identification diagnostics expose sparse prefixes and local-work/
 meter mismatches. CAL-002's restrained joint challenger is installed in explicit
-research, with mixed chronological results and unchanged live selection. CAL-003
-now needs scenario-specific conditional bounds and explicit infeasibility/unboundedness.
+research, with mixed chronological results and unchanged live selection. CAL-003/004
+are installed: bounded conditional scenario diagnostics, explicit refusals and
+separate uncertainty types/metrics. Independent numerical checks and the user's
+manual summary/details check pass. Stage 6 must define continuation intervals and
+evaluate bounded joint-path candidates before changing a default or live selection.
 Programme-wide acceptance gates, user visual acceptance and the PERF-001
 resource-budget decision remain open.
 

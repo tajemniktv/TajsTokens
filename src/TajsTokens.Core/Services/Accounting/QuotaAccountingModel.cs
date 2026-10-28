@@ -242,6 +242,16 @@ public static class QuotaAccountingModel
         return training.Any(x => x.Features.Tokens > 0);
     }
 
+    internal static (string[] Names, double[][] Training, double[] Scenario) JointScenarioDesign(
+        IReadOnlyList<QuotaCostObservation> rows, CodexJointWorkload scenario)
+    {
+        // Feasibility geometry includes requested coordinates explicitly. This is not
+        // a fitted vocabulary or a pooled fallback for previously unseen models.
+        var requested = rows[0] with { Features = rows[0].Features with { JointWorkload = scenario } };
+        var vector = new CostVector(rows.Append(requested).ToArray(), "joint-categories");
+        return (vector.Names, rows.Select(vector.Values).ToArray(), vector.Values(requested));
+    }
+
     private static bool Beats(QuotaCostScore score, QuotaCostScore parent)
     {
         if (!score.Trials.Select(x => (x.StartUtc, x.EndUtc))

@@ -18,7 +18,14 @@ internal static class QuotaIdentificationCli
         var built = QuotaCostObservationBuilder.BuildDetailed(data, cancellation.Token, horizons: ComposedQuotaEvaluator.EvaluationHorizons);
         var cohorts = built.Observations.Select(x => x.Cohort).Distinct().ToList();
         var json = new JsonSerializerOptions { WriteIndented = false };
-        if (args[0] == "--joint-cost-study")
+        if (args[0] == "--quota-support-study")
+        {
+            var results = QuotaScenarioSupport.Diagnose(built.Observations, cancellation.Token);
+            Console.WriteLine(JsonSerializer.Serialize(new { FromUtc = from, ToUtc = to, data.CapturedAtUtc, QuotaScenarioSupport.Version, QuotaScenarioSupport.Methodology,
+                Cases = results.Select(x => new { Cohort = cohorts.IndexOf(x.Cohort), Window = x.Cohort.Kind.ToString(), x.HorizonHours,
+                    x.Scenario, x.ScenarioObservedAtUtc, x.AssumptionCase, x.Result }) }, json));
+        }
+        else if (args[0] == "--joint-cost-study")
         {
             var report = QuotaAccountingModel.Evaluate(built.Observations, "Selected retained local intervals; not account-wide token attribution.", cancellation.Token,
                 ["persistence", "pace", "total", "categories", "joint-categories"]);
@@ -31,7 +38,8 @@ internal static class QuotaIdentificationCli
                 Scores = report.Scores.Select(x => new { Cohort = cohorts.IndexOf(x.Cohort), Window = x.Cohort.Kind.ToString(), x.HorizonHours, x.Candidate,
                     x.Observations, x.TrainingSamples, x.HeldOutSamples, x.HeldOutGenerations, x.IntervalLoss, x.DisplayedDeltaMae, x.BlockMeanIntervalLoss,
                     x.PairedPaceIntervalLoss, x.PairedTotalIntervalLoss, x.PairedCategoryIntervalLoss, x.Status, x.MaterialWin, x.Coefficients,
-                    x.IncompleteJointTrainingIntervals, x.IncompleteJointHeldOutIntervals, x.Trials, x.EvidenceSupport }) }, json));
+                    x.IncompleteJointTrainingIntervals, x.IncompleteJointHeldOutIntervals, x.Trials, x.EvidenceSupport,
+                    Uncertainty = QuotaUncertaintyDiagnosticsBuilder.Build(x.Trials) }) }, json));
         }
         else
         {

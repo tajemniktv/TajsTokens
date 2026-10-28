@@ -107,6 +107,8 @@ public static class CodexIntelligenceProjection
             ["accounting"] = QuotaAccountingModel.Version,
             ["accounting-research"] = Research.QuotaCostEvaluation.Version,
             ["accounting-identification"] = QuotaCostIdentification.Version,
+            ["scenario-identification"] = QuotaScenarioSupport.Version,
+            ["uncertainty-diagnostics"] = QuotaUncertaintyDiagnosticsBuilder.Version,
             ["forecast"] = QuotaPredictionService.PolicyVersion,
             ["reset-outlook"] = QuotaPredictionService.ResetOutlookPolicyVersion,
             ["evidence"] = CodexEvidenceDrift.Policy,

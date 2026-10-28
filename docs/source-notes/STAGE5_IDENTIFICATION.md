@@ -1,4 +1,4 @@
-# Joint quota-cost identification and restrained conversion (CAL-001/002)
+# Support-aware quota conversion (CAL-001–004)
 
 `quota-cost-identification/v1` inspects the existing reconciled cost observations;
 it does not fit prices, change the conversion selector or require a TT scalar.
@@ -251,6 +251,122 @@ numeric scores exactly. Installed Core SHA-256 is
 `8a5fc6892bfee734e38377a6ae19044acbc6279b6f52664ddab1dd738d1ef56b`;
 app assembly SHA-256 is
 `55850fce340d5f8418919270a4eef8ed61174957fb87babc96985bd4898e5dee`.
-The user's prior analysis/import checks pass; the shorter presentation has its
-own requested manual acceptance check. No new persistence or collection contract
+The user's analysis/import checks pass; they also accepted the shorter results
+and collapsed methods presentation as clearer. No new persistence or collection contract
 was introduced by CAL-002.
+
+## Conditional scenario bounds (CAL-003)
+
+`quota-scenario-support/v1` is a bounded, explicit set-membership prototype in the
+existing accounting owner. It reuses the joint-vector construction, includes the
+requested coordinates explicitly and never assigns an unseen model the pooled
+prior used by the regularized challenger. Its constraints are nonnegative linear
+model/category coefficients compatible with the supplied measurement envelopes
+and caller-declared external-activity, lag and mismatch allowances. Scope and
+horizon must match. Missing model labels or coordinate overflow stay unsupported.
+Unknown effort is permitted because this token-only model assumes no extra effort
+coefficient; that is an assumption, not a discovered billing relationship.
+
+For supplied measurement bounds `[L,U]`, external upper bound `E`, lag allowance
+`D` and mismatch allowance `M`, local constraints are
+`max(0,L-E-D-M) <= x beta <= U+D+M`. Unrestricted external activity removes the
+positive local lower bound. `E=0` is a complete-local counterfactual, not a verified
+account attribution. No allowances are learned or enlarged to make a fit feasible.
+The original precision-policy labels and full declared assumptions travel with
+the result. A zero-work interval with a positive adjusted lower bound is explicitly
+infeasible; it does not become a fitted intercept or a local token price.
+
+The prototype handles at most 20 constraints, 16 known models, four active
+model/category coordinates and 200,000 vertex systems. It never truncates an API
+request silently. Columns without training support remain free nonnegative
+coefficients; positive requested mass there produces an unbounded upper cost
+after checking feasibility. Supported coordinates are bounded by nonnegative
+upper-work constraints. Scaled vertex enumeration computes the extrema on this
+small polytope. Relative feasibility tolerance `1e-8` is declared numerical
+precision, not extra quota noise. Ill-conditioned systems return numerically
+uncertain; endpoints are approximations, not certified exact arithmetic. The
+dimension bound deliberately avoids general vertex-enumeration growth; see the
+[Stanford primary lecture on inequality/vertex representations](https://see.stanford.edu/materials/lsocoee364a/transcripts/ConvexOptimizationI-Lecture12.html).
+
+Regressions reproduce the supplied research's algebra independently in C#:
+
+| Constraints / requested work | Conditional local cost |
+|---|---:|
+| `9 <= a+b <= 11`; request `a+b` | 9–11 |
+| Same evidence; request `2a+2b` | 18–22 |
+| Same evidence; request `2a` | 0–22 |
+| Add `14 <= 2a+b <= 16`; request `2a` | 6–14 |
+| Unobserved new-model coordinate | unbounded above |
+| Unrestricted external activity; request `a+b` | 0–11 |
+
+Repeated copies of one mixture do not narrow its coefficient ambiguity. Tests
+also cover incompatible scope, unknown metadata, contradictory constraints,
+explicit sensitivities, cancellation, resource bounds and near-singular systems.
+Familiar-mixture support and individual coefficient identification remain separate.
+
+Explicit accounting analysis inspects the first positive training mixture and
+latest retained positive mixture under two labelled cases: unrestricted external
+activity, and complete-local zero-lag counterfactual. These are retrospective
+sensitivity cases, not live forecasts, selected assumptions or independent samples.
+First-20 remains the comparator; the API itself can use fewer declared constraints
+for deterministic geometry. Ordinary direct quota forecasts are unaffected.
+
+The month range produced 40 cases: 13 bounded, ten unbounded, 13 infeasible under
+the complete-local counterfactual and four outside the dimension bound. The recent
+week produced 16: six bounded, eight outside the dimension bound and two numerically
+uncertain complete-local two-hour cases. The 15/30-minute recent joint designs
+exceed this prototype's dimension bound; no simplified marginal replacement is
+invented. A broader verified optimizer is deferred until a concrete supported
+Planning requirement justifies it; unsupported edits remain withheld.
+
+An independent Python `Fraction` calculation used exact rational native amounts,
+measurement bounds and vertex systems, without floating feasibility slack. It
+checked all **42 bounded/unbounded/infeasible cases**, with zero classification
+mismatches and endpoint agreement within `1e-6` pp. The 12 complexity refusals and
+two numerical-uncertainty refusals were explicitly excluded, not counted as solved.
+This verifies these examples, not general numerical certification or the scientific
+validity of complete-local coverage. Private original numeric audit hashes:
+
+- Month: `04a92a84c2087647948a3a930829b6c0f1ecab24f35c8c67f9da7681de83410a`
+- Recent: `5d637fc39ede5c038d0d569bea68c8325f25f4a1ea8819c8299f6a394e877b1b`
+
+## Separate uncertainty quantities (CAL-004)
+
+`quota-uncertainty-diagnostics/v1` preserves three typed targets:
+`MeasurementEnvelope`, `ConditionalIdentification` and `PredictiveResidualRange`.
+Research scores report measurement width, predictive-range width, counts,
+envelope intersection and containment separately. Missing ranges remain absent;
+invalid/one-sided ranges are excluded and counted. No new probability field,
+calibration threshold or range-fitting algorithm is introduced.
+
+For point `p` and measurement envelope `[L,U]`, the minimum absolute error is
+`distance(p,[L,U])`; the maximum is `max(abs(p-L),abs(p-U))`. Their empirical means
+bound realized absolute error **only if** each latent outcome belongs to its
+declared measurement envelope. For a reported range `P`, containment means the
+whole measurement set lies inside `P`; intersection means the two sets overlap.
+On the same valid samples, containment <= realized empirical latent coverage <=
+intersection under that same measurement-set assumption. These are not future
+coverage guarantees. Lag, attribution and mismatch uncertainty do not disappear
+inside a rounding envelope. Existing 80% envelope-intersection language remains
+explicitly distinct from latent coverage and exhaustion probability.
+
+Regressions distinguish a range nested inside a measurement set from one containing
+it, verify point-error endpoint bounds and empirical coverage inequalities, and
+keep missing/inverted/one-sided/nonfinite inputs out of the denominators. Explicit
+research builds these summaries; the live accounting/forecast hot path does not.
+The collapsed methods section contains the numerical qualifications and case
+details; concise results show only the research case-status counts.
+
+The final full Core suite passed **859 tests** (2m 17s). Windows build passed with
+zero warnings/errors (1m 4.03s), installed/restarted PID 43196 and preserved data
+with backup `20261028T171410268Z-a72cffe0`. Installed Core SHA-256 is
+`8517a2f4e99fbb2700faba6466cd0308fbd1d0cb75f8a502b6c13b32a21c1c29`;
+app assembly SHA-256 is
+`bf6c605455b67a853c1fb26bdca1b05eb8eeca69088ab1c7c5ec1c4d4498f4c8`.
+The installed command reproduced all 16 recent-range support cases and all 60
+month-range cost scores. An independent calculation verified every uncertainty
+summary, including 20 scores with reported residual ranges and 8,760 range rows
+across overlapping candidates/horizons; these are not independent outcomes.
+There were zero mismatches. The user confirmed the summary/details work and
+provided screenshots showing the new case summary and collapsed/expanded methods.
+No native-source write, collection change or live model promotion was introduced.

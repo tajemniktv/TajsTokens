@@ -421,6 +421,26 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
                         $"{x.Cohort.Source} · later mixtures inside span {x.LaterScenarios.WithinTrainingSpan} · " +
                         $"zero-local-work rows {x.ZeroWorkRows}, positive displayed movement {x.ZeroWorkPositiveMovementRows}, " +
                         $"positive lower envelope {x.ZeroWorkPositiveEnvelopeRows}.")) : "");
+            if (result.Accounting.ScenarioSupport is { Count: > 0 } support)
+            {
+                AccountingText.Text += "\n\nConditional scenario bounds · research: " +
+                    string.Join(" · ", support.GroupBy(x => x.Result.Status).Select(x => $"{x.Count()} {x.Key}")) +
+                    ". Cases and assumptions below.";
+                AccountingMethodText.Text += "\n\n" + QuotaScenarioSupport.Methodology + "\n\n" +
+                    string.Join("\n", support.Select(x => $"{x.Cohort.Kind} · {x.HorizonHours * 60:g} min · {x.Scenario} " +
+                        $"({x.ScenarioObservedAtUtc:O}) · {x.AssumptionCase}: {x.Result.Status} · " +
+                        $"{x.Result.LowerCost?.ToString("0.###") ?? "?"}–{x.Result.UpperCost?.ToString("0.###") ?? "unbounded/unavailable"} pp · {x.Result.Reason}"));
+            }
+            AccountingMethodText.Text += "\n\n" + QuotaUncertaintyDiagnosticsBuilder.Methodology + "\n\n" +
+                string.Join("\n", result.Accounting.Scores.Where(x => x.Candidate is "total" or "categories" or "joint-categories")
+                    .Where(x => x.Uncertainty is not null).Select(x =>
+                    {
+                        var u = x.Uncertainty!;
+                        return $"{x.Cohort.Kind} · {x.HorizonHours * 60:g} min · {x.Candidate}: " +
+                            $"point-error bounds {u.MeanMinimumAbsolutePointError?.ToString("0.###") ?? "?"}–{u.MeanMaximumAbsolutePointError?.ToString("0.###") ?? "?"} pp ({u.PointSamples} outcomes); " +
+                            $"residual ranges {u.RangeSamples}, width {u.MeanPredictiveRangeWidth?.ToString("0.###") ?? "?"} pp, " +
+                            $"envelope intersection {u.EnvelopeIntersectionRate?.ToString("P0") ?? "?"}, containment {u.EnvelopeContainmentRate?.ToString("P0") ?? "?"}.";
+                    }));
         }
         catch (OperationCanceledException) when (request.IsCancellationRequested)
         {

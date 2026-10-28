@@ -215,6 +215,14 @@ and model labels for reproduction, with account/session/path identifiers omitted
 review it before sharing. Compare matched targets, availability and provisional
 blocks, not just mean losses. See [Stage 5 evidence](source-notes/STAGE5_IDENTIFICATION.md).
 
+`--quota-support-study` uses the same database/range arguments for bounded
+conditional scenario identification. It inspects the frozen first-20 prefix's
+first positive mixture and the latest retained mixture under explicitly labelled
+external-activity sensitivity cases. It does not choose those assumptions for live
+Planning. More than four active joint coordinates remain unsupported; infeasible,
+unbounded and numerically uncertain results are preserved. Source notes document
+the declared numerical tolerance and independent exact-rational checks.
+
 ## Daily installation
 
 A successful default local app build publishes, installs and restarts `%LOCALAPPDATA%\Programs\TajemnikTV\TajsTokens\current`. Persistent database/settings live in sibling `data`; the prior binary is kept in `previous`, and deployment backups are in `backups`. The build does not delete `data`.

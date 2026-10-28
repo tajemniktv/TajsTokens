@@ -64,6 +64,8 @@ public sealed record QuotaCostScore(
     public double? PairedTotalIntervalLoss { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public double? PairedCategoryIntervalLoss { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public QuotaUncertaintyDiagnostics? Uncertainty { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
     public int IncompleteJointTrainingIntervals { get; init; }
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
@@ -84,4 +86,6 @@ public sealed record QuotaCostReport(
     public IReadOnlyList<QuotaCostCohortCoverage> CohortCoverage { get; init; } = [];
     [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
     public QuotaCostIdentificationReport? Identification { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<QuotaCostScenarioDiagnostic>? ScenarioSupport { get; init; }
 }
