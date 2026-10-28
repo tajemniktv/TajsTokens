@@ -442,3 +442,109 @@ the user before the additional first-frame capture, so no new UI timing result i
 claimed. The initial full-suite run exposed two comparisons that included distinct
 opaque fixture-database identities; those now assert different identities and
 compare the accounting payload separately. The final full-suite run passed.
+
+## Evidence-qualified scheduling and overlapping reads
+
+PERF-007 is implemented in the existing calibration owner. The app database has a
+derived `calibration_evidence_state` singleton with input/feature revisions and a
+schema signature. Transactional triggers track insert/update/delete of quota,
+native token, workload and context evidence and rollout source membership. True
+no-op updates and rollout path/size/last-seen maintenance do not advance it.
+Derived forecast/reset/cache writes do not advance it. A changed column signature
+or missing owned trigger is repaired atomically and advances the revision. Missing
+or unknown schemas disable reuse; they never suppress the original worker path.
+This table retains counters/schema metadata, not an additional source dataset.
+
+The scheduler also qualifies physical storage identity, complete quota anchors,
+freshness and user associations. A completed unchanged generation can be returned
+with its original generation/anchor times; it is not relabeled as a new forecast.
+Its expiry is bounded by forecast horizons, quota resets, observed activity expiry,
+future-dated/late-collected feature availability and the 30-day workload read's
+moving two-hour lookback. Feature-time qualification is reused between quota-only
+changes. Clock rollback invalidates reuse. Failed/interrupted slices do not become
+completed cache entries; existing exact numeric fits still survive interruptions.
+Evidence changed during a slice makes its returned results stale and prevents
+reuse. The coordinator preserves that stale flag independently of token revision.
+Cheap provider-anchored pace remains independent of detailed calibration.
+
+Within a worker, one bounded widest feature snapshot supplies overlapping reads
+for quota lanes and the 30-day workload pass. Quota reads remain narrow in the
+original reader, preserving account assertions at their actual time. Each feature
+projection uses the original SQL active-session query: inferring that set from
+already-filtered metadata would omit old valid prefixes when recent retired-source
+metadata selected a session. Source/capture timestamps and stable row order are
+preserved. Input stamps before/after capture and projection reject mixed generations;
+derived writes do not invalidate these reads. The worker uses one evaluation time
+for quota and workload; its output preserves that actual time even when a slice
+takes longer. No read transaction or raw dataset survives the worker.
+
+A wider feature read reaching its supported bound falls back to the requested
+narrow read; it must not make a previously supported range unavailable. Ledger
+reads and ranges outside the shared window use the original reader. Shared
+active-session materialization is also bounded, with the same fallback.
+
+Synthetic measurement: 20,000 normalized token rows, three overlapping reads
+(two 120-day anchor cutoffs and one 30-day workload range), warm SQLite/file caches,
+no quota rows and no model fitting. Both paths returned 60,000 token references
+with identical serialized evidence hashes. Normal then shared: 25,165,896 ->
+9,046,992 allocated bytes, 370.78 -> 172.70 ms. Reversed order: 25,164,648 ->
+9,039,560 bytes, 413.97 -> 169.11 ms. This is about 64% fewer allocations and
+53–59% less elapsed time for that fixture, not a whole-app improvement ratio.
+Local probe/output: `.codex/temp/stage1/probe`, `reader-benchmark*.jsonl`.
+
+Targeted regressions cover source correction/deletion/rollback, derived/no-op
+writes, trigger recovery, equal-revision physical replacement, future collection,
+window boundaries, expiry, rollback of the clock, failures, mid-slice changes,
+account cutoffs, retired metadata, source-row parity and bounded-read fallback.
+All **682 Core tests passed**, none skipped (1 minute 20 seconds). The serial
+Windows solution build/install passed with zero warnings/errors (55.34 seconds)
+and restarted the daily app as PID 276. No UI interaction was attempted.
+
+### Resource observation and remaining acceptance
+
+The existing resource sampler now includes the installation-qualified app's child
+tree, including transient helpers, with PID creation-time qualification. Earlier
+app/calibration-only observations may omit these helpers. Combined private peaks
+sum one sampling cycle instead of unrelated per-process maxima. CPU/I/O for short
+children covers only their observed portion; shorter-than-interval processes and
+start/end gaps remain unmeasured.
+
+A 35-second unprofiled sample of this installed build observed parent CPU 0.234%
+of 16 logical processors over 34.57 seconds, final private commit 283.1 MiB and
+sampled private peak 298.9 MiB. A calibration child was observed for 10.42 seconds:
+2.174% CPU, 260.1 MiB sampled private peak, 342,558,388 logical read bytes and
+102,646,976 logical write bytes. Its `conhost` helper used 4.72 MiB private commit.
+Combined sampled private peak was **553.2 MiB**; final 283.1 MiB was after the child
+exited and must not substitute for the active-worker peak. Visibility was not
+observed because Computer Use remains stopped. This is not a hidden-idle or
+controlled before/after comparison, and the overall memory problem is not solved.
+
+Optional PhysicalDisk raw counters are separate system-wide observations. In that
+35.99-second device interval C: reported 11,886,080 read / 146,059,264 write bytes,
+D: 13,258,752 / 409,600 and E: 0 / 421,376. These include other applications and
+cannot attribute disk traffic to TajsTokens. Process transfer counters do not
+establish per-process physical disk attribution.
+The method follows Microsoft's [PhysicalDisk counter definition](https://learn.microsoft.com/en-us/previous-versions/aa394308(v=vs.85))
+and [two-sample counter calculation](https://learn.microsoft.com/en-gb/windows/win32/perfctrs/calculating-counter-values).
+
+PERF-001 remains open for numerical budgets, controlled scenario comparisons,
+restore timing and resource acceptance. Sharing preparation and reads is not
+evidence that the combined memory target has been met.
+
+### User-operated restore capture
+
+The user chose to perform the hide/restore manually; agent UI control stayed
+stopped. During the 90-second capture the user reported "no stalls, pretty normal
+I think". The installed app emitted two successful visibility-to-first-frame
+measurements: **30.30 ms and 96.31 ms**. Two selected-history reads completed in
+745.76 ms and 773.30 ms. One hidden-history eviction was observed. All 52 started
+phases completed, with zero lost events or source errors. These are two observed
+transitions, not a population p95 or physical input-to-display latency.
+
+Three collector passes also completed during that interval (3,715.45/3,729.00/
+3,896.90 ms by sorted duration), alongside three fleet reads and continued append
+ingestion. The capture verified that the shell returned before the history query
+finished. It supports bounded restore responsiveness and the user's manual pass;
+it does not close the memory/resource gate. Local evidence is
+`manual-restore-phases.nettrace` and `manual-restore-phase-summary.json` under
+`.codex/temp/stage1/`.

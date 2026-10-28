@@ -27,10 +27,15 @@ public static class CalibrationWorkerHost
             using var cache = new SqliteRidgeFitCache(request.CachePath);
             using IDisposable scope = RidgeFitCacheScope.Use(cache);
             var repository = new SqliteTelemetryRepository(request.DatabasePath);
-            var service = new SqliteIntelligenceService(request.DatabasePath, repository, () => request.Associations);
+            DateTimeOffset now = DateTimeOffset.UtcNow;
+            DateTimeOffset from = request.Lanes.Where(x => x.IsFresh && x.Snapshot is not null)
+                .Select(x => x.Snapshot!.CapturedAtUtc.AddDays(-120)).Append(now.AddDays(-30)).Min();
+            if (from < now.AddDays(-121)) from = now.AddDays(-121);
+            var datasetReader = new CalibrationDatasetReader(request.DatabasePath, request.Associations, from, now);
+            var service = new SqliteIntelligenceService(request.DatabasePath, repository, () => request.Associations, datasetReader);
             IReadOnlyList<CurrentQuotaForecast> forecasts = await service.BuildAndPersistCurrentForecastsAsync(
-                request.Lanes, DateTimeOffset.UtcNow, CancellationToken.None);
-            TokenWorkloadForecast workload = await service.ForecastTokenWorkloadAsync(DateTimeOffset.UtcNow, CancellationToken.None);
+                request.Lanes, now, CancellationToken.None);
+            TokenWorkloadForecast workload = await service.ForecastTokenWorkloadAsync(now, CancellationToken.None);
             await output.WriteLineAsync(JsonSerializer.Serialize(new CodexCalibrationResult(forecasts, workload, cache.Hits, cache.Misses)));
             await output.FlushAsync();
             return 0;

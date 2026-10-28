@@ -688,7 +688,7 @@ public sealed class TelemetryCoordinator
                 var updated = latest with
                 {
                     CurrentForecasts = forecasts,
-                    TokenForecast = result.Workload is { } workload ? workload with { IsStale = !sameTokens } : latest.TokenForecast,
+                    TokenForecast = result.Workload is { } workload ? workload with { IsStale = workload.IsStale || !sameTokens } : latest.TokenForecast,
                     Events = latest.Events.Append(new TelemetryRefreshEvent(_timeProvider.GetUtcNow(), "Calibration completed",
                         $"Detailed calibration finished independently of quota polling; {result.CacheHits} numeric fit cache hits, {result.CacheMisses} misses. Newer quota anchors retain their current outlooks.")).ToArray(),
                 };

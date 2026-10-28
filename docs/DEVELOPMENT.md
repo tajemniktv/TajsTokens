@@ -57,6 +57,23 @@ a fresh child directory under the supplied output root and removes only its own
 fixture after completion. Keep aggregate JSON and qualify hardware/warmup differences;
 these are not timings of an old released binary. See [Stage 1 evidence](source-notes/STAGE1_RESOURCE_VALIDATION.md).
 
+## Resource measurements
+
+Use the existing sampler against an installed app, without UI interaction:
+
+```powershell
+./tools/performance/Measure-AppResources.ps1 -Seconds 35 -IntervalMilliseconds 1000 -PhysicalDiskCounters -OutputPath .codex/temp/stage1/resources.json
+```
+
+It qualifies the app installation and includes its observed child tree, separating
+calibration workers and transient helpers. PID creation times prevent mixing
+reused PIDs. Combined private peaks use one sample cycle. CPU/I/O for a child
+covers its observed lifetime only. Optional PhysicalDisk counters are system-wide;
+they cannot attribute physical bytes to this app. Process transfer and prefix hash
+counters are logical work. Record visibility, scenario, build and sampling limits
+separately. See [Stage 1 evidence](source-notes/STAGE1_RESOURCE_VALIDATION.md) for
+phase tracing, the offline reporter and current measurements.
+
 ## Daily installation
 
 A successful default local app build publishes, installs and restarts `%LOCALAPPDATA%\Programs\TajemnikTV\TajsTokens\current`. Persistent database/settings live in sibling `data`; the prior binary is kept in `previous`, and deployment backups are in `backups`. The build does not delete `data`.

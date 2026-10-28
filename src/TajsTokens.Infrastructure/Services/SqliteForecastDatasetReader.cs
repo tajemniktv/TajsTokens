@@ -28,6 +28,15 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
         string? accountKey = null,
         bool includeQuota = true,
         bool includeLedger = false)
+        => await ReadCoreAsync(provider, profile, fromUtc, toUtc, cancellationToken, accountKey, includeQuota, includeLedger, false);
+
+    internal Task<CodexForecastDataset> ReadQuotaOnlyAsync(string provider, string profile,
+        DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken token, string? accountKey)
+        => ReadCoreAsync(provider, profile, fromUtc, toUtc, token, accountKey, true, false, true);
+
+    private async Task<CodexForecastDataset> ReadCoreAsync(string provider, string profile,
+        DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken cancellationToken,
+        string? accountKey, bool includeQuota, bool includeLedger, bool quotaOnly)
     {
         using var measurement = WorkDiagnostics.Measure(WorkPhase.DatasetRead);
         if (fromUtc >= toUtc) throw new ArgumentException("A non-empty chronological range is required.");
@@ -121,7 +130,13 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
                     });
         }
         if (quota.Count > 500000)
-            throw new InvalidOperationException("Quota evaluation range exceeds the 500,000-row bound; narrow the range.");
+            throw new ForecastDatasetReadLimitException("Quota evaluation range exceeds the 500,000-row bound; narrow the range.");
+        if (quotaOnly)
+        {
+            transaction.Commit();
+            measurement?.Complete(rows: quota.Count, committedTransactions: 1);
+            return new(quota, [], [], [], captured, "Quota-only evidence read.") { AccountAssociations = accountAssociations ?? [] };
+        }
         command.CommandText = """
                               SELECT w.source_record_id,w.source_identity,w.source_file,w.start_byte_offset,w.end_byte_offset,
                                      w.session_id,w.event_type,w.observed_at_utc,w.captured_at_utc,w.turn_id,w.root_turn_id,
@@ -167,7 +182,7 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
                         Text(reader, 21)));
         }
         if (workload.Count > 100000)
-            throw new InvalidOperationException("Workload metadata exceeds the supported replay bound; a paged evidence read is required.");
+            throw new ForecastDatasetReadLimitException("Workload metadata exceeds the supported replay bound; a paged evidence read is required.");
         command.CommandText = """
                               SELECT e.session_id,e.source_event_at_utc,e.captured_at_utc,e.model,e.reasoning_effort,e.uncached_input_tokens,
                                      e.cache_read_tokens,e.cache_write_tokens,e.non_reasoning_output_tokens,e.reasoning_output_tokens,e.reported_total_tokens
@@ -225,7 +240,7 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
                         work));
             }
         }
-        if (tokens.Count > 500000) throw new InvalidOperationException("Token replay exceeds 500,000 rows; narrow the range.");
+        if (tokens.Count > 500000) throw new ForecastDatasetReadLimitException("Token replay exceeds 500,000 rows; narrow the range.");
         command.CommandText = """
                               SELECT event_id,session_id,agent_id,source_event_at_utc,model,input_tokens,context_window_tokens,is_compaction,record_bytes,captured_at_utc
                               FROM context_observations WHERE source_timestamp_quality = 'Valid' AND source_event_at_utc > $lookback AND source_event_at_utc <= $to
@@ -248,7 +263,7 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
                         Number(reader, 8),
                         OptionalTime(reader, 9)));
         }
-        if (context.Count > 500000) throw new InvalidOperationException("Context replay exceeds 500,000 rows; narrow the range.");
+        if (context.Count > 500000) throw new ForecastDatasetReadLimitException("Context replay exceeds 500,000 rows; narrow the range.");
         transaction.Commit();
         measurement?.Complete(rows: quota.Count + workload.Count + tokens.Count + context.Count, committedTransactions: 1);
         return new CodexForecastDataset(
@@ -263,3 +278,5 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
         };
     }
 }
+
+internal sealed class ForecastDatasetReadLimitException(string message) : InvalidOperationException(message);

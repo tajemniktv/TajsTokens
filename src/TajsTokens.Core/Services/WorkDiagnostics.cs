@@ -25,6 +25,8 @@ public enum WorkPhase
     ObservatoryInitialization = 18,
     StateIndexInitialization = 19,
     DashboardFirstFrame = 20,
+    DatasetReuse = 21,
+    CalibrationEvidence = 22,
 }
 
 /// <summary>Opt-in EventPipe/ETW diagnostics. Fixed numeric phases and aggregate work

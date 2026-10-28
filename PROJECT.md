@@ -172,15 +172,17 @@ Owners: `WindowsResourcePolicy`, `App`, `MainWindow`, `TelemetryCoordinator`,
 `CodexObservatoryService`, SQLite stores/providers and `CalibrationProcessService`.
 Memo §11 supplies the mechanisms; their relative runtime cost remains to be measured.
 
-Stage 1 is in progress: PERF-002–006, PERF-008 and P-01
+Stage 1 is in progress: PERF-002–008 and P-01
 are implemented. Normal interactive scheduling, retryable/visible EcoQoS, coalesced
 fleet reads, independent discovery/catch-up, precise projection invalidation, no-op
 write suppression, guarded initialization, indexed reset tails and ordered token
 batching are installed. Retained presentation inputs, qualified short history reuse
 and hidden-history eviction are also installed. Opt-in aggregate phase diagnostics
 and an offline EventPipe reporter are validated; the installed sample identifies
-workload-prefix preparation and worker allocation pressure for PERF-007. All 674
-Core tests and the Windows build pass. Broader measurements and calibration reuse remain open. See
+workload-prefix preparation and worker allocation pressure. Evidence-qualified
+calibration scheduling and worker-local overlapping dataset reads are installed.
+All 682 Core tests and the Windows build pass. Resource/restore acceptance and
+numerical budgets remain open under PERF-001. See
 [current validation evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 
 - [ ] **PERF-001 — Establish measurements and targets.** Compare startup, warm idle,
@@ -191,7 +193,9 @@ Core tests and the Windows build pass. Broader measurements and calibration reus
   numerical budgets from that hardware/data baseline; `BytesObserved` is not a
   physical-I/O counter.
   Aggregate phase capture and separate parent/worker allocation/GC samples are
-  recorded. Scenario comparisons, physical I/O and accepted numerical budgets
+  recorded. Manual hide/restore was normal for the user; two captured first frames
+  took 30.3/96.3 ms. The active-worker combined sampled private peak remains
+  553.2 MiB. Controlled scenario comparisons, attributed physical I/O and numerical budgets
   remain open; [measurement details](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 - [x] **PERF-002 — Repair interactive scheduling.** Remove the UI/tray process hard
   CPU cap and routine forced compacting GC, retaining worker containment and
@@ -234,7 +238,7 @@ Core tests and the Windows build pass. Broader measurements and calibration reus
   Verified by mutation/rollback/replacement/no-op regressions, synthetic prefix
   measurements and installed logical-work diagnostics. Full suite: 668 passed;
   Windows build/install passed; [evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
-- [ ] **PERF-007 — Reuse qualified preparation/evaluation.** Gate expensive calibration
+- [x] **PERF-007 — Reuse qualified preparation/evaluation.** Gate expensive calibration
   on evidence revisions and newly matured outcomes, not cooldown alone. Reuse
   overlapping reads/prepared features and useful interrupted-slice progress. Keep
   cheap anchor/time-sensitive projection separate. Invalidate for account/source/
@@ -243,9 +247,12 @@ Core tests and the Windows build pass. Broader measurements and calibration reus
   Evaluation-local sorted workload prefixes and bounded feature reuse are
   implemented, preserving enclosing-origin collection cutoffs and invalidating on
   late evidence or replacement inputs. Persistent numeric fit recovery remains
-  in the existing cache. Full suite: 674 passed; Windows build/install passed.
-  Evidence/maturity scheduling and overlapping dataset
-  reads remain open; this item is not yet complete.
+  in the existing cache. Separate input revisions exclude derived writes and no-op
+  maintenance, while expiry/future collection/rolling windows invalidate reuse.
+  Shared worker feature reads preserve the original account/window/source rules
+  and fall back at read bounds or concurrent evidence changes. Full suite: 682
+  passed; Windows build/install passed;
+  [matching-output and resource evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 - [x] **PERF-008 — Bound maintenance and queries.** Put legacy privacy scrubs under
   durable migration ownership and enforce privacy in writers. Guard initialization
   with database-replacement recovery. Inspect fleet/reset/cache-stamp query plans;

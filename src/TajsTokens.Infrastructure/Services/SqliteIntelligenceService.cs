@@ -41,14 +41,17 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
 
     private readonly Func<string, CancellationToken, Task>? _queryStageObserver;
     private readonly SqliteTelemetryRepository _telemetryRepository;
+    private readonly ICodexForecastDatasetReader? _forecastDatasetReader;
 
     public SqliteIntelligenceService(
         string databasePath,
         SqliteTelemetryRepository telemetryRepository,
-        Func<IReadOnlyList<RolloutAccountAssociation>>? accountAssociations = null)
+        Func<IReadOnlyList<RolloutAccountAssociation>>? accountAssociations = null,
+        ICodexForecastDatasetReader? forecastDatasetReader = null)
         : this(databasePath, telemetryRepository, queryStageObserver: null)
     {
         _accountAssociations = accountAssociations ?? (() => []);
+        _forecastDatasetReader = forecastDatasetReader;
     }
 
     internal SqliteIntelligenceService(
@@ -174,7 +177,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                             current.Profile, current.AccountKey, current.CapturedAtUtc);
                         if (!datasets.TryGetValue(key, out CodexForecastDataset? dataset))
                         {
-                            dataset = await new SqliteForecastDatasetReader(_databasePath, _accountAssociations()).ReadAsync(
+                            dataset = await (_forecastDatasetReader ?? new SqliteForecastDatasetReader(_databasePath, _accountAssociations())).ReadAsync(
                                 current.Provider,
                                 current.Profile,
                                 current.CapturedAtUtc.AddDays(-120),
@@ -544,7 +547,7 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
         await EnsureInitializedAsync(cancellationToken);
         using var observatory = new SqliteCodexObservatoryStore(_databasePath);
         await observatory.InitializeAsync(cancellationToken);
-        CodexForecastDataset data = await new SqliteForecastDatasetReader(_databasePath).ReadAsync(
+        CodexForecastDataset data = await (_forecastDatasetReader ?? new SqliteForecastDatasetReader(_databasePath)).ReadAsync(
             "codex",
             "default",
             nowUtc.AddDays(-30),
