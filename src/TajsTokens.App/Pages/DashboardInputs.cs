@@ -31,6 +31,7 @@ internal static class DashboardInputs
     public static DashboardInput[] Capture(params FrameworkElement[] controls) => controls.Select(control => control switch
     {
         TextBox box => new DashboardInput(box.Name, Text: box.Text),
+        AutoSuggestBox box => new DashboardInput(box.Name, Text: box.Text),
         NumberBox box => new DashboardInput(box.Name, Text: box.Text, Number: box.Value),
         ComboBox box => new DashboardInput(box.Name, Index: box.SelectedIndex),
         Pivot pivot => new DashboardInput(pivot.Name, Index: pivot.SelectedIndex),
@@ -52,6 +53,7 @@ internal static class DashboardInputs
             switch (control)
             {
                 case TextBox box: box.Text = value.Text ?? ""; break;
+                case AutoSuggestBox box: box.Text = value.Text ?? ""; break;
                 case NumberBox box: box.Value = value.Number; box.Text = value.Text ?? ""; break;
                 case ComboBox box: box.SelectedIndex = value.Index; break;
                 case Pivot pivot: pivot.SelectedIndex = value.Index; break;

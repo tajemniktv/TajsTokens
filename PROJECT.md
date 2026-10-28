@@ -703,7 +703,11 @@ TT evaluator, existing model metadata, `ApiPriceWorkload` and product snapshot.
   build and installed capture/projection checks passed: 11 cached models, five
   observed names, no new credential/API-key or paid probe. Numeric and old research
   records were preserved. [Contract and validation](docs/source-notes/STAGE4_MODEL_CATALOG.md).
-  Suggestion interaction/user visual acceptance remain SHIP-004 work.
+  Installed suggestion/keyboard/free-entry interaction now passed. The new
+  AutoSuggestBox inputs also participate in the existing lightweight hidden-state
+  helper: full unload/reopen preserved model/effort and Diagnostics confirmed a
+  release pass. **831 Core tests** and the Windows build passed for this repair.
+  User visual acceptance and broader SHIP-004 work remain open.
 - [ ] **CAT-002 — Version prices independently.** After DEC-002, validate feed schema,
   units/currency, model/category/tier/context and applicable effective dates. Preserve
   snapshots, separate overrides/labelled fallbacks, last-known-good recovery and

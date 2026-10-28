@@ -97,16 +97,44 @@ The definition ID was
 The installed read-only catalog command over the fixed September 27–October 27 range
 returned 11 choices, five observed model names, two hidden catalog entries, zero
 known aliases/reported retirements, no invalid or truncated definitions, and access
-unverified for every choice. This verifies installed collection/retention/projection;
-actual suggestion interaction and user visual acceptance remain separate gates.
+unverified for every choice. This verified installed collection/retention/projection;
+the interaction follow-through below and user visual acceptance are separate gates.
 
 All 96,437 prior native rows, 481 counter-input journal rows and six existing research
 snapshots survived the upgrade unchanged; one normal native/journal row arrived
 after restart. Telemetry/observatory/state-index versions stayed 16/11/8; intelligence
 advanced 8 → 9. The daily joint-TT archive remained empty.
 
-Installed SHA-256 values:
+Installed SHA-256 values for that catalog milestone:
 
 - Core: `8DADE89CC2D2C0360BF2530F42CAD6397A6CBC3E64C366F095E656FBDF47A202`
 - Infrastructure: `3C7900EB39ACE60E33CF58F0A224A17034A12197B166D57AC6D88D98AAF71AC6`
 - Evaluation: `7CD36D50873087F13BDE750EEACC76FE74758757B7994217B3F44FB88AE79EC6`
+
+### Installed picker and hidden-dashboard follow-through
+
+The October 28 interaction pass verified that typing `gpt-6.1` opens the cached
+Terra/Sol suggestions, keyboard selection retains the exact name, and effort
+suggestions include `xhigh`/`high`. Selecting Terra reports cached catalog and local
+observation while keeping account access unverified. An unlisted exact name is
+kept as entered with its explicit unverified-access label. No model task or access
+probe was submitted.
+
+This exposed a lifecycle integration gap: `PlanModel` and `PlanEffort` had become
+`AutoSuggestBox` controls, but `DashboardInputs.Capture` did not handle that type
+and would throw during the 30-second hidden release. The existing helper now saves
+and restores their text without retaining controls, suggestions or read models.
+An installed full hide/reopen retained the Planning tab, `gpt-6.1-terra` and `xhigh`;
+Diagnostics confirmed one hidden dashboard release pass in the same process.
+A second full hide/reopen retained `unlisted-catalog-check` and
+`custom-effort-check`, keeping the unlisted/unverified label; Diagnostics reached
+two release passes. Quota polling and native collection remained live. Temporary
+inputs were cleared after the checks. This proves text retention through actual
+view rebuilding, without inferring account entitlement from either kind of name.
+
+The full Core suite passed **831 tests** (1m49s); the zero-warning Windows build
+passed (55.68s) and restarted the daily app at 2026-10-28 12:07:42 UTC. Installed app
+DLL SHA-256: `D1E67B23D14B6C67B85570EEE48A56B2B8FEA4A9EE902CE8562F7D85EF40CE16`.
+These are interaction and lifecycle checks, not user visual acceptance, aggregate
+RAM-budget acceptance or completion of programme-wide SHIP-004. An unrelated
+Windows Security overlay was left untouched throughout.
