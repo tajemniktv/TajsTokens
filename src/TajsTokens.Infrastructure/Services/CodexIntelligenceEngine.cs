@@ -87,14 +87,9 @@ public sealed class CodexIntelligenceEngine(
         if (selection.FromUtc >= selection.ToUtc || selection.ToUtc - selection.FromUtc > TimeSpan.FromDays(366))
             throw new ArgumentException("Select an ordered range of at most 366 days.", nameof(selection));
         DateTimeOffset asOf = DateTimeOffset.UtcNow;
-        CodexForecastDataset dataset = await datasetReader().ReadAsync(
-            "codex",
-            "default",
-            selection.FromUtc,
-            selection.ToUtc,
-            token,
-            selection.AccountKey,
-            includeLedger: true);
+        CodexForecastDataset dataset = await datasetReader().ReadLedgerAndQuotaAsync(
+            "codex", "default", selection.FromUtc, selection.ToUtc, token,
+            selection.AccountKey, includeQuota: !selection.HasWorkFilter);
         IReadOnlyList<CodexLedgerEntry> selected = CodexIntelligenceProjection.Select(dataset.Ledger, selection);
         CodexServerEvidenceHistory history = await serverEvidence.ReadHistoryAsync(selection.FromUtc, asOf, selection.AccountKey, token);
         IReadOnlyList<CodexServerObservation> evidence = history.Observations;
@@ -126,7 +121,7 @@ public sealed class CodexIntelligenceEngine(
             new(
                 "Snapshot",
                 "Multiple source captures",
-                $"Local ledger and forecast dataset captured together at {dataset.CapturedAtUtc:O}; provider history upper bound {history.CapturedAtUtc:O}. Not an atomic cross-source snapshot."),
+                $"Local ledger and quota history captured together at {dataset.CapturedAtUtc:O}; provider history upper bound {history.CapturedAtUtc:O}. Not an atomic cross-source snapshot."),
             new("TT", "Research only", "No runtime TT basis has been promoted. Missing TT is not zero workload."),
             new("API equivalent", "Derived", ApiPriceWorkload.Assumptions),
         };

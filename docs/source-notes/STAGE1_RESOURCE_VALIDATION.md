@@ -636,7 +636,8 @@ that policy are the next PERF-004 extension. Numerical memory budgets remain ope
 The approved policy now detaches immediately and, after 30 seconds continuously
 hidden/minimized, captures page-owned presentation inputs and drops the frame,
 its cached pages and generated history. Short hides reuse the same view. The
-native window/navigation shell stays alive for the tray and restore path. No
+native window stays alive for the tray and restore path. The later extension below
+also releases the navigation shell. No
 forced GC or process memory cap was added.
 
 Snapshots are process-local typed records containing scalar values, selection
@@ -754,3 +755,87 @@ This diagnostic changes GC state and **does not count as normal-operation RAM
 acceptance**. No forced collection was added to production. Metadata-only graph,
 aggregate before/after JSON and stack/root reports remain local under
 `.codex/temp/stage1/hidden-page-*`; no raw process-memory dump was taken.
+
+### Navigation shell and allocator
+
+Hidden eviction now releases the NavigationView shell as well as its frame. The
+existing native window is retained. Pane-open and Advanced expansion values join
+the lightweight state; handlers are detached before release and restored with the
+new shell. An installed planner duration of 4.5 hours and its selected view survived
+a full unload, and Back returned to Overview. The shell trace observed a 141.939 ms
+first frame; all 15 captured phases completed with no lost events or source errors.
+These are individual observations, not percentile estimates. The shell slice passed
+687 Core tests and a Windows build with zero warnings/errors before installation.
+
+The manifest opts into the supported Windows
+[segment heap](https://learn.microsoft.com/en-us/windows/win32/sbscs/application-manifests#heaptype).
+Live native heap signatures confirmed that this opt-in took effect. No forced GC,
+working-set trim or new process boundary was added. Native heap free-space inspection
+did not support adding speculative heap trimming; reserved virtual address ranges
+are not RAM measurements.
+
+Both unprofiled 120-second samples used Planning with a 4.5-hour input, then minimized:
+
+| Installed variant | Mean after 30 s | Mean while worker active | Sampled tree peak | Last parent |
+|---|---:|---:|---:|---:|
+| Shell unloading | 472.39 MiB | 490.98 MiB | 644.59 MiB | 256.02 MiB |
+| Shell unloading + segment heap | 459.29 MiB | 459.29 MiB | 537.19 MiB | 202.55 MiB |
+
+The worker was active for 82.04 of the first sample's 89.09 measured seconds and
+all 89.98 seconds of the second. Natural evidence and worker/helper phases differed;
+this is supportive operational evidence, not a controlled allocator effect size.
+The allocator is retained for its observed savings within the supported platform.
+The 400 MiB sustained combined target remains provisional and was not met here.
+Resource samples now include executable and build-manifest SHA-256 hashes because
+a dirty source-identity string alone cannot distinguish successive local builds.
+Evidence: `shell-unload-hidden-120s.json`, `segment-heap-hidden-120s.json`,
+`shell-unload-restore-report.json` and `segment-heap-native-stats.txt` locally in
+`.codex/temp/stage1/`. Interval-weighted means include the partial interval crossing
+30 seconds; older calculations omitting that interval differ slightly.
+
+### Overview evidence projection
+
+Overview history previously requested the complete predictive dataset but consumed
+only its ledger and quota. The existing reader interface now offers that projection
+with a complete-read fallback for other implementations. The SQLite implementation
+keeps one read transaction, the same ownership/provenance rules and selected ledger
+bounds (`from` inclusive, `to` exclusive). It skips metadata/context and predictive
+token-list retention; work-filtered views also skip unused quota rows. Forecast and
+calibration reads, algorithms, collection times and retained evidence are unchanged.
+Oversized selected token reads fail explicitly rather than truncating.
+
+An owned fixture with 20,000 token events and 20,000 metadata rows produced identical
+ledger/quota SHA-256 results in both benchmark orders. Complete reads allocated
+34.67/34.69 MB and took 425.01/413.53 ms; projected reads allocated 15.69/15.70 MB
+and took 195.20/144.91 ms. These are warmed isolated reader measurements, not app
+private-commit savings. Focused tests cover endpoints, unknown models, collection
+time, source identity, conflicting ownership, omitted tables and the 500,000-row
+refusal. Temporary benchmark outputs are `ledger-projection-bench*.log`.
+
+The combined slice passed all 691 Core tests, none skipped (1m35s), and the serial
+Windows build/install with zero warnings/errors (57.66s). The daily app was restarted
+as PID 24800. Its executable SHA-256 is
+`A37D8953067ACE796A70157813E14D86AFF3E2F3BC3CA80AC9D0B0C2C26526B4`.
+Installed Overview and Planning loaded normally; the fixture establishes exact
+projection parity, while the installed check establishes the production read path
+remains usable. It does not compare moving live totals across different times.
+
+A subsequent UI-confirmed five-minute minimized sample on that executable, without
+profiling or forced GC, averaged **351.79 MiB** after the 30-second unload delay.
+Calibration was present for only 117.82 of the 269.38 measured seconds; the mean
+while it was present was **496.88 MiB**, so the overall mean cannot close the
+provisional 400 MiB sustained-worker gate. The aligned tree peak was **556.90 MiB**:
+parent 276.96, worker 215.47, quota helper 29.46, node 21.45 and launcher/console
+helpers 13.56 MiB. The final parent/tree was 226.54 MiB after the worker exited.
+Parent CPU was 0.100% of the 16 logical processors; worker CPU was 0.520% over its
+146.45-second observed lifetime. PhysicalDisk capture succeeded but describes the
+whole device, not attributed app I/O. These results include the app's observed
+helper tree and must not be reported as parent-only acceptance.
+
+The post-sample restore preserved Planning, its 4.5-hour input, the open pane and
+collapsed Advanced group. The input was reset to its original one hour, Overview
+was selected and no settings were saved. A separate trace observed a **120.256 ms**
+first frame, with zero lost events/source errors. It captured 23 starts/22 completions;
+one operation extends outside the capture, not an established operation failure.
+Selected history completed in 658.307 ms, including its 498.050 ms evidence read.
+Evidence: `ledger-projection-hidden-300s.json` and `ledger-projection-restore-report.json`.

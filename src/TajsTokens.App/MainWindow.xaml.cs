@@ -27,6 +27,10 @@ public sealed partial class MainWindow : Window
     private bool _ready;
     private bool _dashboardVisible;
     private long _viewGeneration;
+    private DashboardShell? _dashboardShell;
+    private NavigationView AppNavigation => _dashboardShell?.Navigation ?? throw new InvalidOperationException("Dashboard is unloaded.");
+    private bool _paneOpen = true;
+    private bool _advancedExpanded;
     private Frame? _contentFrame;
     private Frame ContentFrame => _contentFrame ?? throw new InvalidOperationException("Dashboard is unloaded.");
     private readonly Dictionary<Type, object> _pageInputs = [];
@@ -53,7 +57,6 @@ public sealed partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        _contentFrame = (Frame)AppNavigation.Content;
         _historyEvictionTimer.Tick += (_, _) =>
         {
             _historyEvictionTimer.Stop();
@@ -75,6 +78,13 @@ public sealed partial class MainWindow : Window
             frame.Content = null;
             frame.BackStack.Clear();
             frame.ForwardStack.Clear();
+            _paneOpen = AppNavigation.IsPaneOpen;
+            _advancedExpanded = AppNavigation.MenuItems.OfType<NavigationViewItem>()
+                .Any(item => item.MenuItems.Count > 0 && item.IsExpanded);
+            AppNavigation.BackRequested -= OnBackRequested;
+            AppNavigation.SelectionChanged -= OnNavigationSelectionChanged;
+            Content = null;
+            _dashboardShell = null;
             _contentFrame = null;
             _pages.Clear();
             _historyPages.Clear();
@@ -158,7 +168,7 @@ public sealed partial class MainWindow : Window
         {
             // Detaching runs existing Unloaded cancellation/subscription cleanup immediately.
             // Brief hides reuse the view; the timer later retains only inputs/navigation.
-            AppNavigation.Content = null;
+            if (_dashboardShell is { } shell) shell.Navigation.Content = null;
             _historyEvictionTimer.Start();
         }
         else if (visible)
@@ -173,6 +183,7 @@ public sealed partial class MainWindow : Window
                 if (!_dashboardVisible || generation != _viewGeneration) return;
                 EnsureDashboard();
                 AppNavigation.Content = ContentFrame;
+                if (!ReferenceEquals(Content, _dashboardShell)) Content = _dashboardShell;
                 if (ContentFrame.CurrentSourcePageType is null) Navigate(typeof(CodexIntelligencePage));
                 AppNavigation.IsBackEnabled = ContentFrame.CanGoBack;
                 if (firstFrame is not null && ReferenceEquals(_pendingFirstFrame, firstFrame))
@@ -192,12 +203,18 @@ public sealed partial class MainWindow : Window
     private void EnsureDashboard()
     {
         if (_contentFrame is not null) return;
-        var frame = new Frame { CacheSize = 6 };
+        _dashboardShell = new DashboardShell();
+        AppNavigation.BackRequested += OnBackRequested;
+        AppNavigation.SelectionChanged += OnNavigationSelectionChanged;
+        Frame frame = _dashboardShell.InitialFrame;
         _contentFrame = frame;
         frame.Navigated += OnNavigated;
         if (_suspendedPage is { } current) Navigate(current.Type, current.Parameter);
         foreach (var entry in _backStack) frame.BackStack.Add(new PageStackEntry(entry.Type, entry.Parameter, null));
         foreach (var entry in _forwardStack) frame.ForwardStack.Add(new PageStackEntry(entry.Type, entry.Parameter, null));
+        AppNavigation.IsPaneOpen = _paneOpen;
+        foreach (NavigationViewItem item in AppNavigation.MenuItems.OfType<NavigationViewItem>().Where(item => item.MenuItems.Count > 0))
+            item.IsExpanded = _advancedExpanded;
         _suspendedPage = null;
         _backStack = _forwardStack = [];
     }
@@ -217,7 +234,7 @@ public sealed partial class MainWindow : Window
 
     private void OnNavigated(object sender, NavigationEventArgs e)
     {
-        if (AppNavigation is null) return;
+        if (_dashboardShell is null) return;
         _synchronizing = true;
         try
         {

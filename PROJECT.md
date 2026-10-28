@@ -182,7 +182,12 @@ and hidden-history eviction are also installed. Opt-in aggregate phase diagnosti
 and an offline EventPipe reporter are validated; the installed sample identifies
 workload-prefix preparation and worker allocation pressure. Evidence-qualified
 calibration scheduling and worker-local overlapping dataset reads are installed.
-All 687 Core tests and the Windows build pass. Resource/restore acceptance and
+The overview now requests ledger/quota evidence without predictive metadata or
+context; forecast/calibration reads retain their existing inputs. Hidden eviction
+also releases the navigation shell and preserves pane/expansion state. The Windows
+segment heap is enabled within the existing supported OS range; measured savings
+are workload-qualified, not a new memory guarantee. All 691 Core tests and the
+Windows build/install pass. Resource acceptance and
 numerical budgets remain open under PERF-001. See
 [current validation evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 
@@ -200,7 +205,10 @@ numerical budgets remain open under PERF-001. See
   when a 126.9 MiB quota helper overlapped calibration. A fresh background-only
   process previously peaked at 388.2 MiB across the tree. Controlled scenario
   comparisons, attributed physical I/O and numerical budgets
-  remain open; [measurement details](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
+  remain open. The latest five-minute hidden sample averaged 351.8 MiB overall,
+  but 496.9 MiB while calibration was active and peaked at 556.9 MiB; it does not
+  meet the provisional 400 MiB sustained target. Its restore first frame took
+  120.3 ms; [measurement details](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 - [x] **PERF-002 — Repair interactive scheduling.** Remove the UI/tray process hard
   CPU cap and routine forced compacting GC, retaining worker containment and
   cooperative bounded collection. Track desired/applied native policy separately;
@@ -221,7 +229,7 @@ numerical budgets remain open under PERF-001. See
   evict heavy history. Cache summaries by selection/data generation, coalesce visual
   snapshots and update changed properties. Keep alert transitions lossless and
   independent of visual coalescing.
-  Detaches immediately and releases the dashboard frame after 30 seconds hidden,
+  Detaches immediately and releases the dashboard frame and navigation shell after 30 seconds hidden,
   following the user's approved tradeoff. It captures page-owned
   scalar inputs/selection identities and Back/Forward entries, releases the frame
   and its page cache, and rebuilds on restore. Brief hides retain the same view.
@@ -235,7 +243,8 @@ numerical budgets remain open under PERF-001. See
   identities even when labels match, avoiding a reproduced WinUI accessibility
   hang. Full suite: 687 passed; Windows build/install passed; repeated installed
   chat/usage accessibility walks passed. Nested usage range/filter and explorer
-  child-filter restoration, Back navigation and history-to-model-lab switching passed;
+  child-filter restoration, Back navigation and history-to-model-lab switching passed.
+  The shell extension also preserved Planning duration and Advanced expansion;
   [evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 - [x] **PERF-005 — Separate discovery from catch-up.** Deferred/missing/mismatched
   rollouts must not force full discovery every poll. Use bounded fair retries and

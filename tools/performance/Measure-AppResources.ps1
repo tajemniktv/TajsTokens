@@ -30,6 +30,13 @@ $identityPath = Join-Path $installationPath 'build-identity.json'
 $identity = if (Test-Path -LiteralPath $identityPath) {
     (Get-Content -LiteralPath $identityPath -Raw | ConvertFrom-Json).identity
 } else { 'unrecorded' }
+$appExecutablePath = Join-Path $installationPath 'TajsTokens.App.exe'
+$executableSha256 = if (Test-Path -LiteralPath $appExecutablePath) {
+    (Get-FileHash -LiteralPath $appExecutablePath -Algorithm SHA256).Hash
+} else { $null }
+$buildManifestSha256 = if (Test-Path -LiteralPath $identityPath) {
+    (Get-FileHash -LiteralPath $identityPath -Algorithm SHA256).Hash
+} else { $null }
 function Read-PhysicalDisks {
     @(Get-CimInstance Win32_PerfRawData_PerfDisk_PhysicalDisk | Where-Object Name -ne '_Total' |
         Select-Object Name,DiskReadBytesPersec,DiskWriteBytesPersec,Timestamp_PerfTime,Frequency_PerfTime)
@@ -170,6 +177,8 @@ $summaries = foreach ($group in $samples | Group-Object processId,processCreated
 }
 $result = [ordered]@{
     sourceIdentity = $identity
+    executableSha256 = $executableSha256
+    buildManifestSha256 = $buildManifestSha256
     startedAtUtc = $started.ToString('O')
     durationSeconds = $clock.Elapsed.TotalSeconds
     logicalProcessors = [Environment]::ProcessorCount

@@ -7,35 +7,5 @@
     mc:Ignorable="d"
     Title="TajsTokens">
 
-    <Grid>
-        <NavigationView x:Name="AppNavigation"
-                        IsBackButtonVisible="Visible"
-                        BackRequested="OnBackRequested"
-                        IsSettingsVisible="True"
-                        PaneDisplayMode="Auto"
-                        OpenPaneLength="208"
-                        ExpandedModeThresholdWidth="1200"
-                        CompactModeThresholdWidth="700"
-                        IsPaneOpen="True"
-                        SelectionChanged="OnNavigationSelectionChanged">
-            <NavigationView.MenuItems>
-                <NavigationViewItem Content="Overview" Tag="codex-intelligence" Icon="View" IsSelected="True" />
-                <NavigationViewItem Content="Chats and work" Tag="codex" Icon="Library" />
-                <NavigationViewItem Content="Advanced" Icon="Repair" SelectsOnInvoked="False">
-                    <NavigationViewItem.MenuItems>
-                        <NavigationViewItem Content="Session planner" Tag="session-plan" />
-                        <NavigationViewItem Content="Forecast and workload history" Tag="forecasts" />
-                        <NavigationViewItem Content="Quota history details" Tag="analytics" />
-                        <NavigationViewItem Content="Diagnostics" Tag="diagnostics" />
-                        <NavigationViewItem Content="Model lab" Tag="model-lab" />
-                        <NavigationViewItem Content="Rollout coverage" Tag="coverage" />
-                        <NavigationViewItem Content="Native sources" Tag="sources" />
-                        <NavigationViewItem Content="Data explorer" Tag="codex-data" />
-                        <NavigationViewItem Content="CLI harness" Tag="codex-cli" />
-                    </NavigationViewItem.MenuItems>
-                </NavigationViewItem>
-            </NavigationView.MenuItems>
-            <Frame CacheSize="6" Navigated="OnNavigated" />
-        </NavigationView>
-    </Grid>
+    <Grid />
 </Window>
