@@ -16,4 +16,5 @@ public interface ICodexNativeSourcesReadModel
     Task<CodexNativeSourcesSnapshot> ReadAsync(CodexNativeSourcesQuery query, CancellationToken cancellationToken = default);
     Task<CodexLogsSource> ReadLogsAsync(CodexLogsQuery? query = null, CancellationToken cancellationToken = default);
     Task ReleaseLogsSnapshotAsync(string id);
+    Task<CodexModelCatalogRead> ReadModelsAsync(CancellationToken cancellationToken = default);
 }

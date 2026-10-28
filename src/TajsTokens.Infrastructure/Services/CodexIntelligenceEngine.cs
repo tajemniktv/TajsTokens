@@ -21,7 +21,8 @@ public sealed class CodexIntelligenceEngine(
     Func<ICodexForecastDatasetReader> datasetReader,
     ICodexServerEvidenceReader serverEvidence,
     IIntelligenceService intelligence,
-    Func<TelemetrySnapshot> current) : ICodexIntelligence
+    Func<TelemetrySnapshot> current,
+    Func<CancellationToken, Task<CodexModelCatalogHistory>>? modelCatalogHistory = null) : ICodexIntelligence
 {
     public CodexIntelligenceSnapshot Current => CodexIntelligenceProjection.Live(current());
 
@@ -91,6 +92,13 @@ public sealed class CodexIntelligenceEngine(
             "codex", "default", selection.FromUtc, selection.ToUtc, token,
             selection.AccountKey, includeQuota: !selection.HasWorkFilter);
         IReadOnlyList<CodexLedgerEntry> selected = CodexIntelligenceProjection.Select(dataset.Ledger, selection);
+        CodexModelCatalogHistory catalogs;
+        try { catalogs = modelCatalogHistory is null ? CodexModelCatalogHistory.Empty : await modelCatalogHistory(token); }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (Exception e) when (e is not OutOfMemoryException)
+        {
+            catalogs = new(new(CodexModelCatalogReadState.Unavailable, asOf, asOf, null, null, "catalog-history-unavailable"), [], true, 1);
+        }
         CodexServerEvidenceHistory history = await serverEvidence.ReadHistoryAsync(selection.FromUtc, asOf, selection.AccountKey, token);
         IReadOnlyList<CodexServerObservation> evidence = history.Observations;
         bool evidenceTruncated = history.IsPartial;
@@ -147,10 +155,12 @@ public sealed class CodexIntelligenceEngine(
             health,
             CodexIntelligenceProjection.Manifest(
                 selection,
-                Fingerprint(new { selected, quota, forecasts, evidenceIds = evidence.Select(x => x.Id).ToArray() })))
+                Fingerprint(new { selected, quota, forecasts, evidenceIds = evidence.Select(x => x.Id).ToArray(),
+                    catalogs.LastRead, modelCatalogs = catalogs.Versions.Select(x => new { x.Definition.DefinitionId, x.LastCollectedAtUtc, x.LastSourceFetchedAtUtc }) })))
         {
             CurrentState = live.CurrentState,
             JointWorkload = CodexJointWorkloadBuilder.Build(selected.Select(x => x.Workload)),
+            ModelCatalog = CodexModelCatalogProjection.Build(catalogs, selected),
             Chats = CodexProviderReconciliation.Tasks(evidence, selected, selection),
             HistoricalPeriods = selection.HasWorkFilter
                 ? []

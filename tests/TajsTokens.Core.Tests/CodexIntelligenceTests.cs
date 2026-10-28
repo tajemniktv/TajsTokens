@@ -102,6 +102,14 @@ public sealed class CodexIntelligenceTests
             Assert.Equal(35, joint.CategoryTokens);
             Assert.Equal("gpt-6-astra", Assert.Single(joint.Cells).Coordinate!.Model);
             Assert.Null(joint.Cells[0].Coordinate!.ExecutionTier);
+            Assert.True(Assert.Single(result.ModelCatalog.Choices).ObservedInSelection);
+            Assert.Equal("Unverified", result.ModelCatalog.Choices[0].AccountAccess);
+            var failedCatalog = new CodexIntelligenceEngine(() => new SqliteForecastDatasetReader(database), evidence, service,
+                () => TelemetrySnapshot.Empty, modelCatalogHistory: _ => throw new IOException("fixture"));
+            var withoutMetadata = await failedCatalog.QueryAsync(selection, default);
+            Assert.Equal(joint, withoutMetadata.JointWorkload);
+            Assert.True(withoutMetadata.ModelCatalog.History.IsPartial);
+            Assert.True(Assert.Single(withoutMetadata.ModelCatalog.Choices).ObservedInSelection);
             Assert.Equal(35, Assert.Single(result.Chats).SelectedLocalTokens);
             Assert.Contains("ownership incomplete", result.Chats[0].Compatibility);
             var unknownAccount = await engine.QueryAsync(selection with { AccountKey = "account" }, default);

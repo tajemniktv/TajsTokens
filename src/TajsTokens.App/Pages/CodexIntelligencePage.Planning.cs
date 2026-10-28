@@ -46,9 +46,34 @@ public sealed partial class CodexIntelligencePage
         if (_loaded) InvalidatePlan();
     }
 
-    private void OnPlanTextChanged(object sender, TextChangedEventArgs e)
+    private void OnPlanTextChanged(AutoSuggestBox sender, AutoSuggestBoxTextChangedEventArgs e)
     {
         if (_loaded) InvalidatePlan();
+        if (e.Reason == AutoSuggestionBoxTextChangeReason.UserInput) UpdateModelSuggestions(sender);
+        UpdateModelDiscoveryHint();
+    }
+
+    private void UpdateModelSuggestions(AutoSuggestBox sender)
+    {
+        var choices = _snapshot?.ModelCatalog.Choices ?? [];
+        if (ReferenceEquals(sender, PlanModel))
+            sender.ItemsSource = choices.Where(x => x.ObservedInSelection || x.Metadata?.Visibility != "hide")
+                .Select(x => x.Model).Where(x => x.Contains(sender.Text, StringComparison.OrdinalIgnoreCase)).Take(20).ToArray();
+        else
+        {
+            var choice = choices.FirstOrDefault(x => x.Model == PlanModel.Text);
+            sender.ItemsSource = (choice?.Metadata?.ReasoningEfforts ?? []).Concat(choice?.ObservedEfforts ?? [])
+                .Distinct(StringComparer.Ordinal).Where(x => x.Contains(sender.Text, StringComparison.OrdinalIgnoreCase)).Take(20).ToArray();
+        }
+    }
+    private void UpdateModelDiscoveryHint()
+    {
+        if (ModelDiscoveryText is null) return;
+        var view = _snapshot?.ModelCatalog;
+        var choice = view?.Choices.FirstOrDefault(x => x.Model == PlanModel.Text);
+        ModelDiscoveryText.Text = choice?.Description ?? (string.IsNullOrWhiteSpace(PlanModel.Text)
+            ? $"{view?.Choices.Count(x => x.ListedInRetainedCatalog) ?? 0} cached names · model access unverified"
+            : "Unlisted name kept as entered · model access unverified");
     }
 
     private async void OnRecentPattern(object sender, RoutedEventArgs e)

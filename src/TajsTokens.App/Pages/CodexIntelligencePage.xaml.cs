@@ -223,6 +223,7 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
             _historySettings = settings;
             _historyLoadedAt = DateTimeOffset.UtcNow;
             _snapshot = CodexIntelligenceProjection.WithLiveContext(snapshot, App.Services.CodexIntelligence.Current, selection.AccountKey);
+            UpdateModelDiscoveryHint();
             StatusText.Text = $"{selection.FromUtc:yyyy-MM-dd} → {selection.ToUtc:yyyy-MM-dd} UTC · captured {snapshot.AsOfUtc.ToLocalTime():g}";
             string apiReference = !snapshot.ApiEquivalent.IsComplete && snapshot.ApiEquivalent.PricedReportedTokens == 0
                 ? $"API reference unavailable ({snapshot.ApiEquivalent.UnpricedReportedTokens:N0} unpriced tokens)"
@@ -258,7 +259,15 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
                                     $"input {cell.UncachedInput:N0}, cache read {cell.CacheRead:N0}, cache write {cell.CacheWrite:N0}, " +
                                     $"output {cell.NonReasoningOutput:N0}, reasoning {cell.ReasoningOutput:N0}; reported {cell.ReportedTotal:N0}")) +
                                     (joint.Cells.Count > 16 ? "\nFirst 16 coordinate rows shown; projection retains the remaining supported rows." : "") :
-                                    "\nJoint workload unavailable in this capture.");
+                                    "\nJoint workload unavailable in this capture.") +
+                                $"\n\nModel catalog: {snapshot.ModelCatalog.History.LastRead?.State.ToString() ?? "not collected"}; " +
+                                $"source fetched {snapshot.ModelCatalog.History.LastRead?.SourceFetchedAtUtc?.ToString("O") ?? "unknown"}; " +
+                                $"collected {snapshot.ModelCatalog.History.LastRead?.CompletedAtUtc.ToString("O") ?? "unknown"}; " +
+                                $"{snapshot.ModelCatalog.History.Versions.Count} retained definitions inspected; " +
+                                $"{snapshot.ModelCatalog.History.InvalidVersions} invalid; partial={snapshot.ModelCatalog.History.IsPartial}. " +
+                                "Cached names, local observations and account access are separate. No model access has been verified.\n" +
+                                string.Join("\n", snapshot.ModelCatalog.Choices.Take(30).Select(x => $"{x.Model} · {x.Description}" +
+                                    (x.Metadata is { } m ? $" · efforts {string.Join(", ", m.ReasoningEfforts)} · source retirement {m.ReportedRetirementAtUtc?.ToString("O") ?? "unknown"} · successor {m.SuccessorModel ?? "unknown"}" : "")));
             TimelineText.Text = string.Join(
                                     "\n",
                                     snapshot.Timeline.TakeLast(100)

@@ -13,6 +13,23 @@ if (args.Length == 5 && args[0] == "--score-joint")
     return;
 }
 
+if (args.Length == 4 && args[0] == "--model-catalog")
+{
+    var from = DateTimeOffset.Parse(args[2], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal).ToUniversalTime();
+    var to = DateTimeOffset.Parse(args[3], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal).ToUniversalTime();
+    if (from >= to || to - from > TimeSpan.FromDays(366) || to > DateTimeOffset.UtcNow)
+        throw new ArgumentException("Choose an ordered past UTC range of at most 366 days.");
+    using var cancellation = new CancellationTokenSource();
+    Console.CancelKeyPress += (_, e) => { e.Cancel = true; cancellation.Cancel(); };
+    var dataset = await new SqliteForecastDatasetReader(args[1]).ReadLedgerAndQuotaAsync("codex", "default", from, to, cancellation.Token, includeQuota: false);
+    var history = await new SqliteTelemetryRepository(args[1]).ReadModelCatalogHistoryAsync(cancellation.Token);
+    var view = CodexModelCatalogProjection.Build(history, dataset.Ledger);
+    Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { Contract = CodexModelCatalogDefinition.Version, from, to,
+        Scope = "Retained cached metadata and selected installation-local observations. Model access is unverified; no source or credential request is made.",
+        Catalog = view }, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
+    return;
+}
+
 if (args.Length is 3 or 4 && args[0] == "--benchmark-token-writes")
 {
     await IngestionPerformanceCli.BenchmarkWritesAsync(args[1], int.Parse(args[2], CultureInfo.InvariantCulture),

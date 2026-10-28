@@ -24,6 +24,16 @@ The signal is restricted to the current user/session and the same installation d
 
 ## Explicit joint TT candidate scoring
 
+To inspect retained model discovery alongside selected local observations, use:
+
+```powershell
+dotnet run --project tools/TajsTokens.ForecastEvaluation/TajsTokens.ForecastEvaluation.csproj -c Debug --no-build --no-restore -- --model-catalog "$env:LOCALAPPDATA/Programs/TajemnikTV/TajsTokens/data/telemetry.db" 2026-09-27T00:00:00Z 2026-10-27T14:58:00Z > .codex/temp/model-catalog.json
+```
+
+It reads app-owned metadata and selected native history without a new source,
+credential or model request. The output labels account access unverified. Collection,
+versioning and recovery are documented in the [model catalog contract](source-notes/STAGE4_MODEL_CATALOG.md).
+
 After building the evaluation tool, supply a serialized `TtJointWorkloadBasis`
 definition with its computed `BasisId` and `ReferenceScore`:
 

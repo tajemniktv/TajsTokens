@@ -71,6 +71,7 @@ public sealed record CodexIntelligenceSnapshot(
     public QuotaCostReport? Accounting { get; init; }
     public CodexRegimeReport? Regime { get; init; }
     public CodexJointWorkload? JointWorkload { get; init; }
+    public CodexModelCatalogView ModelCatalog { get; init; } = CodexModelCatalogView.Empty;
 }
 
 public sealed record CodexChatAccounting(

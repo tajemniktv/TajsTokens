@@ -23,13 +23,15 @@ public sealed class CodexServerEvidenceService(
     SqliteTelemetryRepository repository,
     ICodexServerEvidenceProvider provider,
     Func<IReadOnlyList<RolloutAccountAssociation>>? associations = null,
-    ICodexServerEvidenceProvider? backendProvider = null) : ICodexServerEvidenceReader
+    ICodexServerEvidenceProvider? backendProvider = null,
+    Func<CancellationToken, Task<CodexModelCatalogRead>>? modelCatalogReader = null) : ICodexServerEvidenceReader
 {
 
     private readonly SemaphoreSlim _gate = new(1, 1);
     private bool _historicalAvailable;
     private DateTimeOffset _nextAttempt;
     public string Status { get; private set; } = "Server evidence has not been collected in this process.";
+    public string ModelCatalogStatus { get; private set; } = "Model metadata has not been collected.";
 
     public async Task<CodexServerEvidenceHistory> ReadHistoryAsync(
         DateTimeOffset fromUtc,
@@ -118,6 +120,18 @@ public sealed class CodexServerEvidenceService(
             _nextAttempt = DateTimeOffset.UtcNow.AddMinutes(CodexServerCollectionPolicy.AttemptIntervalMinutes);
             Status = "Server-evidence collection is in progress; retained results below may be older.";
             await repository.InitializeAsync(token);
+            if (modelCatalogReader is not null)
+            {
+                try
+                {
+                    var metadata = await modelCatalogReader(token);
+                    await repository.SaveModelCatalogReadAsync(metadata, token);
+                    ModelCatalogStatus = $"Model metadata: {metadata.State}; account access unverified.";
+                }
+                catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+                catch (Exception e) when (e is not OutOfMemoryException)
+                { ModelCatalogStatus = "Model metadata read/storage failed; retained catalog remains historical."; }
+            }
             CodexServerCollectionScope selection = await SelectThreadSelectionAsync(token);
             IReadOnlyList<string> threads = selection.RequestedThreadIds;
             CodexServerCollection fetched = await provider.CollectAsync(threads, token);
@@ -133,7 +147,7 @@ public sealed class CodexServerEvidenceService(
                                        history.Observations.All(x => x.State is ServerEvidenceState.Available or ServerEvidenceState.Empty);
             }
             Status = $"Last server-evidence fetch {DateTimeOffset.Now:g}; {collection.Observations.Count} surface/thread results retained. " +
-                     selection.ToDisplayText();
+                     selection.ToDisplayText() + " " + ModelCatalogStatus;
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {

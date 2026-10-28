@@ -34,6 +34,7 @@ public sealed class CodexNativeSourceGateway
     }
 
     public CodexStateDbExplorerService Explorer { get; }
+    public Task<CodexModelCatalogRead> ReadModelsAsync(CancellationToken cancellationToken = default) => CodexModelCacheReader.ReadAsync(Explorer.CodexHome, cancellationToken);
 
     public Task ReleaseLogsSnapshotAsync(string id)
     {

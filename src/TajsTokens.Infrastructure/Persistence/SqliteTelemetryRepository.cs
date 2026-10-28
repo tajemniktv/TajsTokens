@@ -18,7 +18,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 public sealed partial class SqliteTelemetryRepository(string databasePath, TimeProvider? timeProvider = null) : ITelemetryRepository, ISessionIngestionCheckpointStore
 {
     private const int CurrentSchemaVersion = 16;
-    private const int IntelligenceSchemaVersion = 8;
+    private const int IntelligenceSchemaVersion = 9;
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _intelligenceInitializeGate = new(1, 1);
@@ -1238,6 +1238,21 @@ public sealed partial class SqliteTelemetryRepository(string databasePath, TimeP
                     """, cancellationToken);
             }
 
+            if (version < 9)
+            {
+                await ExecuteMigrationAsync(connection, """
+                    CREATE TABLE IF NOT EXISTS codex_model_catalog_definitions (
+                        definition_id TEXT PRIMARY KEY, first_collected_at_utc TEXT NOT NULL, last_collected_at_utc TEXT NOT NULL,
+                        first_source_fetched_at_utc TEXT, last_source_fetched_at_utc TEXT, content_hash TEXT NOT NULL, payload TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_model_catalog_history ON codex_model_catalog_definitions(last_collected_at_utc DESC);
+                    CREATE TABLE IF NOT EXISTS codex_model_catalog_read_state (
+                        singleton INTEGER PRIMARY KEY CHECK(singleton=1), state INTEGER NOT NULL, started_at_utc TEXT NOT NULL,
+                        completed_at_utc TEXT NOT NULL, source_fetched_at_utc TEXT, definition_id TEXT, issue TEXT
+                    );
+                    UPDATE intelligence_schema SET version=9 WHERE component='phase4-intelligence';
+                    """, cancellationToken);
+            }
             _intelligenceInitialized = true;
         }
         finally

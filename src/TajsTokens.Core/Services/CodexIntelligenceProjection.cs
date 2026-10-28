@@ -33,7 +33,7 @@ public static class CodexIntelligenceProjection
         };
     }
 
-    public const string Version = "codex-intelligence/v2-joint";
+    public const string Version = "codex-intelligence/v3-model-catalog";
 
     public static CodexCurrentState CurrentState(TelemetrySnapshot telemetry)
     {

@@ -159,8 +159,9 @@
                         <Border Style="{StaticResource CardStyle}">
                             <StackPanel Spacing="12">
                                 <NumberBox x:Name="PlanHours" Header="Duration (hours)" Value="1" Minimum="0.05" Maximum="168" ValueChanged="OnPlanNumberChanged" />
-                                <TextBox x:Name="PlanModel" Header="Model · optional exact name" TextChanged="OnPlanTextChanged" />
-                                <TextBox x:Name="PlanEffort" Header="Reasoning effort · optional" TextChanged="OnPlanTextChanged" />
+                                <AutoSuggestBox x:Name="PlanModel" Header="Model · optional exact name" TextChanged="OnPlanTextChanged" />
+                                <AutoSuggestBox x:Name="PlanEffort" Header="Reasoning effort · optional" TextChanged="OnPlanTextChanged" />
+                                <TextBlock x:Name="ModelDiscoveryText" Text="Model access is unverified." Style="{StaticResource SubtitleStyle}" TextWrapping="Wrap" />
                                 <Button x:Name="RecentPatternButton" Content="Use recent local work pattern" Click="OnRecentPattern" />
                                 <TextBlock x:Name="RecentPatternText" Text="Optional editable suggestion from recent local activity; it does not establish account ownership." Style="{StaticResource CaptionStyle}" />
                                 <Expander Header="Session counts and history" HorizontalContentAlignment="Stretch" HorizontalAlignment="Stretch">

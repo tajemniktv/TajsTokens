@@ -64,7 +64,8 @@ public sealed class AppServices
             Repository,
             new CodexAppServerEvidenceProvider(),
             () => Settings.RolloutAccountAssociations,
-            new CodexBackendDailyEvidenceProvider(() => Settings.ExperimentalCodexBackendEnabled));
+            new CodexBackendDailyEvidenceProvider(() => Settings.ExperimentalCodexBackendEnabled),
+            modelCatalogReader: CodexNativeSources.ReadModelsAsync);
 
         CodexObservatoryRuntime observatory = CodexObservatoryRuntimeFactory.Create(DatabasePath, Repository);
         ObservatoryStore = observatory.Store;
@@ -89,7 +90,8 @@ public sealed class AppServices
             () => new SqliteForecastDatasetReader(DatabasePath, Settings.RolloutAccountAssociations),
             ServerEvidence,
             Intelligence,
-            () => Telemetry.Latest);
+            () => Telemetry.Latest,
+            modelCatalogHistory: Repository.ReadModelCatalogHistoryAsync);
         AlertEngine = new QuotaAlertEngine(Settings.LowQuotaThresholds);
         LocalLimitsApi = new LocalLimitsHttpServer(() =>
             LocalLimitsProjection.Build(Telemetry.Latest, Settings.LocalLimitsApiToken, DateTimeOffset.UtcNow));

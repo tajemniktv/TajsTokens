@@ -29,6 +29,7 @@ public sealed class CodexNativeSourcesService : ICodexNativeSourcesReadModel
     }
 
     public CodexStateDbExplorerService Explorer => _gateway.Explorer;
+    public Task<CodexModelCatalogRead> ReadModelsAsync(CancellationToken cancellationToken = default) => _gateway.ReadModelsAsync(cancellationToken);
 
     public Task<CodexNativeSourcesSnapshot> ReadAsync(CodexNativeSourcesQuery query, CancellationToken cancellationToken = default)
     {

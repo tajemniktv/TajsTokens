@@ -684,10 +684,21 @@ TT evaluator, existing model metadata, `ApiPriceWorkload` and product snapshot.
   and the Windows build passed. Installed frozen-month scoring matched independent
   subtotals/unmapped quantities; existing daily records stayed unchanged.
   [Contract and validation](docs/source-notes/STAGE4_JOINT_SCORING.md).
-- [ ] **CAT-001 — Separate discovery and entitlement.** Version model metadata with
+- [x] **CAT-001 — Separate discovery and entitlement.** Version model metadata with
   source/retrieval time, aliases, retired entries and capability/effort support.
   Listed, observed and account-access-verified are distinct. Unknown observed models
   stay ingestible without an update or paid probe; no extra API key just for a picker.
+  **Implemented/installed:** `codex-model-catalog/v1` retains closed, content-addressed
+  metadata from the native read-only model cache through the existing collection
+  cadence/repository (intelligence schema 9). Source/retrieval times, reported
+  retirement/successor facts and known aliases stay separate; delisting is not
+  retirement. Planning suggests cached/observed names and efforts but accepts new
+  exact names. Every choice explicitly has **unverified account access**; listing
+  and API-support flags do not establish entitlement. **815 Core tests**, Windows
+  build and installed capture/projection checks passed: 11 cached models, five
+  observed names, no new credential/API-key or paid probe. Numeric and old research
+  records were preserved. [Contract and validation](docs/source-notes/STAGE4_MODEL_CATALOG.md).
+  Suggestion interaction/user visual acceptance remain SHIP-004 work.
 - [ ] **CAT-002 — Version prices independently.** After DEC-002, validate feed schema,
   units/currency, model/category/tier/context and applicable effective dates. Preserve
   snapshots, separate overrides/labelled fallbacks, last-known-good recovery and
@@ -850,8 +861,9 @@ established quota contract. **SCORE-001** now carries selected joint evidence th
 the installed product and conditional forecast projections. Continue Stage 4 with
 the explicit public-basis/catalog decisions. **SCORE-002** now provides the frozen
 joint basis and original/restated archive. **SCORE-003** adds explicit exact/bounded/
-partial scoring and a read-only candidate tool. Continue Stage 4 with **CAT-001/002**
-and the explicit public-basis decisions before measured-TT presentation. No public
+partial scoring and a read-only candidate tool. **CAT-001** now separates cached
+model discovery, local observations and unverified access. Continue Stage 4 with
+**CAT-002** and the explicit public-basis decisions before measured-TT presentation. No public
 TT ruler is activated yet.
 
 ### Existing implementation baseline and known gaps
