@@ -215,7 +215,7 @@ public sealed class SqliteCodexObservatoryReadModelTests
 
             SqliteCommand versionCommand = verify.CreateCommand();
             versionCommand.CommandText = "SELECT version FROM observatory_schema WHERE component = 'codex-observatory';";
-            Assert.Equal(9L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
+            Assert.Equal(10L, (long)(await versionCommand.ExecuteScalarAsync(CancellationToken.None))!);
 
             SqliteCommand indexCommand = verify.CreateCommand();
             indexCommand.CommandText = "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = $name;";
@@ -257,7 +257,7 @@ public sealed class SqliteCodexObservatoryReadModelTests
             await connection.OpenAsync(CancellationToken.None);
             SqliteCommand version = connection.CreateCommand();
             version.CommandText = "SELECT version FROM observatory_schema WHERE component = 'codex-observatory';";
-            Assert.Equal(9L, (long)(await version.ExecuteScalarAsync(CancellationToken.None))!);
+            Assert.Equal(10L, (long)(await version.ExecuteScalarAsync(CancellationToken.None))!);
         }
         finally
         {

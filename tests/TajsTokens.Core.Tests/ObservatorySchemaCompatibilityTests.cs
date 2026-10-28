@@ -10,7 +10,7 @@ public sealed class ObservatorySchemaCompatibilityTests
     private static readonly DateTimeOffset EventAt = DateTimeOffset.Parse("2026-10-01T10:00:00Z");
 
     [Fact]
-    public async Task Schema8UpgradeAndExistingSchema9PlannerPathsPreserveEvidence()
+    public async Task Schema8UpgradeAndExistingCurrentSchemaPlannerPathsPreserveEvidence()
     {
         string directory = TemporaryDirectory();
         string database = Path.Combine(directory, "telemetry.db");
@@ -32,7 +32,7 @@ public sealed class ObservatorySchemaCompatibilityTests
             Evidence before = await ReadEvidenceAsync(database);
             using (var upgrading = new SqliteCodexObservatoryStore(database)) await upgrading.InitializeAsync(default);
             Assert.Equal(before, await ReadEvidenceAsync(database));
-            Assert.Equal(9L, await ScalarAsync(database, "SELECT version FROM observatory_schema WHERE component='codex-observatory'"));
+            Assert.Equal(10L, await ScalarAsync(database, "SELECT version FROM observatory_schema WHERE component='codex-observatory'"));
             Assert.Equal("LegacyUnverified", await ScalarAsync(database, "SELECT source_timestamp_quality FROM codex_native_token_events"));
             Assert.Null(await ScalarAsync(database, "SELECT source_event_at_utc FROM codex_native_token_events"));
 
@@ -46,7 +46,7 @@ public sealed class ObservatorySchemaCompatibilityTests
             Assert.False(scenario.FiveHour.HasEnoughHistory);
             Assert.False(scenario.Weekly.HasEnoughHistory);
             Assert.Equal(before, await ReadEvidenceAsync(database));
-            Assert.Equal(9L, await ScalarAsync(database, "SELECT version FROM observatory_schema WHERE component='codex-observatory'"));
+            Assert.Equal(10L, await ScalarAsync(database, "SELECT version FROM observatory_schema WHERE component='codex-observatory'"));
         }
         finally { SqliteConnection.ClearAllPools(); Directory.Delete(directory, true); }
     }
@@ -60,11 +60,11 @@ public sealed class ObservatorySchemaCompatibilityTests
         {
             await SeedAsync(database);
             Evidence before = await ReadEvidenceAsync(database);
-            await ExecuteAsync(database, "UPDATE observatory_schema SET version=10 WHERE component='codex-observatory'");
+            await ExecuteAsync(database, "UPDATE observatory_schema SET version=11 WHERE component='codex-observatory'");
             using var reader = new SqliteCodexObservatoryStore(database);
             InvalidOperationException error = await Assert.ThrowsAsync<InvalidOperationException>(() => reader.InitializeAsync(default));
-            Assert.Contains("schema 10 is newer than supported version 9", error.Message);
-            Assert.Equal(10L, await ScalarAsync(database, "SELECT version FROM observatory_schema WHERE component='codex-observatory'"));
+            Assert.Contains("schema 11 is newer than supported version 10", error.Message);
+            Assert.Equal(11L, await ScalarAsync(database, "SELECT version FROM observatory_schema WHERE component='codex-observatory'"));
             Assert.Equal(before, await ReadEvidenceAsync(database));
         }
         finally { SqliteConnection.ClearAllPools(); Directory.Delete(directory, true); }

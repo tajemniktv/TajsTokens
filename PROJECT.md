@@ -166,10 +166,15 @@ operations. Missing legacy provenance cannot be reconstructed as invented facts.
 
 **Current implementation boundary:** the store does not yet satisfy this entire
 retention contract. The [native writer](src/TajsTokens.Infrastructure/Persistence/SqliteCodexObservatoryStore.cs)
-keeps normalized increments and the latest reducer state (a cumulative watermark
-where available), not an
-append-only log of every legacy total/last counter input. Its supported metadata
-repair preserves amounts and original observation/collection times. The shared
+keeps normalized increments and latest reducer state, and component 10 adds a
+[closed counter-input journal](src/TajsTokens.Infrastructure/Persistence/SqliteCodexTokenCounterEvidence.cs)
+for new/replayed total and last snapshots, including partial inputs producing no
+delta. Equal replay preserves first capture; differing interpretations remain
+variants of one occurrence, not additive ledger entries. Legacy original inputs
+are unavailable until actually recovered: migration does not reconstruct them from
+deltas. Recovery records its actual input-capture time separately from the known
+occurrence's original capture. Supported metadata repair preserves amounts and
+original observation/collection times. The shared
 [generation retirement](src/TajsTokens.Infrastructure/Persistence/SqliteCodexSourceGeneration.cs)
 currently deletes superseded native token/workload/quota/context projections and
 rollout/parser membership. This is distinct from age expiry and is not proof that
@@ -211,7 +216,7 @@ The current implementation keeps reported account quota, locally observed native
 
 ### Source time and schema compatibility
 
-Observatory component schema 9 keeps nullable source event time, first collection time and timestamp quality separate for token/context evidence. Missing, malformed or unverified source dates remain unknown. Their retained token amounts can contribute to all-time totals, but do not enter hourly history, recent-work autofill or forecasting inputs as invented event dates. Source timestamps require an explicit timezone or supported numeric Unix representation; mixed aggregates have capture time without a single source event date.
+Since observatory component schema 9, nullable source event time, first collection time and timestamp quality are separate for token/context evidence. Missing, malformed or unverified source dates remain unknown. Their retained token amounts can contribute to all-time totals, but do not enter hourly history, recent-work autofill or forecasting inputs as invented event dates. Source timestamps require an explicit timezone or supported numeric Unix representation; mixed aggregates have capture time without a single source event date. Component 10 adds the original counter-input journal described above without reconstructing missing legacy inputs.
 
 The version-8-to-9 migration preserves original observation/capture values and counters, marking legacy source times `LegacyUnverified` rather than restamping them. State-index schema 7 clears disposable fingerprints/cursor so bounded, prefix-verified ingestion can enrich only unverified metadata under the original occurrence identity. Amounts and first capture times stay immutable; changed prefixes retain the existing generation-replacement policy. Source-owned Codex data remains read-only.
 
@@ -486,6 +491,15 @@ acceptance stays open under PERF-001 while this prerequisite evidence work proce
   evidence before replacing destructive retirement. Preserve first collection and
   distinguish unavailable legacy history from new observations; active projections
   must select generations without counting alternatives twice.
+  Original counter-input journaling is implemented in component 10: closed nullable
+  snapshots, immutable replay, interpretation variants and atomic input/reducer
+  writes. Both writer paths retain those inputs through a genuine source rewrite.
+  The 714-test Core suite and Windows build passed; installed ingestion produced
+  three associated journal rows. All 95,956 existing native rows retained their
+  amounts and chronology across migration; [validation](docs/source-notes/STAGE2_EVIDENCE_VALIDATION.md#original-counter-input-journal-component-10).
+  Existing normalized history and other superseded numeric projections still need
+  durable retention/selection; this partial implementation does not close EVID-004
+  or enable compressed replacement.
 
 **Exit:** trace a displayed amount to observations and reproduce it after replay,
 duplicate discovery, compression and supported migration. Late imports improve
@@ -702,8 +716,8 @@ complete; one successful early slice does not validate later changes.
 The Stage 1 mechanisms are installed with their stated evidence; PERF-001 resource
 acceptance remains open. EVID-001 now defines the quantity/retention contract.
 Installed **A-01** chronology acceptance has the stated runtime evidence. Continue
-Stage 2 with the accepted **ING-001** identity/checkpoint contract. Extend durable
-original/superseded evidence under
+Stage 2 with the accepted **ING-001** identity/checkpoint contract and component-10
+original counter-input journal. Finish durable superseded evidence/selection under
 **EVID-004** before **ING-002** changes representation/replacement, then complete
 source reconciliation and eligibility explanations. Deliver **PACE-001–004** as a
 separate reviewable slice using the established quota contract; public TT selection

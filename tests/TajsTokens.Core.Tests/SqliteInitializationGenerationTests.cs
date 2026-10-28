@@ -34,7 +34,7 @@ public sealed class SqliteInitializationGenerationTests
             await store.InitializeAsync(default);
             await index.InitializeAsync(default);
             Assert.Equal(15L, await Scalar(database, "PRAGMA user_version;"));
-            Assert.Equal(9L, await Scalar(database, "SELECT version FROM observatory_schema WHERE component='codex-observatory';"));
+            Assert.Equal(10L, await Scalar(database, "SELECT version FROM observatory_schema WHERE component='codex-observatory';"));
             Assert.Empty(await index.GetFingerprintsAsync(default));
             Assert.Equal(0, await repository.RefreshQuotaResetEventsAsync(default));
         }

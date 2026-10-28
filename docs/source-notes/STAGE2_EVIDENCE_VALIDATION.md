@@ -60,11 +60,59 @@ collection. Reproduction and aggregate local outputs are
 `installed-chronology-result.json`. The result contains aggregate counts/hashes,
 not source paths, account keys or event identities.
 
+## Original counter-input journal (component 10)
+
+Component 10 adds `codex_token_counter_observations` under the existing observatory
+and token transaction owners. It retains closed DTOs containing both nullable six-
+counter snapshots, source time/quality and allowed interpretation metadata. It
+retains partial inputs that cannot produce a reducer delta, without manufacturing
+zeros. The safe source label and known generation association are separate columns;
+unavailable generation association remains null. Source text/JSON and arbitrary
+extension fields are not stored.
+
+Repeated identical input/interpretation is idempotent. Changed numeric or metadata
+interpretations remain fingerprinted variants of the same source occurrence; the
+existing selected delta is not overwritten or summed with those alternatives.
+The journal survives generation retirement. Existing active queries continue to
+use selected projections, so retained variants do not inflate current totals.
+
+Migration starts the journal empty: old deltas are insufficient to reconstruct the
+original total/last inputs. A subsequent replay preserves known occurrence times
+but records the actual later input recovery time separately. There is no forced
+full-history replay in this change. Superseded legacy deltas and other numeric
+projection types still require the remaining EVID-004 retention work.
+
+Seven focused journal cases cover partial/unknown inputs, two-snapshot retention,
+idempotent capture, numeric conflicts, v9-to-v10 migration/recovery, transaction
+failure rollback, and genuine rewrite through each of the individual/batch writer
+paths. Two compatibility cases check older migration/planner paths and refusal of
+component 11. This adds no forecast policy or decoder behavior.
+
+The complete Core suite passed **714 tests** (1m41s), and the Windows solution
+build passed with zero warnings/errors (1m13.30s). Normal deployment installed and
+restarted the daily application, reporting PID 28688. Installed infrastructure
+SHA-256: `480D26CF300E7FC9DCE0D1299988AF7D60EBE76FAF4B8092B399E3B980C5BFE4`.
+
+Read-only installed sampling at `2026-10-28T05:28:23Z` found component 10 and three
+new journal entries, all associated with source generations. Their input captures
+were around `05:28:19Z`; there was no historical journal backfill. A separate
+read-only comparison with the normal pre-deployment component-9 backup verified
+all **95,956** pre-existing native token rows: zero removals and zero changes to
+their six amounts, original observation/capture times, source event times or source
+timestamp qualities. Three additional native rows were collected normally.
+
+These checks read app-owned databases with SQLite read-only/query-only connections;
+they did not modify live data or native Codex sources. Reproduction helpers and
+aggregate JSON are `.codex/temp/stage2/verify_counter_journal_install.py` and
+`compare_counter_journal_upgrade.py`. This proves installed migration/preservation
+and ordinary new journal writes, not a user visual pass, compressed recovery or
+complete superseded projection retention.
+
 ## Remaining boundaries
 
 This closes installed component support, advancing ingestion and the tested
 refusal/recovery boundary. It does not close compressed-history recovery,
 superseded-generation retention, reconciliation, all untimed/all-time presentation
-states or programme-wide user visual acceptance. Those remain under ING-001/002,
+states or programme-wide user visual acceptance. Those remain under ING-002,
 EVID-002/004 and SHIP-004. The quantity/retention definition in PROJECT.md explicitly
 distinguishes these gaps from implemented behavior.

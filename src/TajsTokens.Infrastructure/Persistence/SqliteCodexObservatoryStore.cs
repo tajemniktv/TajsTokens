@@ -23,7 +23,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 /// </summary>
 public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObservatoryStore, IDisposable
 {
-    private const int ObservatorySchemaVersion = 9;
+    private const int ObservatorySchemaVersion = 10;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _initializeGate = new(1, 1);
     private volatile bool _initialized;
@@ -397,6 +397,18 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
                 version = 9;
             }
 
+            if (version == 9)
+            {
+                // Original counter snapshots cannot be reconstructed from old normalized deltas.
+                // Start the journal empty; a verified replay may recover inputs with its actual
+                // new input-capture time while retaining the known occurrence's first capture.
+                await ExecuteMigrationAsync(connection,
+                    SqliteCodexTokenCounterEvidence.MigrationSql +
+                    "UPDATE observatory_schema SET version = 10 WHERE component = 'codex-observatory';",
+                    cancellationToken);
+                version = 10;
+            }
+
             using SqliteCommand privacyVersion = connection.CreateCommand();
             privacyVersion.CommandText = "SELECT version FROM observatory_schema WHERE component = 'legacy-privacy-scrub';";
             object? privacyMarker = await privacyVersion.ExecuteScalarAsync(cancellationToken);
@@ -608,6 +620,11 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
     private static async Task ApplyTokenObservationAsync(SqliteConnection connection, SqliteTransaction transaction,
         CodexTokenCountObservation observation, CancellationToken cancellationToken)
     {
+        // Persist original nullable snapshots before the reducer can discard an unusable input
+        // or normalize overlapping counters. The same transaction owns the input and decision.
+        await SqliteCodexTokenCounterEvidence.WriteAsync(connection, transaction, observation,
+            BuildSafeFileLabel(observation.SourceFile), cancellationToken);
+
         using SqliteCommand duplicate = connection.CreateCommand();
         duplicate.Transaction = transaction;
         duplicate.CommandText = "SELECT 1 FROM codex_native_token_events WHERE source_event_id = $event LIMIT 1;";
