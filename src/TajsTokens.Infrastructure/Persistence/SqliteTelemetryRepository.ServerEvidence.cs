@@ -26,6 +26,8 @@ public sealed partial class SqliteTelemetryRepository
         {
             if (row.ContractVersion != CodexServerEvidenceParser.Contract || row.FetchStartedAtUtc > row.CollectedAtUtc)
                 throw new ArgumentException("Invalid server evidence provenance.");
+            if (row.CollectionScope is { } scope && !scope.HasSupportedShape())
+                throw new ArgumentException("Invalid server evidence collection scope.");
             if (JsonSerializer.Serialize(row).Length > 2 * 1024 * 1024) throw new ArgumentException("Evidence exceeds storage bound.");
             (string json, long? setId) = await CodexServerEvidenceStorage.PackAsync(connection, transaction, row, token);
             using SqliteCommand command = connection.CreateCommand();

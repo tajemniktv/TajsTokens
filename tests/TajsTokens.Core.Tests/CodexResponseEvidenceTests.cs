@@ -194,6 +194,33 @@ public sealed class CodexResponseEvidenceTests
     }
 
     [Fact]
+    public void SnapshotCoverageSeparatesOverlappingCountersAndExcludesRetiredOccurrences()
+    {
+        string file = $"rollout-{Owner}.jsonl";
+        var state = new RolloutParseState(file, "one");
+        var parser = new CodexRolloutParser();
+        parser.Parse(new RawSessionRecord(file, 0, 1, Meta), state);
+        CodexResponseObservation row = parser.Parse(new RawSessionRecord(file, 1, 2, Response()), state).ResponseObservation!;
+        var full = new CodexResponseSnapshot(new(100, 20, 0, 10, 2, 110), false);
+        var page = new CodexResponseEvidencePage([
+            new(row with { ObservedAtUtc = DateTimeOffset.Parse("2026-10-01T00:00:00Z"), Usage = full, TurnUsage = full with { Counters = new(1000,200,0,100,20,1100) }, ThreadUsage = full with { Counters = new(10000,2000,0,1000,200,11000) } }, true),
+            new(row with { Usage = full with { Counters = full.Counters with { InputTokens = null } }, TurnUsage = null,
+                ThreadUsage = null, RuntimeSessionId = null, ObservedAtUtc = null }, true),
+            new(row with { Usage = full }, false)], false, 0);
+        CodexResponseSnapshotCoverage summary = page.DescribeSnapshotCoverage();
+        Assert.Equal(2, summary.ActiveOccurrences);
+        Assert.Equal(1, summary.CompleteResponseSnapshots);
+        Assert.Equal(1, summary.TurnSnapshots);
+        Assert.Equal(1, summary.ThreadSnapshots);
+        Assert.Equal(1, summary.CompleteReportedLineage);
+        Assert.Equal(1, summary.UntimedOccurrences);
+        Assert.Contains("never summed", summary.ToDisplayText());
+        Assert.Equal(110, page.Rows[0].Observation.Usage!.Counters.TotalTokens);
+        Assert.Equal(1100, page.Rows[0].Observation.TurnUsage!.Counters.TotalTokens);
+        Assert.Equal(11000, page.Rows[0].Observation.ThreadUsage!.Counters.TotalTokens);
+    }
+
+    [Fact]
     public void CandidateConflictsStayScopedAndRetiredOrIncompleteIdentityCannotClaimRepeats()
     {
         string file = $"rollout-{Owner}.jsonl";

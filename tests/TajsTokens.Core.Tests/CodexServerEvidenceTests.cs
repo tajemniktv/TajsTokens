@@ -204,7 +204,7 @@ public sealed class CodexServerEvidenceTests : IDisposable
         Assert.DoesNotContain("secret", JsonSerializer.Serialize(row));
         Assert.DoesNotContain("never retain", JsonSerializer.Serialize(row));
         CodexServerObservation missing = Parse("""{"result":{"summary":{},"dailyUsageBuckets":null}}""");
-        Assert.Equal(ServerEvidenceState.Empty, missing.State);
+        Assert.Equal(ServerEvidenceState.Unavailable, missing.State);
         Assert.Null(missing.Activity!.LifetimeTokens);
         Assert.Null(missing.Activity.DailyUsageBuckets);
     }

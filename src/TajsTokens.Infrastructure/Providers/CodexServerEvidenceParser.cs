@@ -92,12 +92,19 @@ public static class CodexServerEvidenceParser
                 Number(summary, "currentStreakDays"),
                 Number(summary, "longestStreakDays"),
                 days);
-            bool hasCounters = activity.LifetimeTokens is not null || activity.PeakDailyTokens is not null || days is { Length: > 0 };
+            bool hasCounters = activity.LifetimeTokens is not null || activity.PeakDailyTokens is not null ||
+                               activity.LongestRunningTurnSec is not null || activity.CurrentStreakDays is not null ||
+                               activity.LongestStreakDays is not null || days is { Length: > 0 };
             return observation with
             {
                 Activity = activity,
-                State = hasCounters ? ServerEvidenceState.Available : ServerEvidenceState.Empty,
-                Detail = "Backend account activity; coverage/time-zone and equality with local token units are not asserted.",
+                State = hasCounters ? ServerEvidenceState.Available : days is { Length: 0 }
+                    ? ServerEvidenceState.Empty : ServerEvidenceState.Unavailable,
+                Detail = hasCounters
+                    ? "Backend account activity; coverage/time-zone and equality with local token units are not asserted."
+                    : days is { Length: 0 }
+                        ? "An empty day list was reported; account-wide zero/completeness is not asserted."
+                        : "Activity fields were not reported. Unknown values are not zero activity.",
             };
         }
         catch (Exception e) when (e is JsonException or InvalidOperationException or OverflowException or FormatException)

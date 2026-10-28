@@ -487,6 +487,7 @@ public sealed partial class ObservatoryPage : Page
                             : $"{responses.Active:N0} active / {responses.Retired:N0} retired occurrences · " +
                               $"{responses.WithDiagnostics:N0} with missing/invalid/conflicting fields · {responses.CorruptRows:N0} unreadable rows. " +
                               $"Within-source candidate groups: {candidates.Repeated:N0} repeated / {candidates.Conflicting:N0} conflicting. " +
+                              responses.DescribeSnapshotCoverage().ToDisplayText() + " " +
                               (responses.Truncated ? "Bounded to 500 rows; incomplete coverage. " : "") +
                               "Separate evidence only; not additional tokens or proven cross-file identity. " +
                               $"Showing {Math.Min(10, responses.Rows.Count)} most recently collected details from this bounded read, active first.");

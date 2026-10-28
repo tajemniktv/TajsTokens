@@ -227,13 +227,13 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
             SummaryText.Text =
                 $"{snapshot.Ledger.Sum(x => x.Workload.ReportedTotalTokens):N0} observed tokens · {snapshot.Ledger.Select(x => x.ThreadId).Distinct().Count():N0} chats\n" +
                 $"API reference: ${snapshot.ApiEquivalent.WeightedAmount:N2}{(snapshot.ApiEquivalent.IsComplete ? "" : " (partial)")} · TT: research only";
-            ProviderText.Text = string.Join(
+            ProviderText.Text = CodexServerCollectionScope.DescribeLatest(snapshot.ProviderEvidence) + "\n\n" + string.Join(
                 "\n",
                 snapshot.ProviderEvidence.GroupBy(x => (x.Surface, x.ThreadId, x.CorrelatedAccountKey, x.ClientVersion))
                     .Select(g => g.OrderByDescending(x => x.CollectedAtUtc).First()).Take(30)
                     .Select(x =>
                         $"REPORTED {x.Surface}: {x.State} · {x.ClientVersion} · {x.AccountEvidence} · collected {x.CollectedAtUtc.ToLocalTime():g}\n{x.Detail}\n{ProviderValues(x)}"));
-            if (ProviderText.Text.Length == 0)
+            if (!snapshot.ProviderEvidence.Any())
                 ProviderText.Text = "No compatible retained provider report. Missing reports are not zero usage.";
             PeriodsText.Text = string.Join(
                 "\n\n",

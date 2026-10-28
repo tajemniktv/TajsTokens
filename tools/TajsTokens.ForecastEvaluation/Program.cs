@@ -59,7 +59,9 @@ if (args.Length == 2 && args[0] == "--reconciliation")
     var home = Path.GetFullPath(args[1]);
     if (!Directory.Exists(home)) throw new ArgumentException("Codex home must exist.");
     var files = new[] { "sessions", "archived_sessions", "archive" }.Select(x => Path.Combine(home, x))
-        .Where(Directory.Exists).SelectMany(x => Directory.EnumerateFiles(x, "*.jsonl", SearchOption.AllDirectories));
+        .Where(Directory.Exists).SelectMany(x => Directory.EnumerateFiles(x, "*.jsonl*", SearchOption.AllDirectories))
+        .Where(path => path.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase) ||
+                       path.EndsWith(".jsonl.zst", StringComparison.OrdinalIgnoreCase));
     var report = await TajsTokens.Infrastructure.Ingestion.CodexReconciliationAudit.RunAsync(files);
     Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(report, new System.Text.Json.JsonSerializerOptions { WriteIndented = true }));
     return;

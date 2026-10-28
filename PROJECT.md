@@ -493,12 +493,24 @@ acceptance stays open under PERF-001 while this prerequisite evidence work proce
   memory stayed bounded for 16/256 MiB synthetic decoded sources, and timed
   cancellation/retry passed. This does not claim complete corpus/lineage coverage
   or close the aggregate app/worker resource budget.
-- [ ] **EVID-002 — Reconcile already-collected response/provider evidence.** Check
+- [x] **EVID-002 — Reconcile already-collected response/provider evidence.** Check
   installed app-server capabilities/schema, pagination and account bracketing.
   Never sum response/turn/thread cumulative representations. Preserve IDs, scope,
   periods and distinct estimated credits/dollars, nullable native amounts and
   purchased balances. Expose bounded thread selection/cadence rather than claiming
   complete live coverage; unknown capability is not zero usage.
+  Installed CLI 0.164.0 schema/captures verify the usage contract, absent pagination
+  and account bracketing. A read-only 439-rollout audit found 28,993 exact vector
+  pair candidates and 194 unpaired responses; response/turn/thread snapshots remain
+  supplemental and overlapping, not additive ledger inputs. New provider batches
+  retain exact requested threads, examined/eligible counts, truncation and the
+  six-thread/30-day/30-minute policy; installed collection retained all nine scoped
+  results. All-null activity is unavailable, while non-token metrics remain useful.
+  The 757-test suite and Windows build passed. [Evidence and limits](docs/source-notes/STAGE2_EVIDENCE_VALIDATION.md#responseprovider-reconciliation-evid-002).
+  Sampling text is wired into evidence views; the visual pass remains unconfirmed
+  because a Windows Security passkey prompt reappeared on focus. No authentication
+  action was taken. Cross-source billing equivalence and complete inventory remain
+  unproven; these results do not promote supplemental counters or quota fits.
 - [ ] **EVID-003 — Explain every eligibility exclusion.** Extend structured support
   reasons into a waterfall with stage denominators, reason overlaps and sanitized
   examples: discovery/encoding, decoding, timely inputs, required role/model/effort/
@@ -748,8 +760,8 @@ acceptance remains open. EVID-001 now defines the quantity/retention contract.
 Installed **A-01** chronology acceptance has the stated runtime evidence. Continue
 Stage 2 with the accepted **ING-001** identity/checkpoint contract, component-10
 original counter-input journal, component-11 superseded numeric retention and the
-**ING-002** compressed ingestion slice. Finish **EVID-002** source reconciliation,
-**EVID-003** eligibility explanations and **EVID-004** scope/answer acceptance.
+**ING-002** compressed ingestion and **EVID-002** scoped reconciliation slices.
+Finish **EVID-003** eligibility explanations and **EVID-004** scope/answer acceptance.
 Deliver **PACE-001–004** as a
 separate reviewable slice using the established quota contract; public TT selection
 does not block that correctness repair.

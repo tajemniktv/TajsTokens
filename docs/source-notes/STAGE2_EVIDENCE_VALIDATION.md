@@ -275,12 +275,112 @@ The final aggregate output is
 `compare_counter_journal_upgrade.v11-v11.base16-base16.json`; native Codex stores
 were read only, and the comparison wrote only aggregate local diagnostics.
 
+## Response/provider reconciliation (EVID-002)
+
+The app's current command resolution selects the installed npm CLI, which reports
+`codex-cli 0.164.0`. Its own `app-server generate-json-schema --experimental`
+output confirms `account/usage/read`, nullable `threadId`, and the response's
+separate summary, daily buckets and optional thread estimate. Neither request nor
+response has cursor/page/limit fields. Thread estimate credits are required micros;
+USD micros and grouped native token amounts remain nullable. Rate-limit metadata
+separately retains purchased balances and spend-control fields. These are separate
+quantities and overlapping snapshots, not inputs to one summed amount.
+
+The generated response/parameter schema SHA-256 values are:
+
+- `GetAccountTokenUsageResponse.json`:
+  `A58E58C852C888E5DE925D99A66688D55EBB2FFF038E795AADF04F8A8426DFF8`.
+- `NullableGetAccountTokenUsageParams.json`:
+  `A992C6EA0FE02B0E9F46B18AFB51B8EE2635E7F0C7D546F71E7F95E2A98BEBBA`.
+- `ClientRequest.json`:
+  `503D09A12AE36FCA152E044877D22E93B0094C2D08C3A53ED731F3C8CF33B9CE`.
+
+The inspected source clone is still `7498521d288b9b3b96ffba4eedf089d8d6e06a84`;
+it corroborates the method shape but is not claimed as the installed binary's
+exact source revision. Installed schema and retained captures provide the version-
+matched evidence. No new authenticated backend probe was needed for this check.
+
+At the read-only retained-data sample (`2026-10-28T07:30:15Z`), CLI 0.164.0 had 113
+available account-activity captures and 678 unavailable thread estimates. The 791
+usage observations had before/after account bracket timestamps; 226 adapter no-
+seam markers did not. A matching bracket remains `ServerCorrelated`, never native
+account identity embedded in a usage response. The optional backend adapter's own
+reports/errors keep their distinct contract and capability state. The app-server
+adapter no longer claims that missing implementation proves a method absent from
+every installed/future client or backend.
+
+All-null activity now remains `Unavailable`; an explicitly empty day list can be
+`Empty` without claiming account-wide zero/completeness. Non-token summary fields
+such as a reported turn duration or streak remain available evidence. Existing
+stored observations are not rewritten to this newer interpretation.
+
+New app-server batches retain a closed selection scope: collection ID, actual
+selection time, requested thread UUIDs, examined candidate rows, eligible UUIDs,
+candidate truncation, policy and bounds. Selection examines at most 100 recent
+native session groups, requests at most six UUIDs, uses known source activity in
+the preceding 30 days and rotates least recently fetched threads first. Unknown
+role/model/account do not delete their token amounts or become invented account
+ownership. Automatic attempts are separated by at least 30 minutes in-process;
+startup/manual requests can occur sooner. This is not the quota polling cadence
+or complete thread/response coverage. Legacy captures retain unknown selection
+scope. Reusing an observation ID with changed scope fails the existing immutable-
+observation check; invalid scope is rejected without losing prior facts.
+
+The installed post-build collector retained one nine-observation batch with six
+requested threads, 68 examined/eligible candidates, no candidate truncation, and
+the recorded 30-day/30-minute policy. Results remained one available account
+report, six unavailable thread estimates and two adapter no-seam markers. No
+missing estimate was converted into zero.
+
+The response store sample retained 30,716 occurrences: 30,628 active and 88 retired.
+All active rows had complete reported lineage, three complete numeric snapshots
+and source time; no within-source repeated/conflicting logical keys were found.
+All active source IDs in that sample predated host/store namespacing. This does not
+invent a native account/host namespace for old observations or establish global
+billing identity. The thread evidence readout now exposes active response snapshot
+completeness, turn/thread snapshot presence, reported lineage and unknown time.
+Turn/thread snapshots remain cumulative alternatives; no quantity is added to the
+native reducer ledger by this display or comparison.
+
+The installed aggregate reconciliation CLI now discovers compressed files too.
+Its read-only v7 run examined **439** stable rollouts, with zero changed/failed
+files and 90,546 owned token observations. Among 29,187 response records, 28,993
+single-pending response/legacy vector pair candidates matched exactly; 194 response
+records were unpaired at lifecycle boundaries, and 61,707 legacy records had no
+pending response. No repeated/conflicting response-key or invalid-vector counter
+was emitted. These are scoped, overlapping diagnostic counts, not proof of native
+pair identity or authority to discard all legacy counters. They justify preserving
+the current ledger and retaining the supplemental evidence rather than summing
+response/turn/thread/legacy representations. The current-file and retained-store
+denominators differ; equality/completeness across them is not assumed.
+
+The full **757-test** Core suite passed (1m44s). Tests cover scope/cadence/rotation,
+candidate truncation and denominators, missing metadata with retained amounts,
+scope immutability/legacy absence/corrupt display, unknown versus empty activity,
+and overlapping response snapshots with retired/untimed/missing-lineage cases.
+The Windows build passed with zero warnings/errors (58.06s), installing/restarting
+PID 4348. Installed infrastructure SHA-256:
+`9A40FEF704B5429FBEB8EC325C1CEC3EFEF111502E20B4E55E7E97BD188A135C`.
+
+Computer Use reached the installed Evidence tab, but a Windows Security passkey
+prompt reappeared when the app received focus. No authentication/security action
+was automated. The sampling-text visual pass remains unconfirmed; the app was
+activated for inspection and was not subsequently minimized through that prompt.
+This is separate from the successful stored-scope and headless runtime checks.
+
+Reproduction artifacts under `.codex/temp/stage2/` are generated metadata in
+`app-server-schema-0.164.0/`, `audit_retained_response_provider.py`,
+`retained-response-provider-audit.json`, and `native-response-reconciliation.json`.
+They contain schemas or aggregate diagnostics, not source payloads, account keys or
+thread/response IDs. Native files/credentials stayed read-only; no opt-in backend
+setting was enabled or fresh experimental backend request made by these audits.
+
 ## Remaining boundaries
 
 This closes installed component support, advancing ingestion and the tested
 refusal/recovery boundary and the supported compressed-ingestion cases above.
 It does not prove a complete native corpus was available/recovered, complete
 cross-source reconciliation, all untimed/all-time presentation states or programme-
-wide user visual acceptance. Those remain under EVID-002/003/004 and SHIP-004.
+wide user visual acceptance. Those remain under EVID-003/004 and SHIP-004.
 The quantity/retention definition in PROJECT.md explicitly
 distinguishes these gaps from implemented behavior.

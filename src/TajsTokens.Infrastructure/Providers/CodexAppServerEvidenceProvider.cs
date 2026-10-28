@@ -17,7 +17,7 @@ namespace TajsTokens.Infrastructure.Providers;
 /// <summary>Separate bounded read session. Codex owns authentication; no auth files or web routes.</summary>
 public sealed class CodexAppServerEvidenceProvider : ICodexServerEvidenceProvider
 {
-    public const int MaxThreads = 6;
+    public const int MaxThreads = CodexServerCollectionPolicy.MaximumThreads;
 
     public async Task<CodexServerCollection> CollectAsync(IReadOnlyList<string> threadIds, CancellationToken cancellationToken)
     {
@@ -167,7 +167,7 @@ public sealed class CodexAppServerEvidenceProvider : ICodexServerEvidenceProvide
                 {
                     State = ServerEvidenceState.NoSupportedSeam,
                     Detail =
-                    "No method in installed/upstream app-server contract. TUI backend authentication remains owned by Codex; no direct request attempted.",
+                    "This adapter has no implemented app-server acquisition for this surface. Other client/backend capabilities are unverified; no direct request attempted.",
                 });
         }
         return new CodexServerCollection(observations);

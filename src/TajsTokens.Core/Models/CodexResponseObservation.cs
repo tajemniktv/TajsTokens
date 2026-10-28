@@ -29,12 +29,39 @@ public sealed record CodexResponseSnapshot(CodexTokenUsageSnapshot Counters, boo
 
 public sealed record CodexResponseEvidenceRow(CodexResponseObservation Observation, bool IsActive);
 
+public sealed record CodexResponseSnapshotCoverage(
+    int ActiveOccurrences,
+    int CompleteResponseSnapshots,
+    int TurnSnapshots,
+    int ThreadSnapshots,
+    int CompleteReportedLineage,
+    int UntimedOccurrences)
+{
+    public string ToDisplayText() =>
+        $"Active response snapshots: {CompleteResponseSnapshots}/{ActiveOccurrences} have all six nonnegative counters; " +
+        $"turn/thread snapshots: {TurnSnapshots}/{ThreadSnapshots}. " +
+        $"Complete reported thread/turn/root/session/response lineage: {CompleteReportedLineage}/{ActiveOccurrences}; " +
+        $"{UntimedOccurrences} lack source time. Response, turn and thread snapshots overlap and are never summed.";
+}
+
 public sealed record CodexResponseEvidencePage(IReadOnlyList<CodexResponseEvidenceRow> Rows, bool Truncated, int CorruptRows)
 {
     public int Active => Rows.Count(x => x.IsActive);
     public int Retired => Rows.Count - Active;
 
     public int WithDiagnostics => Rows.Count(x => x.Observation.Diagnostics.Length > 0);
+
+    public CodexResponseSnapshotCoverage DescribeSnapshotCoverage()
+    {
+        CodexResponseObservation[] active = Rows.Where(x => x.IsActive).Select(x => x.Observation).ToArray();
+        return new(active.Length,
+            active.Count(x => x.Usage?.Counters is { IsComplete: true, IsNonNegative: true }),
+            active.Count(x => x.TurnUsage is not null), active.Count(x => x.ThreadUsage is not null),
+            active.Count(x => !string.IsNullOrWhiteSpace(x.ResponseId) && !string.IsNullOrWhiteSpace(x.TurnId) &&
+                              !string.IsNullOrWhiteSpace(x.RootTurnId) && !string.IsNullOrWhiteSpace(x.RuntimeSessionId) &&
+                              x.ReportedThreadId == x.OwnerThreadId),
+            active.Count(x => x.ObservedAtUtc is null));
+    }
 
     // Deliberately per physical source until a compatible source-root/account scope is established.
     public (int Repeated, int Conflicting) CompareActiveCandidates()

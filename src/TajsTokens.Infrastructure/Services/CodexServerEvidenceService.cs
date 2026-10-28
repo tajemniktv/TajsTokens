@@ -115,11 +115,13 @@ public sealed class CodexServerEvidenceService(
         {
             if (!force && DateTimeOffset.UtcNow < _nextAttempt) return;
             // Failures also back off. Manual retries are explicit; this is not the quota poll cadence.
-            _nextAttempt = DateTimeOffset.UtcNow.AddMinutes(30);
+            _nextAttempt = DateTimeOffset.UtcNow.AddMinutes(CodexServerCollectionPolicy.AttemptIntervalMinutes);
             Status = "Server-evidence collection is in progress; retained results below may be older.";
             await repository.InitializeAsync(token);
-            IReadOnlyList<string> threads = await SelectThreadsAsync(token);
-            CodexServerCollection collection = await provider.CollectAsync(threads, token);
+            CodexServerCollectionScope selection = await SelectThreadSelectionAsync(token);
+            IReadOnlyList<string> threads = selection.RequestedThreadIds;
+            CodexServerCollection fetched = await provider.CollectAsync(threads, token);
+            var collection = new CodexServerCollection(fetched.Observations.Select(row => row with { CollectionScope = selection }).ToArray());
             await repository.SaveServerEvidenceAsync(collection, token);
             if (backendProvider is not null)
                 await repository.SaveServerEvidenceAsync(await backendProvider.CollectAsync([], token), token);
@@ -130,7 +132,8 @@ public sealed class CodexServerEvidenceService(
                 _historicalAvailable = history.Observations.Count > 0 &&
                                        history.Observations.All(x => x.State is ServerEvidenceState.Available or ServerEvidenceState.Empty);
             }
-            Status = $"Last server-evidence fetch {DateTimeOffset.Now:g}; {collection.Observations.Count} surface/thread results retained.";
+            Status = $"Last server-evidence fetch {DateTimeOffset.Now:g}; {collection.Observations.Count} surface/thread results retained. " +
+                     selection.ToDisplayText();
         }
         catch (OperationCanceledException) when (token.IsCancellationRequested)
         {
@@ -192,32 +195,47 @@ public sealed class CodexServerEvidenceService(
     }
 
     public async Task<IReadOnlyList<string>> SelectThreadsAsync(CancellationToken token)
+        => (await SelectThreadSelectionAsync(token)).RequestedThreadIds;
+
+    public async Task<CodexServerCollectionScope> SelectThreadSelectionAsync(CancellationToken token)
     {
+        DateTimeOffset selectedAtUtc = DateTimeOffset.UtcNow;
+        CodexServerCollectionScope Scope(IReadOnlyList<string> ids, int examined, int eligible, bool truncated) => new(
+            Guid.NewGuid().ToString("N"), selectedAtUtc, ids, examined, eligible, truncated,
+            CodexServerCollectionPolicy.MaximumThreads, CodexServerCollectionPolicy.RecentSourceDays,
+            CodexServerCollectionPolicy.AttemptIntervalMinutes, CodexServerCollectionPolicy.Selection);
         await using SqliteConnection connection = await OpenReadOnlyAsync(token);
         using SqliteCommand command = connection.CreateCommand();
         command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE name='codex_native_token_events';";
-        if (Convert.ToInt64(await command.ExecuteScalarAsync(token)) == 0) return [];
+        if (Convert.ToInt64(await command.ExecuteScalarAsync(token)) == 0) return Scope([], 0, 0, false);
         command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE name='codex_server_evidence';";
         bool hasEvidence = Convert.ToInt64(await command.ExecuteScalarAsync(token)) != 0;
         string rotation = hasEvidence
             ? "COALESCE((SELECT MAX(e.collected_at_utc) FROM codex_server_evidence e WHERE e.surface='ThreadUsage' AND e.thread_id=n.session_id),'') ASC,"
             : "";
-        DateTimeOffset selectedAtUtc = DateTimeOffset.UtcNow;
         command.CommandText = $"""
                                SELECT n.session_id FROM codex_native_token_events n
                                WHERE n.source_timestamp_quality = 'Valid' AND n.source_event_at_utc >= $from
                                  AND n.source_event_at_utc <= $to AND n.source_event_at_utc <= n.captured_at_utc
                                GROUP BY n.session_id
-                               ORDER BY {rotation} MAX(n.source_event_at_utc) DESC LIMIT 100;
+                               ORDER BY {rotation} MAX(n.source_event_at_utc) DESC LIMIT $bound;
                                """;
-        command.Parameters.AddWithValue("$from", Utc(selectedAtUtc.AddDays(-30)));
+        command.Parameters.AddWithValue("$from", Utc(selectedAtUtc.AddDays(-CodexServerCollectionPolicy.RecentSourceDays)));
         command.Parameters.AddWithValue("$to", Utc(selectedAtUtc));
+        command.Parameters.AddWithValue("$bound", CodexServerCollectionPolicy.CandidateLimit + 1);
         var threads = new List<string>();
+        int examined = 0, eligible = 0;
+        bool truncated = false;
         await using SqliteDataReader reader = await command.ExecuteReaderAsync(token);
         while (await reader.ReadAsync(token))
-            if (Guid.TryParse(reader.GetString(0), out _) && threads.Count < CodexAppServerEvidenceProvider.MaxThreads)
-                threads.Add(reader.GetString(0));
-        return threads;
+        {
+            if (examined == CodexServerCollectionPolicy.CandidateLimit) { truncated = true; break; }
+            examined++;
+            if (!Guid.TryParse(reader.GetString(0), out _)) continue;
+            eligible++;
+            if (threads.Count < CodexServerCollectionPolicy.MaximumThreads) threads.Add(reader.GetString(0));
+        }
+        return Scope(threads.ToArray(), examined, eligible, truncated);
     }
 
     public async Task<string> ReadNativeMetadataSummaryAsync(CancellationToken token)
@@ -502,7 +520,7 @@ public sealed class CodexServerEvidenceService(
             associations?.Invoke().Count(x => x.IsValid) ?? 0,
             "Source observations remain separate. No ratios assert identical accounting units, no native rollout account IDs are rewritten, and no association is inferred from numeric similarity. " +
             "Read bounded to the latest 2,000 fetch results / 16 MiB of JSON characters, 60 thread comparisons and 30 daily labels per account. Latest failed/null reports do not become zero or silently reuse a successful thread estimate. " +
-            "Plan history/grouped analytics have no supported app-server seam: coverage, completeness, approximation and breakdowns are unavailable, not false/zero. " +
+            "This adapter does not acquire plan history/grouped analytics through app-server; separate opt-in backend observations keep their own capability and coverage states. " +
             "Credits→historical allowance mapping and held-out calibration cannot be evaluated without those labels. TT and live promotion policy are unchanged.");
     }
 

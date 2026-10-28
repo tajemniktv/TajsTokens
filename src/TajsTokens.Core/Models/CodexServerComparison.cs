@@ -34,6 +34,7 @@ public sealed record CodexServerComparisonReport(
                        $"Account report · CLI {x.ClientVersion ?? "unknown"} · {x.Activity!.DailyUsageBuckets?.Count.ToString() ?? "unavailable"} daily buckets · " +
                        $"peak daily {x.Activity.PeakDailyTokens?.ToString("N0") ?? "unknown"} · longest turn {x.Activity.LongestRunningTurnSec?.ToString() ?? "unknown"}s · " +
                        $"streak current/longest {x.Activity.CurrentStreakDays?.ToString() ?? "unknown"}/{x.Activity.LongestStreakDays?.ToString() ?? "unknown"} days. No backend as-of/completeness field.")) +
+               $"\n{CodexServerCollectionScope.DescribeLatest(LatestObservations)}\n" +
                $"\nUser-declared retained-source associations: {UserDeclaredAssociations}\n\n" +
                string.Join(
                    "\n",

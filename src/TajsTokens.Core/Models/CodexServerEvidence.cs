@@ -85,6 +85,8 @@ public sealed record CodexServerObservation(
     ServerEvidenceState State,
     string Detail)
 {
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public CodexServerCollectionScope? CollectionScope { get; init; }
     // Activity/thread responses do not carry accountId. A matching before/after rate-limit
     // account is a separately labelled correlation, never a fabricated native response field.
     public string? CorrelatedAccountKey { get; init; }
