@@ -180,6 +180,8 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
         Timeline.Children.Clear();
         SummaryText.Text = ProviderText.Text = EvidenceText.Text = ManifestText.Text = TimelineText.Text =
             AccountingText.Text = PeriodsText.Text = "";
+        TtValue.Text = TtBasisLabel.Text = PlanMeasuredWork.Text = ReferenceDetails.Text = ReferenceActionStatus.Text = "";
+        SaveTtButton.IsEnabled = false;
     }
 
     private async Task LoadAsync(bool allowCached = false)
@@ -207,6 +209,9 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
             _snapshot = null;
             RenderCurrent();
             WorkValue.Text = "Loading…";
+            TtValue.Text = "Loading…";
+            TtBasisLabel.Text = PlanMeasuredWork.Text = ReferenceDetails.Text = "";
+            SaveTtButton.IsEnabled = false;
             WorkDetail.Text = WorkRange.Text = NowcastSummary.Text = "";
             Groups.ItemsSource = null;
             Timeline.Children.Clear();
@@ -225,12 +230,11 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
             _snapshot = CodexIntelligenceProjection.WithLiveContext(snapshot, App.Services.CodexIntelligence.Current, selection.AccountKey);
             UpdateModelDiscoveryHint();
             StatusText.Text = $"{selection.FromUtc:yyyy-MM-dd} → {selection.ToUtc:yyyy-MM-dd} UTC · captured {snapshot.AsOfUtc.ToLocalTime():g}";
-            string apiReference = !snapshot.ApiEquivalent.IsComplete && snapshot.ApiEquivalent.PricedReportedTokens == 0
-                ? $"API reference unavailable ({snapshot.ApiEquivalent.UnpricedReportedTokens:N0} unpriced tokens)"
-                : $"API reference: ${snapshot.ApiEquivalent.WeightedAmount:N2}{(snapshot.ApiEquivalent.IsComplete ? "" : " (priced portion)")}";
+            string apiReference = snapshot.Reference?.PriceSummary ?? "API reference unavailable";
             SummaryText.Text =
                 $"{snapshot.Ledger.Sum(x => x.Workload.ReportedTotalTokens):N0} observed tokens · {snapshot.Ledger.Select(x => x.ThreadId).Distinct().Count():N0} chats\n" +
-                $"{apiReference} · TT: research only";
+                $"{apiReference} · {snapshot.Reference?.TtSummary ?? "TT unavailable"}";
+            RenderReferenceDetails();
             ProviderText.Text = CodexServerCollectionScope.DescribeLatest(snapshot.ProviderEvidence) + "\n\n" + string.Join(
                 "\n",
                 snapshot.ProviderEvidence.GroupBy(x => (x.Surface, x.ThreadId, x.CorrelatedAccountKey, x.ClientVersion))
@@ -253,7 +257,7 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
                         snapshot.Chats.Select(x =>
                             $"{x.ThreadId} · {x.Report.DataStatus} · {x.Report.UsageSource} · weekly {x.Report.Amounts.WeeklyLimitPercent?.ToString("0.####") ?? "unknown"}% · balance credits {x.Report.Amounts.BalanceUsageCredits?.ToString() ?? "unknown"}\n{x.SelectedLocalTokens:N0} local tokens in selection · as of {x.DataAsOfUtc?.ToString("O") ?? "unknown"}\n{x.Compatibility}"));
             EvidenceText.Text = string.Join("\n\n", snapshot.EvidenceHealth.Select(x => $"{x.Source} · {x.State}\n{x.Explanation}")) +
-                                $"\nAPI coverage: {snapshot.ApiEquivalent.PricedReportedTokens:N0} priced / {snapshot.ApiEquivalent.UnpricedReportedTokens:N0} unpriced tokens." +
+                                $"\nAPI coverage: {snapshot.Reference?.CurrentPrice?.PricedTokens?.ToString("N0") ?? "unknown"} priced / {snapshot.Reference?.CurrentPrice?.UnpricedTokens?.ToString("N0") ?? "unknown"} unpriced tokens." +
                                 (snapshot.JointWorkload is { } joint ? $"\n\n{joint.Describe()}\n" + string.Join("\n", joint.Cells.Take(16).Select(cell =>
                                     $"{cell.Coordinate!.Model ?? "unknown model"} · {cell.Coordinate.ReasoningEffort ?? "unknown effort"}: " +
                                     $"input {cell.UncachedInput:N0}, cache read {cell.CacheRead:N0}, cache write {cell.CacheWrite:N0}, " +

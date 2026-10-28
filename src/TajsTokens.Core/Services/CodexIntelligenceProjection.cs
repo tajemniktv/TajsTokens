@@ -33,7 +33,7 @@ public static class CodexIntelligenceProjection
         };
     }
 
-    public const string Version = "codex-intelligence/v3-model-catalog";
+    public const string Version = "codex-intelligence/v4-public-reference";
 
     public static CodexCurrentState CurrentState(TelemetrySnapshot telemetry)
     {
@@ -97,7 +97,7 @@ public static class CodexIntelligenceProjection
                                  (selection.ThreadId is null || x.ThreadId == selection.ThreadId)).ToArray();
     }
 
-    public static CodexInferenceManifest Manifest(CodexSelection selection, string? evidenceIdentity = null)
+    public static CodexInferenceManifest Manifest(CodexSelection selection, string? evidenceIdentity = null, WorkloadReferenceResult? reference = null)
     {
         var components = new SortedDictionary<string, string>(StringComparer.Ordinal)
         {
@@ -109,11 +109,14 @@ public static class CodexIntelligenceProjection
             ["reset-outlook"] = QuotaPredictionService.ResetOutlookPolicyVersion,
             ["evidence"] = CodexEvidenceDrift.Policy,
             ["daily-pairing"] = CodexDailyPairing.Policy,
-            ["api-reference"] = ApiPriceWorkload.Version,
+            ["api-reference"] = reference?.CurrentPrice?.Contract ?? "unavailable",
+            ["api-legacy-comparator"] = ApiPriceWorkload.Version,
+            ["price-snapshot"] = reference?.Sources.Prices?.LastGood?.SnapshotId ?? "unavailable",
+            ["reference-selection"] = reference?.Sources.Selection?.SelectionId ?? "unavailable",
             ["regime"] = CodexRegimeModel.Version,
             ["provider-reconciliation"] = CodexProviderReconciliation.Version,
             ["inputs-and-results"] = evidenceIdentity ?? "not-captured",
-            ["tt"] = "research-only; no runtime basis selected",
+            ["tt"] = reference?.Sources.Selection?.Basis.BasisId ?? "no usable runtime basis selected",
         };
         string identity = JsonSerializer.Serialize(new { components, selection });
         return new CodexInferenceManifest(

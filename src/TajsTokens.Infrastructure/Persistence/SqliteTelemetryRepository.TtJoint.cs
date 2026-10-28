@@ -30,7 +30,7 @@ public sealed partial class SqliteTelemetryRepository
             if (!await reader.ReadAsync(token) || !TryJointSnapshot(reader.GetString(1), reader.GetString(0), out var original) ||
                 original!.Id != restates || original.Provider != snapshot.Provider || original.Profile != snapshot.Profile ||
                 original.FromUtc != snapshot.FromUtc || original.ToUtc != snapshot.ToUtc || original.DatasetCapturedAtUtc != snapshot.DatasetCapturedAtUtc ||
-                original.RecordedAtUtc > snapshot.RecordedAtUtc || !original.Workload.Equals(snapshot.Workload))
+                original.RecordedAtUtc > snapshot.RecordedAtUtc || original.Selection != snapshot.Selection || !original.Workload.Equals(snapshot.Workload))
                 throw new InvalidOperationException("A restatement must link an intact prior score of the same captured workload and scope.");
         }
         using var insert = connection.CreateCommand(); insert.Transaction = transaction;
@@ -112,6 +112,7 @@ public sealed partial class SqliteTelemetryRepository
                 !string.IsNullOrWhiteSpace(snapshot.Profile) && snapshot.Profile.Length <= 128 &&
                 snapshot.RecordedAtUtc != default && snapshot.DatasetCapturedAtUtc != default && snapshot.DatasetCapturedAtUtc <= snapshot.RecordedAtUtc &&
                 snapshot.FromUtc < snapshot.ToUtc && snapshot.ToUtc - snapshot.FromUtc <= TimeSpan.FromDays(366) &&
+                (snapshot.Selection is null || snapshot.Selection.FromUtc == snapshot.FromUtc && snapshot.Selection.ToUtc == snapshot.ToUtc) &&
                 snapshot.Workload.Kind == CodexJointQuantityKind.ObservedIncrements &&
                 (snapshot.RestatesSnapshotId is null || !string.IsNullOrWhiteSpace(snapshot.RestatesSnapshotId) && snapshot.RestatesSnapshotId.Length <= 128 && snapshot.RestatesSnapshotId != snapshot.Id) &&
                 snapshot.ExactTt == snapshot.Basis.ScoreExact(snapshot.Workload) &&

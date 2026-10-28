@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
     <ItemGroup>
+        <EmbeddedResource Include="../../docs/source-notes/price-reference-2026-10-28.candidate.json" LogicalName="References.ApprovedPrices.json" />
+        <EmbeddedResource Include="../../docs/source-notes/tt-reference-2026-10-28.candidate.json" LogicalName="References.ApprovedTt.json" />
         <EmbeddedResource Include="../../licenses/ZstdSharp.LICENSE.txt" LogicalName="ThirdPartyNotices.ZstdSharp.LICENSE.txt" />
         <EmbeddedResource Include="../../licenses/Zstandard.LICENSE.txt" LogicalName="ThirdPartyNotices.Zstandard.LICENSE.txt" />
     </ItemGroup>

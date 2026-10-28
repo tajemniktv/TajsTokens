@@ -56,6 +56,11 @@ public sealed partial class CodexIntelligencePage
         OutlookDetail.Text = string.Join("\n", outlook.Windows.Where(x => x.Reading is not null)
             .Select(x => $"{QuotaOutlookProjection.Name(x.Kind)}: {x.Detail}"));
         if (_snapshot is not { } snapshot) return;
+        TtValue.Text = snapshot.Reference?.TtSummary ?? "TT unavailable";
+        TtBasisLabel.Text = snapshot.Reference?.BasisLabel ?? "No usable selected TT basis";
+        PlanMeasuredWork.Text = "Selected history: " + Compact(snapshot.Ledger.Sum(x => x.Workload.ReportedTotalTokens)) +
+            " tokens · " + (snapshot.Reference?.TtSummary ?? "TT unavailable") + ". Measured work, separate from quota fit.\n" +
+            (snapshot.Reference?.BasisLabel ?? "No usable selected TT basis");
         string?[] filters = new[]
         {
             snapshot.Selection.Model,

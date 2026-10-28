@@ -108,6 +108,15 @@ public sealed class CodexIntelligenceTests
                 () => TelemetrySnapshot.Empty, modelCatalogHistory: _ => throw new IOException("fixture"));
             var withoutMetadata = await failedCatalog.QueryAsync(selection, default);
             Assert.Equal(joint, withoutMetadata.JointWorkload);
+            var references = new WorkloadReferenceService(repository);
+            var referenceEngine = new CodexIntelligenceEngine(() => new SqliteForecastDatasetReader(database), evidence, service,
+                () => TelemetrySnapshot.Empty, workloadReferences: token => references.ReadAsync(token));
+            var valued = await referenceEngine.QueryAsync(selection, default);
+            Assert.Equal(.000185m, valued.Reference!.Tt!.ExactTt);
+            Assert.Equal(.00037m, valued.Reference.CurrentPrice!.FullAmountUsd);
+            Assert.Null(valued.Reference.DateEffectivePrice!.FullAmountUsd);
+            Assert.Equal(WorkloadReferenceService.ApprovedBasisId, valued.Manifest.Components["tt"]);
+            Assert.Equal(joint, valued.JointWorkload);
             Assert.True(withoutMetadata.ModelCatalog.History.IsPartial);
             Assert.True(Assert.Single(withoutMetadata.ModelCatalog.Choices).ObservedInSelection);
             Assert.Equal(35, Assert.Single(result.Chats).SelectedLocalTokens);

@@ -62,8 +62,8 @@ acceptance. Existing implementation and retention gaps are stated below.
 | Provider account activity and daily token/credit reports | The supported report snapshot and its native period, units and freshness | Lifetime, daily and grouped totals can overlap. Repeated fetches are revisions/snapshots, not new increments. Provider-wide coverage can differ from locally available rollouts. Native dates do not invent per-event UTC times. |
 | Historical plan usage and task-attributed usage | Their separate supported provider contracts | Historical-period basis points retain period/plan, approximation and accounting-complete fields. Task percentages use their stated current-full-allowance basis; balance-usage credits remain a separate amount. Preserve requested-thread coverage and overlapping breakdown dimensions. |
 | Purchased-credit balances and spend controls | The provider's named limit/credit metadata snapshot | Preserve reported balance text/unit, `hasCredits`, unlimited state and control limits/used amounts. A balance is not estimated thread consumption or a token/quota conversion. |
-| API-equivalent valuation | A deterministic calculation under the stated price schedule and assumptions | Keep schedule/date/coverage separate from subscription usage and invoiced dollars. Current fixed prices remain the implementation until CAT-002 selects a versioned catalog. |
-| TT | A frozen, explicitly selected reference-consumption basis | T-01 must select/version the public convention. Current TT is research-only. Token evidence remains usable when TT coordinates or conversion are unavailable. |
+| API-equivalent valuation | A deterministic calculation under the stated price schedule and assumptions | Keep schedule/date/coverage separate from subscription usage and invoiced dollars. Explicit official-snapshot imports preserve last good data and have a 30-day stale label. Current reference and qualified date-effective amounts stay separate. |
+| TT | A frozen, explicitly selected reference-consumption basis | The selected October 28 standard reference defines one TT as one million uncached GPT-6.1 Sol input tokens. Native tokens remain usable when TT coordinates or conversion are unavailable. Price refreshes do not change frozen weights. |
 | Forecasts, quota conversion and inferred changes | Versioned derived calculations using compatible evidence and stated assumptions | Retain cutoff, horizon, training/selection support and uncertainty type. Results and selected interpretations can change without changing original observations. |
 
 ### Semantics
@@ -650,15 +650,17 @@ TT evaluator, existing model metadata, `ApiPriceWorkload` and product snapshot.
   [Contract and limits](docs/source-notes/STAGE4_JOINT_WORKLOAD.md). Joint-model
   calibration and public TT activation remain later work; visual acceptance stays
   separate.
-- [ ] **T-01 — Select the public TT convention.** Resolve DEC-001 before activation:
+- [x] **T-01 — Select the public TT convention.** Resolve DEC-001 before activation:
   exact schedule/weights, reference basket, units/vintage, support/equivalence,
   speed normalization and extension rules. TT is a frozen reference-consumption
   index. Defining a basket does not require running paid synthetic tasks.
-  A [concrete dated proposal](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md)
-  now specifies exact five-model weights, standard/short/30m reference semantics,
+  The [dated selection](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md)
+  specifies exact five-model weights, standard/short/30m reference semantics,
   a one-million-uncached-GPT-6.1-Sol basket and explicit activation/extensions/
   restatements. Read-only preview: 608.26452665 proposed TT over 3,984,535,029 selected
-  native tokens, with no unmapped rows. This is a proposal; no public basis is active.
+  native tokens, with no unmapped rows. The user selected this exact frozen basis,
+  explicit extensions and preserved originals on October 28. This exact basis is
+  now selected in the installed product under D-01; price refreshes cannot move it.
 - [x] **SCORE-002 — Version the joint-coordinate basis.** Reuse immutability,
   normalization and hashing while preserving the old five-category research basis
   and artifacts. Identity covers dimensions, weights, basket and semantics. Preserve
@@ -708,7 +710,7 @@ TT evaluator, existing model metadata, `ApiPriceWorkload` and product snapshot.
   helper: full unload/reopen preserved model/effort and Diagnostics confirmed a
   release pass. **831 Core tests** and the Windows build passed for this repair.
   User visual acceptance and broader SHIP-004 work remain open.
-- [ ] **CAT-002 — Version prices independently.** After DEC-002, validate feed schema,
+- [x] **CAT-002 — Version prices independently.** After DEC-002, validate feed schema,
   units/currency, model/category/tier/context and applicable effective dates. Preserve
   snapshots, separate overrides/labelled fallbacks, last-known-good recovery and
   stale/missing states. Current/date-effective API-equivalent valuation remains
@@ -716,21 +718,30 @@ TT evaluator, existing model metadata, `ApiPriceWorkload` and product snapshot.
   The [source/policy proposal and candidate snapshot](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md)
   recommend explicit official-snapshot imports, separate overrides/fallbacks,
   last-known-good retention, a 30-day stale label and no invented effective dates.
-  Selection remains pending before activation/automatic refresh.
-  **Mechanisms implemented/installed; item remains open:** `api-price-catalog/v1`
+  The user selected this policy on October 28; it is integrated and installed.
+  **Implemented/installed:** `api-price-catalog/v1`
   validates immutable typed snapshots and coordinates/dates; `api-price-valuation/v1`
   separates explicit snapshot-reference and qualified date-effective lookup, numeric
-  overrides and opt-in labelled fallbacks. Intelligence schema 10 preserves versions,
-  original times and last good data through failed imports. Explicit preview/import/
-  inspection commands do not select a source or mutate TT. **831 Core tests**, Windows
-  build and installed fixture recovery/write-guard checks passed. The proposed native
-  month previews at 1,216.5290533 reference USD; its 608.26452665 TT is unchanged.
-  Daily price/TT archives remain empty. Complete selected-policy integration after
-  DEC-002; [contract and evidence](docs/source-notes/STAGE4_PRICE_CATALOG.md).
-- [ ] **D-01 — Clarify versions and expose measured TT.** Distinguish evaluator
+  overrides and opt-in labelled fallbacks. Intelligence schema 11 preserves price
+  versions, actual import/selection times, last good data and explicit source/basis
+  selections. Official imports update current prices independently of TT. Installed
+  failed-import/restart/idempotent-reimport checks preserved last good data,
+  original clocks and the selected basis. **837 Core tests** and the Windows build
+  passed. The installed month returns 1,216.5290533 reference USD; 608.26452665 TT is
+  unchanged. [Mechanism contract](docs/source-notes/STAGE4_PRICE_CATALOG.md) and
+  [product integration/acceptance](docs/source-notes/STAGE4_PUBLIC_REFERENCE.md).
+- [x] **D-01 — Clarify versions and expose measured TT.** Distinguish evaluator
   `tt-lab/v4-blocks`, research `tt-category-basis/v1` and the new public basis.
   Show observed TT with basis/coverage beside native tokens even when conversion is
   unavailable. Update public feature documentation when this actually ships.
+  **Implemented/installed:** Overview/Planning show selected native tokens and TT
+  with the frozen basis vintage and unmapped quantity. Evidence exposes exact IDs,
+  dates, coverage, current/date-effective prices and separate public/research/
+  evaluator versions. Saving an original TT calculation preserves its basis,
+  captured workload and filters; price refreshes do not restate it. The installed
+  saved 367.8566433 TT reproduced independently and survived restart/re-import
+  unchanged. Native/research records survived; README documents the shipped feature.
+  Manual native-picker file selection and user visual acceptance remain SHIP-004.
 
 **Exit:** the selected basket scores one TT; a price refresh cannot move the frozen
 ruler. Unsupported TT coordinates retain usable token accounting. Current quota is
@@ -835,11 +846,11 @@ choices stay with its owner. Recommendations below are not selected numeric poli
 
 | ID | Choice and recommendation | Needed before |
 |---|---|---|
-| DEC-001 / T-01 | Recommend frozen dated tariff-reference TT first, empirical TT separately. Choose exact schedule, joint weights, basket and standard-speed versus tier-specific semantics together. | Public basis activation, not joint projection |
-| DEC-002 | Choose pricing source, override/fallback policy, refresh cadence and effective-date treatment; unknown effective dates stay unknown. | Dynamic price refresh; a pinned TT schedule can be specified independently |
+| DEC-001 / T-01 | Selected October 28: the exact dated five-model tariff-reference basis and one-million-uncached-Sol basket, standard/short/30m semantics and no effort multiplier. Empirical TT stays separate. | D-01 activation/presentation |
+| DEC-002 | Selected October 28: explicit official-snapshot imports, separately labelled overrides/fallbacks, last-good retention, 30-day stale label and no automatic network polling. Unknown effective dates stay unknown. | CAT-002 product integration |
 | DEC-003 | Choose interval semantics/context candidates using the incident and later outcomes. Recommend a small existing-candidate comparison with horizon-specific selection. | Releasing changed pace/default or continuation policy |
 | DEC-004 | Set CPU/disk/memory/latency budgets from PERF-001. Consider collector isolation only if measured cooperative work is insufficient. | Resource acceptance; no new service by assumption |
-| DEC-005 | Define explicit basis activation, extension and historical-restatement policy. Compatible new-model extensions preserve old weights/normalization with a new identity. | Extending/replacing a public basis |
+| DEC-005 | Selected October 28: explicit basis selection; compatible extensions preserve weights/basket/normalization under a new identity. Save originals; historical restatements require an explicit link/request. | Extending/replacing a public basis |
 
 #### Stage 8 — acceptance and delivery for each shipped slice
 
@@ -877,20 +888,20 @@ provider scope and answer-specific eligibility slices have their stated installe
 evidence. **PACE-001–004** implement and evaluate the elapsed-time correction.
 Stage 4's **SCORE-001–003** joint projection, frozen basis/archive and qualified
 scoring are installed. **CAT-001** discovery and picker interaction are verified,
-including hidden-dashboard input restoration. The latest full suite passed 831
+including hidden-dashboard input restoration. The latest full suite passed 837
 tests and the Windows build installed successfully; user visual acceptance remains
 separate.
 
-**Current gate: Stage 4 decisions.** The
-[reviewable price/TT proposal](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md)
-specifies the exact candidate artifacts and previews. DEC-002 must select the price
-source/refresh/fallback policy before CAT-002 product integration. DEC-001/T-01 and
-DEC-005 must select the public basis and activation/extension/restatement policy
-before D-01 measured-TT presentation. The independent CAT-002 validation, valuation
-and versioned last-good archive mechanisms are installed; no price source or public
-TT basis is selected. Pending choices are not defaults. Finish these Stage 4 items
-before starting Stage 5, following the requested stage order. Programme-wide
-acceptance gates and the PERF-001 resource-budget decision remain open.
+**Continue with Stage 5 / CAL-001.** The user selected the exact
+[price policy and frozen TT basis](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md).
+CAT-002 and D-01 are integrated and installed: immutable selections, independent
+price imports, measured TT and explicit original-score saving. Automated checks,
+installed numeric/recovery checks and Overview/Planning rendering passed. The native
+file picker opened, but its separate PickerHost surface was not targetable by
+Computer Use; manual file selection stays open under SHIP-004. Stage 5 must diagnose
+joint coverage and identification before selecting a richer quota-conversion model.
+Programme-wide acceptance gates, user visual acceptance and the PERF-001
+resource-budget decision remain open.
 
 ### Existing implementation baseline and known gaps
 

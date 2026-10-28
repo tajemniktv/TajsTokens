@@ -11,6 +11,8 @@ public sealed record TtJointScoreSnapshot(string Id, DateTimeOffset RecordedAtUt
     public string Contract { get; init; } = Version;
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public TtScoreAssessment? Assessment { get; init; }
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public CodexSelection? Selection { get; init; }
 }
 
 public sealed record TtJointScoreArchiveEntry(string Id, DateTimeOffset? RecordedAtUtc, TtJointScoreSnapshot? Snapshot, string? Problem);

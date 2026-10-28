@@ -18,7 +18,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 public sealed partial class SqliteTelemetryRepository(string databasePath, TimeProvider? timeProvider = null) : ITelemetryRepository, ISessionIngestionCheckpointStore
 {
     private const int CurrentSchemaVersion = 16;
-    private const int IntelligenceSchemaVersion = 10;
+    private const int IntelligenceSchemaVersion = 11;
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
     private readonly SemaphoreSlim _intelligenceInitializeGate = new(1, 1);
@@ -1266,6 +1266,17 @@ public sealed partial class SqliteTelemetryRepository(string databasePath, TimeP
                         last_good_id TEXT, issue TEXT
                     );
                     UPDATE intelligence_schema SET version=10 WHERE component='phase4-intelligence';
+                    """, cancellationToken);
+            }
+            if (version < 11)
+            {
+                await ExecuteMigrationAsync(connection, """
+                    CREATE TABLE IF NOT EXISTS workload_reference_selections (
+                        selection_id TEXT PRIMARY KEY, selected_at_utc TEXT NOT NULL,
+                        content_hash TEXT NOT NULL, payload TEXT NOT NULL
+                    );
+                    CREATE INDEX IF NOT EXISTS idx_reference_selection_time ON workload_reference_selections(selected_at_utc DESC);
+                    UPDATE intelligence_schema SET version=11 WHERE component='phase4-intelligence';
                     """, cancellationToken);
             }
             _intelligenceInitialized = true;

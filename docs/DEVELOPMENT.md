@@ -22,7 +22,32 @@ To bring an already-running installed tray instance forward through the same act
 
 The signal is restricted to the current user/session and the same installation directory. With no matching instance, this starts the dashboard normally. `--background` starts tray-only. Neither flag changes persistent settings.
 
-## Explicit joint TT candidate scoring
+## TT selection, prices and explicit candidate scoring
+
+Overview's Evidence tab owns price-file imports, explicit TT-basis selection and
+"Save this TT calculation". The selected October 28 basis and official price
+snapshot are embedded with their reviewed identities; first use records the actual
+selection/import time. Imports never refresh TT weights. Optional overrides and
+fallbacks are separately labelled and can be disabled there.
+
+The installed evaluation executable offers the same operations:
+
+```powershell
+$referenceTool = "$env:LOCALAPPDATA/Programs/TajemnikTV/TajsTokens/current/TajsTokens.ForecastEvaluation.exe"
+$referenceDb = "$env:LOCALAPPDATA/Programs/TajemnikTV/TajsTokens/data/telemetry.db"
+& $referenceTool --reference-init $referenceDb
+& $referenceTool --reference-import $referenceDb official path/to/prices.json
+& $referenceTool --select-tt $referenceDb path/to/basis.json
+& $referenceTool --reference-view $referenceDb 2026-09-27T00:00:00Z 2026-10-27T14:58:00Z
+```
+
+`--reference-init` initializes approved defaults only when no selection exists;
+it never replaces an existing or damaged selection. Imports accept `official`,
+`override` or `fallback`; the latter two explicitly enable that role. Mutating
+commands require an existing app-owned database. `--reference-view` is read-only
+and does not initialize missing selections. Bad imports return exit 2 and retain
+last good data. Current reference and date-effective amounts stay separate; unknown
+effective dates stay unpriced. See the [public reference contract](source-notes/STAGE4_PUBLIC_REFERENCE.md).
 
 Price-file preview is also explicit and read-only; its final argument is the caller's
 source-age threshold, not an activated freshness policy:
@@ -33,8 +58,9 @@ dotnet run --project tools/TajsTokens.ForecastEvaluation/TajsTokens.ForecastEval
 
 `--price-import <initialized-app-db> <source-key> <file>` writes only the price archive
 and attempt state, with no activation; `--price-source <app-db> <source-key>` reads it.
-Use an isolated app-owned fixture while source-policy selection is pending. Bad
-imports return exit 2 and retain last good data. See the [price snapshot contract](source-notes/STAGE4_PRICE_CATALOG.md).
+It rejects active source keys: use `--reference-import` for a selected source so role
+validation is applied. Use isolated app-owned fixtures for experiments. Bad imports
+return exit 2 and retain last good data. See the [price snapshot contract](source-notes/STAGE4_PRICE_CATALOG.md).
 
 To inspect retained model discovery alongside selected local observations, use:
 
@@ -55,7 +81,8 @@ dotnet run --project tools/TajsTokens.ForecastEvaluation/TajsTokens.ForecastEval
 
 This command reads app-owned selected native increments and writes aggregate JSON
 to standard output. It does not activate the candidate, save scores into daily data
-or infer account-wide completeness. Public activation still requires T-01. Exact,
+or infer account-wide completeness. Explicit activation uses `--select-tt`; previews
+alone never select a basis. Exact,
 bounded, partial, unbounded and inconsistent results retain their distinct meanings;
 see [the scoring contract](source-notes/STAGE4_JOINT_SCORING.md). A definition larger
 than 512 KiB or a future/range longer than 366 days is rejected. Use Ctrl+C to cancel.

@@ -1,7 +1,11 @@
-# Price-catalog and public TT choices — proposed, not active
+# Price-catalog and public TT choices — selected October 28
 
-This makes PROJECT.md decisions DEC-001/T-01, DEC-002 and DEC-005 concrete. No daily
-setting, active price source, TT basis or historical score has been changed.
+The user selected both recommendations on October 28: explicit official-snapshot
+imports and the exact frozen TT basis below, including the activation/extension/
+restatement policy. PROJECT.md tracks implementation and installed acceptance.
+The candidate JSON files retain their original bytes and names so the reviewed
+artifact digest and basis identity remain stable; their original proposal status
+is historical metadata, not the current activation state.
 
 ## Price data and refresh policy (DEC-002)
 
@@ -11,7 +15,7 @@ import rather than a new app build. No official structured feed has been selecte
 or verified for unattended refresh in this work. This trades automatic network
 refresh for a traceable initial source and does not prevent adding a selected feed.
 
-Proposed policy:
+Selected policy:
 
 - Explicit imports validate schema, USD/per-million-token units, exact model,
   product, speed tier, context bracket and cache-write lifetime. Unknown coordinates

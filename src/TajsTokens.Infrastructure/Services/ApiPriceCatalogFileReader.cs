@@ -17,6 +17,18 @@ public static class ApiPriceCatalogFileReader
             if (stream.Length is <= 0 or > 512 * 1024) return Failure(ApiPriceImportState.Invalid, "price-file-size-bound");
             byte[] bytes = new byte[(int)stream.Length]; await stream.ReadExactlyAsync(bytes, token);
             if (stream.ReadByte() != -1) return Failure(ApiPriceImportState.Invalid, "price-file-changed");
+            return Parse(sourceKey, bytes);
+        }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return Failure(ApiPriceImportState.Unavailable, "price-file-unavailable"); }
+    }
+
+    public static ApiPriceImportAttempt Parse(string sourceKey, byte[] bytes)
+    {
+        ApiPriceImportAttempt Failure(ApiPriceImportState state, string issue) => new(sourceKey, DateTimeOffset.UtcNow, state, null, issue);
+        try
+        {
+            if (bytes.Length is <= 0 or > 512 * 1024) return Failure(ApiPriceImportState.Invalid, "price-file-size-bound");
             using var json = JsonDocument.Parse(bytes); var root = json.RootElement;
             ApiPriceCatalogSnapshot snapshot;
             string? contract = root.GetProperty("Contract").GetString();
@@ -61,8 +73,6 @@ public static class ApiPriceCatalogFileReader
             else return Failure(ApiPriceImportState.Invalid, "unsupported-price-contract");
             return new(sourceKey, DateTimeOffset.UtcNow, ApiPriceImportState.Accepted, snapshot, null);
         }
-        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
-        catch (Exception e) when (e is IOException or UnauthorizedAccessException) { return Failure(ApiPriceImportState.Unavailable, "price-file-unavailable"); }
         catch (Exception e) when (e is JsonException or ArgumentException or FormatException or InvalidOperationException or KeyNotFoundException or OverflowException)
         { return Failure(ApiPriceImportState.Invalid, "invalid-price-schema"); }
     }

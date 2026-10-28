@@ -20,6 +20,20 @@ internal static class ApiPriceCatalogCli
     }
     public static async Task ImportAsync(string database, string sourceKey, string file)
     {
+        await VerifyDestinationAsync(database);
+        var selected = (await new SqliteTelemetryRepository(database).ReadWorkloadReferenceSelectionAsync(default)).Selection;
+        if (selected is not null && (sourceKey == selected.PriceSourceKey || sourceKey == selected.OverrideSourceKey || sourceKey == selected.FallbackSourceKey))
+            throw new ArgumentException("Use --reference-import for an active price source.");
+        var attempt = await ApiPriceCatalogFileReader.ReadAsync(sourceKey, file, default);
+        await new SqliteTelemetryRepository(database).SavePriceCatalogImportAsync(attempt, default);
+        Console.WriteLine(JsonSerializer.Serialize(new { attempt.SourceKey, State = attempt.State.ToString(), attempt.AttemptedAtUtc,
+            SnapshotId = attempt.Snapshot?.SnapshotId, Origin = attempt.Snapshot?.Origin.ToString(), attempt.Issue,
+            ActiveSourceChanged = false, TtBasisChanged = false }));
+        if (attempt.State != ApiPriceImportState.Accepted) Environment.ExitCode = 2;
+    }
+
+    public static async Task VerifyDestinationAsync(string database)
+    {
         // Never initialize an arbitrary existing/native SQLite file as app-owned telemetry.
         if (!File.Exists(database)) throw new ArgumentException("An initialized TajsTokens telemetry database is required.");
         await using (var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = database, Mode = SqliteOpenMode.ReadOnly, Pooling = false }.ToString()))
@@ -29,12 +43,6 @@ internal static class ApiPriceCatalogCli
             if (Convert.ToInt32(await command.ExecuteScalarAsync(), CultureInfo.InvariantCulture) != 3)
                 throw new ArgumentException("Destination is not an initialized TajsTokens telemetry database.");
         }
-        var attempt = await ApiPriceCatalogFileReader.ReadAsync(sourceKey, file, default);
-        await new SqliteTelemetryRepository(database).SavePriceCatalogImportAsync(attempt, default);
-        Console.WriteLine(JsonSerializer.Serialize(new { attempt.SourceKey, State = attempt.State.ToString(), attempt.AttemptedAtUtc,
-            SnapshotId = attempt.Snapshot?.SnapshotId, Origin = attempt.Snapshot?.Origin.ToString(), attempt.Issue,
-            ActiveSourceChanged = false, TtBasisChanged = false }));
-        if (attempt.State != ApiPriceImportState.Accepted) Environment.ExitCode = 2;
     }
     public static async Task PreviewAsync(string database, string file, string fromText, string toText, string ageText)
     {

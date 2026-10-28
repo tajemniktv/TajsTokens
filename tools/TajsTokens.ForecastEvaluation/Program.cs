@@ -7,6 +7,13 @@ using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
+if (args.Length == 2 && args[0] == "--reference-init" || args.Length == 3 && args[0] == "--select-tt" ||
+    args.Length == 4 && args[0] is "--reference-import" or "--reference-view")
+{
+    await ApiPriceCatalogCli.RunAsync(() => WorkloadReferenceCli.RunAsync(args));
+    return;
+}
+
 if (args.Length == 4 && args[0] == "--price-import")
 {
     await ApiPriceCatalogCli.RunAsync(() => ApiPriceCatalogCli.ImportAsync(args[1], args[2], args[3]));

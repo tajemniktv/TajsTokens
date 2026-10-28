@@ -86,12 +86,14 @@ public sealed class AppServices
             ServerEvidence,
             isBackground,
             calibrationService: Calibration);
+        WorkloadReferences = new WorkloadReferenceService(Repository);
         CodexIntelligence = new CodexIntelligenceEngine(
             () => new SqliteForecastDatasetReader(DatabasePath, Settings.RolloutAccountAssociations),
             ServerEvidence,
             Intelligence,
             () => Telemetry.Latest,
-            modelCatalogHistory: Repository.ReadModelCatalogHistoryAsync);
+            modelCatalogHistory: Repository.ReadModelCatalogHistoryAsync,
+            workloadReferences: token => WorkloadReferences.ReadAsync(token));
         AlertEngine = new QuotaAlertEngine(Settings.LowQuotaThresholds);
         LocalLimitsApi = new LocalLimitsHttpServer(() =>
             LocalLimitsProjection.Build(Telemetry.Latest, Settings.LocalLimitsApiToken, DateTimeOffset.UtcNow));
@@ -128,6 +130,7 @@ public sealed class AppServices
     public IIntelligenceService Intelligence { get; }
     public CalibrationProcessService Calibration { get; }
     public ICodexIntelligence CodexIntelligence { get; }
+    public WorkloadReferenceService WorkloadReferences { get; }
     public TelemetryCoordinator Telemetry { get; }
     public QuotaAlertEngine AlertEngine { get; }
     public LocalLimitsHttpServer LocalLimitsApi { get; }

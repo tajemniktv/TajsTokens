@@ -31,7 +31,7 @@ public sealed partial class SqliteTelemetryRepository
         return Array.AsReadOnly(entries.ToArray());
     }
 
-    public async Task SavePriceCatalogImportAsync(ApiPriceImportAttempt attempt, CancellationToken token)
+    public async Task SavePriceCatalogImportAsync(ApiPriceImportAttempt attempt, CancellationToken token, bool onlyIfMissing = false)
     {
         if (string.IsNullOrWhiteSpace(attempt.SourceKey) || attempt.SourceKey.Length > 128 || !Enum.IsDefined(attempt.State) || attempt.AttemptedAtUtc == default ||
             (attempt.State == ApiPriceImportState.Accepted) != (attempt.Snapshot is not null) || attempt.Issue?.Length > 128)
@@ -41,6 +41,13 @@ public sealed partial class SqliteTelemetryRepository
         await InitializeIntelligenceAsync(token);
         await using var connection = new SqliteConnection(_connectionString); await connection.OpenAsync(token);
         using var transaction = connection.BeginTransaction();
+        if (onlyIfMissing)
+        {
+            using var exists = connection.CreateCommand(); exists.Transaction = transaction;
+            exists.CommandText = "SELECT COUNT(*) FROM api_price_catalog_import_state WHERE source_key=$key;";
+            exists.Parameters.AddWithValue("$key", attempt.SourceKey);
+            if (Convert.ToInt64(await exists.ExecuteScalarAsync(token), CultureInfo.InvariantCulture) != 0) return;
+        }
         string at = attempt.AttemptedAtUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
         if (payload is not null)
         {

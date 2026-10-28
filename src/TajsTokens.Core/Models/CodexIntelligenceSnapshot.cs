@@ -60,7 +60,7 @@ public sealed record CodexIntelligenceSnapshot(
     IReadOnlyList<QuotaSnapshot> QuotaTimeline,
     IReadOnlyList<CurrentQuotaForecast> Current,
     TokenWorkloadForecast? Workload,
-    ApiPriceWeight ApiEquivalent,
+    ApiPriceWeight LegacyApiEquivalent,
     IReadOnlyList<CodexServerObservation> ProviderEvidence,
     IReadOnlyList<CodexEvidenceHealth> EvidenceHealth,
     CodexInferenceManifest Manifest)
@@ -72,6 +72,8 @@ public sealed record CodexIntelligenceSnapshot(
     public CodexRegimeReport? Regime { get; init; }
     public CodexJointWorkload? JointWorkload { get; init; }
     public CodexModelCatalogView ModelCatalog { get; init; } = CodexModelCatalogView.Empty;
+    public WorkloadReferenceResult? Reference { get; init; }
+    public DateTimeOffset? DatasetCapturedAtUtc { get; init; }
 }
 
 public sealed record CodexChatAccounting(

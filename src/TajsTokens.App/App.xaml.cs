@@ -51,6 +51,7 @@ public partial class App : Application
     }
 
     public AppServices Services { get; }
+    internal nint WindowHandle => _window is null ? 0 : WinRT.Interop.WindowNative.GetWindowHandle(_window);
     internal string SchedulingDiagnostic => _resourcePolicy.Diagnostic;
     internal string PresentationDiagnostic => (_window as MainWindow)?.PresentationDiagnostic ?? "Presentation: no dashboard window.";
 

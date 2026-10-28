@@ -72,5 +72,17 @@ public static class ApiPriceWorkload
         return new ApiPriceWeight(Version, amount, priced, unpriced, pricedEvents, unpricedEvents);
     }
 
+    public static ApiPriceCatalogSnapshot LegacySnapshot()
+    {
+        var context = new ApiPriceReferenceContext("api-text-reference", "standard", "input-at-most-272000", "30m");
+        return new(ApiPriceCatalogSnapshot.Version, ApiPriceOrigin.LegacyPinnedFallback, "Legacy pinned 2026-09-19", null,
+            "USD", "per-1000000-tokens", [Source], Rates.SelectMany(pair =>
+            {
+                decimal?[] values = [pair.Value.Input, pair.Value.Cached, pair.Value.CacheWrite, pair.Value.Output, pair.Value.Output];
+                return values.Select((value, i) => new ApiPriceRate(new(pair.Key, context.Product, context.Tier, context.ContextBand),
+                    (TtTokenCategory)i, i == 2 ? context.CacheWritePolicy : null, value, null, null, Source));
+            }).ToArray(), context);
+    }
+
     private sealed record Rate(decimal Input, decimal Cached, decimal? CacheWrite, decimal Output);
 }

@@ -106,6 +106,8 @@
                                     <HyperlinkButton Grid.Column="1" Content="Explore work" Click="OnHistory" />
                                 </Grid>
                                 <TextBlock x:Name="WorkValue" Style="{StaticResource HeroMetricStyle}" />
+                                <TextBlock x:Name="TtValue" Style="{StaticResource HeroMetricStyle}" />
+                                <TextBlock x:Name="TtBasisLabel" Style="{StaticResource CaptionStyle}" />
                                 <TextBlock x:Name="WorkDetail" Style="{StaticResource SubtitleStyle}" />
                                 <TextBlock x:Name="NowcastSummary" Style="{StaticResource SubtitleStyle}" />
                                 <HyperlinkButton Content="Inspect quota changes" Click="OnQuotaHistory" HorizontalAlignment="Left" />
@@ -154,6 +156,7 @@
                 <ScrollViewer HorizontalScrollBarVisibility="Disabled">
                     <StackPanel Spacing="16" Padding="0,16,12,20" MaxWidth="1000" HorizontalAlignment="Left">
                         <TextBlock Text="Will my next session fit?" Style="{StaticResource SectionTitleStyle}" />
+                        <TextBlock x:Name="PlanMeasuredWork" Style="{StaticResource SubtitleStyle}" TextWrapping="Wrap" />
                         <TextBlock Text="A conditional account-wide scenario. Work-history filters below the live header do not allocate quota to projects or chats."
                                    Style="{StaticResource SubtitleStyle}" />
                         <Border Style="{StaticResource CardStyle}">
@@ -201,6 +204,22 @@
                         </Expander>
                         <Expander Header="Coverage and source health" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
                             <TextBlock x:Name="EvidenceText" Style="{StaticResource TechnicalTextStyle}" />
+                        </Expander>
+                        <Expander x:Name="ReferenceExpander" Header="TT basis and API reference prices" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                            <StackPanel Spacing="12">
+                                <TextBlock x:Name="ReferenceDetails" Style="{StaticResource TechnicalTextStyle}" />
+                                <Button x:Name="SaveTtButton" Content="Save this TT calculation" Click="OnSaveTt" />
+                                <ComboBox x:Name="PriceImportRole" Header="Import as" SelectedIndex="0">
+                                    <x:String>Official snapshot</x:String><x:String>Local override</x:String><x:String>Community fallback (enable)</x:String>
+                                </ComboBox>
+                                <Button Content="Import price snapshot…" Click="OnImportPrice" />
+                                <Button Content="Disable overrides and fallbacks" Click="OnDisableOptionalPrices" />
+                                <Button Content="Enable legacy pinned fallback" Click="OnLegacyPrices" />
+                                <Button Content="Select a different TT basis…" Click="OnSelectTtBasis" />
+                                <TextBlock Text="Price imports leave TT weights unchanged. Selecting another basis changes future views; saved calculations stay on their original basis. Historical restatements must be explicit."
+                                           Style="{StaticResource CaptionStyle}" />
+                                <TextBlock x:Name="ReferenceActionStatus" Style="{StaticResource SubtitleStyle}" TextWrapping="Wrap" />
+                            </StackPanel>
                         </Expander>
                         <Expander Header="Provider reports and historical periods" HorizontalAlignment="Stretch"
                                   HorizontalContentAlignment="Stretch">

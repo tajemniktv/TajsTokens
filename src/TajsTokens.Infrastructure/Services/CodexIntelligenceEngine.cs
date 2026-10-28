@@ -22,7 +22,8 @@ public sealed class CodexIntelligenceEngine(
     ICodexServerEvidenceReader serverEvidence,
     IIntelligenceService intelligence,
     Func<TelemetrySnapshot> current,
-    Func<CancellationToken, Task<CodexModelCatalogHistory>>? modelCatalogHistory = null) : ICodexIntelligence
+    Func<CancellationToken, Task<CodexModelCatalogHistory>>? modelCatalogHistory = null,
+    Func<CancellationToken, Task<WorkloadReferenceState>>? workloadReferences = null) : ICodexIntelligence
 {
     public CodexIntelligenceSnapshot Current => CodexIntelligenceProjection.Live(current());
 
@@ -72,7 +73,7 @@ public sealed class CodexIntelligenceEngine(
                     Regime = regime,
                     Manifest = CodexIntelligenceProjection.Manifest(
                         snapshot.Selection,
-                        Fingerprint(new { snapshot.Manifest.Id, cost, regime })),
+                        Fingerprint(new { snapshot.Manifest.Id, cost, regime }), snapshot.Reference),
                 };
             },
             token);
@@ -92,6 +93,13 @@ public sealed class CodexIntelligenceEngine(
             "codex", "default", selection.FromUtc, selection.ToUtc, token,
             selection.AccountKey, includeQuota: !selection.HasWorkFilter);
         IReadOnlyList<CodexLedgerEntry> selected = CodexIntelligenceProjection.Select(dataset.Ledger, selection);
+        var joint = CodexJointWorkloadBuilder.Build(selected.Select(x => x.Workload));
+        WorkloadReferenceState references;
+        try { references = workloadReferences is null ? new(null, null) : await workloadReferences(token); }
+        catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
+        catch (Exception e) when (e is not OutOfMemoryException)
+        { references = new(null, null, Issue: "reference-selection-unavailable"); }
+        var reference = WorkloadReferenceProjection.Build(references, joint, selected, asOf);
         CodexModelCatalogHistory catalogs;
         try { catalogs = modelCatalogHistory is null ? CodexModelCatalogHistory.Empty : await modelCatalogHistory(token); }
         catch (OperationCanceledException) when (token.IsCancellationRequested) { throw; }
@@ -130,8 +138,8 @@ public sealed class CodexIntelligenceEngine(
                 "Snapshot",
                 "Multiple source captures",
                 $"Local ledger and quota history captured together at {dataset.CapturedAtUtc:O}; provider history upper bound {history.CapturedAtUtc:O}. Not an atomic cross-source snapshot."),
-            new("TT", "Research only", "No runtime TT basis has been promoted. Missing TT is not zero workload."),
-            new("API equivalent", "Derived", ApiPriceWorkload.Assumptions),
+            new("TT", reference.Tt?.State.ToString() ?? "Unavailable", reference.BasisLabel + ". Frozen reference consumption, not remaining allowance."),
+            new("API equivalent", reference.CurrentPrice?.State.ToString() ?? "Unavailable", "Selected snapshot-reference valuation; actual billing conditions and effective dates are not inferred."),
         };
         return CodexIntelligenceProjection.WithLiveContext(new CodexIntelligenceSnapshot(
             asOf,
@@ -156,10 +164,12 @@ public sealed class CodexIntelligenceEngine(
             CodexIntelligenceProjection.Manifest(
                 selection,
                 Fingerprint(new { selected, quota, forecasts, evidenceIds = evidence.Select(x => x.Id).ToArray(),
-                    catalogs.LastRead, modelCatalogs = catalogs.Versions.Select(x => new { x.Definition.DefinitionId, x.LastCollectedAtUtc, x.LastSourceFetchedAtUtc }) })))
+                    catalogs.LastRead, reference, modelCatalogs = catalogs.Versions.Select(x => new { x.Definition.DefinitionId, x.LastCollectedAtUtc, x.LastSourceFetchedAtUtc }) }), reference))
         {
             CurrentState = live.CurrentState,
-            JointWorkload = CodexJointWorkloadBuilder.Build(selected.Select(x => x.Workload)),
+            JointWorkload = joint,
+            Reference = reference,
+            DatasetCapturedAtUtc = dataset.CapturedAtUtc,
             ModelCatalog = CodexModelCatalogProjection.Build(catalogs, selected),
             Chats = CodexProviderReconciliation.Tasks(evidence, selected, selection),
             HistoricalPeriods = selection.HasWorkFilter

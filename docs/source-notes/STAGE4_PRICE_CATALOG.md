@@ -2,12 +2,12 @@
 
 ## Delivery boundary
 
-This is the independent data/valuation portion of **CAT-002**. DEC-002's source,
-refresh, override/fallback and freshness choices remain pending in the
-[concrete proposal](PRICE_AND_TT_PROPOSAL_2026-10-28.md). No price setting, network
-feed or public TT ruler is activated. Production and research still use the existing
-`ApiPriceWorkload` pinned card until an explicit source policy is selected and wired.
-The checklist remains open for that integration and acceptance.
+This records the independent data/valuation milestone of **CAT-002**. At that
+milestone no source or public TT basis was active. The user subsequently selected
+the [concrete policy and basis](PRICE_AND_TT_PROPOSAL_2026-10-28.md); product integration
+is recorded in the [public reference contract](STAGE4_PUBLIC_REFERENCE.md). The
+legacy pinned `ApiPriceWorkload` remains a reproducible research comparator and an
+explicitly enabled labelled fallback, independently of the public TT ruler.
 
 ## Closed, immutable snapshot
 
