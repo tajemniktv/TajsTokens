@@ -181,7 +181,7 @@ and hidden-history eviction are also installed. Opt-in aggregate phase diagnosti
 and an offline EventPipe reporter are validated; the installed sample identifies
 workload-prefix preparation and worker allocation pressure. Evidence-qualified
 calibration scheduling and worker-local overlapping dataset reads are installed.
-All 682 Core tests and the Windows build pass. Resource/restore acceptance and
+All 686 Core tests and the Windows build pass. Resource/restore acceptance and
 numerical budgets remain open under PERF-001. See
 [current validation evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 
@@ -195,7 +195,8 @@ numerical budgets remain open under PERF-001. See
   Aggregate phase capture and separate parent/worker allocation/GC samples are
   recorded. Manual hide/restore was normal for the user; two captured first frames
   took 30.3/96.3 ms. The active-worker combined sampled private peak remains
-  553.2 MiB. Controlled scenario comparisons, attributed physical I/O and numerical budgets
+  566.7 MiB after dashboard use; a fresh background-only process peaked at 388.2 MiB
+  across the app, worker and helpers. Controlled scenario comparisons, attributed physical I/O and numerical budgets
   remain open; [measurement details](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 - [x] **PERF-002 — Repair interactive scheduling.** Remove the UI/tray process hard
   CPU cap and routine forced compacting GC, retaining worker containment and
@@ -222,6 +223,9 @@ numerical budgets remain open under PERF-001. See
   Full suite: 670 passed; Windows build/install passed. Installed planning state,
   hidden release and qualified cache-hit counters were observed;
   [evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
+  The user approved releasing the dashboard frame after 30 seconds hidden while
+  preserving lightweight inputs/navigation. That extension is being implemented;
+  its restore correctness and reclaimed memory remain to be measured.
 - [x] **PERF-005 — Separate discovery from catch-up.** Deferred/missing/mismatched
   rollouts must not force full discovery every poll. Use bounded fair retries and
   filesystem-fallback budgets, independent relationship reconciliation and correct

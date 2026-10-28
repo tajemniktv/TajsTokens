@@ -183,6 +183,9 @@ public static class QuotaForecastCalibration
         var trials = new List<QuotaForecastTrial>();
         foreach (IReadOnlyList<QuotaSnapshot> epoch in SplitEpochs(stream).Where(x => x.Count >= 3))
         {
+            // The epoch is immutable within this replay. Share its prefix backing storage
+            // instead of copying the growing history for each estimate/projection.
+            QuotaSnapshot[] history = epoch.ToArray();
             DateTimeOffset? lastOrigin = null;
             for (int i = 1; i < epoch.Count - 1; i++)
             {
@@ -202,9 +205,10 @@ public static class QuotaForecastCalibration
                 if (target is null || Math.Abs((target.CapturedAtUtc - targetTime).TotalMinutes) > 5 ||
                     target.CapturedAtUtc <= anchor.CapturedAtUtc) continue;
                 lastOrigin = anchor.CapturedAtUtc;
-                double rate = QuotaPaceModels.Estimate(epoch.Take(i + 1).ToArray(), model);
+                IReadOnlyList<QuotaSnapshot> prefix = new ArraySegment<QuotaSnapshot>(history, 0, i + 1);
+                double rate = QuotaPaceModels.Estimate(prefix, model);
                 double lead = (target.CapturedAtUtc - anchor.CapturedAtUtc).TotalHours;
-                double prediction = QuotaPaceModels.ProjectRemaining(epoch.Take(i + 1).ToArray(), model, lead);
+                double prediction = QuotaPaceModels.ProjectRemaining(anchor, model, lead, rate);
                 IReadOnlyList<double> calibration = CalibrationErrors(trials, anchor.CapturedAtUtc, anchor.ResetsAtUtc!.Value, lead, options);
                 double? radius = ErrorRadius(calibration, options);
                 int exhaustedIndex = -1;
@@ -218,7 +222,7 @@ public static class QuotaForecastCalibration
                 // require a reading at reset; positive labels require observed saturation.
                 bool? exhausted = exhaustedIndex >= 0 ? true : epoch[^1].CapturedAtUtc == anchor.ResetsAtUtc ? false : null;
                 double hoursToReset = (anchor.ResetsAtUtc!.Value - anchor.CapturedAtUtc).TotalHours;
-                bool predictsExhaustion = QuotaPaceModels.ProjectRemaining(epoch.Take(i + 1).ToArray(), model, hoursToReset) <= 0;
+                bool predictsExhaustion = QuotaPaceModels.ProjectRemaining(anchor, model, hoursToReset, rate) <= 0;
                 double? etaError = null;
                 if (exhaustedIndex >= 0 && rate > 0 && predictsExhaustion && anchor.RemainingPercent > 0)
                 {

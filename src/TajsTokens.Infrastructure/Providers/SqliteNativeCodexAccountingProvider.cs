@@ -110,6 +110,7 @@ public sealed class SqliteNativeCodexAccountingProvider(string databasePath) : I
         finally
         {
             _cacheGate.Release();
+            SqliteMemoryDiagnostics.Record(WorkPhase.NativeProjection);
         }
     }
 

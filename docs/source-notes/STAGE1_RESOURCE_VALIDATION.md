@@ -548,3 +548,85 @@ finished. It supports bounded restore responsiveness and the user's manual pass;
 it does not close the memory/resource gate. Local evidence is
 `manual-restore-phases.nettrace` and `manual-restore-phase-summary.json` under
 `.codex/temp/stage1/`.
+
+## Retained evidence memory
+
+The final workload pass now releases the wider quota-phase feature cache after
+projecting its 30-day range. It retains complete prefixes for relevant sessions,
+including starts older than 30 days. A later wider request falls back to the
+original reader rather than receiving truncated evidence. If source evidence
+changes between phases, the final read reloads only its needed range. If detailed
+quota calibration was skipped, the worker never loads an unused 120-day range.
+
+The existing SQLite dataset reader also shares repeated common text within each
+read: session/source labels, model/effort, event/contract labels and related common
+metadata. Sharing uses ordinal equality, at most 16,384 values of at most 512
+characters. Unique observation/record/turn IDs stay unpooled. The dictionary is
+local to one read; there is no global string-intern pool or additional durable
+retention. Timestamps, source identity values, row order, bounds and forecasting
+calculations are unchanged.
+
+An isolated managed-retention experiment loaded the installed pre-change reader
+and the new reader over the same synthetic 20,000-token / 20,000-metadata fixture.
+Both returned identical serialized evidence hashes. Normal order: 19,243,856 ->
+9,010,672 retained managed bytes; reversed order: 19,129,480 -> 9,010,648. That is
+about **53% less live dataset memory**. Token-session string instances fell from
+20,000 to 200 distinct session values; metadata source-string instances fell from
+20,000 to one value. Full collection was used only in the isolated measurement
+process to measure retained objects; no forced GC was added to the application.
+These are dataset-retention measurements, not process-private-commit savings.
+
+The old installed Infrastructure assembly SHA-256 was
+`937b101a7d3799a2dc4962b7335f656c7e544153984a4f3cf329906fb3b25d09`
+(source content through a4d2380); the new installed assembly is
+`4f9b538cb2b6c1b211fa4ffdfcccfe57adf7efad04d60b0e98510d3d6e568171`.
+Local reproduction is in `.codex/temp/stage1/probe` with
+`reader-retained-memory*.jsonl`. Bounds/replacement/fallback, common-value sharing
+and old-prefix retention are covered by targeted regressions. All **686 Core
+tests passed**, none skipped (1 minute 26 seconds). The serial Windows build and
+installation passed with zero warnings/errors in 69.75 seconds, restarting the
+daily app as PID 36716.
+
+### Replay allocation and process attribution
+
+Quota replay now estimates each origin's pace once and projects both targets from
+that rate, using a prefix view instead of repeated array copies. Model formulas,
+selection and evidence remain unchanged. The isolated comparison exercised all
+11 candidates, three horizon choices and dense weekly/five-hour-cycle fixtures:
+14,201 serialized trials matched (SHA-256
+`2a0c7bf9cfc3dd2dd3cf65ad22921c4ed01ccf47b8853db62067acffd11d41b4`).
+Allocated bytes fell from 1,552,769,576 to 221,938,968; elapsed time was 8,681.04
+versus 3,352.30 ms. Reversed order confirmed 1,552,766,376 versus 221,937,504 bytes
+and 9,458.95 versus 4,567.00 ms. These fixture results are not whole-app ratios.
+Local evidence: `pace-replay-benchmark*.jsonl` under `.codex/temp/stage1/`.
+
+Opt-in `MemoryObserved` events report process private commit, last-GC occupied and
+committed heap, and SQLite allocator current/high-water bytes. GC fields describe
+the last collection, not current live objects; these overlapping counters cannot
+form an exact partition. The installed parent sample reported 273.43 MiB private
+commit, 39.81 MiB last-GC occupied, 116.89 MiB last-GC committed and 6.33 MiB SQLite
+allocation (14.88 MiB SQLite high-water). SQLite does not explain the bulk of this
+process. The remaining native/CLR/UI memory has not been individually attributed.
+The trace/report completed 37 phases without lost events or source errors.
+Local evidence: `native-memory-attribution*` under `.codex/temp/stage1/`.
+
+After the user confirmed hiding the dashboard, the earlier 120-second sample
+averaged 489.27 MiB across app, worker and helpers, peaked at 566.70 MiB, and ended
+at 449.94 MiB. The app alone ended at 258.43 MiB and peaked at 313.36 MiB. This was
+before replay's allocation change; it is not a controlled speed comparison.
+
+The user then exited the installed app and authorized a background-only restart
+on the latest build. Without ever opening the dashboard, the 120-second sample
+averaged 235.33 MiB, peaked at 388.17 MiB across the tree, and ended at 305.12 MiB.
+The main app ended at 110.33 MiB (114.80 MiB peak); the active calibration worker
+peaked at 191.43 MiB. Startup/catch-up CPU was 0.287% for the parent and 0.492% for
+the worker, normalized to 16 logical processors. Helpers and active workloads
+vary; this operational comparison identifies a dashboard-initialization increment
+but does not prove how much unloading can reclaim. Local evidence:
+`reader-memory-hidden-120s.json` and `background-only-120s.json`.
+
+The current source passed all 686 Core tests (1m38s), followed serially by the
+Windows build/install with zero warnings/errors (72.50s). The offline reporter
+also built successfully. The user chose dashboard unloading after 30 seconds
+hidden, preserving lightweight state; implementation and runtime acceptance of
+that policy are the next PERF-004 extension. Numerical memory budgets remain open.

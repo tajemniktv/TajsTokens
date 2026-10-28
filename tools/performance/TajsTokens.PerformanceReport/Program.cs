@@ -12,6 +12,7 @@ using var source = new EventPipeEventSource(args[0]);
 var completed = new List<Completion>();
 var started = new HashSet<(int Process, long Operation)>();
 var invalidations = new Dictionary<(int Process, int Phase, int Reason), int>();
+var memory = new List<MemoryObservation>();
 int sourceErrors = 0;
 source.Dynamic.All += data =>
 {
@@ -30,11 +31,15 @@ source.Dynamic.All += data =>
             var key = (data.ProcessID, (int)Number("phase"), (int)Number("reason"));
             invalidations[key] = invalidations.GetValueOrDefault(key) + 1;
             break;
+        case "MemoryObserved":
+            memory.Add(new(data.ProcessID, (int)Number("phase"), Number("privateBytes"),
+                Number("lastGcHeapBytes"), Number("lastGcCommittedBytes"), Number("sqliteAllocatedBytes"), Number("sqliteHighWaterBytes")));
+            break;
         case "EventSourceMessage": sourceErrors++; break; // Never copy error/source payloads into a shareable report.
     }
 };
 source.Process();
-if (started.Count == 0 && completed.Count == 0)
+if (started.Count == 0 && completed.Count == 0 && memory.Count == 0)
 {
     Console.Error.WriteLine("No TajsTokens phase events found. This is not evidence of zero work; verify the provider, runtime and capture interval.");
     return 2;
@@ -73,11 +78,24 @@ Console.WriteLine(JsonSerializer.Serialize(new
     completed = completed.Count,
     unfinishedWithinCapture = started.Except(completed.Select(item => (item.Process, item.Operation))).Count(),
     phases,
+    memory = memory.GroupBy(item => (item.Process, item.Phase)).Select(group =>
+    {
+        object Known(Func<MemoryObservation, long> field)
+        {
+            long[] values = group.Select(field).Where(value => value >= 0).ToArray();
+            return new { measuredSamples = values.Length, maxMiB = values.Length == 0 ? (double?)null : values.Max() / 1048576d,
+                lastMiB = values.Length == 0 ? (double?)null : values[^1] / 1048576d };
+        }
+        return new { processId = group.Key.Process, phase = Enum.GetName(typeof(WorkPhase), group.Key.Phase), samples = group.Count(),
+            processPrivate = Known(x => x.Private), lastGcOccupiedHeap = Known(x => x.Heap),
+            lastGcCommitted = Known(x => x.Committed), sqliteAllocated = Known(x => x.Sqlite), sqliteHighWater = Known(x => x.SqlitePeak) };
+    }),
     invalidations = invalidations.OrderBy(item => item.Key.Process).ThenBy(item => item.Key.Phase).ThenBy(item => item.Key.Reason)
         .Select(item => new { processId = item.Key.Process, phaseId = item.Key.Phase, reason = item.Key.Reason, count = item.Value }),
-    qualification = "Nested phases overlap; do not sum them as process wall time or CPU. Unmeasured counters are null, not zero. Rows are phase-specific submitted observations or returned rows, not unique retained evidence. Logical bytes are not physical disk I/O. Unfinished phases may extend outside the capture. First-frame timing begins at the app visibility transition and excludes physical input/IPC delivery. Trace collection adds overhead.",
+    qualification = "Nested phases overlap; do not sum them as process wall time or CPU. Unmeasured counters are null, not zero. Rows are phase-specific submitted observations or returned rows, not unique retained evidence. Logical bytes are not physical disk I/O. Unfinished phases may extend outside the capture. First-frame timing begins at the app visibility transition and excludes physical input/IPC delivery. Memory counters overlap: GC is from its last collection, SQLite is allocator-reported current/high-water usage, and neither covers all native memory. Trace collection adds overhead.",
 }, new JsonSerializerOptions { WriteIndented = true }));
 return source.EventsLost > 0 || sourceErrors > 0 ? 1 : 0;
 
 internal sealed record Completion(int Process, int Phase, long Operation, long Microseconds,
     bool Succeeded, long Rows, long Bytes, long Commits, long Hits);
+internal sealed record MemoryObservation(int Process, int Phase, long Private, long Heap, long Committed, long Sqlite, long SqlitePeak);

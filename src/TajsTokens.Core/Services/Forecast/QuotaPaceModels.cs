@@ -27,13 +27,18 @@ public static class QuotaPaceModels
     public static double ProjectRemaining(IReadOnlyList<QuotaSnapshot> epoch, string model, double leadHours)
     {
         double rate = Estimate(epoch, model);
+        return ProjectRemaining(epoch[^1], model, leadHours, rate);
+    }
+
+    internal static double ProjectRemaining(QuotaSnapshot anchor, string model, double leadHours, double rate)
+    {
         double effectiveHours = model switch
         {
             "damped-2h" => 2 * (1 - Math.Exp(-leadHours / 2)),
             "damped-6h" => 6 * (1 - Math.Exp(-leadHours / 6)),
             _ => leadHours,
         };
-        return Math.Clamp(epoch[^1].RemainingPercent!.Value - rate * effectiveHours, 0, 100);
+        return Math.Clamp(anchor.RemainingPercent!.Value - rate * effectiveHours, 0, 100);
     }
 
     public static double Estimate(IReadOnlyList<QuotaSnapshot> epoch, string model)

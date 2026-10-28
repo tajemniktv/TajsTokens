@@ -47,6 +47,19 @@ public sealed class WorkDiagnostics : EventSource
         return measurement;
     }
 
+    [NonEvent]
+    public static void RecordMemory(WorkPhase phase, long sqliteAllocatedBytes, long sqliteHighWaterBytes)
+    {
+        if (!Log.IsEnabled()) return;
+        GCMemoryInfo gc = GC.GetGCMemoryInfo();
+        long privateBytes = -1;
+        try { using var process = Process.GetCurrentProcess(); privateBytes = process.PrivateMemorySize64; }
+        catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception or PlatformNotSupportedException) { }
+        Log.MemoryObserved((int)phase, privateBytes,
+            gc.Index == 0 ? -1 : gc.HeapSizeBytes - gc.FragmentedBytes,
+            gc.Index == 0 ? -1 : gc.TotalCommittedBytes, sqliteAllocatedBytes, sqliteHighWaterBytes);
+    }
+
     [Event(1, Level = EventLevel.Informational)]
     public void PhaseStarted(int phase, long operation)
         => WriteEvent(1, new object[] { phase, operation });
@@ -63,6 +76,14 @@ public sealed class WorkDiagnostics : EventSource
     {
         if (IsEnabled()) WriteEvent(3, new object[] { phase, reason });
     }
+
+    // GC fields describe the most recent collection, not exact current live memory.
+    // SQLite allocations overlap process private memory; its high-water value is not current usage.
+    [Event(4, Level = EventLevel.Informational)]
+    public void MemoryObserved(int phase, long privateBytes, long lastGcHeapBytes,
+        long lastGcCommittedBytes, long sqliteAllocatedBytes, long sqliteHighWaterBytes)
+        => WriteEvent(4, new object[] { phase, privateBytes, lastGcHeapBytes,
+            lastGcCommittedBytes, sqliteAllocatedBytes, sqliteHighWaterBytes });
 }
 
 public sealed class WorkMeasurement : IDisposable

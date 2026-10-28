@@ -35,7 +35,10 @@ public static class CalibrationWorkerHost
             var service = new SqliteIntelligenceService(request.DatabasePath, repository, () => request.Associations, datasetReader);
             IReadOnlyList<CurrentQuotaForecast> forecasts = await service.BuildAndPersistCurrentForecastsAsync(
                 request.Lanes, now, CancellationToken.None);
+            SqliteMemoryDiagnostics.Record(WorkPhase.QuotaCalibration);
+            datasetReader.RetainOnlyNextRead();
             TokenWorkloadForecast workload = await service.ForecastTokenWorkloadAsync(now, CancellationToken.None);
+            SqliteMemoryDiagnostics.Record(WorkPhase.WorkloadCalibration);
             await output.WriteLineAsync(JsonSerializer.Serialize(new CodexCalibrationResult(forecasts, workload, cache.Hits, cache.Misses)));
             await output.FlushAsync();
             return 0;

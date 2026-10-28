@@ -19,25 +19,38 @@ internal sealed class CalibrationDatasetReader(string databasePath, IReadOnlyLis
     private CalibrationEvidenceStamp? _stamp;
     private string? _provider, _profile;
     private bool _wideReadUnavailable;
+    private DateTimeOffset _sharedFromUtc = sharedFromUtc, _sharedToUtc = sharedToUtc;
+    private bool _retainOnlyNextRead;
     internal int SharedFeatureReads { get; private set; }
     internal int ReusedReads { get; private set; }
+    internal int RetainedFeatureRows => _shared is null ? 0 : _shared.Tokens.Count + _shared.Workload.Count + _shared.Context.Count;
+
+    // The quota phase has finished. Keep overlap reuse for the final workload read,
+    // then release evidence outside that narrower range; retain full relevant session prefixes.
+    internal void RetainOnlyNextRead() => _retainOnlyNextRead = true;
 
     public async Task<CodexForecastDataset> ReadAsync(string provider, string profile, DateTimeOffset fromUtc,
         DateTimeOffset toUtc, CancellationToken token, string? accountKey = null, bool includeQuota = true, bool includeLedger = false)
     {
-        if (includeLedger || fromUtc < sharedFromUtc || toUtc > sharedToUtc || fromUtc >= toUtc || _wideReadUnavailable)
+        if (_retainOnlyNextRead && _shared is null && !includeLedger && fromUtc < toUtc)
+        { _sharedFromUtc = fromUtc; _sharedToUtc = toUtc; }
+        if (includeLedger || fromUtc < _sharedFromUtc || toUtc > _sharedToUtc || fromUtc >= toUtc || _wideReadUnavailable)
+        {
+            if (_retainOnlyNextRead) { _shared = null; _stamp = null; _retainOnlyNextRead = false; }
             return await _reader.ReadAsync(provider, profile, fromUtc, toUtc, token, accountKey, includeQuota, includeLedger);
+        }
         CalibrationEvidenceStamp? before = await _evidence.ReadAsync(DateTimeOffset.UtcNow, token, includeTimeBoundary: false);
         if (before is null) return await _reader.ReadAsync(provider, profile, fromUtc, toUtc, token, accountKey, includeQuota);
         if (_stamp != before || _provider != provider || _profile != profile)
         { _shared = null; _stamp = null; }
         if (_shared is null)
         {
+            if (_retainOnlyNextRead) { _sharedFromUtc = fromUtc; _sharedToUtc = toUtc; }
             try
             {
                 // Quota is deliberately not widened across accounts. A broad feature read
                 // that reaches its supported bound must not disable a narrower answer.
-                _shared = await (featureReader ?? _reader).ReadAsync(provider, profile, sharedFromUtc, sharedToUtc,
+                _shared = await (featureReader ?? _reader).ReadAsync(provider, profile, _sharedFromUtc, _sharedToUtc,
                     token, includeQuota: false);
                 SharedFeatureReads++;
             }
@@ -88,6 +101,12 @@ internal sealed class CalibrationDatasetReader(string databasePath, IReadOnlyLis
             Context = _shared.Context.Where(x => x.ObservedAtUtc > lookback && x.ObservedAtUtc <= toUtc).ToArray(),
             Workload = _shared.Workload.Where(x => x.ObservedAtUtc <= toUtc && sessions.Contains(x.SessionId)).ToArray(),
         };
+        if (_retainOnlyNextRead)
+        {
+            _shared = result with { Quota = [] };
+            _sharedFromUtc = fromUtc; _sharedToUtc = toUtc;
+            _retainOnlyNextRead = false;
+        }
         ReusedReads++;
         work?.Complete(rows: result.Quota.Count + result.Tokens.Count + result.Workload.Count + result.Context.Count, cacheHits: 1);
         return result;

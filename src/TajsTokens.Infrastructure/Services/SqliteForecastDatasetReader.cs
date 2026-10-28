@@ -45,6 +45,20 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
         await connection.OpenAsync(cancellationToken);
         using SqliteTransaction transaction = connection.BeginTransaction(true);
         DateTimeOffset captured = DateTimeOffset.UtcNow;
+        Dictionary<string, string>? repeatedText = null;
+
+        string Shared(string value)
+        {
+            // Per-read value sharing, not global string interning. These common labels/IDs
+            // already belong to the returned evidence. Unique record/turn IDs stay unpooled.
+            if (value.Length > 512) return value;
+            repeatedText ??= new(StringComparer.Ordinal);
+            if (repeatedText.TryGetValue(value, out string? existing)) return existing;
+            if (repeatedText.Count < 16384) repeatedText.Add(value, value);
+            return value;
+        }
+
+        string? SharedText(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : Shared(r.GetString(i));
 
         string Utc(DateTimeOffset value)
         {
@@ -115,15 +129,15 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
                         OptionalTime(reader, 4),
                         provider,
                         profile,
-                        reader.GetString(5),
-                        reader.GetString(6) is { Length: > 0 } account ? account : null)
+                        Shared(reader.GetString(5)),
+                        reader.GetString(6) is { Length: > 0 } account ? Shared(account) : null)
                     {
                         ObservationId = Text(reader, 7) is { Length: > 0 } id ? id : null,
-                        SourceIdentity = Text(reader, 8),
-                        SessionId = Text(reader, 9),
-                        LimitId = Text(reader, 10),
-                        PlanType = Text(reader, 11),
-                        Lane = Text(reader, 12),
+                        SourceIdentity = SharedText(reader, 8),
+                        SessionId = SharedText(reader, 9),
+                        LimitId = SharedText(reader, 10),
+                        PlanType = SharedText(reader, 11),
+                        Lane = SharedText(reader, 12),
                         CollectedAtUtc = OptionalTime(reader, 13),
                         HasSourceTimestamp = reader.GetInt32(14) != 0 &&
                                              (!string.IsNullOrEmpty(Text(reader, 7)) || OptionalTime(reader, 13) is not null),
@@ -159,27 +173,27 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
                 workload.Add(
                     new CodexWorkloadObservation(
                         reader.GetString(0),
-                        reader.GetString(1),
-                        reader.GetString(2),
+                        Shared(reader.GetString(1)),
+                        Shared(reader.GetString(2)),
                         reader.GetInt64(3),
                         reader.GetInt64(4),
-                        reader.GetString(5),
-                        reader.GetString(6),
+                        Shared(reader.GetString(5)),
+                        Shared(reader.GetString(6)),
                         OptionalTime(reader, 7),
                         Time(reader.GetString(8)),
                         Text(reader, 9),
-                        Text(reader, 10),
-                        Text(reader, 11),
-                        Text(reader, 12),
-                        Text(reader, 13),
+                        SharedText(reader, 10),
+                        SharedText(reader, 11),
+                        SharedText(reader, 12),
+                        SharedText(reader, 13),
                         Number(reader, 14),
-                        reader.GetString(15),
+                        Shared(reader.GetString(15)),
                         Number(reader, 16),
                         Number(reader, 17),
                         Number(reader, 18),
                         Number(reader, 19),
-                        Text(reader, 20),
-                        Text(reader, 21)));
+                        SharedText(reader, 20),
+                        SharedText(reader, 21)));
         }
         if (workload.Count > 100000)
             throw new ForecastDatasetReadLimitException("Workload metadata exceeds the supported replay bound; a paged evidence read is required.");
@@ -204,11 +218,11 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
             while (await reader.ReadAsync(cancellationToken))
             {
                 var work = new CodexPredictiveTokenEvent(
-                    reader.GetString(0),
+                    Shared(reader.GetString(0)),
                     Time(reader.GetString(1)),
                     OptionalTime(reader, 2),
-                    Text(reader, 3),
-                    Text(reader, 4),
+                    SharedText(reader, 3),
+                    SharedText(reader, 4),
                     reader.GetInt64(5),
                     reader.GetInt64(6),
                     reader.GetInt64(7),
@@ -253,10 +267,10 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
                 context.Add(
                     new CodexContextObservation(
                         reader.GetString(0),
-                        reader.GetString(1),
-                        Text(reader, 2),
+                        Shared(reader.GetString(1)),
+                        SharedText(reader, 2),
                         Time(reader.GetString(3)),
-                        Text(reader, 4),
+                        SharedText(reader, 4),
                         Number(reader, 5),
                         Number(reader, 6),
                         reader.GetInt64(7) != 0,

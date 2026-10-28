@@ -27,12 +27,18 @@ public sealed class WorkDiagnosticsTests
         Assert.True(Convert.ToInt64(incomplete[2]) >= 0);
         Assert.Equal(-1L, incomplete[4]);
         Assert.Contains(listener.Started, values => Convert.ToInt64(values[1]) == inner.Operation);
+        WorkDiagnostics.RecordMemory(WorkPhase.Collection, 10000000, 12000000);
+        object?[] memory = Assert.Single(listener.Memory, values => Convert.ToInt32(values[0]) == (int)WorkPhase.Collection);
+        Assert.Equal(10000000L, memory[4]);
+        Assert.Equal(12000000L, memory[5]);
+        Assert.True(Convert.ToInt64(memory[1]) > 0 || Convert.ToInt64(memory[1]) == -1);
     }
 
     private sealed class Listener : EventListener
     {
         public ConcurrentQueue<object?[]> Started { get; } = new();
         public ConcurrentQueue<object?[]> Completed { get; } = new();
+        public ConcurrentQueue<object?[]> Memory { get; } = new();
         protected override void OnEventSourceCreated(EventSource source)
         {
             if (source.Name == "TajsTokens-Work") EnableEvents(source, EventLevel.Informational);
@@ -41,6 +47,7 @@ public sealed class WorkDiagnosticsTests
         {
             if (args.EventId == 1) Started.Enqueue(args.Payload!.ToArray());
             if (args.EventId == 2) Completed.Enqueue(args.Payload!.ToArray());
+            if (args.EventId == 4) Memory.Enqueue(args.Payload!.ToArray());
         }
     }
 }
