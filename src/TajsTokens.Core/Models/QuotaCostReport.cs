@@ -62,6 +62,12 @@ public sealed record QuotaCostScore(
     public decimal UnpricedReportedTokens { get; init; }
     public double? PairedPaceIntervalLoss { get; init; }
     public double? PairedTotalIntervalLoss { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public double? PairedCategoryIntervalLoss { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public int IncompleteJointTrainingIntervals { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingDefault)]
+    public int IncompleteJointHeldOutIntervals { get; init; }
 }
 
 public sealed record QuotaCostReport(

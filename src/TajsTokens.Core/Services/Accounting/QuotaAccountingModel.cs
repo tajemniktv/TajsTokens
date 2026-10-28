@@ -89,15 +89,19 @@ public static class QuotaAccountingModel
                 bool needsCategories = candidate is not ("total" or "pace" or "persistence" or "api-price");
                 int incompleteTraining = needsCategories ? training.Count(x => !x.HasCompleteTokenCategories) : 0;
                 int incompleteHeldout = needsCategories ? heldout.Count(x => !x.HasCompleteTokenCategories) : 0;
+                bool joint = candidate == "joint-categories";
+                int incompleteJointTraining = joint ? training.Count(x => !QuotaCostIdentification.Valid(x)) : 0;
+                int incompleteJointHeldout = joint ? heldout.Count(x => !QuotaCostIdentification.Valid(x)) : 0;
                 bool noTrainingWork = candidate is not ("pace" or "persistence") && training.Length >= 20 && !HasTrainingWork(training);
-                bool fitted = training.Length >= 20 && unpricedTraining == 0 && incompleteTraining == 0 && !noTrainingWork;
+                bool fitted = training.Length >= 20 && unpricedTraining == 0 && incompleteTraining == 0 && incompleteJointTraining == 0 && !noTrainingWork;
                 IntervalRidge? fit = fitted && candidate is not "pace" and not "persistence"
-                    ? IntervalRidge.Fit(training.Select(vector.Values).ToArray(), training, cancellationToken)
+                    ? Fit(training, vector, candidate, cancellationToken)
                     : null;
                 foreach (QuotaCostObservation row in fitted ? heldout : [])
                 {
                     if (candidate == "api-price" && !Priceable(row)) continue;
                     if (needsCategories && !row.HasCompleteTokenCategories) continue;
+                    if (joint && !QuotaCostIdentification.Valid(row)) continue;
                     double prediction = candidate switch
                     {
                         "pace" => row.PaceDelta,
@@ -156,8 +160,9 @@ public static class QuotaAccountingModel
                         false,
                         noTrainingWork ? "no-recorded-training-work" :
                         incompleteTraining > 0 ? "incomplete-category-training" :
+                        incompleteJointTraining > 0 ? "incomplete-joint-training" :
                         unpricedTraining > 0 ? "unpriced-training-evidence" :
-                        fitted ? "evaluation-only" : "insufficient-training-intervals",
+                        fitted ? joint ? "research-only-joint-shrunk-to-pooled" : "evaluation-only" : "insufficient-training-intervals",
                         fit is null
                             ? new Dictionary<string, double>()
                             : vector.Names.Select((name, i) => (name, value: fit.Weights[i] / fit.Scales[i]))
@@ -168,6 +173,8 @@ public static class QuotaAccountingModel
                         RateCardVersion = candidate == "api-price" ? ApiPriceWorkload.Version : null,
                         IncompleteCategoryTrainingIntervals = incompleteTraining,
                         IncompleteCategoryHeldOutIntervals = incompleteHeldout,
+                        IncompleteJointTrainingIntervals = incompleteJointTraining,
+                        IncompleteJointHeldOutIntervals = incompleteJointHeldout,
                         UnpricedTrainingIntervals = unpricedTraining,
                         UnpricedHeldOutIntervals = unpricedHeldout,
                         UnpricedReportedTokens =
@@ -176,19 +183,22 @@ public static class QuotaAccountingModel
             }
             foreach (QuotaCostScore score in local)
             {
-                if (score.Candidate == "api-price")
+                if (score.Candidate is "api-price" or "joint-categories")
                 {
-                    HashSet<DateTimeOffset> origins = score.Trials.Select(x => x.StartUtc).ToHashSet();
+                    var origins = score.Trials.Select(x => (x.StartUtc, x.EndUtc)).ToHashSet();
                     scores.Add(
                         score with
                         {
                             PairedPaceIntervalLoss =
                             Mean(
-                                local.Single(x => x.Candidate == "pace").Trials.Where(x => origins.Contains(x.StartUtc))
+                                local.Single(x => x.Candidate == "pace").Trials.Where(x => origins.Contains((x.StartUtc, x.EndUtc)))
                                     .Select(x => x.IntervalLoss)),
                             PairedTotalIntervalLoss = Mean(
-                                local.Single(x => x.Candidate == "total").Trials.Where(x => origins.Contains(x.StartUtc))
+                                local.Single(x => x.Candidate == "total").Trials.Where(x => origins.Contains((x.StartUtc, x.EndUtc)))
                                     .Select(x => x.IntervalLoss)),
+                            PairedCategoryIntervalLoss = score.Candidate == "joint-categories" ? Mean(
+                                local.Single(x => x.Candidate == "categories").Trials.Where(x => origins.Contains((x.StartUtc, x.EndUtc)))
+                                    .Select(x => x.IntervalLoss)) : null,
                         });
                     continue;
                 }
@@ -252,14 +262,30 @@ public static class QuotaAccountingModel
         string candidate,
         CancellationToken cancellationToken)
     {
-        if (training.Count < 20 || !HasTrainingWork(training) || candidate is not ("total" or "categories" or "model-effort"))
+        if (training.Count < 20 || !HasTrainingWork(training) || candidate is not ("total" or "categories" or "model-effort" or "joint-categories"))
             throw new ArgumentException(
                 "Composition forecasting requires 20 cost observations, positive recorded training work and a supported composition model.");
         if (candidate != "total" && training.Any(x => !x.HasCompleteTokenCategories))
             throw new ArgumentException("Category fitting requires complete disjoint token evidence.");
+        if (candidate == "joint-categories" && training.Any(x => !QuotaCostIdentification.Valid(x)))
+            throw new ArgumentException("Joint fitting requires complete observed joint token evidence.");
         var vector = new CostVector(training, candidate);
-        IntervalRidge fit = IntervalRidge.Fit(training.Select(vector.Values).ToArray(), training, cancellationToken);
+        IntervalRidge fit = Fit(training, vector, candidate, cancellationToken);
         return row => fit.Predict(vector.Values(row));
+    }
+
+    private static IntervalRidge Fit(IReadOnlyList<QuotaCostObservation> training, CostVector vector, string candidate, CancellationToken token)
+    {
+        double[]? prior = null;
+        if (candidate == "joint-categories")
+        {
+            var pooled = new CostVector(training, "categories");
+            IntervalRidge fit = IntervalRidge.Fit(training.Select(pooled.Values).ToArray(), training, token);
+            // Final nonnegative joint coefficients shrink toward the training-only pooled
+            // category fit. Unknown and vocabulary-overflow bins retain distinct coordinates.
+            prior = Enumerable.Range(0, vector.Names.Length).Select(i => fit.Weights[i % 5] / fit.Scales[i % 5]).ToArray();
+        }
+        return IntervalRidge.Fit(training.Select(vector.Values).ToArray(), training, token, prior);
     }
 
     internal static double[] FitCategoryWeights(IReadOnlyList<QuotaCostObservation> training, CancellationToken cancellationToken)
@@ -319,6 +345,15 @@ public static class QuotaAccountingModel
             }
             models = training.SelectMany(x => x.Features.ModelTokenShares.Keys).Distinct().Order().Take(16).ToArray();
             efforts = training.SelectMany(x => x.Features.EffortTokenShares.Keys).Distinct().Order().Take(16).ToArray();
+            if (candidate == "joint-categories")
+            {
+                models = training.SelectMany(x => x.Features.JointWorkload?.Cells ?? []).Select(x => x.Coordinate!.Model)
+                    .Where(x => !string.IsNullOrWhiteSpace(x)).Cast<string>().Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).Take(16).ToArray();
+                efforts = [];
+                Names = models.Select(x => "joint-model:" + x).Concat(["joint-missing-model", "joint-vocabulary-overflow"])
+                    .SelectMany(x => Enumerable.Range(0, 5).Select(c => $"{x}/{(TtTokenCategory)c}/M")).ToArray();
+                return;
+            }
             var names = new List<string>(
                 candidate == "total"
                     ? ["reported-total/M"]
@@ -338,6 +373,19 @@ public static class QuotaAccountingModel
         public double[] Values(QuotaCostObservation row)
         {
             if (candidate == "api-price") return [(double)row.ApiPriceWeight!.WeightedAmount];
+            if (candidate == "joint-categories")
+            {
+                var joint = row.Features.JointWorkload ?? throw new ArgumentException("Joint workload is unavailable.");
+                double[] result = new double[Names.Length];
+                foreach (var cell in joint.Cells.Concat(joint.Overflow is { } overflow ? [overflow] : []))
+                {
+                    string? model = cell.Coordinate?.Model;
+                    int m = cell.Coordinate is not null && string.IsNullOrWhiteSpace(model) ? models.Length : Array.IndexOf(models, model);
+                    if (m < 0) m = models.Length + 1;
+                    for (int c = 0; c < 5; c++) result[m * 5 + c] += (double)TtJointWorkloadBasis.Amount(cell, (TtTokenCategory)c) / 1e6;
+                }
+                return result;
+            }
             CodexForecastFeatures f = row.Features;
             double total = f.Tokens / 1e6;
             var values = new List<double>(candidate == "total" ? [total] : row.TokenCategories.Select(x => x / 1e6));
@@ -364,13 +412,14 @@ public static class QuotaAccountingModel
             return row.Select((x, i) => x / Scales[i] * Weights[i]).Sum();
         }
 
-        public static IntervalRidge Fit(double[][] input, IReadOnlyList<QuotaCostObservation> targets, CancellationToken cancellationToken)
+        public static IntervalRidge Fit(double[][] input, IReadOnlyList<QuotaCostObservation> targets, CancellationToken cancellationToken, double[]? prior = null)
         {
             int dimensions = input[0].Length;
             double[] scales = Enumerable.Range(0, dimensions).Select(i => Math.Max(1e-9, Math.Sqrt(input.Average(x => x[i] * x[i]))))
                 .ToArray();
             double[][] x = input.Select(row => row.Select((v, i) => v / scales[i]).ToArray()).ToArray();
-            double[] weights = new double[dimensions];
+            double[] center = Enumerable.Range(0, dimensions).Select(i => (prior?[i] ?? 0) * scales[i]).ToArray();
+            double[] weights = (double[])center.Clone();
             const double penalty = 0.1;
             // Squared distance to the censoring interval is convex, continuously differentiable.
             // Trace bounds the Hessian spectral norm, giving a conservative fixed step.
@@ -378,7 +427,7 @@ public static class QuotaAccountingModel
             for (int iteration = 0; iteration < 2000; iteration++)
             {
                 cancellationToken.ThrowIfCancellationRequested();
-                double[] gradient = weights.Select(w => penalty * w).ToArray();
+                double[] gradient = weights.Select((w, i) => penalty * (w - center[i])).ToArray();
                 for (int j = 0; j < x.Length; j++)
                 {
                     double prediction = x[j].Select((v, i) => v * weights[i]).Sum();

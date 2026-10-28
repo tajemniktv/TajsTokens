@@ -5,7 +5,7 @@ namespace TajsTokens.Core.Tests;
 
 public sealed class QuotaCostIdentificationTests
 {
-    private static QuotaCostObservation Work(QuotaCostObservation row, params (string? Model, int Category, long Tokens)[] cells)
+    internal static QuotaCostObservation Work(QuotaCostObservation row, params (string? Model, int Category, long Tokens)[] cells)
     {
         var events=cells.Select((x,i)=>new CodexPredictiveTokenEvent("session-"+i,row.StartUtc.AddMinutes(1),row.EndUtc,x.Model,null,
             x.Category==0?x.Tokens:0,x.Category==1?x.Tokens:0,x.Category==2?x.Tokens:0,x.Category==3?x.Tokens:0,x.Category==4?x.Tokens:0,x.Tokens)).ToArray();

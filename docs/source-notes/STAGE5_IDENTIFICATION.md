@@ -1,4 +1,4 @@
-# Joint quota-cost identification diagnostics (CAL-001)
+# Joint quota-cost identification and restrained conversion (CAL-001/002)
 
 `quota-cost-identification/v1` inspects the existing reconciled cost observations;
 it does not fit prices, change the conversion selector or require a TT scalar.
@@ -121,10 +121,136 @@ At 120 minutes, the largest weekly cohort has 22/99 and 14/99 respectively.
 These counts overlap across horizons. They reject a literal zero-lag,
 complete-local-coverage explanation for those declared envelopes; they do not
 identify the cause, external activity amount or lag distribution. Diagnostics
-rendering and native file selection are pending the user's manual host check.
+rendering was subsequently confirmed by the user's manual host check and screenshot.
+They reported working accounting/regime analysis but excessive prose. Presentation
+work should keep concise results visible and methods/assumptions inspectable on demand.
 
 The paired old model implementations and their thresholds remain unchanged.
 CAL-002 must compare a restrained joint challenger with pooled/raw baselines on
 chronological matched outcomes. Positive quota envelopes with no recorded local
 work must remain visible; they cannot be fitted away as local token prices.
 CAL-003/004 retain ownership of feasible-set assumptions and uncertainty semantics.
+
+## Restrained joint challenger (CAL-002)
+
+`quota-cost-research/v8-joint-shrink` adds `joint-categories` to explicit research,
+not the live candidate list. It reuses `QuotaAccountingModel`'s nonnegative,
+zero-intercept interval-distance ridge solver. For training matrix `X`, target
+envelopes `[L,U]` and column RMS scales `s`, it minimizes
+`mean(distance(X beta,[L,U])^2)/2 + 0.1*||s*(beta-betaPooled)||^2/2`.
+`betaPooled` is the preceding pooled-category fit on exactly the same frozen
+training rows. The penalty is fixed before evaluation; no held-out tuning occurs.
+Missing-model and training-vocabulary overflow category bins remain separate;
+the model vocabulary is capped at 16. Effort, tier and context add no multiplier.
+
+All final coefficients are nonnegative. Unseen coordinates inherit the pooled
+prior as a regularization assumption, not an identified price. Zero local work
+still predicts zero local contribution; an intercept cannot explain missing
+external activity. Absent/inconsistent observed joint inputs withhold the joint
+candidate while preserving simpler supported baselines. The old first-20
+comparator, default live candidates, fitting results and promotion policy remain
+unchanged. Its research flag cannot earn a production-promotion label.
+
+The existing composed evaluator has an explicit `includeJointResearch` option,
+default false. It uses the existing origin-only joint continuation, preserving
+native pairings rather than multiplying model/category marginals. It reports
+realized-work oracle cost and future-work forecast losses separately. Collection-
+qualified replay checks training, origin and outcome availability; reconstructed
+replay remains a distinct experiment. This does not select a new context, fit a
+lag distribution or prove local-work/account attribution.
+
+### Retained comparisons
+
+The diagnostic range is September 27 00:00–October 27 14:58 UTC. A second,
+recent-week range is October 22 00:00–October 28 16:40 UTC, following the user's
+current dashboard range and its stronger observed joint contrast. This second
+inspection is exploratory, not an untouched final selection holdout. Each range
+fits its own frozen first-20 prefix. Empty/sparse prefixes remain visible rather
+than silently choosing the first 20 positive rows. Overlapping horizons are never
+pooled or treated as independent outcomes.
+
+Mean measurement-envelope distance, in quota percentage points:
+
+| Range / compatible meter cohort | Horizon | Oracle held-out rows | Raw total | Pooled categories | Joint |
+|---|---:|---:|---:|---:|---:|
+| Month / largest weekly | 15 min | 815 | 0.0743 | 0.0568 | 0.0579 |
+| Month / largest weekly | 30 min | 505 | 0.1034 | 0.1556 | 0.1570 |
+| Month / largest weekly | 120 min | 118 | 1.1985 | 0.9586 | 1.4403 |
+| Month / five-hour | 30 min | 12 | 9.6643 | 10.0858 | 10.4468 |
+| Month / other weekly | 30 min | 25 | 0.5059 | 0.4939 | 0.5242 |
+| Recent week / weekly | 15 min | 121 | 0.1695 | 0.3245 | 0.1315 |
+| Recent week / weekly | 30 min | 55 | 0.4267 | 0.9430 | 0.2062 |
+| Recent week / weekly | 120 min | 3 | 0.1196 | 0 | 0 |
+
+Five-minute comparisons have zero envelope distance for all three candidates;
+that broad-envelope result does not identify useful conversion weights. Four
+month-range cohort/horizon prefixes contain no local work; two have fewer than
+20 intervals. They produce no fitted local-conversion results. Positive meter
+movement without recorded local tokens and the coverage limitations above remain
+part of interpretation, including in seemingly favorable mean errors.
+
+Collection-qualified **end-to-end** recent-week comparisons, on identical targets:
+
+| Horizon | Matched targets | Provisional blocks / reset groups | Raw total | Pooled categories | Joint |
+|---|---:|---:|---:|---:|---:|
+| 5 min | 176 | 5 / 2 | 0 | 0 | 0 |
+| 15 min | 92 | 9 / 3 | 0.1539 | 0.2652 | 0.0936 |
+| 30 min | 42 | 7 / 3 | 0.3735 | 0.7490 | 0.1702 |
+| 120 min | 0 | 0 / 0 | unavailable | unavailable | unavailable |
+
+The missing two-hour trials are withheld because frozen training was collected
+after those origins. At 15/30 minutes one origin fails that availability check;
+28/12 further origins lack supported composition. Counts can overlap. Six-hour
+blocks/reset groups do not establish independence or completed cycles; the
+existing effective-sample estimates are only about 3.33 and 5.00.
+
+The recent reconstructed 15/30-minute forecasts improve similarly (joint
+0.1549/0.2960 versus total 0.2102/0.5199 and pooled 0.3749/1.0606, 109/52 targets).
+Its three two-hour forecasts regress (joint 1.1311 versus total 0.1093 and pooled
+0.8110), despite zero oracle joint cost loss. This demonstrates why oracle fit
+does not establish future-work prediction. In the month replay, joint forecasts
+generally lose to simpler models; the largest weekly strict two-hour cohort is
+an exception (34 targets, joint 2.4967 versus total 3.2378 and pooled 2.7510),
+while its joint oracle cost is worse. No universal model or horizon win follows.
+
+**Decision:** retain the challenger in explicit research. Recent 15/30-minute
+improvement supports continued investigation, but sparse short-window blocks,
+mixed older-period performance, two-hour availability and unresolved local/account
+coverage do not justify changing live selection or presenting coefficients as
+provider prices. A later context/prefix policy needs its own chronological
+evaluation under FORE-001/005; first-20 is not a permanent sample-size policy.
+
+### Numerical and product verification
+
+The joint-pairing synthetic counterexample distinguishes costs 51 and 15 despite
+identical marginals. Regressions also verify training-only vocabulary/weights,
+pooled-prior behavior for unseen models, nonnegativity, zero local cost, incomplete
+joint withholding, matched baselines, unchanged default composed candidates and
+late-collection rejection. Independent NumPy 2.3.5 coordinate minimization solves
+each scalar derivative by bisection, separately from the product's simultaneous
+projected-gradient solver. All ten fitted cohort/horizon comparisons across both
+ranges agree within `1e-4` pp held-out prediction difference and `1e-6` scaled
+KKT residual; zero mismatches. This checks the chosen convex objective, not the
+scientific validity of the local/account explanation.
+
+Private read-only cost JSONL artifact SHA-256 values:
+
+- Month: `69f1d249bc376fe07784a5932d589dc7aca3fc0d34e885b1140ceb59f1bf1396`
+- Recent week: `cbb20b21fe4c1451b88a4ee36d4d0308ee486d172cacc587e68d879bf9fa581e`
+
+Explicit accounting analysis presents the joint comparison alongside total and
+pooled results. Following the user's host feedback, long methodology and detailed
+coverage qualifications move into a collapsed **Methods and assumptions** expander;
+the first view shows concise result and support rows. This is a targeted response
+to the reported prose density, not completion of the app-wide presentation review.
+
+The final full Core suite passed **849 tests** (2m 8s). Windows build passed with
+zero warnings/errors (1m 14.09s) and installed/restarted PID 31884, with backup
+`20261028T165630318Z-b6145ecd`. The installed command reproduced all recent-range
+numeric scores exactly. Installed Core SHA-256 is
+`8a5fc6892bfee734e38377a6ae19044acbc6279b6f52664ddab1dd738d1ef56b`;
+app assembly SHA-256 is
+`55850fce340d5f8418919270a4eef8ed61174957fb87babc96985bd4898e5dee`.
+The user's prior analysis/import checks pass; the shorter presentation has its
+own requested manual acceptance check. No new persistence or collection contract
+was introduced by CAL-002.

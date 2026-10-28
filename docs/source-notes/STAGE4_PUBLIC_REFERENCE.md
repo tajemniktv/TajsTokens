@@ -104,9 +104,13 @@ The native import picker opened successfully, but its separate `PickerHost`
 surface was absent from the Computer Use target inventory and input was refused.
 No picker selection was automated or claimed. The app exited through its existing
 graceful-stop event and restarted in background mode at 16:11:04 UTC, retaining the
-selection and original. Actual file choice through that picker and user visual
-acceptance remain open under SHIP-004. CLI import and its shared import service
-were verified separately.
+selection and original. The user's subsequent manual host check confirmed successful
+official-snapshot file selection/import. Their screenshot shows `Accepted`, the
+same selected basis and price identities, unchanged first-import time, disabled
+optional sources and qualified current/date-effective amounts. Overview's native
+tokens, TT and frozen-vintage label were also visible in their supplied screenshot.
+These specific host checks pass; programme-wide SHIP-004 remains open for later
+slices and the broader presentation review.
 
 Backup/live comparison preserved all **96,792 prior native rows**, **836 original
 counter-input rows** and **six research snapshots**, with zero changed/removed prior

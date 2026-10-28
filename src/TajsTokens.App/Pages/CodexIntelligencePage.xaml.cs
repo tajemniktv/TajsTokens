@@ -179,7 +179,7 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
         Groups.ItemsSource = null;
         Timeline.Children.Clear();
         SummaryText.Text = ProviderText.Text = EvidenceText.Text = ManifestText.Text = TimelineText.Text =
-            AccountingText.Text = PeriodsText.Text = "";
+            AccountingText.Text = AccountingMethodText.Text = PeriodsText.Text = "";
         TtValue.Text = TtBasisLabel.Text = PlanMeasuredWork.Text = ReferenceDetails.Text = ReferenceActionStatus.Text = "";
         SaveTtButton.IsEnabled = false;
     }
@@ -218,6 +218,7 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
             SummaryText.Text =
                 ProviderText.Text = EvidenceText.Text = ManifestText.Text = TimelineText.Text = TimelineLegend.Text = "";
             AccountingText.Text = "Run retrospective analysis explicitly; it does not change production forecasts.";
+            AccountingMethodText.Text = "";
             PeriodsText.Text = "";
             StatusText.Text = "Reading selected evidence…";
             HistoryReadCount++;
@@ -387,6 +388,7 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
         var request = new CancellationTokenSource();
         _request = request;
         AccountingText.Text = "Analyzing frozen held-out residuals…";
+        AccountingMethodText.Text = "";
         try
         {
             CodexIntelligenceSnapshot result = await App.Services.CodexIntelligence.AnalyzeAsync(snapshot, request.Token);
@@ -394,12 +396,12 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
             _snapshot = result with { Current = _snapshot!.Current, CurrentState = _snapshot.CurrentState, Workload = _snapshot.Workload };
             AccountingText.Text = string.Join(
                                       "\n",
-                                      result.Accounting!.Scores.Where(x => x.Candidate is "total" or "categories")
+                                      result.Accounting!.Scores.Where(x => x.Candidate is "total" or "categories" or "joint-categories")
                                           .Select(x =>
-                                              $"{x.Cohort.Kind} · {x.Cohort.Source} · {x.HorizonHours * 60:g} min · {x.Candidate}: {x.HeldOutSamples} held-out / {x.HeldOutGenerations} resets · error {x.IntervalLoss?.ToString("0.###") ?? "unavailable"} pp · {x.Status}")) +
-                                  "\n\n" + result.Regime!.Methodology + "\n" +
-                                  (result.Regime.Candidates.Count == 0
-                                      ? "No supported retrospective boundary candidate. This is not proof of a stable regime."
+                                              $"{x.Cohort.Kind} · {QuotaAccountScope.Describe(x.Cohort.AccountKey)} · {x.HorizonHours * 60:g} min · {x.Candidate}: error {x.IntervalLoss?.ToString("0.###") ?? "unavailable"} pp · {x.HeldOutSamples} held-out · {x.Status}")) +
+                                  "\n\n" +
+                                  (result.Regime!.Candidates.Count == 0
+                                      ? "Regime change: no supported candidate."
                                       : string.Join(
                                           "\n",
                                           result.Regime.Candidates.Select(x =>
@@ -407,14 +409,18 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
             RenderManifest();
             RenderTimeline();
             if (result.Accounting.Identification is { } identification)
-                AccountingText.Text += "\n\nJoint identification · geometry, not calibrated quota cost:\n" +
+                AccountingText.Text += "\n\nJoint support · diagnostic only:\n" +
                     string.Join("\n", identification.Cohorts.Select(x =>
-                        $"{x.Cohort.Kind} · {x.HorizonHours * 60:g} min: {x.ExaminedRows}/{x.Observations} intervals, " +
-                        $"{x.ChronologicalSupport.EvaluationBlocks} provisional blocks / {x.ChronologicalSupport.DistinctResetCycles} reset groups. " +
-                        $"First-20 joint rank {x.FrozenFirst20Joint.NumericalRank}/{x.FrozenFirst20Joint.ActiveColumns}; retained rank {x.RetainedJoint.NumericalRank}/{x.RetainedJoint.ActiveColumns}. " +
-                        $"Later mixtures: {x.LaterScenarios.WithinTrainingSpan} in / {x.LaterScenarios.OutsideTrainingSpan} outside the training span. " +
-                        $"Missing/invalid joint rows: {x.MissingJointRows}/{x.InvalidJointRows}. " +
-                        $"No local work but positive movement/envelope: {x.ZeroWorkPositiveMovementRows}/{x.ZeroWorkPositiveEnvelopeRows}.")) + "\n" + identification.Methodology;
+                        $"{x.Cohort.Kind} · {x.HorizonHours * 60:g} min: {x.ExaminedRows}/{x.Observations} intervals · " +
+                        $"{x.ChronologicalSupport.EvaluationBlocks} blocks / {x.ChronologicalSupport.DistinctResetCycles} reset groups\n" +
+                        $"Rank: first-20 {x.FrozenFirst20Joint.NumericalRank}/{x.FrozenFirst20Joint.ActiveColumns}, retained {x.RetainedJoint.NumericalRank}/{x.RetainedJoint.ActiveColumns} · " +
+                        $"later mixtures outside span {x.LaterScenarios.OutsideTrainingSpan} · missing/invalid {x.MissingJointRows}/{x.InvalidJointRows}"));
+            AccountingMethodText.Text = result.Accounting.Methodology + "\n\n" + result.Regime.Methodology +
+                (result.Accounting.Identification is { } detail ? "\n\n" + detail.Methodology + "\n\n" +
+                    string.Join("\n", detail.Cohorts.Select(x => $"{x.Cohort.Kind} · {x.HorizonHours * 60:g} min · " +
+                        $"{x.Cohort.Source} · later mixtures inside span {x.LaterScenarios.WithinTrainingSpan} · " +
+                        $"zero-local-work rows {x.ZeroWorkRows}, positive displayed movement {x.ZeroWorkPositiveMovementRows}, " +
+                        $"positive lower envelope {x.ZeroWorkPositiveEnvelopeRows}.")) : "");
         }
         catch (OperationCanceledException) when (request.IsCancellationRequested)
         {

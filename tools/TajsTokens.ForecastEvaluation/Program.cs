@@ -7,6 +7,12 @@ using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
+if (args.Length == 4 && args[0] is "--joint-cost-study" or "--joint-composed-study" or "--joint-composed-strict")
+{
+    await ApiPriceCatalogCli.RunAsync(() => QuotaIdentificationCli.RunJointAsync(args));
+    return;
+}
+
 if (args.Length == 4 && args[0] is "--cost-identification" or "--cost-identification-audit")
 {
     await ApiPriceCatalogCli.RunAsync(() => QuotaIdentificationCli.RunAsync(args));

@@ -211,7 +211,7 @@ public sealed class QuotaCostEvaluationTests
     public void EmptyLocalWorkDoesNotBecomeTimeCostAndSparseCohortsDoNotBorrow()
     {
         QuotaCostObservation[] rows = Observations(60);
-        rows[30] = rows[30] with { TokenCategories = new double[5], Features = rows[30].Features with { Tokens = 0 } };
+        rows[30] = rows[30] with { TokenCategories = new double[5], Features = rows[30].Features with { Tokens = 0, JointWorkload = CodexJointWorkloadBuilder.Build([]) } };
         IEnumerable<QuotaCostObservation> unknown = rows.Take(10).Select(x => x with { Cohort = x.Cohort with { AccountKey = null } });
         QuotaCostReport report = QuotaCostEvaluation.Evaluate(rows.Concat(unknown).ToArray(), "fixture");
         Assert.All(report.Scores.Where(x => x.Cohort.AccountKey is null), x => Assert.Equal(0, x.HeldOutSamples));

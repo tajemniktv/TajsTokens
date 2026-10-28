@@ -20,7 +20,8 @@ public static class ComposedQuotaValidation
         CodexForecastDataset data,
         CancellationToken cancellationToken = default,
         ForecastReplayAvailability availability = ForecastReplayAvailability.ReconstructedEventTime,
-        IReadOnlyList<double>? horizons = null)
+        IReadOnlyList<double>? horizons = null,
+        bool includeJointResearch = false)
     {
         IReadOnlyList<QuotaCostObservation> rows = QuotaCostObservationBuilder.Build(
             data,
@@ -56,7 +57,7 @@ public static class ComposedQuotaValidation
                     cancellationToken);
             }
             QuotaCostObservation[] asserted = QuotaCostTrainingPolicy.Select(rows, group.Key.Cohort, group.Key.HorizonHours, true);
-            string[] candidates = new[] { "total", "categories", "model-effort" };
+            string[] candidates = includeJointResearch ? ["total", "categories", "model-effort", "joint-categories"] : ["total", "categories", "model-effort"];
             foreach (string candidate in asserted.Length > nativeTraining.Length
                          ? candidates.Concat(candidates.Select(x => "asserted-" + x))
                          : candidates)
@@ -73,10 +74,13 @@ public static class ComposedQuotaValidation
 
                 bool needsCategories = candidate.Replace("asserted-", "", StringComparison.Ordinal) != "total";
                 bool completeTraining = !needsCategories || training.All(x => x.HasCompleteTokenCategories);
+                bool joint = candidate.Replace("asserted-", "", StringComparison.Ordinal) == "joint-categories";
+                bool completeJointTraining = !joint || training.All(QuotaCostIdentification.Valid);
                 bool hasTrainingWork = QuotaAccountingModel.HasTrainingWork(training);
                 if (training.Length >= 20 && !hasTrainingWork) withheldReasons["no-recorded-training-work"] = training.Length;
                 if (!completeTraining) withheldReasons["incomplete-category-training"] = training.Count(x => !x.HasCompleteTokenCategories);
-                if (nativeTraining.Length == 20 && completeTraining && hasTrainingWork)
+                if (!completeJointTraining) withheldReasons["incomplete-joint-training"] = training.Count(x => !QuotaCostIdentification.Valid(x));
+                if (nativeTraining.Length == 20 && completeTraining && completeJointTraining && hasTrainingWork)
                 {
                     Func<QuotaCostObservation, double> fit = QuotaAccountingModel.FitFrozen(
                         training,
@@ -88,6 +92,11 @@ public static class ComposedQuotaValidation
                         if (needsCategories && !row.HasCompleteTokenCategories)
                         {
                             Withheld("incomplete-category-outcome");
+                            continue;
+                        }
+                        if (joint && !QuotaCostIdentification.Valid(row))
+                        {
+                            Withheld("incomplete-joint-outcome");
                             continue;
                         }
                         if (availability == ForecastReplayAvailability.CollectedByOrigin)
@@ -135,6 +144,12 @@ public static class ComposedQuotaValidation
                         {
                             missing++;
                             Withheld("missing-or-stale-composition");
+                            continue;
+                        }
+                        if (joint && workload.JointWorkload is not { IsComplete: true })
+                        {
+                            missing++;
+                            Withheld("missing-joint-continuation");
                             continue;
                         }
                         QuotaCostObservation projected = Project(row, workload);
@@ -219,7 +234,7 @@ public static class ComposedQuotaValidation
             }
         }
         return new ComposedQuotaEvaluation(
-            Version,
+            includeJointResearch ? Version + "/joint-research-v1" : Version,
             $"{availability}: native token forecast at each exact origin, then preceding-two-hour " +
             "composition, then frozen first-20-interval cost weights. Forecast, actual-workload cost, and pace losses use identical held-out targets. " +
             "CollectedByOrigin requires frozen token-cost inputs (quota labels, token amounts/model/effort and any ownership assertions) collected before the origin, the origin meter already collected, " +
@@ -230,7 +245,9 @@ public static class ComposedQuotaValidation
             "absolute displayed-delta errors, with eight earlier blocks, an empirical 80% target and a one-point minimum radius. " +
             "Calibration labels must already be available at the origin (event time for reconstruction, actual collection for strict replay). " +
             "Coverage measures reported remaining quota, not latent true usage or exhaustion probability. Sparse ranges remain absent. " +
-            "No activity-conditioned quota distribution or live promotion is implied. " + ComposedQuotaBreakdowns.Methodology,
+            "No activity-conditioned quota distribution or live promotion is implied. " +
+            (includeJointResearch ? "Explicit joint research uses the existing origin-only joint continuation with nonnegative coefficients shrunk toward the frozen pooled-category fit. It cannot enter live selection. " : "") +
+            ComposedQuotaBreakdowns.Methodology,
             scores);
     }
 

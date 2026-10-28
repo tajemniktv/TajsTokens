@@ -62,7 +62,7 @@ public static class QuotaCostIdentification
         return new(Version, Methodology, result);
     }
 
-    private static bool Valid(QuotaCostObservation row) => row.HasCompleteTokenCategories &&
+    internal static bool Valid(QuotaCostObservation row) => row.HasCompleteTokenCategories &&
         row.Features.JointWorkload is { Kind: CodexJointQuantityKind.ObservedIncrements } joint &&
         joint.ReportedTokens == row.Features.Tokens && joint.MissingModelTokens >= 0 && joint.MissingModelTokens <= joint.ReportedTokens &&
         joint.Cells.All(x => x.IsComplete) && (joint.Overflow is null || joint.Overflow.IsComplete) &&

@@ -105,6 +105,8 @@ public static class CodexIntelligenceProjection
             ["joint-workload"] = CodexJointWorkload.Version,
             ["workload"] = TokenWorkloadPredictionService.PolicyVersion,
             ["accounting"] = QuotaAccountingModel.Version,
+            ["accounting-research"] = Research.QuotaCostEvaluation.Version,
+            ["accounting-identification"] = QuotaCostIdentification.Version,
             ["forecast"] = QuotaPredictionService.PolicyVersion,
             ["reset-outlook"] = QuotaPredictionService.ResetOutlookPolicyVersion,
             ["evidence"] = CodexEvidenceDrift.Policy,

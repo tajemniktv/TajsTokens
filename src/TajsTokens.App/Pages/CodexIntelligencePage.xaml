@@ -234,6 +234,9 @@
                             <StackPanel Spacing="12">
                                 <Button x:Name="AnalyzeButton" Content="Analyze selected history" Click="OnAnalyze" />
                                 <TextBlock x:Name="AccountingText" Style="{StaticResource TechnicalTextStyle}" />
+                                <Expander Header="Methods and assumptions" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">
+                                    <TextBlock x:Name="AccountingMethodText" Style="{StaticResource TechnicalTextStyle}" />
+                                </Expander>
                             </StackPanel>
                         </Expander>
                         <Expander Header="Reproducibility manifest" HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch">

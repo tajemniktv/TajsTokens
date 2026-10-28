@@ -741,7 +741,9 @@ TT evaluator, existing model metadata, `ApiPriceWorkload` and product snapshot.
   captured workload and filters; price refreshes do not restate it. The installed
   saved 367.8566433 TT reproduced independently and survived restart/re-import
   unchanged. Native/research records survived; README documents the shipped feature.
-  Manual native-picker file selection and user visual acceptance remain SHIP-004.
+  The user's manual check confirmed official import through the native picker;
+  supplied screenshots show Accepted and the unchanged frozen basis. Overview TT
+  presentation and accounting-analysis rendering also passed these specific checks.
 
 **Exit:** the selected basket scores one TT; a price refresh cannot move the frozen
 ruler. Unsupported TT coordinates retain usable token accounting. Current quota is
@@ -761,11 +763,17 @@ policies and bounded calibration worker. A TT scalar is not required for this ro
   quota movement. All 36 retained matrices agreed with independent SVD checks;
   see [method and results](docs/source-notes/STAGE5_IDENTIFICATION.md). This does
   not establish account attribution, precise coefficients or feasible scenario bounds.
-- [ ] **CAL-002 — Compare a restrained joint model.** Retain total-token and pooled
+- [x] **CAL-002 — Compare a restrained joint model.** Retain total-token and pooled
   category baselines; test nonnegative model/category coefficients shrunk toward
   pooled weights using the existing solver family. Add effort/tier departures only
   with evidence beyond observed tokens. Evaluate realized-work cost explanation
   separately from end-to-end future-work prediction.
+  Explicit research now compares nonnegative joint coefficients shrunk toward the
+  training-only pooled fit. Month and recent-week chronological comparisons keep
+  oracle and future-work losses separate; collection-qualified recent 15/30-minute
+  gains are promising, older results are mixed and two-hour recent strict trials
+  are unavailable. The challenger remains research-only; live selection is unchanged.
+  [Methods, matched counts, independent numerical check and decision](docs/source-notes/STAGE5_IDENTIFICATION.md).
 - [ ] **CAL-003 — Make support scenario-specific.** Permit justified familiar-mixture
   answers despite unidentified individual coefficients; bound/withhold unsupported
   edits. Prototype feasible-set diagnostics under explicit rounding/lag/attribution/
@@ -884,6 +892,9 @@ complete; one successful early slice does not validate later changes.
   Update implemented behavior here, public README only for shipped features,
   procedures in development docs and evidence in source notes. Commit validated
   slices; push only when requested or previously authorized.
+  Current user feedback: accounting/regime analysis works, but prose density is
+  excessive across the app. Keep results concise and methods/assumptions behind
+  disclosure; broader presentation acceptance remains open.
 
 #### Current implementation handoff
 
@@ -893,20 +904,21 @@ provider scope and answer-specific eligibility slices have their stated installe
 evidence. **PACE-001–004** implement and evaluate the elapsed-time correction.
 Stage 4's **SCORE-001–003** joint projection, frozen basis/archive and qualified
 scoring are installed. **CAT-001** discovery and picker interaction are verified,
-including hidden-dashboard input restoration. The latest full suite passed 844
+including hidden-dashboard input restoration. The latest full suite passed 849
 tests and the Windows build installed successfully; user visual acceptance remains
 separate.
 
-**Continue with Stage 5 / CAL-002.** The user selected the exact
+**Continue with Stage 5 / CAL-003.** The user selected the exact
 [price policy and frozen TT basis](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md).
 CAT-002 and D-01 are integrated and installed: immutable selections, independent
 price imports, measured TT and explicit original-score saving. Automated checks,
 installed numeric/recovery checks and Overview/Planning rendering passed. The native
-file picker opened, but its separate PickerHost surface was not targetable by
-Computer Use; manual file selection stays open under SHIP-004. CAL-001 is installed:
+native picker import subsequently passed the user's manual check. CAL-001 rendering
+also passed; the user requested less prose. CAL-001 is installed:
 joint coverage and identification diagnostics expose sparse prefixes and local-work/
-meter mismatches. CAL-002 now compares a restrained joint conversion against the
-existing baselines, without changing production selection on diagnostic evidence alone.
+meter mismatches. CAL-002's restrained joint challenger is installed in explicit
+research, with mixed chronological results and unchanged live selection. CAL-003
+now needs scenario-specific conditional bounds and explicit infeasibility/unboundedness.
 Programme-wide acceptance gates, user visual acceptance and the PERF-001
 resource-budget decision remain open.
 

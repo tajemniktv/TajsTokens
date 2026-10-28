@@ -20,8 +20,9 @@ public static class ComposedQuotaEvaluator
         CodexForecastDataset data,
         CancellationToken cancellationToken = default,
         ForecastReplayAvailability availability = ForecastReplayAvailability.ReconstructedEventTime,
-        IReadOnlyList<double>? horizons = null)
+        IReadOnlyList<double>? horizons = null,
+        bool includeJointResearch = false)
     {
-        return ComposedQuotaValidation.Evaluate(data, cancellationToken, availability, horizons ?? EvaluationHorizons);
+        return ComposedQuotaValidation.Evaluate(data, cancellationToken, availability, horizons ?? EvaluationHorizons, includeJointResearch);
     }
 }

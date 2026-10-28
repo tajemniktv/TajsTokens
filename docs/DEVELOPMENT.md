@@ -200,6 +200,21 @@ counters are logical work. Record visibility, scenario, build and sampling limit
 separately. See [Stage 1 evidence](source-notes/STAGE1_RESOURCE_VALIDATION.md) for
 phase tracing, the offline reporter and current measurements.
 
+## Restrained joint-cost research
+
+For explicit restrained-joint research on an ordered past range up to 366 days:
+
+```powershell
+dotnet run --project tools/TajsTokens.ForecastEvaluation -c Debug --no-build --no-restore -- --joint-cost-study "$env:LOCALAPPDATA/Programs/TajemnikTV/TajsTokens/data/telemetry.db" 2026-10-22T00:00:00Z 2026-10-28T16:40:00Z
+```
+
+`--joint-composed-study` and `--joint-composed-strict` use the same arguments for
+reconstructed and collection-qualified future-work replay. These read-only commands
+do not select a live model. Cost JSONL includes private derived numeric observations
+and model labels for reproduction, with account/session/path identifiers omitted;
+review it before sharing. Compare matched targets, availability and provisional
+blocks, not just mean losses. See [Stage 5 evidence](source-notes/STAGE5_IDENTIFICATION.md).
+
 ## Daily installation
 
 A successful default local app build publishes, installs and restarts `%LOCALAPPDATA%\Programs\TajemnikTV\TajsTokens\current`. Persistent database/settings live in sibling `data`; the prior binary is kept in `previous`, and deployment backups are in `backups`. The build does not delete `data`.
