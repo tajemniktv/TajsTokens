@@ -17,7 +17,7 @@ namespace TajsTokens.Infrastructure.Persistence;
 
 public sealed partial class SqliteTelemetryRepository(string databasePath, TimeProvider? timeProvider = null) : ITelemetryRepository, ISessionIngestionCheckpointStore
 {
-    private const int CurrentSchemaVersion = 15;
+    private const int CurrentSchemaVersion = 16;
     private const int IntelligenceSchemaVersion = 7;
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private readonly string _connectionString = new SqliteConnectionStringBuilder { DataSource = databasePath }.ToString();
@@ -34,7 +34,8 @@ public sealed partial class SqliteTelemetryRepository(string databasePath, TimeP
 
         SqliteCommand command = connection.CreateCommand();
         command.CommandText = """
-                              SELECT file_path, last_byte_offset, updated_at_utc, last_session_id, parser_version, source_identity, consumed_prefix_sha256
+                              SELECT file_path, last_byte_offset, updated_at_utc, last_session_id, parser_version, source_identity, consumed_prefix_sha256,
+                                  coordinate_kind, logical_source_path, physical_encoding, physical_source_identity
                               FROM ingestion_checkpoints
                               WHERE file_path = $path;
                               """;
@@ -46,28 +47,63 @@ public sealed partial class SqliteTelemetryRepository(string databasePath, TimeP
             return null;
         }
 
-        return new FileIngestionCheckpoint(
+        return ReadCheckpoint(reader);
+    }
+
+    private static FileIngestionCheckpoint ReadCheckpoint(SqliteDataReader reader) => new(
             reader.GetString(0),
             reader.GetInt64(1),
             ParseUtc(reader.GetString(2)),
             reader.IsDBNull(3) ? null : reader.GetString(3),
             reader.GetString(4),
-            reader.IsDBNull(5) ? null : reader.GetString(5)) { ConsumedPrefixSha256 = reader.IsDBNull(6) ? null : reader.GetString(6) };
+            reader.IsDBNull(5) ? null : reader.GetString(5))
+        {
+            ConsumedPrefixSha256 = reader.IsDBNull(6) ? null : reader.GetString(6),
+            CoordinateKind = reader.IsDBNull(7) ? null : reader.GetString(7),
+            LogicalSourcePath = reader.IsDBNull(8) ? null : reader.GetString(8),
+            PhysicalEncoding = reader.IsDBNull(9) ? null : reader.GetString(9),
+            PhysicalSourceIdentity = reader.IsDBNull(10) ? null : reader.GetString(10),
+        };
+
+    public async Task<IReadOnlyList<FileIngestionCheckpoint>> FindCheckpointCandidatesAsync(string fileName, CancellationToken cancellationToken)
+    {
+        await using var connection = new SqliteConnection(_connectionString);
+        await connection.OpenAsync(cancellationToken);
+        using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT file_path, last_byte_offset, updated_at_utc, last_session_id, parser_version, source_identity, consumed_prefix_sha256,
+                coordinate_kind, logical_source_path, physical_encoding, physical_source_identity
+            FROM ingestion_checkpoints
+            WHERE file_path LIKE $windows ESCAPE '|' OR file_path LIKE $unix ESCAPE '|'
+            ORDER BY updated_at_utc DESC LIMIT 65;
+            """;
+        string escaped = fileName.Replace("|", "||", StringComparison.Ordinal).Replace("%", "|%", StringComparison.Ordinal).Replace("_", "|_", StringComparison.Ordinal);
+        command.Parameters.AddWithValue("$windows", "%\\" + escaped);
+        command.Parameters.AddWithValue("$unix", "%/" + escaped);
+        var result = new List<FileIngestionCheckpoint>();
+        await using SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken)) result.Add(ReadCheckpoint(reader));
+        return result;
     }
 
     public Task SaveCheckpointAsync(FileIngestionCheckpoint checkpoint, CancellationToken cancellationToken)
     {
         return ExecutePreparedCommandAsync(
             """
-            INSERT INTO ingestion_checkpoints(file_path, last_byte_offset, updated_at_utc, last_session_id, parser_version, source_identity, consumed_prefix_sha256)
-            VALUES($path, $offset, $updated, $session, $parser, $identity, $prefix)
+            INSERT INTO ingestion_checkpoints(file_path, last_byte_offset, updated_at_utc, last_session_id, parser_version, source_identity, consumed_prefix_sha256,
+                coordinate_kind, logical_source_path, physical_encoding, physical_source_identity)
+            VALUES($path, $offset, $updated, $session, $parser, $identity, $prefix, $coordinate, $logical, $encoding, $physical)
             ON CONFLICT(file_path) DO UPDATE SET
               last_byte_offset = excluded.last_byte_offset,
               updated_at_utc = excluded.updated_at_utc,
               last_session_id = excluded.last_session_id,
               parser_version = excluded.parser_version,
               source_identity = excluded.source_identity,
-              consumed_prefix_sha256 = excluded.consumed_prefix_sha256;
+              consumed_prefix_sha256 = excluded.consumed_prefix_sha256,
+              coordinate_kind = excluded.coordinate_kind,
+              logical_source_path = excluded.logical_source_path,
+              physical_encoding = excluded.physical_encoding,
+              physical_source_identity = excluded.physical_source_identity;
             """,
             cmd =>
             {
@@ -78,6 +114,10 @@ public sealed partial class SqliteTelemetryRepository(string databasePath, TimeP
                 cmd.Parameters.AddWithValue("$parser", checkpoint.ParserVersion);
                 cmd.Parameters.AddWithValue("$identity", DbValue(checkpoint.SourceIdentity));
                 cmd.Parameters.AddWithValue("$prefix", DbValue(checkpoint.ConsumedPrefixSha256));
+                cmd.Parameters.AddWithValue("$coordinate", DbValue(checkpoint.CoordinateKind));
+                cmd.Parameters.AddWithValue("$logical", DbValue(checkpoint.LogicalSourcePath));
+                cmd.Parameters.AddWithValue("$encoding", DbValue(checkpoint.PhysicalEncoding));
+                cmd.Parameters.AddWithValue("$physical", DbValue(checkpoint.PhysicalSourceIdentity));
             },
             cancellationToken);
     }
@@ -1013,6 +1053,33 @@ public sealed partial class SqliteTelemetryRepository(string databasePath, TimeP
                 PRAGMA user_version = 15;
                 """,
                 cancellationToken);
+        }
+        if (version < 16)
+        {
+            using SqliteTransaction transaction = connection.BeginTransaction();
+            var columns = new HashSet<string>(StringComparer.Ordinal);
+            using var command = connection.CreateCommand();
+            command.Transaction = transaction;
+            command.CommandText = "PRAGMA table_info(ingestion_checkpoints);";
+            await using (SqliteDataReader reader = await command.ExecuteReaderAsync(cancellationToken))
+                while (await reader.ReadAsync(cancellationToken)) columns.Add(reader.GetString(1));
+            // Known additive columns may already exist in a recovered partial schema. Preserve
+            // their values; ingestion refuses unknown coordinate kinds rather than relabelling.
+            foreach ((string name, string sql) in new[]
+            {
+                ("coordinate_kind", "ALTER TABLE ingestion_checkpoints ADD COLUMN coordinate_kind TEXT;"),
+                ("logical_source_path", "ALTER TABLE ingestion_checkpoints ADD COLUMN logical_source_path TEXT;"),
+                ("physical_encoding", "ALTER TABLE ingestion_checkpoints ADD COLUMN physical_encoding TEXT;"),
+                ("physical_source_identity", "ALTER TABLE ingestion_checkpoints ADD COLUMN physical_source_identity TEXT;"),
+            })
+            {
+                if (columns.Contains(name)) continue;
+                command.CommandText = sql;
+                await command.ExecuteNonQueryAsync(cancellationToken);
+            }
+            command.CommandText = "PRAGMA user_version = 16;";
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            transaction.Commit();
         }
     }
 

@@ -906,12 +906,8 @@ public sealed class SqliteCodexObservatoryStore(string databasePath) : ICodexObs
         await connection.OpenAsync(cancellationToken);
         using SqliteTransaction transaction = connection.BeginTransaction();
 
-        SqliteCommand removePathAlias = connection.CreateCommand();
-        removePathAlias.Transaction = transaction;
-        removePathAlias.CommandText = "DELETE FROM rollout_files WHERE file_path = $file AND source_identity <> $identity;";
-        removePathAlias.Parameters.AddWithValue("$file", safeFileLabel);
-        removePathAlias.Parameters.AddWithValue("$identity", sourceIdentity);
-        await removePathAlias.ExecuteNonQueryAsync(cancellationToken);
+        await SqliteCodexSourceGeneration.RetirePreviousAsync(connection, transaction,
+            safeFileLabel, sourceIdentity, cancellationToken);
 
         SqliteCommand upsert = connection.CreateCommand();
         upsert.Transaction = transaction;

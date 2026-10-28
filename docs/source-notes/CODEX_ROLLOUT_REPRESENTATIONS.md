@@ -1,9 +1,10 @@
 # Codex rollout representation contract
 
 Design accepted for **ING-001** on 2026-10-28. [PROJECT.md](../../PROJECT.md)
-owns the product contract and remaining work. This note specifies the extension to
-the existing discovery, ingestion, checkpoint and SQLite owners; it does not claim
-compressed ingestion or the complete immutable-retention contract is implemented.
+owns the product contract and remaining work. The ING-002 implementation now extends
+the existing discovery, ingestion, checkpoint and SQLite owners;
+[validation](STAGE2_EVIDENCE_VALIDATION.md#compressed-rollout-ingestion-ing-002)
+states its proof and limits separately from the complete retention contract.
 
 ## Evidence and compatibility
 
@@ -164,10 +165,13 @@ The upstream [MIT notice](https://github.com/oleg-st/ZstdSharp/blob/2cd0c019693b
 requires retaining copyright/permission text. Ship that notice with the dependency
 in portable and daily installations. The package declares a license expression but
 does not contain a license text file; relying on copying its DLL alone is insufficient.
-Verify restore asset selection, dependency manifests, published DLL/notice and normal
-install/recovery with the actual app build when the reference is introduced.
+The pinned port is based on Zstandard 1.5.7; also retain that upstream's
+[BSD notice](https://github.com/facebook/zstd/blob/v1.5.7/LICENSE).
+Both notices are embedded in the infrastructure assembly and copied into the app's
+`ThirdPartyNotices/` directory by publish, including the normal daily installation.
 
 Sources: [NuGet package](https://www.nuget.org/packages/ZstdSharp.Port/0.8.8),
 [package repository](https://github.com/oleg-st/ZstdSharp), and the pinned source
-files above. This review downloads/inspects the package only; it adds no runtime
-dependency and supplies no performance or production decode proof.
+files above. The initial review inspected the package only. Subsequent ING-002
+implementation adds the pinned runtime dependency; the evidence record contains
+published-asset, installed decoder and memory/cancellation verification.

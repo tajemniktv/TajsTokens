@@ -71,7 +71,9 @@ internal static class SqliteCodexRetiredEvidence
                     'UncachedInputTokens', n.uncached_input_tokens, 'CacheReadTokens', n.cache_read_tokens,
                     'CacheWriteTokens', n.cache_write_tokens, 'NonReasoningOutputTokens', n.non_reasoning_output_tokens,
                     'ReasoningOutputTokens', n.reasoning_output_tokens, 'ReportedTotalTokens', n.reported_total_tokens)
-            FROM codex_native_token_events n WHERE n.source_file = $file;
+            FROM codex_native_token_events n WHERE n.source_file = $file OR n.source_event_id IN (
+                SELECT source_record_id FROM rollout_records WHERE source_identity IN (
+                    SELECT source_identity FROM codex_retired_source_generations WHERE retirement_id = $retirement));
 
             INSERT INTO codex_retired_numeric_observations
             SELECT $retirement, 'counter-state', s.session_id,
@@ -83,7 +85,9 @@ internal static class SqliteCodexRetiredEvidence
                     'TotalTokens', s.total_tokens, 'LastSourceEventId', s.last_source_event_id,
                     'LastObservedAtUtc', s.last_observed_at_utc, 'HasCumulativeBaseline', s.has_cumulative_baseline,
                     'LastSourceEventAtUtc', s.last_source_event_at_utc)
-            FROM codex_counter_state s WHERE s.source_file = $file;
+            FROM codex_counter_state s WHERE s.source_file = $file OR s.last_source_event_id IN (
+                SELECT source_record_id FROM rollout_records WHERE source_identity IN (
+                    SELECT source_identity FROM codex_retired_source_generations WHERE retirement_id = $retirement));
 
             INSERT INTO codex_retired_numeric_observations
             SELECT $retirement, 'quota', json_array(q.provider, q.profile, q.kind, q.captured_at_utc,
@@ -106,7 +110,7 @@ internal static class SqliteCodexRetiredEvidence
                     'Model', c.model, 'InputTokens', c.input_tokens, 'ContextWindowTokens', c.context_window_tokens,
                     'IsCompaction', c.is_compaction, 'RecordBytes', c.record_bytes)
             FROM rollout_records r JOIN context_observations c ON c.event_id = r.source_record_id || ':ctx'
-            WHERE r.file_path = $file AND r.source_identity IN (
+            WHERE r.source_identity IN (
                 SELECT source_identity FROM codex_retired_source_generations WHERE retirement_id = $retirement);
 
             INSERT INTO codex_retired_numeric_observations
@@ -128,7 +132,7 @@ internal static class SqliteCodexRetiredEvidence
                 json_object('EventId', u.event_id, 'SessionId', u.session_id, 'TimestampUtc', u.timestamp_utc,
                     'EventType', u.event_type, 'TokenDelta', u.token_delta)
             FROM rollout_records r JOIN usage_events u ON u.event_id IN (r.source_record_id, r.source_record_id || ':token')
-            WHERE r.file_path = $file AND r.source_identity IN (
+            WHERE r.source_identity IN (
                 SELECT source_identity FROM codex_retired_source_generations WHERE retirement_id = $retirement);
             """;
         command.Parameters.AddWithValue("$retirement", Guid.NewGuid().ToString("N"));

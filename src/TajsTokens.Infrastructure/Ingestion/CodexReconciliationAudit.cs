@@ -20,20 +20,22 @@ public static class CodexReconciliationAudit
         IEnumerable<string> paths,
         CancellationToken cancellationToken = default)
     {
-        var reader = new FileSystemCodexSessionEventProvider();
         var parser = new CodexRolloutParser();
         var report = new ReconciliationAuditReport();
         var fingerprints = new Dictionary<string, int>();
         var sequences = new List<CodexSequenceComparison.Sequence>();
-        foreach (string path in paths.Select(Path.GetFullPath).Distinct(StringComparer.OrdinalIgnoreCase)
+        foreach (string path in paths.Select(Path.GetFullPath).Select(CodexRolloutSource.Canonicalize).Distinct(StringComparer.OrdinalIgnoreCase)
                      .Order(StringComparer.OrdinalIgnoreCase))
         {
             cancellationToken.ThrowIfCancellationRequested();
             report.FilesExamined++;
             try
             {
-                var before = new FileInfo(path);
-                long length = before.Length;
+                await using CodexRolloutSource? source = await CodexRolloutSource.OpenAsync(path, cancellationToken);
+                if (source is null) { report.FailedFilesExcluded++; continue; }
+                var before = new FileInfo(source.PhysicalPath);
+                long physicalLength = before.Length;
+                long length = source.DecodedLength;
                 DateTime written = before.LastWriteTimeUtc;
                 var parseState = new RolloutParseState(path, path);
                 var state = new ReconciliationExperimentState();
@@ -43,7 +45,8 @@ public static class CodexReconciliationAudit
                 long unownedRecords = 0;
                 long unownedTokenRecords = 0;
                 long observations = 0;
-                await foreach (RawSessionRecord raw in reader.ReadNewJsonLinesAsync(path, 0, cancellationToken))
+                await using Stream decoded = source.OpenDecodedStream();
+                await foreach (RawSessionRecord raw in FileSystemCodexSessionEventProvider.ReadAsync(decoded, path, 0, length, cancellationToken))
                 {
                     if (raw.EndByteOffset > length) break;
                     ParsedRolloutRecord parsed = parser.Parse(raw, parseState);
@@ -83,12 +86,13 @@ public static class CodexReconciliationAudit
                         });
                     sequence.Add(Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(comparable))));
                 }
-                var after = new FileInfo(path);
-                if (!after.Exists || after.Length != length || after.LastWriteTimeUtc != written)
+                var after = new FileInfo(source.PhysicalPath);
+                if (!after.Exists || after.Length != physicalLength || after.LastWriteTimeUtc != written)
                 {
                     report.ChangedFilesExcluded++;
                     continue;
                 }
+                source.EnsureSelected();
                 report.StableFiles++;
                 responses.Complete();
                 foreach ((string key, long count) in responses.Counts)
@@ -140,10 +144,10 @@ public static class CodexReconciliationAudit
 
 public sealed class ReconciliationAuditReport
 {
-    public string Version => "reconciliation-audit/v6";
+    public string Version => "reconciliation-audit/v7";
     public Dictionary<string, long> ResponseComparison { get; set; } = [];
 
-    public string Interpretation => "Physical-file experiment, not canonical usage. Candidates use scalar counters; " +
+    public string Interpretation => "Rollout-representation experiment, not canonical usage. Plain siblings win; decoded bytes are inspected. Candidates use scalar counters; " +
                                     "cross-file matches are not request identity. Changed/unreadable/malformed files excluded. " +
                                     "Ordered owned-token sequences classify equal/prefix/divergent/non-prefix overlap candidates, not byte copies. " +
                                     "Pre-ownership records (including possible inherited history) remain excluded by the production parser. " +

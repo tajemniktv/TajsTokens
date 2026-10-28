@@ -27,6 +27,7 @@ public enum WorkPhase
     DashboardFirstFrame = 20,
     DatasetReuse = 21,
     CalibrationEvidence = 22,
+    CompressedValidation = 23,
 }
 
 /// <summary>Opt-in EventPipe/ETW diagnostics. Fixed numeric phases and aggregate work

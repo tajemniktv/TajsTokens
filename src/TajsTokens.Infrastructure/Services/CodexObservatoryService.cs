@@ -199,12 +199,12 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
         if (reconciliationDue)
         {
             HashSet<string> discovered = DiscoverFiles(cancellationToken).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            HashSet<string> indexed = catalog.Threads.Select(thread => thread.RolloutPath)
+            HashSet<string> indexed = catalog.Threads.Select(thread => CodexRolloutSource.Canonicalize(thread.RolloutPath))
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
             _lastCoverage = new CodexCollectionCoverage(
                 _timeProvider.GetUtcNow(),
                 indexed.Count,
-                indexed.Count(File.Exists),
+                indexed.Count(path => File.Exists(CodexRolloutSource.Resolve(path))),
                 discovered.Count,
                 discovered.Count(path => !indexed.Contains(path)),
                 indexed.Count(path => !discovered.Contains(path)));
@@ -258,8 +258,9 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
         int recordsScanned = 0;
         int normalized = 0;
         int errors = 0;
+        var readFailures = new Dictionary<CodexRolloutReadFailure, int>();
         long bytes = 0;
-        long hashedBytes = 0, decodedBytes = 0;
+        long hashedBytes = 0, decodedBytes = 0, validationBytes = 0;
         int checkpointWrites = 0;
         var sessionsTouched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var appliedThreads = new List<CodexStateThread>(changedThreads.Length);
@@ -273,30 +274,39 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
 
             try
             {
-                if (!File.Exists(thread.RolloutPath))
+                if (!File.Exists(CodexRolloutSource.Resolve(thread.RolloutPath)))
                 {
                     errors++;
+                    readFailures[CodexRolloutReadFailure.MissingFile] = readFailures.GetValueOrDefault(CodexRolloutReadFailure.MissingFile) + 1;
                     earliestUnappliedUpdatedAtMs = MinTimestamp(earliestUnappliedUpdatedAtMs, thread.UpdatedAtMs);
                     continue;
                 }
 
-                var infoBefore = new FileInfo(thread.RolloutPath);
+                var infoBefore = new FileInfo(CodexRolloutSource.Resolve(thread.RolloutPath));
                 bytes = checked(bytes + infoBefore.Length);
 
                 CodexIngestionResult result = await _ingestionService.IngestAsync(thread.RolloutPath, cancellationToken);
+                if (result.IsSourceMissing)
+                {
+                    errors++;
+                    readFailures[CodexRolloutReadFailure.MissingFile] = readFailures.GetValueOrDefault(CodexRolloutReadFailure.MissingFile) + 1;
+                    earliestUnappliedUpdatedAtMs = MinTimestamp(earliestUnappliedUpdatedAtMs, thread.UpdatedAtMs);
+                    continue;
+                }
                 recordsScanned += result.RecordsScanned;
                 normalized += result.RecordsNormalized;
                 hashedBytes += result.PrefixBytesHashed;
                 decodedBytes += result.CompleteRecordBytesDecoded;
+                validationBytes += result.CompressedValidationBytes;
                 checkpointWrites += result.CheckpointWrites;
 
-                var infoAfter = new FileInfo(thread.RolloutPath);
+                var infoAfter = new FileInfo(result.PhysicalSourcePath ?? CodexRolloutSource.Resolve(thread.RolloutPath));
                 infoAfter.Refresh();
                 string sourceIdentity = result.SourceIdentity ?? CodexSessionIngestionService.GetSourceIdentity(thread.RolloutPath);
                 string touchedSessionId = result.SessionId ?? thread.ThreadId;
                 await _store.UpsertRolloutFileAsync(
                     sourceIdentity,
-                    thread.RolloutPath,
+                    result.LogicalSourcePath ?? thread.RolloutPath,
                     touchedSessionId,
                     infoAfter.Exists ? infoAfter.Length : 0,
                     DateTimeOffset.UtcNow,
@@ -327,9 +337,11 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
             {
                 throw;
             }
-            catch (Exception) when (File.Exists(thread.RolloutPath))
+            catch (Exception exception)
             {
                 errors++;
+                CodexRolloutReadFailure failure = exception is CodexRolloutReadException rollout ? rollout.Failure : CodexRolloutReadFailure.Unexpected;
+                readFailures[failure] = readFailures.GetValueOrDefault(failure) + 1;
                 earliestUnappliedUpdatedAtMs = MinTimestamp(earliestUnappliedUpdatedAtMs, thread.UpdatedAtMs);
             }
         }
@@ -359,6 +371,8 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
             DiscoveryReconciled = reconciliationDue, CatalogRowsRead = catalog.Threads.Count,
             PrefixBytesHashed = hashedBytes, CompleteRecordBytesDecoded = decodedBytes,
             CheckpointWrites = checkpointWrites,
+            ReadFailures = readFailures,
+            CompressedValidationBytes = validationBytes,
         };
 
         async Task<CodexStateCatalogBatch?> ReadCatalogAsync(long minimum)
@@ -377,7 +391,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
         FileInfo fileInfo,
         CancellationToken cancellationToken)
     {
-        if (!fileInfo.Exists || result.LastCompleteRecordOffset < fileInfo.Length)
+        if (!fileInfo.Exists || !result.ReachedCurrentEndOfFile)
         {
             return false;
         }
@@ -449,8 +463,9 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
         int recordsScanned = 0;
         int normalized = 0;
         int errors = 0;
+        var readFailures = new Dictionary<CodexRolloutReadFailure, int>();
         long bytes = 0;
-        long hashedBytes = 0, decodedBytes = 0;
+        long hashedBytes = 0, decodedBytes = 0, validationBytes = 0;
         int checkpointWrites = 0;
         var sessionsTouched = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -481,7 +496,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
             filesScanned++;
             try
             {
-                var info = new FileInfo(file);
+                var info = new FileInfo(CodexRolloutSource.Resolve(file));
                 if (!info.Exists)
                 {
                     continue;
@@ -491,11 +506,18 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
                 string? filenameSessionId = CodexRolloutParser.ExtractSessionIdFromFileName(file);
 
                 CodexIngestionResult result = await _ingestionService.IngestAsync(file, cancellationToken);
+                if (result.IsSourceMissing)
+                {
+                    errors++;
+                    readFailures[CodexRolloutReadFailure.MissingFile] = readFailures.GetValueOrDefault(CodexRolloutReadFailure.MissingFile) + 1;
+                    continue;
+                }
                 string sourceIdentity = result.SourceIdentity ?? CodexSessionIngestionService.GetSourceIdentity(file);
                 recordsScanned += result.RecordsScanned;
                 normalized += result.RecordsNormalized;
                 hashedBytes += result.PrefixBytesHashed;
                 decodedBytes += result.CompleteRecordBytesDecoded;
+                validationBytes += result.CompressedValidationBytes;
                 checkpointWrites += result.CheckpointWrites;
 
                 string? touchedSessionId = result.SessionId ?? filenameSessionId;
@@ -506,7 +528,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
 
                 await _store.UpsertRolloutFileAsync(
                     sourceIdentity,
-                    file,
+                    result.LogicalSourcePath ?? file,
                     touchedSessionId,
                     info.Exists ? info.Length : 0,
                     DateTimeOffset.UtcNow,
@@ -517,10 +539,12 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
             {
                 throw;
             }
-            catch (Exception) when (File.Exists(file))
+            catch (Exception exception)
             {
                 // One malformed/locked/replaced rollout must not stop the remaining local corpus.
                 errors++;
+                CodexRolloutReadFailure failure = exception is CodexRolloutReadException rollout ? rollout.Failure : CodexRolloutReadFailure.Unexpected;
+                readFailures[failure] = readFailures.GetValueOrDefault(failure) + 1;
             }
         }
 
@@ -534,6 +558,8 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
             bytes)
         {
             DeferredFiles = changed.Count - batch.Length + incomplete, DiscoveryReconciled = true,
+            ReadFailures = readFailures,
+            CompressedValidationBytes = validationBytes,
             PrefixBytesHashed = hashedBytes, CompleteRecordBytesDecoded = decodedBytes,
             CheckpointWrites = checkpointWrites,
         };
@@ -561,10 +587,12 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
 
             try
             {
-                foreach (string file in Directory.EnumerateFiles(root, "*.jsonl", options))
+                foreach (string file in Directory.EnumerateFiles(root, "*.jsonl*", options))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
-                    files.Add(Path.GetFullPath(file));
+                    if (file.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase) ||
+                        file.EndsWith(".jsonl.zst", StringComparison.OrdinalIgnoreCase))
+                        files.Add(Path.GetFullPath(CodexRolloutSource.Canonicalize(file)));
                 }
             }
             catch (UnauthorizedAccessException)
@@ -586,7 +614,7 @@ public sealed class CodexObservatoryService : ICodexObservatoryService, ICodexRo
             {
                 try
                 {
-                    return File.GetLastWriteTimeUtc(file);
+                    return File.GetLastWriteTimeUtc(CodexRolloutSource.Resolve(file));
                 }
                 catch
                 {

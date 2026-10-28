@@ -458,10 +458,9 @@ acceptance stays open under PERF-001 while this prerequisite evidence work proce
   Defined in [Source of Truth](#source-of-truth), including quantity-specific
   authority, the allowlisted provenance envelope, original versus normalized
   counters, first collection time, alternatives and selected-generation membership.
-  Current destructive retirement and latest-only counter state are stated as
-  implementation gaps; durable retention remains open under ING-001/002 and
-  EVID-004. Source cross-check and documentation consistency only; no runtime or
-  schema change is claimed by closing this specification item.
+  The original destructive-retirement/latest-only gaps were recorded explicitly;
+  subsequent counter journaling and retirement preservation are tracked under
+  EVID-004. Closing this specification item itself claimed documentation only.
 - [x] **ING-001 — Define encoding-neutral identity/checkpoints.** Specify logical
   equivalence, physical representation preference, decoded-byte offsets/hashes,
   resume state and migration of physical checkpoints. Cover siblings, archives,
@@ -473,11 +472,27 @@ acceptance stays open under PERF-001 while this prerequisite evidence work proce
   Selected ZstdSharp.Port 0.8.8 after pinned package/source/license inspection.
   This closes design and dependency review only; migration, shipped notices,
   decoding/resource proof and recovery remain ING-002/EVID-004 implementation gates.
-- [ ] **ING-002 — Implement compressed discovery/read/recovery together.** Extend
+- [x] **ING-002 — Implement compressed discovery/read/recovery together.** Extend
   the existing owners as one slice, with bounded decoding/memory and explicit
   corrupt/truncated/unsupported states. Test plain, compressed, both-present,
   archived, restored/resumed and representation races, interrupted final records,
   cancellation/restart. Equivalent evidence must preserve totals and capture times.
+  Implemented through the existing filesystem provider, collector, ingestion and
+  checkpoint owners: plain-preferred discovery, retained-handle verification,
+  bounded streaming Zstandard validation before writes, decoded-byte checkpoints,
+  verified archive aliases and explicit read-failure reasons. Telemetry schema 16
+  adds coordinate/representation metadata without relabelling old checkpoints;
+  state-index schema 8 revisits disposable skip hints. Original IDs/times survive
+  verified adoption; new occurrence IDs namespace the local host/store. Blank
+  complete lines advance checkpoints; valid empty replacements retire their old
+  projections through the evidence-preserving path. Validation details are in the
+  [Stage 2 evidence record](docs/source-notes/STAGE2_EVIDENCE_VALIDATION.md#compressed-rollout-ingestion-ing-002).
+  The 747-test Core suite and Windows build passed. Installed adoption reached
+  403 compressed checkpoints while preserving all 96,120 pre-deployment native
+  rows and 164 journal rows; no adoption retired a generation. Installed preflight
+  memory stayed bounded for 16/256 MiB synthetic decoded sources, and timed
+  cancellation/retry passed. This does not claim complete corpus/lineage coverage
+  or close the aggregate app/worker resource budget.
 - [ ] **EVID-002 — Reconcile already-collected response/provider evidence.** Check
   installed app-server capabilities/schema, pagination and account bracketing.
   Never sum response/turn/thread cumulative representations. Preserve IDs, scope,
@@ -732,10 +747,10 @@ The Stage 1 mechanisms are installed with their stated evidence; PERF-001 resour
 acceptance remains open. EVID-001 now defines the quantity/retention contract.
 Installed **A-01** chronology acceptance has the stated runtime evidence. Continue
 Stage 2 with the accepted **ING-001** identity/checkpoint contract, component-10
-original counter-input journal and component-11 superseded numeric retention.
-Implement **ING-002** verified representation adoption and candidate validation,
-then finish EVID-004 scope/answer/replay acceptance and complete
-source reconciliation and eligibility explanations. Deliver **PACE-001–004** as a
+original counter-input journal, component-11 superseded numeric retention and the
+**ING-002** compressed ingestion slice. Finish **EVID-002** source reconciliation,
+**EVID-003** eligibility explanations and **EVID-004** scope/answer acceptance.
+Deliver **PACE-001–004** as a
 separate reviewable slice using the established quota contract; public TT selection
 does not block that correctness repair.
 

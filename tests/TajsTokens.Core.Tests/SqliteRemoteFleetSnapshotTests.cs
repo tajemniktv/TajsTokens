@@ -71,7 +71,7 @@ public sealed class SqliteRemoteFleetSnapshotTests
             query.CommandText = "SELECT COUNT(*) FROM quota_snapshots;";
             Assert.Equal(1L, await query.ExecuteScalarAsync());
             query.CommandText = "PRAGMA user_version;";
-            Assert.Equal(15L, await query.ExecuteScalarAsync());
+        Assert.Equal(16L, await query.ExecuteScalarAsync());
         });
     }
 

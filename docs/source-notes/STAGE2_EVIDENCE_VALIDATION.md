@@ -166,11 +166,121 @@ The comparison helper is the same `compare_counter_journal_upgrade.py`, now taki
 the deployment backup directory name as an argument; aggregate output is
 `compare_counter_journal_upgrade.v10-v11.json` under `.codex/temp/stage2/`.
 
+## Compressed rollout ingestion (ING-002)
+
+Plain `.jsonl` and `.jsonl.zst` siblings are one discovery slot, with plain preferred.
+The optional native state catalog can point to either representation, including a
+plain path whose compressed sibling is the only file present. State-index schema 8
+clears only disposable fingerprints/cursors to revisit previously skipped sources.
+
+One retained physical handle supplies independent verifier/parser positions via
+`RandomAccess`, so a rename cannot make them read different files. Compressed
+sources deny in-place writes while held, permit rename/delete, and validate every
+frame/checksum through EOF before any ingestion writes. A change in the selected
+physical representation is retried rather than treated as a verified checkpoint.
+The line reader and preflight share the 64 MiB record limit; Zstandard window log
+25 caps each decoder window at 32 MiB. Input/output buffers are 64 KiB. No decoded
+rollout or raw source JSON is written to a temporary file or evidence table.
+
+Telemetry schema 16 adds nullable checkpoint coordinate kind, logical source path,
+physical encoding and physical identity. Legacy plain checkpoints gain the decoded
+coordinate kind only after full consumed-prefix SHA-256 verification. Compressed
+resume decodes/discards from zero; compressed physical size is never used as the
+decoded offset/EOF. The original UTF-8 bytes, including CR/LF and optional BOM,
+remain in coordinates/hashes; the BOM is excluded only from transient JSON text.
+
+Verified sibling/archive adoption retains occurrence IDs and original captures.
+Archive aliases require a matching canonical filename and source-root namespace,
+then the complete consumed prefix. A bounded alias search fails explicitly if
+ambiguous; new occurrence identities include a hashed host/store namespace plus
+physical identity. Existing IDs are preserved, not retroactively relabelled.
+The original logical locator remains stable through moves, so reducer state and
+later retirement cover all prior increments. Legacy moves that already changed the
+file registry's locator are handled by known source-record generation membership,
+not only current file labels: native/counter/context/timeline facts are preserved
+and retired together. A regression reproduces the former missing-archive failure.
+Equal filename/header/prefix data in
+a fork or another source root does not establish the same occurrence.
+
+Complete blank lines advance the checkpoint without becoming observations. An
+unterminated final record remains pending. A valid empty replacement selects an
+empty generation and preserves the old evidence before retiring its projections.
+Missing-during-open results cannot register an unverified replacement identity.
+Typed failure counts distinguish missing/inaccessible, truncated/invalid frames,
+unsupported windows/dictionaries/checkpoints, oversized records and changed or
+conflicting representations. Cancellation propagates; a missing source is not EOF.
+
+The read-only reconciliation experiment also uses decoded bounds and the retained
+handle. Its v7 report chooses one sibling rather than stopping at compressed file
+size or counting both physical representations. It remains an aggregate experiment,
+never a canonical importer or proof of cross-file billing identity. The separate
+on-demand 2 MiB byte-comparison inspector remains conservative/plain-only; it must
+not be used to claim complete compressed lineage or collection coverage.
+
+Automated cases cover both persistence lanes, plain/compressed/both/restore/append,
+archive and genuine rewrite, legacy checkpoint adoption, source-root separation,
+inherited child prefixes, Unicode/CRLF/BOM, blank/incomplete tails, empty/corrupt/
+truncated/checksum failures, concatenated/skippable frames, window/dictionary limits,
+oversized records before writes, cancellation, atomic replacement and state-index
+EOF/fingerprint behavior. Strong prefix verification and original capture facts
+remain assertions, not inferred from successful parsing.
+
+Installed decoder probes use synthetic frames generated directly into compressed
+files with a 2 MiB window. They compare 16 and 256 MiB decoded sizes, record private
+commit/working set and allocations without forced GC, and cancel a large validation
+after warmup before proving handle release and a complete retry. This measures
+compressed preflight only, not full ingestion/parser memory or the main/worker
+aggregate background budget; PERF-001 remains open.
+
+The final **747-test** Core suite passed (1m48s), including the legacy locator-
+membership regression. The Windows build passed with zero warnings/errors
+(1m25.32s) and normal deployment restarted PID 31612. Installed infrastructure
+SHA-256: `A5911DDE30C9CEF7DAC773CB052B201F40370408C6C68BD6AE310C3FDF6B821C`.
+The published `ZstdSharp.dll` SHA-256 is
+`B285BB9F59928BECB8E048BF2A75E872F6555F8773D7B72386A9F77F447F425C`.
+Both the port's MIT notice and Zstandard 1.5.7 BSD notice were verified byte-for-
+byte against repository notices in the installed `ThirdPartyNotices/` directory;
+they are also embedded in the infrastructure assembly.
+
+The installed decoder's synthetic preflight results were:
+
+| Decoded input | Encoded bytes | Wall time | Sampled process private peak | Allocated bytes |
+|---|---:|---:|---:|---:|
+| 16 MiB | 1,560 | 69.02 ms | 17.08 MiB | 210,080 |
+| 256 MiB | 24,600 | 209.04 ms | 16.52 MiB | 238,936 |
+
+The 10 ms sampler obtained 5/13 samples respectively; working-set peaks were about
+44.51/44.52 MiB. These are separate console processes including runtime overhead,
+not decoder-only allocation totals or full-app limits. The large validation was
+also cancelled after warmup; an exclusive read-handle check then succeeded and a
+fresh read completed all 268,435,456 decoded bytes. Reproduction uses the temporary
+`compression-probe` project, `decoder-fixtures`, `decoder-16m-result.json`,
+`decoder-256m-result.json` and `decoder-cancel-result.json` under `.codex/temp/stage2/`.
+
+An initial installed comparison preserved 96,073 native rows and 117 journal rows
+after the first compressed-capable build. Normal backup retention later rotated
+that earlier backup; its aggregate comparison remains recorded. The final build
+was compared read-only with its own normal pre-deployment backup: **96,120** native
+rows and **164** complete journal rows had zero removals or changes to original
+amounts/chronology/input payloads. Four new rows of each kind were collected normally.
+The installed markers were telemetry 16, observatory 11 and state index 8.
+
+During that final comparison, decoded-coordinate checkpoints advanced from 405 to
+434 and compressed checkpoints from 374 to **403**; all recorded retirement counts
+remained zero. This is real installed prefix-verified adoption without restamping
+retained facts. The remaining 64 legacy checkpoint rows are not a count of missing
+files: they can include aliases, sources outside the current catalog or pending
+work. No corpus-completeness percentage or cause distribution is inferred from them.
+The final aggregate output is
+`compare_counter_journal_upgrade.v11-v11.base16-base16.json`; native Codex stores
+were read only, and the comparison wrote only aggregate local diagnostics.
+
 ## Remaining boundaries
 
 This closes installed component support, advancing ingestion and the tested
-refusal/recovery boundary. It does not close compressed-history recovery,
-complete generation adoption/recovery, reconciliation, all untimed/all-time presentation
-states or programme-wide user visual acceptance. Those remain under ING-002,
-EVID-002/004 and SHIP-004. The quantity/retention definition in PROJECT.md explicitly
+refusal/recovery boundary and the supported compressed-ingestion cases above.
+It does not prove a complete native corpus was available/recovered, complete
+cross-source reconciliation, all untimed/all-time presentation states or programme-
+wide user visual acceptance. Those remain under EVID-002/003/004 and SHIP-004.
+The quantity/retention definition in PROJECT.md explicitly
 distinguishes these gaps from implemented behavior.

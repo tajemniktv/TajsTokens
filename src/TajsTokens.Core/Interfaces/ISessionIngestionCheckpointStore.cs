@@ -14,4 +14,6 @@ public interface ISessionIngestionCheckpointStore
 {
     Task<FileIngestionCheckpoint?> GetCheckpointAsync(string filePath, CancellationToken cancellationToken);
     Task SaveCheckpointAsync(FileIngestionCheckpoint checkpoint, CancellationToken cancellationToken);
+    Task<IReadOnlyList<FileIngestionCheckpoint>> FindCheckpointCandidatesAsync(string fileName, CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyList<FileIngestionCheckpoint>>([]);
 }

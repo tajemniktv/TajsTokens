@@ -30,7 +30,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
     private readonly CodexRolloutParser _parser = new();
     private readonly ICodexSessionEventProvider _sessionEventProvider;
 
-    private readonly Dictionary<string, (string Identity, string PhysicalIdentity, long Offset, string Hash, long Length, DateTime Written)> _verifiedPrefixes =
+    private readonly Dictionary<string, (string Identity, string PhysicalIdentity, long Offset, string Hash, long Length, DateTime Written, long DecodedLength)> _verifiedPrefixes =
         new(StringComparer.OrdinalIgnoreCase);
 
     public CodexSessionIngestionService(
@@ -63,15 +63,20 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
     public async Task<bool> IsUnchangedAsync(string filePath, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (!_verifiedPrefixes.TryGetValue(filePath, out var verified) || verified.Offset != verified.Length ||
+        filePath = CodexRolloutSource.Canonicalize(filePath);
+        if (!_verifiedPrefixes.TryGetValue(filePath, out var verified) || verified.Offset != verified.DecodedLength ||
             verified.PhysicalIdentity.StartsWith("fallback", StringComparison.Ordinal)) return false;
-        var info = new FileInfo(filePath);
+        string physicalPath = CodexRolloutSource.Resolve(filePath);
+        var info = new FileInfo(physicalPath);
         if (!info.Exists || info.Length != verified.Length || info.LastWriteTimeUtc != verified.Written ||
-            GetSourceIdentity(filePath) != verified.PhysicalIdentity) return false;
+            GetSourceIdentity(physicalPath) != verified.PhysicalIdentity) return false;
         FileIngestionCheckpoint? checkpoint = await _checkpointStore.GetCheckpointAsync(filePath, cancellationToken);
         return checkpoint is not null && checkpoint.SourceIdentity == verified.Identity &&
                checkpoint.LastByteOffset == verified.Offset && checkpoint.ConsumedPrefixSha256 == verified.Hash &&
-               checkpoint.ParserVersion == ParserVersion(filePath);
+               checkpoint.ParserVersion == ParserVersion(checkpoint.LogicalSourcePath ?? filePath) &&
+               checkpoint.CoordinateKind == "decoded-utf8-bytes-v1" &&
+               checkpoint.PhysicalSourceIdentity == verified.PhysicalIdentity &&
+               checkpoint.PhysicalEncoding == (physicalPath.EndsWith(".zst", StringComparison.OrdinalIgnoreCase) ? "zstandard" : "plain");
     }
 
     private string ParserVersion(string filePath)
@@ -84,10 +89,11 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
     public async Task<CodexIngestionResult> IngestAsync(string filePath, CancellationToken cancellationToken)
     {
         using var work = WorkDiagnostics.Measure(WorkPhase.RolloutIngestion);
-        if (!File.Exists(filePath))
+        await using CodexRolloutSource? source = await CodexRolloutSource.OpenAsync(filePath, cancellationToken);
+        if (source is null)
         {
             work?.Complete(rows: 0, logicalBytes: 0, committedTransactions: 0);
-            return CodexIngestionResult.Empty;
+            return CodexIngestionResult.MissingSource;
         }
 
         if (_observatoryStore is not null)
@@ -95,73 +101,92 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             await _observatoryStore.InitializeAsync(cancellationToken);
         }
 
-        string parserVersion = ParserVersion(filePath);
+        filePath = source.CanonicalPath;
         FileIngestionCheckpoint? existing = await _checkpointStore.GetCheckpointAsync(filePath, cancellationToken);
-        string sourceIdentity = GetSourceIdentity(filePath);
-        string physicalIdentity = sourceIdentity;
-        var initialInfo = new FileInfo(filePath);
-        long initialLength = initialInfo.Length;
-        DateTime initialWritten = initialInfo.LastWriteTimeUtc;
+        if (_sessionEventProvider is FileSystemCodexSessionEventProvider)
+        {
+            IReadOnlyList<FileIngestionCheckpoint> candidates = await _checkpointStore.FindCheckpointCandidatesAsync(
+                Path.GetFileName(filePath), cancellationToken);
+            if (candidates.Count >= 65) throw new CodexRolloutReadException(CodexRolloutReadFailure.ConflictingRepresentations);
+            StringComparison comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            existing = candidates.Append(existing).Where(x => x is not null &&
+                    string.Equals(Path.GetFileName(x.FilePath), Path.GetFileName(filePath), comparison) &&
+                    string.Equals(CodexRolloutSource.Namespace(x.FilePath), CodexRolloutSource.Namespace(filePath), comparison))
+                .OrderByDescending(x => x!.UpdatedAtUtc).ThenByDescending(x => x!.LastByteOffset).FirstOrDefault();
+        }
+        string logicalSourcePath = existing?.LogicalSourcePath ?? existing?.FilePath ?? filePath;
+        string parserVersion = ParserVersion(logicalSourcePath);
+        string sourceNamespace = Environment.MachineName + "\0" + CodexRolloutSource.Namespace(filePath);
+        if (OperatingSystem.IsWindows()) sourceNamespace = sourceNamespace.ToUpperInvariant();
+        string sourceIdentity = "rollout/v1:" + Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(sourceNamespace))) + ":" + source.PhysicalIdentity;
+        string physicalIdentity = source.PhysicalIdentity;
+        long initialLength = source.PhysicalLength;
+        DateTime initialWritten = source.WrittenUtc;
         long prefixBytesHashed = 0;
         long completeRecordBytesDecoded = 0;
         int checkpointWrites = 0;
         using var prefixHash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
-        await using var prefixStream = new FileStream(
-            filePath,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.ReadWrite | FileShare.Delete,
-            65536,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
+        Stream prefixStream = source.OpenDecodedStream();
+        await using var prefixLifetime = new AsyncStreamLifetime(() => prefixStream);
+        long prefixPosition = 0;
         byte[] hashBuffer = new byte[65536];
 
         async Task<string> HashThroughAsync(long offset)
         {
             using var verification = WorkDiagnostics.Measure(WorkPhase.PrefixVerification);
             long before = prefixBytesHashed;
-            if (prefixStream.Position > offset)
+            if (prefixPosition > offset)
             {
-                prefixStream.Position = 0;
+                await prefixStream.DisposeAsync();
+                prefixStream = source.OpenDecodedStream();
+                prefixPosition = 0;
                 prefixHash.GetHashAndReset();
             }
-            while (prefixStream.Position < offset)
+            while (prefixPosition < offset)
             {
                 int read = await prefixStream.ReadAsync(
                     hashBuffer.AsMemory(
                         0,
-                        (int)Math.Min(hashBuffer.Length, offset - prefixStream.Position)),
+                        (int)Math.Min(hashBuffer.Length, offset - prefixPosition)),
                     cancellationToken);
                 if (read == 0) throw new IOException("Rollout changed while verifying its byte checkpoint; retry required.");
                 prefixHash.AppendData(hashBuffer, 0, read);
+                prefixPosition += read;
                 prefixBytesHashed += read;
             }
             verification?.Complete(logicalBytes: prefixBytesHashed - before);
             return Convert.ToHexString(prefixHash.GetCurrentHash());
         }
 
-        bool sameFile = existing?.SourceIdentity is { } previousIdentity &&
-                        (previousIdentity == sourceIdentity || previousIdentity.StartsWith(
-                            sourceIdentity + ":generation:",
+        bool sameFile = existing?.PhysicalSourceIdentity == physicalIdentity || existing?.SourceIdentity is { } previousIdentity &&
+                        (previousIdentity == physicalIdentity || previousIdentity.StartsWith(
+                            physicalIdentity + ":generation:",
                             StringComparison.Ordinal));
         // A verified legacy checkpoint may retain its occurrence ID after gaining a stable
         // physical file ID. Cache against that physical ID, never against a path-only fallback.
-        bool cachedPrefix = !sourceIdentity.StartsWith("fallback-path:", StringComparison.Ordinal) &&
+        bool cachedPrefix = !physicalIdentity.StartsWith("fallback-path:", StringComparison.Ordinal) &&
                             existing?.ConsumedPrefixSha256 is { } knownHash &&
                             _verifiedPrefixes.TryGetValue(
                                 filePath,
-                                out (string Identity, string PhysicalIdentity, long Offset, string Hash, long Length, DateTime Written) verified) &&
-                            verified == (existing.SourceIdentity, sourceIdentity, existing.LastByteOffset, knownHash, initialLength, initialWritten);
+                                out var verified) &&
+                            verified == (existing.SourceIdentity, physicalIdentity, existing.LastByteOffset, knownHash, initialLength, initialWritten, source.DecodedLength);
         string? existingPrefix = existing is null ? null :
             cachedPrefix ? existing.ConsumedPrefixSha256 :
-            await HashThroughAsync(Math.Min(existing.LastByteOffset, prefixStream.Length));
+            await HashThroughAsync(Math.Min(existing.LastByteOffset, source.DecodedLength));
         // A prefix-verified legacy fallback ID denotes the already captured occurrence, even
         // though it never proved physical identity. Retain its IDs/capture times during the
         // transition to stable OS identity; changed bytes still start a new generation.
         bool legacyIdentity = existing?.SourceIdentity?.StartsWith("fallback:", StringComparison.Ordinal) == true ||
                               existing?.SourceIdentity?.StartsWith("fallback-path:", StringComparison.Ordinal) == true;
-        bool verifiedContent = existing is not null && (sameFile || legacyIdentity) && existing.LastByteOffset <= prefixStream.Length &&
+        bool knownCoordinates = existing?.CoordinateKind is null or "decoded-utf8-bytes-v1";
+        if (!knownCoordinates) throw new CodexRolloutReadException(CodexRolloutReadFailure.UnsupportedCheckpoint);
+        bool verifiedContent = existing is not null && (sameFile || legacyIdentity || existing.LastByteOffset > 0) &&
+                               existing.LastByteOffset <= source.DecodedLength &&
                                existing.ConsumedPrefixSha256 is not null &&
                                existing.ConsumedPrefixSha256 == existingPrefix;
+        if (!verifiedContent && existing is not null && existing.FilePath != filePath &&
+            File.Exists(CodexRolloutSource.Resolve(existing.FilePath)))
+            throw new CodexRolloutReadException(CodexRolloutReadFailure.ConflictingRepresentations);
         bool canResume = verifiedContent && string.Equals(existing!.ParserVersion, parserVersion, StringComparison.Ordinal);
         // These upgrades enrich immutable occurrences only. Keep verified IDs, token amounts and
         // prior capture times; ownership/reducer upgrades still require their generation replay.
@@ -170,13 +195,13 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                                    existing.ParserVersion == parserVersion.Replace(TypedParserVersion, "typed-v7-response-evidence", StringComparison.Ordinal));
 
         if (canResume || metadataOnlyReplay) sourceIdentity = existing!.SourceIdentity!;
-        else if (sameFile)
+        else if (existing is not null)
             // New generation retires the old projections before replay, even when the OS file ID
             // survived an in-place rewrite. Legacy unverified checkpoints take this path once.
             sourceIdentity += ":generation:" + existingPrefix;
 
         long fromOffset = canResume ? existing!.LastByteOffset : 0;
-        if (new FileInfo(filePath).Length < fromOffset)
+        if (source.DecodedLength < fromOffset)
         {
             fromOffset = 0;
             canResume = false;
@@ -198,19 +223,26 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             }
         }
 
-        var state = new RolloutParseState(filePath, sourceIdentity, resumeState);
+        var state = new RolloutParseState(logicalSourcePath, sourceIdentity, resumeState);
         int recordsScanned = 0;
         int normalizedRecords = 0;
         long lastCompleteRecordOffset = fromOffset;
+        long checkpointedOffset = canResume ? existing!.LastByteOffset : -1;
         List<ParsedRolloutRecord>? pendingRecords = _ingestionBatchWriter is null
             ? null
             : new List<ParsedRolloutRecord>(DurableBatchSize);
 
-        await foreach (RawSessionRecord record in _sessionEventProvider.ReadNewJsonLinesAsync(filePath, fromOffset, cancellationToken))
+        await using Stream recordStream = source.OpenDecodedStream();
+        IAsyncEnumerable<RawSessionRecord> records = _sessionEventProvider is FileSystemCodexSessionEventProvider
+            ? FileSystemCodexSessionEventProvider.ReadAsync(recordStream, logicalSourcePath, fromOffset, source.DecodedLength, cancellationToken, includeWhitespace: true)
+            : _sessionEventProvider.ReadNewJsonLinesAsync(filePath, fromOffset, cancellationToken);
+        await foreach (RawSessionRecord record in records)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            recordsScanned++;
             completeRecordBytesDecoded += record.EndByteOffset - record.StartByteOffset;
+            lastCompleteRecordOffset = record.EndByteOffset;
+            if (string.IsNullOrWhiteSpace(record.Payload)) continue;
+            recordsScanned++;
 
             if (_observatoryStore is not null)
             {
@@ -235,7 +267,8 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                 }
                 else
                 {
-                    await PersistParsedTelemetryAsync(parsed, sourceIdentity, filePath, cancellationToken);
+                    source.EnsureSelected();
+                    await PersistParsedTelemetryAsync(parsed, sourceIdentity, logicalSourcePath, source.CurrentPhysicalLength, cancellationToken);
                 }
 
                 if (parsed.HasNormalizedTelemetry)
@@ -249,10 +282,12 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             lastCompleteRecordOffset = record.EndByteOffset;
             if (recordsScanned % DurableBatchSize == 0)
             {
+                source.EnsureSelected();
                 await FlushIngestionBatchAsync(
                     pendingRecords,
                     sourceIdentity,
-                    filePath,
+                    logicalSourcePath,
+                    source.CurrentPhysicalLength,
                     cancellationToken);
                 await SaveCheckpointAsync(
                     filePath,
@@ -261,19 +296,31 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                     existing?.LastSessionId,
                     parserVersion,
                     sourceIdentity,
+                    logicalSourcePath, source.Encoding, physicalIdentity,
                     await HashThroughAsync(lastCompleteRecordOffset),
                     cancellationToken);
                 checkpointWrites++;
+                checkpointedOffset = lastCompleteRecordOffset;
             }
         }
 
+        source.EnsureSelected();
+        if (recordsScanned == 0 && _observatoryStore is not null &&
+            (!canResume || lastCompleteRecordOffset != existing?.LastByteOffset || existing.PhysicalEncoding != source.Encoding ||
+             existing.PhysicalSourceIdentity != physicalIdentity || existing.FilePath != filePath))
+            await _observatoryStore.UpsertRolloutFileAsync(sourceIdentity, logicalSourcePath,
+                state.OwnSessionId ?? existing?.LastSessionId, source.PhysicalLength, DateTimeOffset.UtcNow, cancellationToken);
         await FlushIngestionBatchAsync(
             pendingRecords,
             sourceIdentity,
-            filePath,
+            logicalSourcePath,
+            source.CurrentPhysicalLength,
             cancellationToken);
-        string finalPrefix = canResume && recordsScanned == 0 ? existingPrefix! : await HashThroughAsync(lastCompleteRecordOffset);
-        if ((!canResume && recordsScanned == 0) || recordsScanned % DurableBatchSize != 0)
+        string finalPrefix = canResume && lastCompleteRecordOffset == existing!.LastByteOffset
+            ? existingPrefix! : await HashThroughAsync(lastCompleteRecordOffset);
+        if (checkpointedOffset != lastCompleteRecordOffset ||
+            existing?.CoordinateKind != "decoded-utf8-bytes-v1" || existing.PhysicalSourceIdentity != physicalIdentity ||
+            existing.PhysicalEncoding != source.Encoding || existing.FilePath != filePath)
         {
             await SaveCheckpointAsync(
                 filePath,
@@ -282,16 +329,17 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                 existing?.LastSessionId,
                 parserVersion,
                 sourceIdentity,
+                logicalSourcePath, source.Encoding, physicalIdentity,
                 finalPrefix,
                 cancellationToken);
             checkpointWrites++;
         }
 
-        var finalInfo = new FileInfo(filePath);
+        var finalInfo = new FileInfo(source.PhysicalPath);
         if (finalInfo.Length == initialLength && finalInfo.LastWriteTimeUtc == initialWritten &&
-            GetSourceIdentity(filePath) == physicalIdentity)
+            GetSourceIdentity(source.PhysicalPath) == physicalIdentity)
             _verifiedPrefixes[filePath] = (sourceIdentity, physicalIdentity, lastCompleteRecordOffset,
-                finalPrefix, initialLength, initialWritten);
+                finalPrefix, initialLength, initialWritten, source.CurrentDecodedLength);
         else _verifiedPrefixes.Remove(filePath);
 
         int normalized = _observatoryStore is null ? recordsScanned : normalizedRecords;
@@ -300,7 +348,11 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         {
             SourceIdentity = sourceIdentity,
             LastCompleteRecordOffset = lastCompleteRecordOffset,
-            SourceLength = TryGetFileSize(filePath),
+            SourceLength = source.CurrentDecodedLength,
+            LogicalSourcePath = logicalSourcePath,
+            PhysicalSourcePath = source.PhysicalPath,
+            PhysicalSourceLength = source.CurrentPhysicalLength,
+            CompressedValidationBytes = source.Compressed ? source.DecodedLength : 0,
             PrefixBytesHashed = prefixBytesHashed,
             CompleteRecordBytesDecoded = completeRecordBytesDecoded,
             CheckpointWrites = checkpointWrites,
@@ -311,6 +363,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         List<ParsedRolloutRecord>? pendingRecords,
         string sourceIdentity,
         string filePath,
+        long fileSizeBytes,
         CancellationToken cancellationToken)
     {
         if (_ingestionBatchWriter is null || pendingRecords is null || pendingRecords.Count == 0)
@@ -321,7 +374,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         await _ingestionBatchWriter.WriteBatchAsync(
             sourceIdentity,
             filePath,
-            TryGetFileSize(filePath),
+            fileSizeBytes,
             pendingRecords,
             cancellationToken);
         pendingRecords.Clear();
@@ -331,6 +384,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         ParsedRolloutRecord parsed,
         string sourceIdentity,
         string filePath,
+        long fileSizeBytes,
         CancellationToken cancellationToken)
     {
         if (_observatoryStore is null)
@@ -346,7 +400,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
             parsed.SessionId,
             parsed.EventClass,
             parsed.RecordBytes,
-            TryGetFileSize(filePath),
+            fileSizeBytes,
             parsed.TimestampUtc,
             cancellationToken, parsed.TimestampQuality);
 
@@ -393,6 +447,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         string? previousSessionId,
         string parserVersion,
         string sourceIdentity,
+        string logicalSourcePath, string physicalEncoding, string physicalIdentity,
         string consumedPrefixSha256,
         CancellationToken cancellationToken)
     {
@@ -414,43 +469,32 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                 DateTimeOffset.UtcNow,
                 state.OwnSessionId ?? previousSessionId,
                 parserVersion,
-                sourceIdentity) { ConsumedPrefixSha256 = consumedPrefixSha256 },
+                sourceIdentity)
+            {
+                ConsumedPrefixSha256 = consumedPrefixSha256,
+                CoordinateKind = "decoded-utf8-bytes-v1", LogicalSourcePath = logicalSourcePath,
+                PhysicalEncoding = physicalEncoding, PhysicalSourceIdentity = physicalIdentity,
+            },
             cancellationToken);
     }
 
-    private static long TryGetFileSize(string filePath)
-    {
-        try
-        {
-            return Math.Max(0, new FileInfo(filePath).Length);
-        }
-        catch (IOException)
-        {
-            return 0;
-        }
-        catch (UnauthorizedAccessException)
-        {
-            return 0;
-        }
-    }
-
-    internal static string GetSourceIdentity(string filePath)
+    internal static string GetSourceIdentity(string filePath, SafeFileHandle? existingHandle = null)
     {
         if (OperatingSystem.IsWindows())
         {
-            using SafeFileHandle handle = File.OpenHandle(
+            using SafeFileHandle? openedHandle = existingHandle is null ? File.OpenHandle(
                 filePath,
                 FileMode.Open,
                 FileAccess.Read,
-                FileShare.ReadWrite | FileShare.Delete);
+                FileShare.ReadWrite | FileShare.Delete) : null;
 
-            if (GetFileInformationByHandle(handle, out ByHandleFileInformation info))
+            if (GetFileInformationByHandle(existingHandle ?? openedHandle!, out ByHandleFileInformation info))
             {
                 return $"win:{info.VolumeSerialNumber:X8}:{info.FileIndexHigh:X8}{info.FileIndexLow:X8}";
             }
         }
 
-        if (OperatingSystem.IsLinux() && TryGetLinuxFileIdentity(filePath) is { } linuxIdentity)
+        if (OperatingSystem.IsLinux() && TryGetLinuxFileIdentity(filePath, existingHandle) is { } linuxIdentity)
         {
             return linuxIdentity;
         }
@@ -464,7 +508,7 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
         return $"fallback-path:{pathHash}";
     }
 
-    private static string? TryGetLinuxFileIdentity(string filePath)
+    private static string? TryGetLinuxFileIdentity(string filePath, SafeFileHandle? handle = null)
     {
         const int atCurrentWorkingDirectory = -100;
         const uint statxInode = 0x100;
@@ -477,7 +521,8 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
                 Marshal.WriteInt64(buffer, offset, 0);
             }
 
-            if (LinuxStatx(atCurrentWorkingDirectory, filePath, 0, statxInode, buffer) != 0 ||
+            if (LinuxStatx(handle is null ? atCurrentWorkingDirectory : handle.DangerousGetHandle().ToInt32(),
+                    handle is null ? filePath : "", handle is null ? 0 : 0x1000, statxInode, buffer) != 0 ||
                 (unchecked((uint)Marshal.ReadInt32(buffer, 0)) & statxInode) == 0)
             {
                 return null;
@@ -515,6 +560,11 @@ public sealed class CodexSessionIngestionService : ICodexSessionIngestionService
     {
         byte[] bytes = Encoding.UTF8.GetBytes($"{sourceIdentity}:{start}:{end}");
         return Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+    }
+
+    private sealed class AsyncStreamLifetime(Func<Stream> current) : IAsyncDisposable
+    {
+        public ValueTask DisposeAsync() => current().DisposeAsync();
     }
 
     [DllImport("kernel32.dll", SetLastError = true)]

@@ -236,7 +236,7 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
         await Execute("DROP TABLE quota_snapshots_v10;");
         await repository.InitializeAsync(default);
         await repository.InitializeAsync(default);
-        Assert.Equal(15L, await Scalar("PRAGMA user_version;"));
+        Assert.Equal(16L, await Scalar("PRAGMA user_version;"));
         QuotaSnapshot row = Assert.Single(
             await repository.GetRecentQuotaSnapshotsAsync(QuotaWindowKind.FiveHour, "codex", "default", 10, default));
         Assert.Equal(12.375, row.UsedPercent);
@@ -273,7 +273,7 @@ public sealed class QuotaEvidencePersistenceTests : IDisposable
         Assert.Empty(await index.GetFingerprintsAsync(default));
         Assert.Equal(0, await index.GetWatermarkAsync(default));
         Assert.Equal(1L, await Scalar("SELECT COUNT(*) FROM quota_snapshots;"));
-        Assert.Equal(7L, await Scalar("SELECT version FROM codex_state_index_schema;"));
+        Assert.Equal(8L, await Scalar("SELECT version FROM codex_state_index_schema;"));
     }
 
     private async Task Execute(string sql)

@@ -428,7 +428,7 @@ public sealed class CodexServerEvidenceTests : IDisposable
             JsonSerializer.Serialize(Assert.Single((await Service(repository).CompareAsync(default)).LatestObservations)));
         repository = new SqliteTelemetryRepository(Database);
         await repository.InitializeAsync(default);
-        Assert.Equal(15L, await Scalar("PRAGMA user_version"));
+        Assert.Equal(16L, await Scalar("PRAGMA user_version"));
         Assert.Equal(
             JsonSerializer.Serialize(row),
             JsonSerializer.Serialize(Assert.Single((await Service(repository).CompareAsync(default)).LatestObservations)));
@@ -457,7 +457,7 @@ public sealed class CodexServerEvidenceTests : IDisposable
         Assert.Equal("invalid JSON", await Scalar("SELECT evidence_json FROM codex_server_evidence WHERE observation_id='bad'"));
         await Execute("DELETE FROM codex_server_evidence WHERE observation_id='bad';");
         await repository.InitializeAsync(default);
-        Assert.Equal(15L, await Scalar("PRAGMA user_version"));
+        Assert.Equal(16L, await Scalar("PRAGMA user_version"));
     }
 
     [Fact]

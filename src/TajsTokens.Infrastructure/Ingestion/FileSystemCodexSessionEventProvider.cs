@@ -16,36 +16,44 @@ namespace TajsTokens.Infrastructure.Ingestion;
 public sealed class FileSystemCodexSessionEventProvider : ICodexSessionEventProvider
 {
     private const int BufferSize = 64 * 1024;
-    private const int MaxRecordBytes = 64 * 1024 * 1024;
+    internal const int MaxRecordBytes = 64 * 1024 * 1024;
 
     public async IAsyncEnumerable<RawSessionRecord> ReadNewJsonLinesAsync(
         string filePath,
         long fromOffset,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        if (!File.Exists(filePath))
-        {
-            yield break;
-        }
+        await using CodexRolloutSource? source = await CodexRolloutSource.OpenAsync(filePath, cancellationToken);
+        if (source is null) yield break;
+        await using Stream stream = source.OpenDecodedStream();
+        await foreach (RawSessionRecord record in ReadAsync(stream, CodexRolloutSource.Canonicalize(filePath), fromOffset,
+                           source.DecodedLength, cancellationToken)) yield return record;
+    }
 
-        await using var stream = new FileStream(
-            filePath,
-            FileMode.Open,
-            FileAccess.Read,
-            FileShare.ReadWrite | FileShare.Delete,
-            BufferSize,
-            FileOptions.Asynchronous | FileOptions.SequentialScan);
-
+    internal static async IAsyncEnumerable<RawSessionRecord> ReadAsync(Stream stream, string filePath,
+        long fromOffset, long decodedLength, [EnumeratorCancellation] CancellationToken cancellationToken,
+        bool includeWhitespace = false)
+    {
         fromOffset = Math.Max(0, fromOffset);
-        if (fromOffset > stream.Length)
+        if (fromOffset > decodedLength)
         {
             // File was truncated/replaced. Re-scan from the beginning; parser-version/checkpoint logic
             // keeps this explicit instead of silently skipping content.
             fromOffset = 0;
         }
 
-        stream.Seek(fromOffset, SeekOrigin.Begin);
         byte[] buffer = new byte[BufferSize];
+        if (stream.CanSeek) stream.Seek(fromOffset, SeekOrigin.Begin);
+        else
+        {
+            long skipped = 0;
+            while (skipped < fromOffset)
+            {
+                int read = await stream.ReadAsync(buffer.AsMemory(0, (int)Math.Min(buffer.Length, fromOffset - skipped)), cancellationToken);
+                if (read == 0) throw new IOException("Decoded rollout changed before its checkpoint.");
+                skipped += read;
+            }
+        }
         using var recordBuffer = new MemoryStream();
         long recordStart = fromOffset;
         long absoluteOffset = fromOffset;
@@ -65,7 +73,7 @@ public sealed class FileSystemCodexSessionEventProvider : ICodexSessionEventProv
                 int newline = buffer.AsSpan(index, read - index).IndexOf((byte)'\n');
                 int count = newline < 0 ? read - index : newline;
                 if (recordBuffer.Length + count > MaxRecordBytes)
-                    throw new InvalidDataException($"JSONL record exceeds {MaxRecordBytes:N0} bytes: {filePath}");
+                    throw new CodexRolloutReadException(CodexRolloutReadFailure.RecordTooLarge);
                 recordBuffer.Write(buffer, index, count);
                 index += count;
                 absoluteOffset += count;
@@ -80,7 +88,11 @@ public sealed class FileSystemCodexSessionEventProvider : ICodexSessionEventProv
                         length--;
                     }
 
-                    string payload = Encoding.UTF8.GetString(recordBuffer.GetBuffer(), 0, length);
+                    // The optional UTF-8 BOM is not JSON text. Its original bytes still belong
+                    // to the record coordinates and checkpoint hash.
+                    int textStart = recordStart == 0 && length >= 3 && recordBuffer.GetBuffer().AsSpan(0, 3)
+                        .SequenceEqual(new byte[] { 0xEF, 0xBB, 0xBF }) ? 3 : 0;
+                    string payload = Encoding.UTF8.GetString(recordBuffer.GetBuffer(), textStart, length - textStart);
                     var completedRecord = new RawSessionRecord(filePath, recordStart, absoluteOffset, payload);
                     recordBuffer.SetLength(0);
                     // A rare multi-megabyte content record must not pin its capacity while the
@@ -88,7 +100,7 @@ public sealed class FileSystemCodexSessionEventProvider : ICodexSessionEventProv
                     if (recordBuffer.Capacity > BufferSize) recordBuffer.Capacity = BufferSize;
                     recordStart = absoluteOffset;
 
-                    if (!string.IsNullOrWhiteSpace(payload))
+                    if (includeWhitespace || !string.IsNullOrWhiteSpace(payload))
                     {
                         yield return completedRecord;
                     }

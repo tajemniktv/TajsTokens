@@ -4,6 +4,13 @@
 
 namespace TajsTokens.Core.Models;
 
+public enum CodexRolloutReadFailure
+{
+    InvalidCompressedFrame, TruncatedCompressedFrame, UnsupportedWindow, UnsupportedDictionary,
+    RepresentationChanged, ConflictingRepresentations, UnsupportedCheckpoint, RecordTooLarge,
+    Inaccessible, MissingFile, Unexpected,
+}
+
 public sealed record CodexIngestionResult(
     int RecordsScanned,
     int RecordsNormalized,
@@ -12,14 +19,20 @@ public sealed record CodexIngestionResult(
     public string? SourceIdentity { get; init; }
     public long LastCompleteRecordOffset { get; init; }
     public long SourceLength { get; init; }
+    public string? LogicalSourcePath { get; init; }
+    public string? PhysicalSourcePath { get; init; }
+    public long PhysicalSourceLength { get; init; }
+    public bool IsSourceMissing { get; init; }
     // Ephemeral logical work counters; never physical disk I/O or retained source content.
     public long PrefixBytesHashed { get; init; }
     public long CompleteRecordBytesDecoded { get; init; }
+    public long CompressedValidationBytes { get; init; }
     public int CheckpointWrites { get; init; }
 
-    public bool ReachedCurrentEndOfFile => LastCompleteRecordOffset >= SourceLength;
+    public bool ReachedCurrentEndOfFile => !IsSourceMissing && LastCompleteRecordOffset >= SourceLength;
 
     public static CodexIngestionResult Empty { get; } = new(0, 0, null);
+    public static CodexIngestionResult MissingSource { get; } = new(0, 0, null) { IsSourceMissing = true };
 }
 
 public sealed record CodexObservatoryRefreshResult(
@@ -31,6 +44,9 @@ public sealed record CodexObservatoryRefreshResult(
     int Errors,
     long BytesObserved)
 {
+    public IReadOnlyDictionary<CodexRolloutReadFailure, int> ReadFailures { get; init; }
+        = new Dictionary<CodexRolloutReadFailure, int>();
+    public long CompressedValidationBytes { get; init; }
     public CodexCollectionCoverage? Coverage { get; init; }
     public int DeferredFiles { get; init; }
     public bool DiscoveryReconciled { get; init; }

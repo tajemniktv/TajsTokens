@@ -18,6 +18,45 @@ namespace TajsTokens.Core.Tests;
 
 public sealed class CodexStateIndexedIngestionTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CompressedCatalogRolloutUsesDecodedEofAndCommitsItsFingerprint(bool compressedCatalogPath)
+    {
+        DirectoryInfo directory = Directory.CreateTempSubdirectory("tajstokens-state-compressed-");
+        try
+        {
+            const string owner = "11111111-1111-4111-8111-111111111111";
+            DirectoryInfo sessions = Directory.CreateDirectory(Path.Combine(directory.FullName, "sessions"));
+            string file = Path.Combine(sessions.FullName, $"rollout-{owner}.jsonl");
+            byte[] bytes = await File.ReadAllBytesAsync(Path.Combine(AppContext.BaseDirectory, "Fixtures", "CodexRollouts", "root-counter-reset.jsonl"));
+            using (var compressor = new ZstdSharp.Compressor(3))
+                await File.WriteAllBytesAsync(file + ".zst", compressor.Wrap(bytes).ToArray());
+            long updated = new DateTimeOffset(File.GetLastWriteTimeUtc(file + ".zst")).ToUnixTimeMilliseconds();
+            await CreateStateDatabaseAsync(Path.Combine(directory.FullName, "state_5.sqlite"),
+                [new StateThread(owner, compressedCatalogPath ? file + ".zst" : file, updated - 1000, updated, 220)]);
+            string database = Path.Combine(directory.FullName, "telemetry.db");
+            var repository = new SqliteTelemetryRepository(database);
+            await repository.InitializeAsync(default);
+            using var store = new SqliteCodexObservatoryStore(database);
+            var index = new SqliteCodexStateIndexStore(database);
+            var ingestion = new CodexSessionIngestionService(new FileSystemCodexSessionEventProvider(), repository, store,
+                new SqliteCodexIngestionBatchWriter(database, store));
+            var collector = new CodexObservatoryService(ingestion, store, new CodexStateCatalog(directory.FullName), index, [sessions.FullName]);
+            CodexObservatoryRefreshResult first = await collector.RefreshAsync(default);
+            Assert.Equal(1, first.FilesScanned);
+            Assert.Equal(0, first.Errors);
+            Assert.Equal(0, first.DeferredFiles);
+            Assert.Equal(1, first.Coverage!.AccessibleIndexedPaths);
+            Assert.Equal(0, (await collector.RefreshAsync(default)).FilesScanned);
+            Assert.Single(await index.GetFingerprintsAsync(default));
+            FileIngestionCheckpoint checkpoint = (await repository.GetCheckpointAsync(file, default))!;
+            Assert.Equal(bytes.Length, checkpoint.LastByteOffset);
+            Assert.Equal("zstandard", checkpoint.PhysicalEncoding);
+        }
+        finally { SqliteConnection.ClearAllPools(); directory.Delete(true); }
+    }
+
     [Fact]
     public async Task RefreshAsync_Version6CacheRevisitsUnchangedRolloutForTimestampProvenance()
     {

@@ -13,4 +13,8 @@ public sealed record FileIngestionCheckpoint(
     string? SourceIdentity)
 {
     public string? ConsumedPrefixSha256 { get; init; }
+    public string? CoordinateKind { get; init; }
+    public string? LogicalSourcePath { get; init; }
+    public string? PhysicalEncoding { get; init; }
+    public string? PhysicalSourceIdentity { get; init; }
 }
