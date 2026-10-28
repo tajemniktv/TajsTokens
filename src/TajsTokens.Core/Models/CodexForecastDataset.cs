@@ -55,4 +55,8 @@ public sealed record CodexForecastFeatures(
     ForecastReplayAvailability Availability,
     int PeakObservedTurnOverlap = 0,
     int ObservedTokenEvents = 0,
-    int ObservedContextEvents = 0);
+    int ObservedContextEvents = 0)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public CodexJointWorkload? JointWorkload { get; init; }
+}

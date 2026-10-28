@@ -150,6 +150,7 @@ public sealed class CodexIntelligenceEngine(
                 Fingerprint(new { selected, quota, forecasts, evidenceIds = evidence.Select(x => x.Id).ToArray() })))
         {
             CurrentState = live.CurrentState,
+            JointWorkload = CodexJointWorkloadBuilder.Build(selected.Select(x => x.Workload)),
             Chats = CodexProviderReconciliation.Tasks(evidence, selected, selection),
             HistoricalPeriods = selection.HasWorkFilter
                 ? []

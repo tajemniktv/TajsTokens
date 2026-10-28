@@ -18,7 +18,7 @@ namespace TajsTokens.Core.Services;
 /// </summary>
 public static class TokenWorkloadPredictionService
 {
-    public const string PolicyVersion = "rollout-token/v2";
+    public const string PolicyVersion = "rollout-token/v3-joint-composition";
 
     public const string Methodology = "Reconstructed rollout history: predict the sum of recorded token increments " +
                                       "(including cached input) in the next interval, conditional on recent local activity. " +

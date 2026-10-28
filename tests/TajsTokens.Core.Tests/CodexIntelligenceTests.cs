@@ -97,9 +97,16 @@ public sealed class CodexIntelligenceTests
                 Assert.Single(Assert.Single(result.ProviderEvidence, x => x.Activity is not null).Activity!.DailyUsageBuckets!).Tokens);
             Assert.Equal("native-thread", Assert.Single(result.Ledger).ThreadId);
             Assert.Equal("source", result.Ledger[0].SourceIdentity);
+            var joint = Assert.IsType<CodexJointWorkload>(result.JointWorkload);
+            Assert.Equal(35, joint.ReportedTokens);
+            Assert.Equal(35, joint.CategoryTokens);
+            Assert.Equal("gpt-6-astra", Assert.Single(joint.Cells).Coordinate!.Model);
+            Assert.Null(joint.Cells[0].Coordinate!.ExecutionTier);
             Assert.Equal(35, Assert.Single(result.Chats).SelectedLocalTokens);
             Assert.Contains("ownership incomplete", result.Chats[0].Compatibility);
-            Assert.Empty((await engine.QueryAsync(selection with { AccountKey = "account" }, default)).Ledger);
+            var unknownAccount = await engine.QueryAsync(selection with { AccountKey = "account" }, default);
+            Assert.Empty(unknownAccount.Ledger);
+            Assert.Empty(unknownAccount.JointWorkload!.Cells);
             CodexForecastDataset canonical = await new SqliteForecastDatasetReader(
                     database,
                     [
@@ -139,6 +146,7 @@ public sealed class CodexIntelligenceTests
                 selection with { AccountKey = "account", ThreadId = "native-thread" },
                 default);
             Assert.Single(attributed.Ledger);
+            Assert.Equal(joint, attributed.JointWorkload);
             Assert.Single(attributed.Chats);
             Assert.Empty(attributed.Current);
             Assert.Empty(attributed.QuotaTimeline);

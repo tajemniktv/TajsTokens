@@ -252,7 +252,13 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
                         snapshot.Chats.Select(x =>
                             $"{x.ThreadId} · {x.Report.DataStatus} · {x.Report.UsageSource} · weekly {x.Report.Amounts.WeeklyLimitPercent?.ToString("0.####") ?? "unknown"}% · balance credits {x.Report.Amounts.BalanceUsageCredits?.ToString() ?? "unknown"}\n{x.SelectedLocalTokens:N0} local tokens in selection · as of {x.DataAsOfUtc?.ToString("O") ?? "unknown"}\n{x.Compatibility}"));
             EvidenceText.Text = string.Join("\n\n", snapshot.EvidenceHealth.Select(x => $"{x.Source} · {x.State}\n{x.Explanation}")) +
-                                $"\nAPI coverage: {snapshot.ApiEquivalent.PricedReportedTokens:N0} priced / {snapshot.ApiEquivalent.UnpricedReportedTokens:N0} unpriced tokens.";
+                                $"\nAPI coverage: {snapshot.ApiEquivalent.PricedReportedTokens:N0} priced / {snapshot.ApiEquivalent.UnpricedReportedTokens:N0} unpriced tokens." +
+                                (snapshot.JointWorkload is { } joint ? $"\n\n{joint.Describe()}\n" + string.Join("\n", joint.Cells.Take(16).Select(cell =>
+                                    $"{cell.Coordinate!.Model ?? "unknown model"} · {cell.Coordinate.ReasoningEffort ?? "unknown effort"}: " +
+                                    $"input {cell.UncachedInput:N0}, cache read {cell.CacheRead:N0}, cache write {cell.CacheWrite:N0}, " +
+                                    $"output {cell.NonReasoningOutput:N0}, reasoning {cell.ReasoningOutput:N0}; reported {cell.ReportedTotal:N0}")) +
+                                    (joint.Cells.Count > 16 ? "\nFirst 16 coordinate rows shown; projection retains the remaining supported rows." : "") :
+                                    "\nJoint workload unavailable in this capture.");
             TimelineText.Text = string.Join(
                                     "\n",
                                     snapshot.Timeline.TakeLast(100)

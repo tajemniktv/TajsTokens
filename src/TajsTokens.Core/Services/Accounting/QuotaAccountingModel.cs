@@ -13,7 +13,7 @@ namespace TajsTokens.Core.Services;
 /// <summary>Frozen-prefix cost calibration, deliberately separate from future-workload forecasting.</summary>
 public static class QuotaAccountingModel
 {
-    public const string Version = "quota-cost-evaluation/v6-elapsed-pace";
+    public const string Version = "quota-cost-evaluation/v7-joint-evidence";
 
     public const string Methodology = "Evaluation only: actual interval workload is an oracle cost input, NOT an end-to-end forecast. " +
                                       "Disjoint targets within each cohort/horizon; overlapping sources and horizons are never pooled. " +
@@ -326,7 +326,7 @@ public static class QuotaAccountingModel
             if (Rich)
                 names.AddRange(
                     models.Select(x => "model:" + x).Concat(efforts.Select(x => "effort:" + x))
-                        .Concat(["unknown-model", "unknown-effort"]));
+                        .Concat(["unknown-model", "unknown-effort", "vocabulary-overflow-model", "vocabulary-overflow-effort"]));
             if (extension is not null) names.AddRange(extension.Names);
             Names = names.ToArray();
         }
@@ -345,8 +345,10 @@ public static class QuotaAccountingModel
             {
                 values.AddRange(models.Select(x => total * f.ModelTokenShares.GetValueOrDefault(x)));
                 values.AddRange(efforts.Select(x => total * f.EffortTokenShares.GetValueOrDefault(x)));
-                values.Add(total * Math.Max(0, 1 - models.Sum(x => f.ModelTokenShares.GetValueOrDefault(x))));
-                values.Add(total * Math.Max(0, 1 - efforts.Sum(x => f.EffortTokenShares.GetValueOrDefault(x))));
+                values.Add(total * Math.Max(0, 1 - f.ModelTokenShares.Values.Sum()));
+                values.Add(total * Math.Max(0, 1 - f.EffortTokenShares.Values.Sum()));
+                values.Add(total * f.ModelTokenShares.Where(x => !models.Contains(x.Key, StringComparer.Ordinal)).Sum(x => x.Value));
+                values.Add(total * f.EffortTokenShares.Where(x => !efforts.Contains(x.Key, StringComparer.Ordinal)).Sum(x => x.Value));
             }
             // Optional features are workload interactions: time or missing telemetry cannot
             // generate predicted local cost in an interval with no recorded tokens.

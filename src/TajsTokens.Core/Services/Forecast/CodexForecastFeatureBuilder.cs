@@ -124,6 +124,6 @@ public static class CodexForecastFeatureBuilder
             availability,
             peak,
             tokens.Length,
-            contexts.Length);
+            contexts.Length) { JointWorkload = CodexJointWorkloadBuilder.Build(tokens) };
     }
 }

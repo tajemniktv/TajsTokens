@@ -244,6 +244,7 @@ public static class ComposedQuotaValidation
                 Tokens = (long)Math.Clamp(workload.ExpectedTokens, 0, long.MaxValue),
                 ModelTokenShares = workload.ModelShares,
                 EffortTokenShares = workload.EffortShares,
+                JointWorkload = workload.JointWorkload,
             },
         };
     }

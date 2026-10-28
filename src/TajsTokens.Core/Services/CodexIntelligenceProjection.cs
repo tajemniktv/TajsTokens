@@ -33,7 +33,7 @@ public static class CodexIntelligenceProjection
         };
     }
 
-    public const string Version = "codex-intelligence/v1";
+    public const string Version = "codex-intelligence/v2-joint";
 
     public static CodexCurrentState CurrentState(TelemetrySnapshot telemetry)
     {
@@ -102,6 +102,7 @@ public static class CodexIntelligenceProjection
         var components = new SortedDictionary<string, string>(StringComparer.Ordinal)
         {
             ["projection"] = Version,
+            ["joint-workload"] = CodexJointWorkload.Version,
             ["workload"] = TokenWorkloadPredictionService.PolicyVersion,
             ["accounting"] = QuotaAccountingModel.Version,
             ["forecast"] = QuotaPredictionService.PolicyVersion,

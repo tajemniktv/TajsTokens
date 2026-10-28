@@ -13,7 +13,7 @@ namespace TajsTokens.Core.Services;
 /// <summary>Shared scalar-to-vector projection; retrospective targets never enter composition.</summary>
 public static class WorkloadCompositionPrediction
 {
-    public const string Version = "recent-workload-composition/v2";
+    public const string Version = "recent-workload-composition/v3-joint";
 
     public static PredictedWorkload? Project(
         CodexForecastDataset data,
@@ -61,7 +61,8 @@ public static class WorkloadCompositionPrediction
             rows.Max(x => x.ObservedAtUtc),
             availability,
             Version + ": scalar token forecast distributed by the preceding two hours' disjoint category composition. " +
-            "Model/effort shares retain unknown mass; no future metadata or task completions. " +
-            "Incomplete category evidence withholds composition; this is a prediction, not rewritten accounting.");
+            "Observed joint model/effort/category cells continue together, including unknown and vocabulary-overflow mass; marginal shares never invent their pairing. " +
+            "No future metadata or task completions. Incomplete category evidence withholds composition; this is a prediction, not rewritten accounting.")
+        { JointWorkload = CodexJointWorkloadBuilder.Project(CodexJointWorkloadBuilder.Build(rows), prediction.ExpectedTokens) };
     }
 }

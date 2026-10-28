@@ -632,12 +632,24 @@ receipt visual acceptance and PERF-001 resource acceptance remain separate.
 Owners: event/dataset projections, accounting feature builder, `TtWorkloadBasis`,
 TT evaluator, existing model metadata, `ApiPriceWorkload` and product snapshot.
 
-- [ ] **SCORE-001 — Preserve sparse model × category quantities.** Build joint cells
+- [x] **SCORE-001 — Preserve sparse model × category quantities.** Build joint cells
   from reconciled events, with supported tier/product/context distinctions and
   explicit unknown mass. Keep disjoint conservation and reported totals; never
   multiply marginal shares to invent joint cells. Distinguish vocabulary overflow
   from missing metadata. Carry joint information into recent-work/forecast caches;
   test equal marginal totals with different joint costs.
+  **Implemented/installed:** `codex-joint-workload/v1` aggregates selected increments
+  directly, preserves exact category/reported amounts and per-event diagnostics,
+  and separates bounded vocabulary overflow from overlapping missing-label mass.
+  Execution tier/product/charged context remain explicitly unknown in native rows.
+  Product Evidence, origin-qualified feature caches and conditional forecast
+  composition carry the joint mixture. The fixed-month check conserved 3,984,535,029
+  tokens across 20,078 events and all 759 cost intervals; 24 chronological comparator
+  score/trial sets matched the prior installed baseline. **781 Core tests** and the
+  Windows build passed; installed read-model and numeric-retention checks passed.
+  [Contract and limits](docs/source-notes/STAGE4_JOINT_WORKLOAD.md). Joint-model
+  calibration and public TT activation remain later work; visual acceptance stays
+  separate.
 - [ ] **T-01 — Select the public TT convention.** Resolve DEC-001 before activation:
   exact schedule/weights, reference basket, units/vintage, support/equivalence,
   speed normalization and extension rules. TT is a frozen reference-consumption
@@ -815,8 +827,10 @@ original counter-input journal, component-11 superseded numeric retention and th
 **EVID-003** supplies eligibility explanations and the retained 67-case breakdown;
 **EVID-004** supplies the stated retention/answer and selected-generation acceptance.
 **PACE-001–004** now implement and evaluate the elapsed-time correction under the
-established quota contract. Continue Stage 4 with **SCORE-001** joint evidence and
-the explicit public-basis/catalog decisions. No public TT ruler is activated yet.
+established quota contract. **SCORE-001** now carries selected joint evidence through
+the installed product and conditional forecast projections. Continue Stage 4 with
+the explicit public-basis/catalog decisions and versioned joint scoring. No public
+TT ruler is activated yet.
 
 ### Existing implementation baseline and known gaps
 

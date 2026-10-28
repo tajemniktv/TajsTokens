@@ -70,6 +70,7 @@ public sealed record CodexIntelligenceSnapshot(
     public IReadOnlyList<CodexPeriodReconciliation> HistoricalPeriods { get; init; } = [];
     public QuotaCostReport? Accounting { get; init; }
     public CodexRegimeReport? Regime { get; init; }
+    public CodexJointWorkload? JointWorkload { get; init; }
 }
 
 public sealed record CodexChatAccounting(

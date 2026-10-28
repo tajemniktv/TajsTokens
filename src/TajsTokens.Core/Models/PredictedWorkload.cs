@@ -15,4 +15,8 @@ public sealed record PredictedWorkload(
     int CompositionObservations,
     DateTimeOffset LatestCompositionAtUtc,
     ForecastReplayAvailability Availability,
-    string Methodology);
+    string Methodology)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public CodexJointWorkload? JointWorkload { get; init; }
+}

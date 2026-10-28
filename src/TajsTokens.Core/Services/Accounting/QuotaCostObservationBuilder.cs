@@ -12,7 +12,7 @@ namespace TajsTokens.Core.Services;
 
 public static class QuotaCostObservationBuilder
 {
-    public const string Version = "quota-cost-observations/v4-elapsed-pace";
+    public const string Version = "quota-cost-observations/v5-joint-evidence";
 
     public const string CoverageBoundary =
         "Construction counts eligible-epoch interior start candidates, not raw quota readings or independent outcomes. " +
