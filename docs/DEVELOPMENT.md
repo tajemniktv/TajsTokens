@@ -22,6 +22,22 @@ To bring an already-running installed tray instance forward through the same act
 
 The signal is restricted to the current user/session and the same installation directory. With no matching instance, this starts the dashboard normally. `--background` starts tray-only. Neither flag changes persistent settings.
 
+## Explicit joint TT candidate scoring
+
+After building the evaluation tool, supply a serialized `TtJointWorkloadBasis`
+definition with its computed `BasisId` and `ReferenceScore`:
+
+```powershell
+dotnet run --project tools/TajsTokens.ForecastEvaluation/TajsTokens.ForecastEvaluation.csproj -c Debug --no-build --no-restore -- --score-joint "$env:LOCALAPPDATA/Programs/TajemnikTV/TajsTokens/data/telemetry.db" .codex/temp/candidate-basis.json 2026-09-27T00:00:00Z 2026-10-27T14:58:00Z > .codex/temp/candidate-joint-score.json
+```
+
+This command reads app-owned selected native increments and writes aggregate JSON
+to standard output. It does not activate the candidate, save scores into daily data
+or infer account-wide completeness. Public activation still requires T-01. Exact,
+bounded, partial, unbounded and inconsistent results retain their distinct meanings;
+see [the scoring contract](source-notes/STAGE4_JOINT_SCORING.md). A definition larger
+than 512 KiB or a future/range longer than 366 days is rejected. Use Ctrl+C to cancel.
+
 ## Forecast threshold study
 
 Run this explicitly against the app-owned telemetry database, with a fixed past UTC range:

@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Models;
+using TajsTokens.Core.Services;
 
 namespace TajsTokens.Infrastructure.Persistence;
 
@@ -113,7 +114,8 @@ public sealed partial class SqliteTelemetryRepository
                 snapshot.FromUtc < snapshot.ToUtc && snapshot.ToUtc - snapshot.FromUtc <= TimeSpan.FromDays(366) &&
                 snapshot.Workload.Kind == CodexJointQuantityKind.ObservedIncrements &&
                 (snapshot.RestatesSnapshotId is null || !string.IsNullOrWhiteSpace(snapshot.RestatesSnapshotId) && snapshot.RestatesSnapshotId.Length <= 128 && snapshot.RestatesSnapshotId != snapshot.Id) &&
-                snapshot.ExactTt == snapshot.Basis.ScoreExact(snapshot.Workload);
+                snapshot.ExactTt == snapshot.Basis.ScoreExact(snapshot.Workload) &&
+                (snapshot.Assessment is null || snapshot.Assessment == TtJointScoring.Evaluate(snapshot.Basis, snapshot.Workload));
         }
         catch (OverflowException) { return false; }
     }

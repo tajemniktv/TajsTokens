@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Models;
+using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 
 namespace TajsTokens.Core.Tests;
@@ -36,6 +37,30 @@ public sealed class TtJointScorePersistenceTests : IDisposable
             command.Parameters.AddWithValue("$hash", Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(payload))));
         }
         await command.ExecuteNonQueryAsync();
+    }
+
+    [Fact]
+    public async Task OptionalAssessmentPreservesOldPayloadsAndFreezesNewPartialResultsAcrossRestart()
+    {
+        var repository = new SqliteTelemetryRepository(Database); var original = Snapshot();
+        Assert.DoesNotContain("Assessment", JsonSerializer.Serialize(original));
+        await repository.SaveTtJointScoreAsync(original, default);
+        var unsupported = new CodexJointWorkload(CodexJointWorkload.Version, original.Workload.Kind,
+            original.Workload.Cells.Select(x => x with { Coordinate = x.Coordinate! with { Model = "unmapped" } }).ToArray(), null, 0, 0);
+        var partial = original with { Id = "partial", Workload = unsupported, ExactTt = null,
+            Assessment = TtJointScoring.Evaluate(original.Basis, unsupported) };
+        await repository.SaveTtJointScoreAsync(partial, default);
+        await Assert.ThrowsAsync<ArgumentException>(() => repository.SaveTtJointScoreAsync(partial with { Assessment = partial.Assessment! with { CoveredSubtotalTt = 999 } }, default));
+        var history = await new SqliteTelemetryRepository(Database).GetTtJointScoreHistoryAsync(original.Provider, original.Profile, 20, default);
+        Assert.Null(history.Single(x => x.Id == original.Id).Snapshot!.Assessment);
+        Assert.Equal(partial.Assessment, history.Single(x => x.Id == partial.Id).Snapshot!.Assessment);
+        Assert.Equal(TtScoreState.Partial, partial.Assessment!.State);
+        var tampered = JsonNode.Parse(JsonSerializer.Serialize(partial))!;
+        tampered["Assessment"]!["CoveredSubtotalTt"] = 999;
+        await Execute("UPDATE tt_joint_score_snapshots SET payload=$payload,content_hash=$hash WHERE snapshot_id='partial'", tampered.ToJsonString());
+        var checkedHistory = await repository.GetTtJointScoreHistoryAsync(original.Provider, original.Profile, 20, default);
+        Assert.NotNull(checkedHistory.Single(x => x.Id == "partial").Problem);
+        Assert.NotNull(checkedHistory.Single(x => x.Id == original.Id).Snapshot);
     }
     private async Task<long> Scalar(string sql)
     {

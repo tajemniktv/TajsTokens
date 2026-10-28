@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace TajsTokens.Core.Models;
 
 /// <summary>Original selected scoring output or an explicitly linked restatement of exactly the same workload.</summary>
@@ -7,6 +9,8 @@ public sealed record TtJointScoreSnapshot(string Id, DateTimeOffset RecordedAtUt
 {
     public const string Version = "tt-joint-score-snapshot/v1";
     public string Contract { get; init; } = Version;
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public TtScoreAssessment? Assessment { get; init; }
 }
 
 public sealed record TtJointScoreArchiveEntry(string Id, DateTimeOffset? RecordedAtUtc, TtJointScoreSnapshot? Snapshot, string? Problem);

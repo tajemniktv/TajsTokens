@@ -668,12 +668,22 @@ TT evaluator, existing model metadata, `ApiPriceWorkload` and product snapshot.
   checks passed. All six existing research snapshots, 96,391 native rows and 435
   counter-input rows survived the upgrade unchanged. Daily data has no joint-score
   records or active public basis. [Contract and validation](docs/source-notes/STAGE4_JOINT_BASIS.md).
-- [ ] **SCORE-003 — Support exact, bounded and partial scoring.** Derive missing-field
+- [x] **SCORE-003 — Support exact, bounded and partial scoring.** Derive missing-field
   requirements from the requested score: equal-weight output splits can be exact;
   unknown cache splits can give finite bounds; unknown models retain covered
   subtotals without guessed weights. Distinguish exact-under-basis, finite bounds,
   partial/unbounded and inconsistent constraints. Implement cheap common cases;
   generic feasibility solving belongs in bounded/offline work when justified.
+  **Implemented/installed:** `tt-joint-scoring/v1` solves the five-category/group-total
+  cases directly and returns Exact, FiniteBounds, Partial, Unbounded, Inconsistent
+  or ArithmeticUnavailable. Unsupported mappings retain identified supported
+  subtotals; finite bounds round outward and are not probabilities. Versioned optional
+  assessments preserve existing archive payloads. The explicit read-only
+  `--score-joint` candidate tool does not activate or save a public ruler.
+  **809 Core tests**, including 80 independent exhaustive small-allocation checks,
+  and the Windows build passed. Installed frozen-month scoring matched independent
+  subtotals/unmapped quantities; existing daily records stayed unchanged.
+  [Contract and validation](docs/source-notes/STAGE4_JOINT_SCORING.md).
 - [ ] **CAT-001 — Separate discovery and entitlement.** Version model metadata with
   source/retrieval time, aliases, retired entries and capability/effort support.
   Listed, observed and account-access-verified are distinct. Unknown observed models
@@ -839,9 +849,10 @@ original counter-input journal, component-11 superseded numeric retention and th
 established quota contract. **SCORE-001** now carries selected joint evidence through
 the installed product and conditional forecast projections. Continue Stage 4 with
 the explicit public-basis/catalog decisions. **SCORE-002** now provides the frozen
-joint basis and original/restated archive. Continue **SCORE-003** with explicit
-bounded/partial scoring before the measured-TT presentation. No public TT ruler is
-activated yet.
+joint basis and original/restated archive. **SCORE-003** adds explicit exact/bounded/
+partial scoring and a read-only candidate tool. Continue Stage 4 with **CAT-001/002**
+and the explicit public-basis decisions before measured-TT presentation. No public
+TT ruler is activated yet.
 
 ### Existing implementation baseline and known gaps
 
