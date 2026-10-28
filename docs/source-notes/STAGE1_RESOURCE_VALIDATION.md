@@ -659,3 +659,98 @@ by another successful Windows build/install (52.52s), restarting the daily app a
 PID 7984. Core tests do not exercise WinUI state restoration. Manual planner/form,
 Back/Forward, restore timing and combined-memory acceptance remain pending under
 PERF-004/PERF-001. Agent Computer Use remains stopped; the user performs UI actions.
+
+### Restore ordering and accessibility identity
+
+The first installed unload pass preserved planner text/numeric inputs but reset its
+selected tab to Overview. Restoration in Frame.Navigated ran before the page's
+navigation-mode initialization. Saved inputs now apply once at Loading, after
+navigation parameter handling and before Loaded starts scoped queries. Nested
+usage inputs are applied while detached; nested explorer pages use the same
+Loading boundary. Switching between history and model-lab modes does not apply a
+saved index to a different tab collection.
+
+An installed pass of that correction kept the Planning tab, 3.25-hour duration and
+test model text after a full unload. A separate unsaved Settings interval of 67
+seconds survived unloading; Back returned to Planning with its inputs intact.
+The test values were restored without saving runtime settings. One traced corrected
+restore reached its first frame in 103.305 ms. All 45 captured phases completed,
+with zero lost events/source errors and a dashboard-release event. This is one
+observed transition, not a population percentile or input-to-photon latency.
+Evidence: `dashboard-restore-order*` under `.codex/temp/stage1/`.
+
+Broader UI inspection reproduced an unresponsive chat browser with unbounded
+native allocation. Symbolized live stacks locate the UI thread in WinUI item
+container lookup and UIAutomationCore sibling traversal/BulkFetch, rather than a
+forecast calculation. A screenshot-only attempt also encountered the same native
+accessibility path; it did not isolate the initiating client. Two diagnosed test
+processes required targeted recovery after the normal shutdown timed out. The
+normal deployment helper remains graceful-only; its behavior was not changed.
+
+This matches the reported WinUI [duplicate-item automation defect](https://github.com/microsoft/microsoft-ui-xaml/issues/11226).
+The chat diagnostic lists formerly bound display strings directly, allowing equal
+rows. They now wrap each row in a reference-identity TextListItem and bind its Text,
+preserving duplicate labels and order. Do not convert this wrapper to a value-equal
+record or deduplicate user-visible evidence. An automated regression covers this
+identity contract. Full Core suite: 687 passed, none skipped (1m12s). Windows build
+and installed accessibility confirmation are pending at this checkpoint. Stack-only
+local evidence: `usage-ui-stall*` and `chat-screenshot-native-stack.txt`; no memory
+dump or content-bearing heap artifact was collected.
+
+### Confirmed hidden sample after page unloading
+
+On the earlier installed unload build (before the restore-order and accessibility
+corrections), a UI-confirmed 120-second minimized interval ended at 420.76 MiB
+combined private commit. After the 30-second delay, its time-weighted mean was
+415.10 MiB and sampled peak 595.06 MiB. The main process fell from 232.49 MiB at the
+first sample to 207.41 MiB at the last; worker peak was 226.68 MiB. Parent CPU was
+0.0733% and worker CPU 0.5354%, normalized to 16 logical processors. The sample was
+unprofiled and includes ongoing collection/calibration plus observed helpers.
+
+At the aligned 595.06 MiB peak the app used 206.06 MiB, calibration 226.68 MiB,
+the native Codex quota helper 126.93 MiB, node 21.36 MiB and the three remaining
+launcher/console helpers 14.04 MiB. Thus releasing pages does not resolve the
+combined peak; helper overlap and residual UI/runtime memory remain material.
+The separate later accessibility runaway is excluded from this hidden sample.
+Evidence: `dashboard-unload-hidden-120s.json`. The proposed sustained-versus-peak
+400 MiB budget has been put to the user; neither choice is yet accepted.
+
+The final Windows build/install passed with zero warnings/errors (55.24s), starting
+PID 38692. Repeated accessibility walks over the 394-thread chat browser and usage
+view returned normally; the process remained responsive without the earlier native
+allocation runaway. On this build, a full hidden unload preserved the nested usage
+view, seven-day history and text filter. A cached forecast History page switched
+into Model lab without applying an invalid saved tab index. A further unload
+preserved the data explorer's child filter. Temporary inputs were cleared; the
+usage range was returned to its original thirty days. No settings were saved.
+
+The later restore capture completed all 34 phases, with no lost events/source
+errors. Its two first-frame observations were **53.601 ms and 76.525 ms**. These
+cover installed transitions; they are not p95 estimates. The earlier corrected
+planner/settings/Back checks plus these nested-view checks close PERF-004's
+functional acceptance. Evidence: `uia-fixed-restore*`. PERF-001 remains open.
+
+A fresh unprofiled, UI-confirmed hidden sample after visiting multiple pages on the
+final build averaged 412.63 MiB after the unload delay and sampled a 670.77 MiB
+combined peak. Worker activity was observed only for the final 61.86 seconds, so
+this mean is not a sustained-worker budget result. At the aligned peak: parent
+336.75 MiB, worker 178.87 MiB, native quota helper 119.16 MiB, node 21.34 MiB and
+other helpers 14.66 MiB. Parent CPU was 0.0521%, worker 0.4894% of 16 processors.
+This broader page-visit scenario is not directly comparable to the earlier planner
+sample or a fresh tray-only process. Evidence: `uia-fixed-hidden-120s.json`.
+
+An isolated, explicitly induced collection followed the normal-operation samples.
+`dotnet-gcdump` 10.0.750501 reported a 6,102,090-byte managed graph (69,429 objects),
+while private commit fell from 366.71 to 309.97 MiB after five seconds. Its runtime
+warned that .NET 10 uses lossy event buffering; the graph is not an exact inventory
+of every native/managed allocation. Live SOS inspection still enumerated two
+Overview and two Forecast page objects, with no managed root path found for them;
+that alone does not establish a leak or identify native ownership. The remaining
+private commit cannot be attributed to retained forecasting arrays from this
+managed graph. Framework/native caches, allocations outside the CLR heap, observer
+effects and lifecycle differences remain unresolved attribution candidates.
+
+This diagnostic changes GC state and **does not count as normal-operation RAM
+acceptance**. No forced collection was added to production. Metadata-only graph,
+aggregate before/after JSON and stack/root reports remain local under
+`.codex/temp/stage1/hidden-page-*`; no raw process-memory dump was taken.

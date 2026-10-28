@@ -20,7 +20,7 @@ public sealed partial class CodexPage : IDashboardPresentation
         _showExecutionDetails = saved.ExecutionDetails;
         if (saved.UsageInputs is not null)
         {
-            ShowUsage(true);
+            _usagePage ??= CreateUsagePage();
             ((IDashboardPresentation)_usagePage!).RestoreInputs(saved.UsageInputs);
         }
         if (saved.Fleet) ShowFleet(true);

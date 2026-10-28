@@ -172,8 +172,8 @@ Owners: `WindowsResourcePolicy`, `App`, `MainWindow`, `TelemetryCoordinator`,
 `CodexObservatoryService`, SQLite stores/providers and `CalibrationProcessService`.
 Memo §11 supplies the mechanisms; their relative runtime cost remains to be measured.
 
-Stage 1 is in progress: PERF-002–003, PERF-005–008 and P-01
-are implemented; PERF-004's approved dashboard-unload extension awaits runtime acceptance.
+Stage 1 is in progress: PERF-002–008 and P-01 are implemented and verified within
+their stated scope; PERF-001 resource acceptance and numerical budgets remain open.
 Normal interactive scheduling, retryable/visible EcoQoS, coalesced
 fleet reads, independent discovery/catch-up, precise projection invalidation, no-op
 write suppression, guarded initialization, indexed reset tails and ordered token
@@ -182,7 +182,7 @@ and hidden-history eviction are also installed. Opt-in aggregate phase diagnosti
 and an offline EventPipe reporter are validated; the installed sample identifies
 workload-prefix preparation and worker allocation pressure. Evidence-qualified
 calibration scheduling and worker-local overlapping dataset reads are installed.
-All 686 Core tests and the Windows build pass. Resource/restore acceptance and
+All 687 Core tests and the Windows build pass. Resource/restore acceptance and
 numerical budgets remain open under PERF-001. See
 [current validation evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 
@@ -195,9 +195,11 @@ numerical budgets remain open under PERF-001. See
   physical-I/O counter.
   Aggregate phase capture and separate parent/worker allocation/GC samples are
   recorded. Manual hide/restore was normal for the user; two captured first frames
-  took 30.3/96.3 ms. The active-worker combined sampled private peak remains
-  566.7 MiB after dashboard use; a fresh background-only process peaked at 388.2 MiB
-  across the app, worker and helpers. Controlled scenario comparisons, attributed physical I/O and numerical budgets
+  took 30.3/96.3 ms; a corrected unload/rebuild restore took 103.3 ms. A confirmed
+  hidden sample averaged 415.1 MiB after the unload delay and peaked at 595.1 MiB
+  when a 126.9 MiB quota helper overlapped calibration. A fresh background-only
+  process previously peaked at 388.2 MiB across the tree. Controlled scenario
+  comparisons, attributed physical I/O and numerical budgets
   remain open; [measurement details](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 - [x] **PERF-002 — Repair interactive scheduling.** Remove the UI/tray process hard
   CPU cap and routine forced compacting GC, retaining worker containment and
@@ -214,24 +216,27 @@ numerical budgets remain open under PERF-001. See
   repeat a completed collection's fleet scan or reclamation.
   Implemented with typed completion identity and the coalesced fleet reader;
   [652-test/build and installed evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
-- [ ] **PERF-004 — Preserve presentation state and reduce rendering.** Pause hidden
+- [x] **PERF-004 — Preserve presentation state and reduce rendering.** Pause hidden
   subscriptions/timers, retain lightweight navigation/filter state and selectively
   evict heavy history. Cache summaries by selection/data generation, coalesce visual
   snapshots and update changed properties. Keep alert transitions lossless and
   independent of visual coalescing.
-  Retains the detached frame/inputs, releases heavy history after 30 seconds hidden
-  and qualifies short overview reuse by selection, settings and SQLite generation.
-  Full suite: 670 passed; Windows build/install passed. Installed planning state,
-  hidden release and qualified cache-hit counters were observed;
-  [evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
-  The user approved releasing the dashboard frame after 30 seconds hidden while
-  preserving lightweight inputs/navigation. That extension now captures page-owned
+  Detaches immediately and releases the dashboard frame after 30 seconds hidden,
+  following the user's approved tradeoff. It captures page-owned
   scalar inputs/selection identities and Back/Forward entries, releases the frame
   and its page cache, and rebuilds on restore. Brief hides retain the same view.
-  Unsaved settings retain their original conflict-detection baseline. History,
-  generated visuals, CLI run output and raw comparison evidence are rebuildable;
-  they are not retained as presentation inputs. Manual state/restore acceptance
-  and reclaimed memory still need measurement; PERF-004 is reopened for that pass.
+  Unsaved settings retain their original conflict-detection baseline. History and
+  generated visuals reload; CLI output and raw comparison baselines are released
+  and require another run or a fresh baseline capture. They are not retained as
+  presentation inputs. Installed state/restore acceptance
+  is verified; combined resource acceptance remains under PERF-001. A navigation-order correction preserves
+  the Planning tab, typed values and unsaved settings through full unloading;
+  installed Back navigation passed. Diagnostic text rows now have distinct object
+  identities even when labels match, avoiding a reproduced WinUI accessibility
+  hang. Full suite: 687 passed; Windows build/install passed; repeated installed
+  chat/usage accessibility walks passed. Nested usage range/filter and explorer
+  child-filter restoration, Back navigation and history-to-model-lab switching passed;
+  [evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
 - [x] **PERF-005 — Separate discovery from catch-up.** Deferred/missing/mismatched
   rollouts must not force full discovery every poll. Use bounded fair retries and
   filesystem-fallback budgets, independent relationship reconciliation and correct

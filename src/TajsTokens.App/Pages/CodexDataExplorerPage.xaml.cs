@@ -59,8 +59,8 @@ public sealed partial class CodexDataExplorerPage : Page, IHistoryPresentation
 
             void RestoreExplorerInputs(object sender, NavigationEventArgs args)
             {
-                if (restored.Inputs is not null && args.Content is IDashboardPresentation presentation)
-                    presentation.RestoreInputs(restored.Inputs);
+                if (restored.Inputs is not null && args.Content is Page page && page is IDashboardPresentation)
+                    DashboardInputs.RestoreOnLoading(page, restored.Inputs);
             }
         }
         ShowSources();

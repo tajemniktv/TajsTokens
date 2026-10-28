@@ -13,6 +13,7 @@ using Microsoft.UI.Xaml.Navigation;
 using TajsTokens.Core.Enums;
 using TajsTokens.Core.Models;
 using TajsTokens.Core.Services;
+using TajsTokens.App.ViewModels;
 
 #endregion
 
@@ -125,12 +126,7 @@ public sealed partial class CodexPage : Page, IHistoryPresentation
         FleetHost.Visibility = Visibility.Collapsed;
         if (show && _usagePage is null)
         {
-            _usagePage = new UsagePage();
-            _usagePage.ThreadRequested += async (_, requestedThreadId) =>
-            {
-                ShowUsage(false);
-                await LoadThreadAsync(requestedThreadId);
-            };
+            _usagePage = CreateUsagePage();
         }
         if (show && threadId is not null) _usagePage!.SelectThread(threadId);
         // Detach the report while browsing so its existing unload/cancellation lifecycle runs.
@@ -141,6 +137,17 @@ public sealed partial class CodexPage : Page, IHistoryPresentation
         WorkViewButton.IsChecked = !show;
         FleetViewButton.IsChecked = false;
         UsageViewButton.IsChecked = show;
+    }
+
+    private UsagePage CreateUsagePage()
+    {
+        var page = new UsagePage();
+        page.ThreadRequested += async (_, requestedThreadId) =>
+        {
+            ShowUsage(false);
+            await LoadThreadAsync(requestedThreadId);
+        };
+        return page;
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
@@ -833,7 +840,13 @@ public sealed partial class CodexPage : Page, IHistoryPresentation
 
     private static void AddListSection(Panel parent, string title, IReadOnlyList<string> values)
     {
-        var list = new ListView { SelectionMode = ListViewSelectionMode.None, MaxHeight = 260, ItemsSource = values };
+        var list = new ListView
+        {
+            SelectionMode = ListViewSelectionMode.None,
+            MaxHeight = 260,
+            DisplayMemberPath = nameof(TextListItem.Text),
+            ItemsSource = values.Select(text => new TextListItem(text)).ToArray(),
+        };
         parent.Children.Add(new Expander { Header = title, Content = list, IsExpanded = true });
     }
 

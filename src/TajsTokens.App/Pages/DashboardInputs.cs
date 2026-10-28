@@ -16,6 +16,18 @@ internal sealed record DashboardInput(string Name, string? Text = null, double N
 
 internal static class DashboardInputs
 {
+    public static void RestoreOnLoading(Page page, object state)
+    {
+        // Frame.Navigated precedes the page's OnNavigatedTo. Restore after its
+        // navigation parameter handling, before Loaded starts scoped queries.
+        page.Loading += Apply;
+        void Apply(FrameworkElement sender, object args)
+        {
+            page.Loading -= Apply;
+            ((IDashboardPresentation)page).RestoreInputs(state);
+        }
+    }
+
     public static DashboardInput[] Capture(params FrameworkElement[] controls) => controls.Select(control => control switch
     {
         TextBox box => new DashboardInput(box.Name, Text: box.Text),

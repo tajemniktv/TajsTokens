@@ -228,7 +228,7 @@ public sealed partial class MainWindow : Window
                 if (!_pages.Any(reference => reference.TryGetTarget(out var page) && ReferenceEquals(page, current)))
                     _pages.Add(new(current));
                 if (_pageInputs.Remove(current.GetType(), out object? inputs) && current is IDashboardPresentation presentation)
-                    presentation.RestoreInputs(inputs);
+                    DashboardInputs.RestoreOnLoading(current, inputs);
             }
             _historyPages.RemoveAll(reference => !reference.TryGetTarget(out _));
             if (e.Content is IHistoryPresentation history && !_historyPages.Any(reference =>
