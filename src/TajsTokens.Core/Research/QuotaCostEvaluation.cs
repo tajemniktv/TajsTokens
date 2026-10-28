@@ -46,6 +46,7 @@ public static class QuotaCostEvaluation
                 DatasetCapturedAtUtc = data.CapturedAtUtc,
                 EvidenceCoverage = QuotaEvaluationCoverageBuilder.Build(data),
                 ConstructionCoverage = built.Coverage,
+                Identification = QuotaCostIdentification.Analyze(built.Observations, cancellationToken),
             };
     }
 

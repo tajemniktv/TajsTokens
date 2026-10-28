@@ -752,10 +752,15 @@ not presented as a TT wallet.
 Owners: existing observation builder, accounting model, training/evaluation/coverage
 policies and bounded calibration worker. A TT scalar is not required for this route.
 
-- [ ] **CAL-001 — Diagnose identification and contrast.** Report joint coverage,
+- [x] **CAL-001 — Diagnose identification and contrast.** Report joint coverage,
   effective rank/collinearity, independent blocks/cycles and scenario support. More
   copies of one mixture do not identify individual prices. Keep the fixed-first-20
   experiment as a frozen comparator, not a sample-size theorem or permanent policy.
+  Installed bounded diagnostics expose numerical rank, participation dimension,
+  collinearity, chronological support, later-mixture geometry and zero-local-work
+  quota movement. All 36 retained matrices agreed with independent SVD checks;
+  see [method and results](docs/source-notes/STAGE5_IDENTIFICATION.md). This does
+  not establish account attribution, precise coefficients or feasible scenario bounds.
 - [ ] **CAL-002 — Compare a restrained joint model.** Retain total-token and pooled
   category baselines; test nonnegative model/category coefficients shrunk toward
   pooled weights using the existing solver family. Add effort/tier departures only
@@ -888,18 +893,20 @@ provider scope and answer-specific eligibility slices have their stated installe
 evidence. **PACE-001–004** implement and evaluate the elapsed-time correction.
 Stage 4's **SCORE-001–003** joint projection, frozen basis/archive and qualified
 scoring are installed. **CAT-001** discovery and picker interaction are verified,
-including hidden-dashboard input restoration. The latest full suite passed 837
+including hidden-dashboard input restoration. The latest full suite passed 844
 tests and the Windows build installed successfully; user visual acceptance remains
 separate.
 
-**Continue with Stage 5 / CAL-001.** The user selected the exact
+**Continue with Stage 5 / CAL-002.** The user selected the exact
 [price policy and frozen TT basis](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md).
 CAT-002 and D-01 are integrated and installed: immutable selections, independent
 price imports, measured TT and explicit original-score saving. Automated checks,
 installed numeric/recovery checks and Overview/Planning rendering passed. The native
 file picker opened, but its separate PickerHost surface was not targetable by
-Computer Use; manual file selection stays open under SHIP-004. Stage 5 must diagnose
-joint coverage and identification before selecting a richer quota-conversion model.
+Computer Use; manual file selection stays open under SHIP-004. CAL-001 is installed:
+joint coverage and identification diagnostics expose sparse prefixes and local-work/
+meter mismatches. CAL-002 now compares a restrained joint conversion against the
+existing baselines, without changing production selection on diagnostic evidence alone.
 Programme-wide acceptance gates, user visual acceptance and the PERF-001
 resource-budget decision remain open.
 

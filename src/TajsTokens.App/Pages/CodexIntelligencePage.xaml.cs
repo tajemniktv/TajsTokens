@@ -406,6 +406,15 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
                                               $"{x.BoundaryLowerUtc:O} → {x.BoundaryUpperUtc:O}: residual {x.BeforeResidual:0.##} → {x.AfterResidual:0.##} pp; relative rate {x.RelativeRate?.ToString("0.##") ?? "unknown"}×. {x.Explanation}")));
             RenderManifest();
             RenderTimeline();
+            if (result.Accounting.Identification is { } identification)
+                AccountingText.Text += "\n\nJoint identification · geometry, not calibrated quota cost:\n" +
+                    string.Join("\n", identification.Cohorts.Select(x =>
+                        $"{x.Cohort.Kind} · {x.HorizonHours * 60:g} min: {x.ExaminedRows}/{x.Observations} intervals, " +
+                        $"{x.ChronologicalSupport.EvaluationBlocks} provisional blocks / {x.ChronologicalSupport.DistinctResetCycles} reset groups. " +
+                        $"First-20 joint rank {x.FrozenFirst20Joint.NumericalRank}/{x.FrozenFirst20Joint.ActiveColumns}; retained rank {x.RetainedJoint.NumericalRank}/{x.RetainedJoint.ActiveColumns}. " +
+                        $"Later mixtures: {x.LaterScenarios.WithinTrainingSpan} in / {x.LaterScenarios.OutsideTrainingSpan} outside the training span. " +
+                        $"Missing/invalid joint rows: {x.MissingJointRows}/{x.InvalidJointRows}. " +
+                        $"No local work but positive movement/envelope: {x.ZeroWorkPositiveMovementRows}/{x.ZeroWorkPositiveEnvelopeRows}.")) + "\n" + identification.Methodology;
         }
         catch (OperationCanceledException) when (request.IsCancellationRequested)
         {

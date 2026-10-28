@@ -7,6 +7,12 @@ using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
+if (args.Length == 4 && args[0] is "--cost-identification" or "--cost-identification-audit")
+{
+    await ApiPriceCatalogCli.RunAsync(() => QuotaIdentificationCli.RunAsync(args));
+    return;
+}
+
 if (args.Length == 2 && args[0] == "--reference-init" || args.Length == 3 && args[0] == "--select-tt" ||
     args.Length == 4 && args[0] is "--reference-import" or "--reference-view")
 {

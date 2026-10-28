@@ -87,6 +87,20 @@ bounded, partial, unbounded and inconsistent results retain their distinct meani
 see [the scoring contract](source-notes/STAGE4_JOINT_SCORING.md). A definition larger
 than 512 KiB or a future/range longer than 366 days is rejected. Use Ctrl+C to cancel.
 
+## Joint quota-cost identification
+
+The Evidence tab's explicit accounting analysis includes bounded joint-design
+diagnostics. The standalone read-only report avoids fitting the research models:
+
+```powershell
+dotnet run --project tools/TajsTokens.ForecastEvaluation -c Debug --no-build --no-restore -- --cost-identification "$env:LOCALAPPDATA/Programs/TajemnikTV/TajsTokens/data/telemetry.db" 2026-09-27T00:00:00Z 2026-10-27T14:58:00Z
+```
+
+`--cost-identification-audit` uses the same arguments and additionally emits numeric
+matrices as JSONL for independent checks. Both commands restrict ranges to 366 days,
+keep cohort identities aliased and make no selection/write. Do not sum horizon rows
+as independent work. [Methods, retained results and limits](source-notes/STAGE5_IDENTIFICATION.md).
+
 ## Forecast threshold study
 
 Run this explicitly against the app-owned telemetry database, with a fixed past UTC range:

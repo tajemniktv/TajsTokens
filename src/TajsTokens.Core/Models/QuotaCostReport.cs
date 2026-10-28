@@ -76,4 +76,6 @@ public sealed record QuotaCostReport(
     public QuotaEvaluationCoverage? EvidenceCoverage { get; init; }
     public IReadOnlyList<QuotaCostConstructionCoverage> ConstructionCoverage { get; init; } = [];
     public IReadOnlyList<QuotaCostCohortCoverage> CohortCoverage { get; init; } = [];
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public QuotaCostIdentificationReport? Identification { get; init; }
 }
