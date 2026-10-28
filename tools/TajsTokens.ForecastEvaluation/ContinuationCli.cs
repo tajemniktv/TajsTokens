@@ -2,10 +2,29 @@ using System.Globalization;
 using System.Text.Json;
 using TajsTokens.Core.Models;
 using TajsTokens.Core.Research;
+using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Services;
 
 internal static class ContinuationCli
 {
+    public static async Task AuditPathsAsync(string[] args)
+    {
+        var origin = DateTimeOffset.Parse(args[2], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal).ToUniversalTime();
+        double context = double.Parse(args[3], CultureInfo.InvariantCulture), horizon = double.Parse(args[4], CultureInfo.InvariantCulture);
+        if (origin >= DateTimeOffset.UtcNow || !double.IsFinite(context) || context <= 0 || context > 2)
+            throw new ArgumentException("Choose a past origin and a context up to two hours.");
+        using var cancellation = new CancellationTokenSource();
+        Console.CancelKeyPress += (_, e) => { e.Cancel = true; cancellation.Cancel(); };
+        var data = await new SqliteForecastDatasetReader(args[1]).ReadLedgerAndQuotaAsync("codex", "default", origin.AddHours(-context),
+            origin.AddTicks(1), cancellation.Token, includeQuota: false);
+        var tokens = data.Ledger.Select(x => x.Workload).Where(x => x.ObservedAtUtc > origin.AddHours(-context) &&
+            x.ObservedAtUtc <= origin && x.CapturedAtUtc <= origin).ToArray();
+        var paths = WorkloadCompositionPrediction.SamplePaths(data with { Tokens = tokens }, origin, context, horizon, token: cancellation.Token);
+        Console.WriteLine(JsonSerializer.Serialize(new { OriginUtc = origin, ContextHours = context, HorizonHours = horizon, data.CapturedAtUtc,
+            SourceRows = tokens.Select(x => new { x.ObservedAtUtc, x.CapturedAtUtc, x.Model, x.ReasoningEffort, x.UncachedInputTokens, x.CacheReadTokens,
+                x.CacheWriteTokens, x.NonReasoningOutputTokens, x.ReasoningOutputTokens, x.ReportedTotalTokens }), Result = paths }));
+    }
+
     public static async Task RunAsync(string[] args)
     {
         var from = DateTimeOffset.Parse(args[2], CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal).ToUniversalTime();

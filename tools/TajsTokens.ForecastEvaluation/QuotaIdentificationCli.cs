@@ -44,15 +44,23 @@ internal static class QuotaIdentificationCli
         else
         {
             var report = ComposedQuotaEvaluator.Evaluate(data, cancellation.Token,
-                args[0] == "--joint-composed-strict" ? ForecastReplayAvailability.CollectedByOrigin : ForecastReplayAvailability.ReconstructedEventTime,
-                includeJointResearch: true);
+                args[0] is "--joint-composed-strict" or "--joint-path-strict" ? ForecastReplayAvailability.CollectedByOrigin : ForecastReplayAvailability.ReconstructedEventTime,
+                includeJointResearch: true, includeJointPathsResearch: args[0] is "--joint-path-study" or "--joint-path-strict");
             Console.WriteLine(JsonSerializer.Serialize(new { RecordType = "composed-report", FromUtc = from, ToUtc = to, data.CapturedAtUtc,
-                report.Version, report.Methodology,
+                report.Version, report.Methodology, report.PathCache,
                 Scores = report.Scores.Select(x => new { Cohort = cohorts.IndexOf(x.Cohort), Window = x.Cohort.Kind.ToString(), x.HorizonHours, x.CostModel,
                     x.Availability, x.TrainingIntervals, x.HeldOutIntervals, x.ResetGenerations, x.MissingComposition, x.IntervalLoss, x.CostOnlyIntervalLoss,
                     x.PaceIntervalLoss, x.IncumbentIntervalLoss, x.DisplayedDeltaMae, x.WithheldReasons, x.EvidenceSupport,
+                    CompatibleInputTrials = x.Trials.Count(t => t.JointPath?.CompatibleFrozenFitInputs == true),
+                    CompatibilityReasons = x.Trials.SelectMany(t => t.JointPath?.InputCompatibilityReasons ?? []).GroupBy(t => t).ToDictionary(t => t.Key, t => t.Count()),
+                    MatchedCompatibleForecastLoss = x.Trials.Where(t => t.JointPath?.CompatibleFrozenFitInputs == true).Select(t => (double?)t.IntervalLoss).DefaultIfEmpty().Average(),
+                    MatchedCompatiblePaceLoss = x.Trials.Where(t => t.JointPath?.CompatibleFrozenFitInputs == true).Select(t => (double?)t.PaceIntervalLoss).DefaultIfEmpty().Average(),
+                    RawPathUncertainty = x.Trials.Any(t => t.JointPath?.Paths > 1) ? QuotaUncertaintyDiagnosticsBuilder.Build(x.Trials.Select(t =>
+                        new QuotaCostTrial(t.OriginUtc, t.OutcomeUtc, DateTimeOffset.UnixEpoch, t.ObservedDelta, t.LowerObservedDelta!.Value,
+                            t.UpperObservedDelta!.Value, t.PredictedDelta, t.IntervalLoss, t.ObservedDelta - t.PredictedDelta,
+                            t.JointPath?.PathP10Delta, t.JointPath?.PathP90Delta)).ToArray(), QuotaUncertaintyKind.ConditionalResampledPathRange) : null,
                     Trials = x.Trials.Select(t => new { t.OriginUtc, t.OutcomeUtc, t.PredictedDelta, t.ActualWorkloadCost, t.ObservedDelta,
-                        t.IntervalLoss, t.CostOnlyIntervalLoss, t.PaceIntervalLoss, t.IncumbentIntervalLoss }) }) }, json));
+                        t.LowerObservedDelta, t.UpperObservedDelta, t.IntervalLoss, t.CostOnlyIntervalLoss, t.PaceIntervalLoss, t.IncumbentIntervalLoss, t.JointPath }) }) }, json));
         }
     }
 

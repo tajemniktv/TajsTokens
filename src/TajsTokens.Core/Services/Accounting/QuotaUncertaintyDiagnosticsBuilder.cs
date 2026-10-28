@@ -14,8 +14,11 @@ public static class QuotaUncertaintyDiagnosticsBuilder
         "Unknown reporting lag, account attribution and model mismatch are not removed by rounding envelopes. Invalid or one-sided ranges are excluded and counted. " +
         "The existing residual-range construction/80% envelope-intersection target remains unchanged and does not establish 80% latent coverage.";
 
-    public static QuotaUncertaintyDiagnostics Build(IReadOnlyList<QuotaCostTrial> trials)
+    public static QuotaUncertaintyDiagnostics Build(IReadOnlyList<QuotaCostTrial> trials,
+        QuotaUncertaintyKind reportedRangeKind = QuotaUncertaintyKind.PredictiveResidualRange)
     {
+        if (reportedRangeKind is not (QuotaUncertaintyKind.PredictiveResidualRange or QuotaUncertaintyKind.ConditionalResampledPathRange))
+            throw new ArgumentOutOfRangeException(nameof(reportedRangeKind));
         var points = trials.Where(x => double.IsFinite(x.Prediction) && double.IsFinite(x.LowerDelta) &&
             double.IsFinite(x.UpperDelta) && x.LowerDelta <= x.UpperDelta).ToArray();
         var requested = trials.Where(x => x.LowerPrediction is not null || x.UpperPrediction is not null).ToArray();
@@ -28,6 +31,8 @@ public static class QuotaUncertaintyDiagnosticsBuilder
             Mean(points.Select(x => Math.Max(Math.Abs(x.Prediction - x.LowerDelta), Math.Abs(x.Prediction - x.UpperDelta)))),
             Mean(bands.Select(x => x.UpperPrediction!.Value - x.LowerPrediction!.Value)),
             Mean(bands.Select(x => x.UpperPrediction >= x.LowerDelta && x.LowerPrediction <= x.UpperDelta ? 1d : 0d)),
-            Mean(bands.Select(x => x.LowerPrediction <= x.LowerDelta && x.UpperPrediction >= x.UpperDelta ? 1d : 0d)), Methodology);
+            Mean(bands.Select(x => x.LowerPrediction <= x.LowerDelta && x.UpperPrediction >= x.UpperDelta ? 1d : 0d)), Methodology +
+                (reportedRangeKind == QuotaUncertaintyKind.ConditionalResampledPathRange ? " Raw finite-window path quantiles remain model-conditional; no predictive calibration is inferred." : ""))
+            { ReportedRangeKind = reportedRangeKind };
     }
 }

@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 namespace TajsTokens.Core.Models;
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
-public enum QuotaUncertaintyKind { MeasurementEnvelope, ConditionalIdentification, PredictiveResidualRange }
+public enum QuotaUncertaintyKind { MeasurementEnvelope, ConditionalIdentification, PredictiveResidualRange, ConditionalResampledPathRange }
 
 /// <summary>Empirical diagnostics conditional on latent outcomes belonging to supplied measurement envelopes. No calibrated probability is implied.</summary>
 public sealed record QuotaUncertaintyDiagnostics(
@@ -20,5 +20,5 @@ public sealed record QuotaUncertaintyDiagnostics(
     string Methodology)
 {
     public QuotaUncertaintyKind ObservationKind => QuotaUncertaintyKind.MeasurementEnvelope;
-    public QuotaUncertaintyKind ReportedRangeKind => QuotaUncertaintyKind.PredictiveResidualRange;
+    public QuotaUncertaintyKind ReportedRangeKind { get; init; } = QuotaUncertaintyKind.PredictiveResidualRange;
 }

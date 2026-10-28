@@ -24,6 +24,13 @@ public static class CodexJointWorkloadBuilder
             reasoning += other.reasoning; total += other.total; count += other.count;
             inconsistent += other.inconsistent; invalid += other.invalid;
         }
+        public void AddConditional(CodexJointWorkloadCell row, decimal scale)
+        {
+            input += row.UncachedInput * scale; cache += row.CacheRead * scale; write += row.CacheWrite * scale;
+            output += row.NonReasoningOutput * scale; reasoning += row.ReasoningOutput * scale;
+            total += row.ReportedTotal * scale;
+            // These are projected/resampled amounts, not additional source observations.
+        }
         public CodexJointWorkloadCell Cell(CodexWorkloadCoordinate? key) => new(key, input, cache, write, output,
             reasoning, total, count, inconsistent, invalid);
     }
@@ -75,5 +82,35 @@ public static class CodexJointWorkloadBuilder
         }
         return new(CodexJointWorkload.Version, CodexJointQuantityKind.ConditionalProjection, observed.Cells.Select(Scale).ToArray(),
             observed.Overflow is { } overflow ? Scale(overflow) : null, observed.MissingModelTokens * scale, observed.MissingEffortTokens * scale);
+    }
+
+    internal static CodexJointWorkload CombineConditional(IEnumerable<(CodexJointWorkload Workload, decimal Scale)> parts)
+    {
+        var amounts = new Dictionary<CodexWorkloadCoordinate, Accumulator>();
+        Accumulator? overflow = null;
+        decimal missingModel = 0, missingEffort = 0;
+        foreach (var (workload, scale) in parts)
+        {
+            if (!workload.IsComplete || scale < 0) throw new ArgumentException("Conditional combination requires complete quantities and nonnegative scales.");
+            foreach (var cell in workload.Cells)
+            {
+                if (!amounts.TryGetValue(cell.Coordinate!, out var current)) amounts.Add(cell.Coordinate!, current = new());
+                current.AddConditional(cell, scale);
+            }
+            if (workload.Overflow is { } other) (overflow ??= new()).AddConditional(other, scale);
+            missingModel += workload.MissingModelTokens * scale; missingEffort += workload.MissingEffortTokens * scale;
+        }
+        var ordered = amounts.OrderBy(x => x.Key.Model, StringComparer.Ordinal).ThenBy(x => x.Key.ReasoningEffort, StringComparer.Ordinal)
+            .ThenBy(x => x.Key.ExecutionTier, StringComparer.Ordinal).ThenBy(x => x.Key.Product, StringComparer.Ordinal)
+            .ThenBy(x => x.Key.ContextBand, StringComparer.Ordinal).ToArray();
+        foreach (var row in ordered.Skip(CodexJointWorkload.MaximumCoordinates)) (overflow ??= new()).Merge(row.Value);
+        CodexJointWorkloadCell Cell(CodexWorkloadCoordinate? coordinate, Accumulator accumulator)
+        {
+            var cell = accumulator.Cell(coordinate);
+            return cell with { ReportedTotal = cell.CategoryTotal };
+        }
+        return new(CodexJointWorkload.Version, CodexJointQuantityKind.ConditionalProjection,
+            ordered.Take(CodexJointWorkload.MaximumCoordinates).Select(x => Cell(x.Key, x.Value)).ToArray(),
+            overflow is null ? null : Cell(null, overflow), missingModel, missingEffort);
     }
 }

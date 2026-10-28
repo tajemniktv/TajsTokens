@@ -50,4 +50,14 @@ public sealed class QuotaUncertaintyDiagnosticsTests
         Assert.Equal(0, result.RangeSamples); Assert.Equal(4, result.InvalidRangeSamples);
         Assert.Null(result.MeanPredictiveRangeWidth); Assert.Null(result.EnvelopeContainmentRate);
     }
+
+    [Fact]
+    public void ConditionalPathRangeKindSurvivesSerializationWithoutBecomingAResidualBand()
+    {
+        var result = QuotaUncertaintyDiagnosticsBuilder.Build([Trial(10, 9, 11, 8, 12)], QuotaUncertaintyKind.ConditionalResampledPathRange);
+        var reopened = System.Text.Json.JsonSerializer.Deserialize<QuotaUncertaintyDiagnostics>(System.Text.Json.JsonSerializer.Serialize(result));
+        Assert.Equal(result, reopened);
+        Assert.Equal(QuotaUncertaintyKind.ConditionalResampledPathRange, reopened!.ReportedRangeKind);
+        Assert.Equal(QuotaUncertaintyKind.MeasurementEnvelope, reopened.ObservationKind);
+    }
 }

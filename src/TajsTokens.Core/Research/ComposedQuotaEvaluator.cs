@@ -21,8 +21,9 @@ public static class ComposedQuotaEvaluator
         CancellationToken cancellationToken = default,
         ForecastReplayAvailability availability = ForecastReplayAvailability.ReconstructedEventTime,
         IReadOnlyList<double>? horizons = null,
-        bool includeJointResearch = false)
+        bool includeJointResearch = false,
+        bool includeJointPathsResearch = false)
     {
-        return ComposedQuotaValidation.Evaluate(data, cancellationToken, availability, horizons ?? EvaluationHorizons, includeJointResearch);
+        return ComposedQuotaValidation.Evaluate(data, cancellationToken, availability, horizons ?? EvaluationHorizons, includeJointResearch, includeJointPathsResearch);
     }
 }

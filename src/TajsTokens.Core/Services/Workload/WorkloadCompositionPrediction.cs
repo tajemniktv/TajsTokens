@@ -11,7 +11,7 @@ using TajsTokens.Core.Models;
 namespace TajsTokens.Core.Services;
 
 /// <summary>Shared scalar-to-vector projection; retrospective targets never enter composition.</summary>
-public static class WorkloadCompositionPrediction
+public static partial class WorkloadCompositionPrediction
 {
     public const string Version = "recent-workload-composition/v3-joint";
     public const string ContinuationVersion = "recent-joint-continuation/v1";

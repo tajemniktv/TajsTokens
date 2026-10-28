@@ -40,7 +40,21 @@ public sealed record ComposedQuotaTrial(
     public bool? CompleteOutcomeTokenCategories { get; init; }
     public double? LowerObservedDelta { get; init; }
     public double? UpperObservedDelta { get; init; }
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public JointQuotaPathEvidence? JointPath { get; init; }
 }
+
+/// <summary>Experimental input/fit compatibility and raw path spread, not release eligibility or calibrated coverage.</summary>
+public sealed record JointQuotaPathEvidence(string Version, double ContextHours, DateTimeOffset CostTrainingFromUtc, DateTimeOffset CostTrainingToUtc,
+    double MaximumTrainingEnvelopeViolation, IReadOnlyList<string> InputCompatibilityReasons, int NovelCoordinates,
+    bool UnknownCoordinateMass, bool VolumeOutsideTrainingRange, int Paths, uint? Seed, string? InputRevision, double? PathP10Delta, double? PathP90Delta)
+{
+    public bool CompatibleFrozenFitInputs => InputCompatibilityReasons.Count == 0;
+    public QuotaUncertaintyKind? PathRangeKind => Paths > 1 ? QuotaUncertaintyKind.ConditionalResampledPathRange : null;
+    public string Qualification => "Research only. Compatibility checks a frozen nonnegative fit and known coordinates, not identification, account completeness or predictive calibration. A failed fit check is not an infeasibility proof; regularization can select an outside-envelope optimum. Raw path quantiles are model-conditional, not confidence bounds. Native local work remains unattributed; no live promotion.";
+}
+
+public sealed record JointPathCacheStatistics(int Entries, int MaximumEntries, int Hits, int Misses);
 
 public sealed record ComposedQuotaScore(
     QuotaHistoryCohort Cohort,
@@ -102,4 +116,8 @@ public sealed record ComposedQuotaBreakdown(
     public double? MeanUnderprediction { get; init; }
 }
 
-public sealed record ComposedQuotaEvaluation(string Version, string Methodology, IReadOnlyList<ComposedQuotaScore> Scores);
+public sealed record ComposedQuotaEvaluation(string Version, string Methodology, IReadOnlyList<ComposedQuotaScore> Scores)
+{
+    [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    public JointPathCacheStatistics? PathCache { get; init; }
+}

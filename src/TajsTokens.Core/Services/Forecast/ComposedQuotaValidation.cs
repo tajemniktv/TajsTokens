@@ -11,7 +11,7 @@ using TajsTokens.Core.Models;
 namespace TajsTokens.Core.Services;
 
 /// <summary>Actual-cost and origin-only forecast errors on identical disjoint outcomes.</summary>
-public static class ComposedQuotaValidation
+public static partial class ComposedQuotaValidation
 {
     public const string Version = "composed-quota/v12-blocks";
     public static IReadOnlyList<double> EvaluationHorizons { get; } = Array.AsReadOnly(new[] { 5d / 60, .25, .5, 2d });
@@ -21,7 +21,8 @@ public static class ComposedQuotaValidation
         CancellationToken cancellationToken = default,
         ForecastReplayAvailability availability = ForecastReplayAvailability.ReconstructedEventTime,
         IReadOnlyList<double>? horizons = null,
-        bool includeJointResearch = false)
+        bool includeJointResearch = false,
+        bool includeJointPathsResearch = false)
     {
         IReadOnlyList<QuotaCostObservation> rows = QuotaCostObservationBuilder.Build(
             data,
@@ -30,6 +31,8 @@ public static class ComposedQuotaValidation
         var predictions = new Dictionary<(DateTimeOffset, double), PredictedWorkload?>();
         var tokenReplay = new TokenWorkloadPredictionService.ReplayCache();
         var activities = new Dictionary<DateTimeOffset, string>();
+        CodexForecastFeatureIndex? continuationIndex = includeJointPathsResearch ? new(data) : null;
+        WorkloadCompositionPrediction.PathCache? pathCache = includeJointPathsResearch ? new() : null;
         var scores = new List<ComposedQuotaScore>();
         foreach (IGrouping<(QuotaHistoryCohort Cohort, double HorizonHours), QuotaCostObservation> group in rows.GroupBy(x =>
                      (x.Cohort, x.HorizonHours)))
@@ -57,7 +60,9 @@ public static class ComposedQuotaValidation
                     cancellationToken);
             }
             QuotaCostObservation[] asserted = QuotaCostTrainingPolicy.Select(rows, group.Key.Cohort, group.Key.HorizonHours, true);
-            string[] candidates = includeJointResearch ? ["total", "categories", "model-effort", "joint-categories"] : ["total", "categories", "model-effort"];
+            string[] candidates = includeJointPathsResearch ? ["total", "categories", "model-effort", "joint-categories",
+                "joint-recent-30m", "joint-recent-2h", "joint-blocks-30m", "joint-blocks-2h"] :
+                includeJointResearch ? ["total", "categories", "model-effort", "joint-categories"] : ["total", "categories", "model-effort"];
             foreach (string candidate in asserted.Length > nativeTraining.Length
                          ? candidates.Concat(candidates.Select(x => "asserted-" + x))
                          : candidates)
@@ -72,9 +77,11 @@ public static class ComposedQuotaValidation
                     withheldReasons[reason] = withheldReasons.GetValueOrDefault(reason) + 1;
                 }
 
-                bool needsCategories = candidate.Replace("asserted-", "", StringComparison.Ordinal) != "total";
+                string baseCandidate = candidate.Replace("asserted-", "", StringComparison.Ordinal);
+                bool pathCandidate = baseCandidate.StartsWith("joint-recent-", StringComparison.Ordinal) || baseCandidate.StartsWith("joint-blocks-", StringComparison.Ordinal);
+                bool needsCategories = baseCandidate != "total";
                 bool completeTraining = !needsCategories || training.All(x => x.HasCompleteTokenCategories);
-                bool joint = candidate.Replace("asserted-", "", StringComparison.Ordinal) == "joint-categories";
+                bool joint = baseCandidate == "joint-categories" || pathCandidate;
                 bool completeJointTraining = !joint || training.All(QuotaCostIdentification.Valid);
                 bool hasTrainingWork = QuotaAccountingModel.HasTrainingWork(training);
                 if (training.Length >= 20 && !hasTrainingWork) withheldReasons["no-recorded-training-work"] = training.Length;
@@ -84,8 +91,9 @@ public static class ComposedQuotaValidation
                 {
                     Func<QuotaCostObservation, double> fit = QuotaAccountingModel.FitFrozen(
                         training,
-                        candidate.Replace("asserted-", "", StringComparison.Ordinal),
+                        joint ? "joint-categories" : baseCandidate,
                         cancellationToken);
+                    var inputCheck = pathCandidate ? new JointPathInputCheck(training, fit) : null;
                     foreach (QuotaCostObservation row in ordered.Skip(20).Where(x => x.StartUtc >= training[^1].EndUtc))
                     {
                         cancellationToken.ThrowIfCancellationRequested();
@@ -129,7 +137,22 @@ public static class ComposedQuotaValidation
                         // Use the actual elapsed target horizon, never the target's workload.
                         double hours = (row.EndUtc - row.StartUtc).TotalHours;
                         (DateTimeOffset StartUtc, double hours) key = (row.StartUtc, hours);
-                        if (!predictions.TryGetValue(key, out PredictedWorkload? workload))
+                        PredictedWorkload? workload;
+                        JointWorkloadPaths? ensemble = null;
+                        double contextHours = baseCandidate.EndsWith("-30m", StringComparison.Ordinal) ? .5 : 2;
+                        if (pathCandidate)
+                        {
+                            if (baseCandidate.StartsWith("joint-blocks-", StringComparison.Ordinal))
+                            {
+                                ensemble = WorkloadCompositionPrediction.SamplePaths(continuationIndex!, row.StartUtc, contextHours, hours, availability,
+                                    WorkloadCompositionPrediction.DefaultPathSeed, pathCache!, cancellationToken);
+                                workload = ensemble.Mean is { } mean ? DescribeJoint(mean, ensemble.Context with
+                                { Version = WorkloadCompositionPrediction.PathVersion, ProjectedTokens = (double)mean.ReportedTokens,
+                                    Status = "conditional-block-path-mean", Methodology = WorkloadCompositionPrediction.PathMethodology }) : null;
+                            }
+                            else workload = WorkloadCompositionPrediction.Continue(continuationIndex!, row.StartUtc, contextHours, hours, availability).Workload;
+                        }
+                        else if (!predictions.TryGetValue(key, out workload))
                         {
                             workload = TokenWorkloadPredictionService.PredictHorizonCached(
                                 data,
@@ -155,6 +178,8 @@ public static class ComposedQuotaValidation
                         QuotaCostObservation projected = Project(row, workload);
                         double predicted = fit(projected);
                         double actualCost = fit(row);
+                        JointQuotaPathEvidence? pathEvidence = pathCandidate ? inputCheck!.Describe(workload.JointWorkload!, contextHours,
+                            ensemble, part => fit(Project(row, DescribeJoint(part, workload.Continuation!)))) : null;
                         if (!activities.TryGetValue(row.StartUtc, out string? activity))
                         {
                             activity = CodexNowcastActivity.Evaluate(data, row.StartUtc, availability).State.ToString();
@@ -184,6 +209,7 @@ public static class ComposedQuotaValidation
                                 UpperObservedDelta = row.UpperDelta,
                                 OutcomeQualityFlags = row.QualityFlags.ToArray(),
                                 CompleteOutcomeTokenCategories = row.HasCompleteTokenCategories,
+                                JointPath = pathEvidence,
                                 CalibrationAvailableAtUtc = availability == ForecastReplayAvailability.CollectedByOrigin
                                     ? row.OutcomeCollectedAtUtc
                                     : row.EndUtc,
@@ -234,7 +260,7 @@ public static class ComposedQuotaValidation
             }
         }
         return new ComposedQuotaEvaluation(
-            includeJointResearch ? Version + "/joint-research-v1" : Version,
+            includeJointPathsResearch ? Version + "/joint-path-research-v1" : includeJointResearch ? Version + "/joint-research-v1" : Version,
             $"{availability}: native token forecast at each exact origin, then preceding-two-hour " +
             "composition, then frozen first-20-interval cost weights. Forecast, actual-workload cost, and pace losses use identical held-out targets. " +
             "CollectedByOrigin requires frozen token-cost inputs (quota labels, token amounts/model/effort and any ownership assertions) collected before the origin, the origin meter already collected, " +
@@ -246,9 +272,12 @@ public static class ComposedQuotaValidation
             "Calibration labels must already be available at the origin (event time for reconstruction, actual collection for strict replay). " +
             "Coverage measures reported remaining quota, not latent true usage or exhaustion probability. Sparse ranges remain absent. " +
             "No activity-conditioned quota distribution or live promotion is implied. " +
-            (includeJointResearch ? "Explicit joint research uses the existing origin-only joint continuation with nonnegative coefficients shrunk toward the frozen pooled-category fit. It cannot enter live selection. " : "") +
+            (includeJointResearch || includeJointPathsResearch ? "Explicit joint research uses the existing origin-only joint continuation with nonnegative coefficients shrunk toward the frozen pooled-category fit. It cannot enter live selection. " : "") +
+            (includeJointPathsResearch ? "Explicit joint-path research compares whole recent-context continuation and 64 contiguous-block paths for 30-minute/two-hour contexts, using the same frozen joint-cost fit. " +
+                "Input/fit compatibility is reported separately; failed checks do not silently suppress exploratory errors or qualify release. " +
+                "Raw path P10/P90 are model-conditional and separate from earlier-held-out residual bands. " + WorkloadCompositionPrediction.PathMethodology + " " : "") +
             ComposedQuotaBreakdowns.Methodology,
-            scores);
+            scores) { PathCache = pathCache is null ? null : new(pathCache.Count, WorkloadCompositionPrediction.PathCache.MaximumEntries, pathCache.Hits, pathCache.Misses) };
     }
 
     internal static QuotaCostObservation Project(QuotaCostObservation row, PredictedWorkload workload)

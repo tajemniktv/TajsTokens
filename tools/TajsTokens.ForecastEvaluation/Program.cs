@@ -7,13 +7,19 @@ using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
+if (args.Length == 5 && args[0] == "--joint-path-audit")
+{
+    await ApiPriceCatalogCli.RunAsync(() => ContinuationCli.AuditPathsAsync(args));
+    return;
+}
+
 if (args.Length == 4 && args[0] is "--continuation-contexts" or "--continuation-contexts-strict")
 {
     await ApiPriceCatalogCli.RunAsync(() => ContinuationCli.RunAsync(args));
     return;
 }
 
-if (args.Length == 4 && args[0] is "--joint-cost-study" or "--joint-composed-study" or "--joint-composed-strict" or "--quota-support-study")
+if (args.Length == 4 && args[0] is "--joint-cost-study" or "--joint-composed-study" or "--joint-composed-strict" or "--quota-support-study" or "--joint-path-study" or "--joint-path-strict")
 {
     await ApiPriceCatalogCli.RunAsync(() => QuotaIdentificationCli.RunJointAsync(args));
     return;

@@ -815,11 +815,18 @@ shared projection and the existing Planning page; no duplicate planner/estimator
   the recent shorter-context signal is mixed with availability/older-period limits.
   Both continue into FORE-002/005; the released default is unchanged.
   [Contract, counts, errors and installed parity](docs/source-notes/STAGE6_CONTINUATION.md).
-- [ ] **FORE-002 — Evaluate one joint-path challenger.** Compare corrected direct
+- [x] **FORE-002 — Evaluate one joint-path challenger.** Compare corrected direct
   pace, recent joint-workload continuation through supported conversion and a small
   contiguous-block resampling candidate. Preserve pairings, bursts/pauses and volume/
   composition dependence. Use bounded revision-qualified caches and deterministic
   seeds; resampling cannot create unseen support.
+  Explicit research compares both contexts and a fixed 64-path contiguous-bin
+  sampler on matched targets. Cache revision/eviction and source/mean conservation
+  pass, including independent native-frame and quota-conversion checks. Corrected
+  direct pace beats the challenger at recent 15/30-minute horizons; sparse/tied
+  results do not justify release. Keep the candidate research-only and retain the
+  corrected baseline. Input/fit compatibility and raw path spread are separate
+  from predictive calibration; see [results and limits](docs/source-notes/STAGE6_CONTINUATION.md).
 - [ ] **FORE-003 — Integrate supported planning edits.** Start from recent work and
   preserve useful existing duration/model/effort/count/lookback controls. Distinguish
   same-token revaluation from changed-model task prediction. Keep count scenarios as
@@ -923,11 +930,11 @@ provider scope and answer-specific eligibility slices have their stated installe
 evidence. **PACE-001–004** implement and evaluate the elapsed-time correction.
 Stage 4's **SCORE-001–003** joint projection, frozen basis/archive and qualified
 scoring are installed. **CAT-001** discovery and picker interaction are verified,
-including hidden-dashboard input restoration. The latest full suite passed 866
+including hidden-dashboard input restoration. The latest full suite passed 877
 tests and the Windows build installed successfully; user visual acceptance remains
 separate.
 
-**Continue with Stage 6 / FORE-002.** The user selected the exact
+**Continue with Stage 6 / FORE-003.** The user selected the exact
 [price policy and frozen TT basis](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md).
 CAT-002 and D-01 are integrated and installed: immutable selections, independent
 price imports, measured TT and explicit original-score saving. Automated checks,
@@ -940,8 +947,11 @@ research, with mixed chronological results and unchanged live selection. CAL-003
 are installed: bounded conditional scenario diagnostics, explicit refusals and
 separate uncertainty types/metrics. Independent numerical checks and the user's
 manual summary/details check pass. FORE-001's explicit continuation contract and
-matched context comparison are installed, with unchanged defaults. FORE-002 now
-evaluates a bounded joint-path challenger before any changed default or live selection.
+matched context comparison are installed, with unchanged defaults. FORE-002's
+bounded joint-path comparison is installed in explicit research; it does not earn
+live selection. FORE-003 now integrates useful recent native work/TT and supported
+planning edits through the existing flow, retaining direct quota answers and the
+separate count-based comparator.
 Programme-wide acceptance gates, user visual acceptance and the PERF-001
 resource-budget decision remain open.
 
@@ -958,7 +968,7 @@ still horizon-dependent: sparse five-minute/reset labels and poor long-horizon
 constant-pace extrapolation do not establish a universal window or calibrated
 survival probability. Flat meters and missing local activity never prove idleness.
 
-The tray/UI process keeps normal scheduling and has no hard CPU cap or routine forced compacting GC. EcoQoS remains a background hint with retryable native transitions exposed in Diagnostics; detailed calibration retains its separate worker budget. Typed collector completion generations coalesce supplementary fleet reads, and cached fleet status ages by clock time independently of database changes. Hidden dashboards still release their page cache and active queries/timers, retaining navigation destinations rather than selected history; PERF-004 owns preserving useful lightweight presentation state. Quota collection and alerts continue, with a full configured polling delay after each pass. Compact quota-pace outlooks remain independent of detailed calibration and never load its training dataset. Full source discovery now follows its reconciliation cadence independently of bounded pending rollout retries; a persistent failure remains explicit without forcing full discovery every poll.
+The tray/UI process keeps normal scheduling and has no hard CPU cap or routine forced compacting GC. EcoQoS remains a background hint with retryable native transitions exposed in Diagnostics; detailed calibration retains its separate worker budget. Typed collector completion generations coalesce supplementary fleet reads, and cached fleet status ages by clock time independently of database changes. After 30 seconds hidden, dashboards release their pages and active queries/timers while preserving lightweight navigation, filter and input state; owned evidence is reloaded on restore. Quota collection and alerts continue, with a full configured polling delay after each pass. Compact quota-pace outlooks remain independent of detailed calibration and never load its training dataset. Full source discovery now follows its reconciliation cadence independently of bounded pending rollout retries; a persistent failure remains explicit without forcing full discovery every poll.
 
 Detailed workload calibration and token nowcasts run in one owned headless process in either mode, independently of the collector and UI. Its Windows job limits total-system CPU to 0.5% in the background or 2% with the dashboard visible, private commit to 384 MiB and its managed heap to 256 MiB. Background-started slices allow ten minutes with a five-minute cooldown; foreground-started slices allow three minutes with a one-minute cooldown. The longer background wall budget lets historical data preparation finish at the lower CPU rate. Showing the dashboard adjusts an active worker's CPU budget immediately. Closing the app terminates its worker. Timeouts or memory-limit failures retain quota-pace outlooks and cached progress rather than blocking collection. Detailed results are published as fresh only for an unchanged fresh quota anchor; token nowcasts are stale if their native accounting generation changed. Full forecast promotion checks collection-time qualification before reconstructed comparisons; model selection, source provenance and acceptance criteria remain the same.
 
@@ -966,4 +976,4 @@ Completed numeric ridge fits are reusable across slices and restarts in the rebu
 
 Implemented Codex-focused audit slices include the local Live fleet, explicit host-qualified SSH status checks, descriptive cache input mix, an opt-in authenticated read-only local limits API, a read-only inventory of source/account combinations retained in quota history, and aggregate daily JSON reports from the existing native event ledger. The inventory is derived from observations rather than a second mutable account registry. Unknown account keys remain unknown, and matching API windows receive the same opaque account ID only within the same provider and source. Daily local workload is explicitly unattributed to a backend account.
 
-Successful SSH fleet checks now retain append-only host-qualified status snapshots with separate remote capture and local collection times, allowing offline status review. SSH is optional and never needed for account-wide provider quota on the PC; local Tokscale-style scanning likewise cannot supply another machine's private thread history without an additional source. No remote agent or automatic SSH polling is assumed. The status snapshots do not establish remote account ownership or provide lossless cross-machine token/quota history. Further work needs source-specific evidence before product claims: a Codex notify hook must sanitize content-bearing payloads and prove overlap with existing rollout accounting; detailed context-component token costs and per-prompt quota costs cannot be inferred from current totals; full distributed usage history needs explicit host/account provenance, source-qualified deduplication and offline recovery. Dynamic price catalogs and burn/runout baselines are research candidates, not substitutes for the existing fixed-rate counterfactual and chronological forecast evaluation. No remote quota is merged into a local account, and no process-level Stop action is provided.
+Successful SSH fleet checks now retain append-only host-qualified status snapshots with separate remote capture and local collection times, allowing offline status review. SSH is optional and never needed for account-wide provider quota on the PC; local Tokscale-style scanning likewise cannot supply another machine's private thread history without an additional source. No remote agent or automatic SSH polling is assumed. The status snapshots do not establish remote account ownership or provide lossless cross-machine token/quota history. Further work needs source-specific evidence before product claims: a Codex notify hook must sanitize content-bearing payloads and prove overlap with existing rollout accounting; detailed context-component token costs and per-prompt quota costs cannot be inferred from current totals; full distributed usage history needs explicit host/account provenance, source-qualified deduplication and offline recovery. Selected official price imports and frozen TT are separate reference calculations; automatic price feeds and richer quota-model selection retain their source and chronological-validation gates. No remote quota is merged into a local account, and no process-level Stop action is provided.

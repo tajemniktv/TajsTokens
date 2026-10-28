@@ -236,6 +236,14 @@ reports keep availability, matched targets, local-token errors and composition
 errors separate. Neither chooses a released context default. See the
 [continuation contract and fixed comparisons](source-notes/STAGE6_CONTINUATION.md).
 
+`--joint-path-study` / `--joint-path-strict` use the same database/range arguments
+for explicit joint-path quota research. They retain the direct baseline and show
+input/fit compatibility separately from experimental errors. Match exact target
+keys across alternatives before comparing means. `--joint-path-audit` accepts a
+database, past UTC origin, context hours and horizon hours to reproduce one finite
+64-path ensemble. These commands neither select a live model nor turn raw path
+quantiles into calibrated intervals; audit files stay private until reviewed.
+
 ## Daily installation
 
 A successful default local app build publishes, installs and restarts `%LOCALAPPDATA%\Programs\TajemnikTV\TajsTokens\current`. Persistent database/settings live in sibling `data`; the prior binary is kept in `previous`, and deployment backups are in `backups`. The build does not delete `data`.
