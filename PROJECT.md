@@ -449,11 +449,17 @@ acceptance stays open under PERF-001 while this prerequisite evidence work proce
   implementation gaps; durable retention remains open under ING-001/002 and
   EVID-004. Source cross-check and documentation consistency only; no runtime or
   schema change is claimed by closing this specification item.
-- [ ] **ING-001 — Define encoding-neutral identity/checkpoints.** Specify logical
+- [x] **ING-001 — Define encoding-neutral identity/checkpoints.** Specify logical
   equivalence, physical representation preference, decoded-byte offsets/hashes,
   resume state and migration of physical checkpoints. Cover siblings, archives,
   restore/resume, forks, inherited prefixes and genuine rewrites. Select a compatible
   Zstandard dependency with license/packaging review; keep strong prefix verification.
+  Defined in the [representation contract](docs/source-notes/CODEX_ROLLOUT_REPRESENTATIONS.md):
+  scoped, prefix-proven equivalence; decoded UTF-8 coordinates; verified legacy
+  adoption; separate physical identity; candidate generations and bounded streaming.
+  Selected ZstdSharp.Port 0.8.8 after pinned package/source/license inspection.
+  This closes design and dependency review only; migration, shipped notices,
+  decoding/resource proof and recovery remain ING-002/EVID-004 implementation gates.
 - [ ] **ING-002 — Implement compressed discovery/read/recovery together.** Extend
   the existing owners as one slice, with bounded decoding/memory and explicit
   corrupt/truncated/unsupported states. Test plain, compressed, both-present,
@@ -696,7 +702,7 @@ complete; one successful early slice does not validate later changes.
 The Stage 1 mechanisms are installed with their stated evidence; PERF-001 resource
 acceptance remains open. EVID-001 now defines the quantity/retention contract.
 Installed **A-01** chronology acceptance has the stated runtime evidence. Continue
-Stage 2 with **ING-001** identity/checkpoint design. Extend durable
+Stage 2 with the accepted **ING-001** identity/checkpoint contract. Extend durable
 original/superseded evidence under
 **EVID-004** before **ING-002** changes representation/replacement, then complete
 source reconciliation and eligibility explanations. Deliver **PACE-001–004** as a
