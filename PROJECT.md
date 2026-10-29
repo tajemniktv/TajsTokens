@@ -989,11 +989,20 @@ rejecting/deferring a candidate. Not every research proposal must become a featu
   are covered; visual/navigation acceptance remains on the host list. Full Core
   validation passes 969 tests; Windows installation/restart and packaged-report
   parity pass. [Method, support and limits](docs/source-notes/STAGE7_SHARED_WINDOWS.md).
-- [ ] **NEXT-005 — Decide whether more machinery is warranted.** Test bounded local
+- [x] **NEXT-005 — Decide whether more machinery is warranted.** Test bounded local
   slope, adaptive state/lag or conformal layers only against a demonstrated remaining
   failure and simpler comparators. Record selection/deferral. No universal latent TT,
   new always-on Python/Wolfram service, neural predictor or collection framework is
   implied by the research.
+  **Evaluated / defer:** existing elapsed-time/recent/damped controls repair the
+  observation defect; rolling comparisons do not select a richer policy. Mixed
+  amount results, unsupported cost/path fits, unknown backend lag and dependent
+  sparse prospective outcomes do not identify a failure that another slope/state/
+  lag/conformal layer can presently resolve. Reuse existing mature-error selection
+  and calibration. Require a repeatable residual failure on compatible matched
+  targets, sufficient temporal/reset support and an independently qualified target
+  before a new bounded challenger. This closes the current complexity decision,
+  not predictive acceptance. [Evidence and revisit conditions](docs/source-notes/STAGE7_MODEL_DECISION.md).
 
 #### Decision checkpoints
 
@@ -1084,9 +1093,8 @@ because calibration and paired/reset/outcome support remain insufficient.
 NEXT-003's audit confirms selection effects while retaining ordinary-loss exclusions;
 latent censored fitting remains deferred. NEXT-004's aligned comparison cannot
 select a shared cost law from the available positive-work holdout; its marker's
-host pass remains open. NEXT-005's selection/deferral of further machinery is the
-next unblocked checkpoint; target demonstrated failures with simpler comparators
-and preserve the frozen TT reference and competing explanations.**
+host pass remains open. NEXT-005 defers additional machinery using the existing
+comparisons. Preserve the frozen TT reference and competing explanations.**
 The user selected the exact
 [price policy and frozen TT basis](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md).
 CAT-002 and D-01 are integrated and installed: immutable selections, independent
@@ -1112,6 +1120,16 @@ checks, and is now installed with FORE-005's journal. The user is away; keep the
 physical tray/Overview and Planning hide/restore checks listed above open.
 Programme-wide acceptance gates, user visual acceptance and the PERF-001
 resource-budget decision remain open.
+
+**Remaining checklist audit:** FORE-003/004 and NEXT-004 need the listed host
+checks; PERF-001 needs controlled resource measurements and DEC-004's agreed
+budget. FORE-005 still needs broader before-target output/outcome support and reset
+labels; the October 29 10:04 UTC journal contains 268 compact computations and no
+detailed computations. The detailed writer is implemented, but successful worker
+completion and matched selected/composed support must be checked separately from
+waiting for labels. SHIP-001–004 remain programme-wide gates over those open items;
+the latest slice's tests/install proofs do not close the programme. All other
+Stage 1–7 boxes are completed implementations or explicit evaluated deferrals.
 
 ### Existing implementation baseline and known gaps
 
