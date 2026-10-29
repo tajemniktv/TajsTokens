@@ -1127,7 +1127,12 @@ budget. FORE-005 still needs broader before-target output/outcome support and re
 labels; the October 29 10:04 UTC journal contains 268 compact computations and no
 detailed computations. The detailed writer is implemented, but successful worker
 completion and matched selected/composed support must be checked separately from
-waiting for labels. SHIP-001–004 remain programme-wide gates over those open items;
+waiting for labels. A numeric phase capture observes one worker ending around its
+three-minute slice without a detailed computation; successful reads in the next
+slice narrow the investigation. The next unblocked operational checkpoint is to
+isolate current quota replay cost versus token work on a fixed snapshot, retaining
+exact results and existing budgets before choosing a fix. [Capture and limits](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md#installed-detailed-completion-gap-october-29).
+SHIP-001–004 remain programme-wide gates over those open items;
 the latest slice's tests/install proofs do not close the programme. All other
 Stage 1–7 boxes are completed implementations or explicit evaluated deferrals.
 

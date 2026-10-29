@@ -948,3 +948,42 @@ targeted operational optimization, not a universal speedup. Aggregate evidence i
 The serial Windows build/install passed with zero warnings/errors (53.69s),
 restarting the daily app as PID 44984. Installed Core SHA-256:
 `EE61E4936862FFF7AAE6F81B929B47413304F094C5386BA92B30C01C1AFFEF5D`.
+
+### Installed detailed-completion gap, October 29
+
+The later shared-window build (`982a334` source slice; installed pre-commit identity
+based on `077369b`) still records compact forecasts but has no detailed journal
+computations: 268 compact at 10:04 UTC, 277 at 10:14 UTC. The current detailed
+writer is present in `SqliteIntelligenceService`; waiting for reset labels alone
+cannot establish detailed prospective validation.
+
+A 232-second, numeric-only `TajsTokens-Work` EventPipe capture attached to the
+existing app/workers without UI control or a new calibration request. Worker
+12300 started at 10:09:47.9208901 UTC, was last sampled at 10:12:46.5444816 UTC,
+and was absent by 10:13:01. Last observed CPU was 59.640625 seconds; sampled private
+peak after attachment was 265.88 MiB. This is consistent with the configured
+three-minute foreground slice and its 2%-of-system job limit on 16 processors.
+The sample misses startup and is instrumented; it is not a new whole-tree memory
+acceptance result. It does not capture the exact terminating exception or prove
+that every slice fails for the same reason.
+
+The next worker, 22996, began at 10:14:06 UTC. Its capture includes quota-calibration
+start, successful dataset reads of 171,615 and 191,098 rows (3.028/5.408 elapsed
+seconds), dataset reuse, and completed initial feature-index preparation. The
+capture ends before that slice's completion. These observations narrow the next
+investigation beyond merely assuming storage preparation never finishes.
+
+Source inspection identifies another current-query replay path:
+`QuotaPredictionService.Predict` calls its shared `Evaluate`, which constructs
+features and predictions for every historical label before the current point.
+This is a candidate operational cost, not a measured attribution of all worker
+time. The earlier token dependency-closure optimization remains separate. The
+next useful experiment is to isolate quota/current versus token work on a fixed
+app-owned snapshot and compare exact results before changing replay dependencies
+or budgets. Preserve targets, training/selection/calibration support, fallback and
+collection-time qualification; do not weaken the model merely to finish sooner.
+
+Local diagnostic source and `phases.jsonl` are under
+`.codex/temp/stage7/worker-completion/`; capture SHA-256:
+`767f18a2f59a6ef1620c06fbae756bf982eee5951f993ce2aa18d0ae788d4c23`.
+No product source, scheduling policy or running version changed for this capture.
