@@ -353,6 +353,25 @@ targets do not establish collection completeness or account inactivity. The
 [Stage 7 decision and evidence](source-notes/STAGE7_ACTIVITY.md) distinguish this
 comparison from a shipped habitual forecast or workload-path probability.
 
+## Coherent threshold-path research
+
+```powershell
+dotnet run --project tools/TajsTokens.ForecastEvaluation -c Debug --no-build --no-restore -- --coherent-thresholds-strict "$env:LOCALAPPDATA/Programs/TajemnikTV/TajsTokens/data/telemetry.db" 2026-09-27T00:00:00Z 2026-10-27T14:58:00Z
+```
+
+`--coherent-thresholds` gives reconstructed replay. Append `-audit` to either
+command for numerical per-path costs and outcomes; output describes usage patterns
+and needs review before sharing. The past UTC range is bounded to 366 days; no
+database write, new acquisition or live selection occurs.
+
+One shared two-hour joint ensemble feeds both paired windows and all four horizon
+prefixes. Native cases supply only current reported reset boundaries; unknown
+future capacities remain unresolved. Output includes first-crossing bins,
+no-crossing/unresolved shares and crossing-conditional timing. These are scenario
+calculations under explicit fitted maps, not calibrated probability forecasts.
+Sampling, unavailable pairs/training/contexts and fit-compatibility issues remain
+visible. See [the method, evidence and deferral](source-notes/STAGE7_THRESHOLDS.md).
+
 ## Daily installation
 
 A successful default local app build publishes, installs and restarts `%LOCALAPPDATA%\Programs\TajemnikTV\TajsTokens\current`. Persistent database/settings live in sibling `data`; the prior binary is kept in `previous`, and deployment backups are in `backups`. The build does not delete `data`.

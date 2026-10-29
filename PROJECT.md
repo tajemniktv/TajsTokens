@@ -934,11 +934,26 @@ rejecting/deferring a candidate. Not every research proposal must become a featu
   packaged-tool fixed-study comparisons pass. This closes the evaluation/deferral
   decision, not a shipped all-day habitual forecast.
   [Method, results and limits](docs/source-notes/STAGE7_ACTIVITY.md).
-- [ ] **NEXT-002 — Evaluate coherent threshold paths.** Propagate the same workload
+- [x] **NEXT-002 — Evaluate coherent threshold paths.** Propagate the same workload
   paths through both windows with explicit supported resets. Preserve no-crossing
   mass and label crossing-conditional timing. Do not take minima of marginal quantiles
   as first-exhaustion quantiles. Allowance threshold differs from execution stop,
   purchases and grace; probability labels require predictive validation.
+  **Evaluated / explicit research only:** one shared joint ensemble now feeds both
+  window maps and all 5/15/30/120-minute prefixes. Results retain no-crossing and
+  unresolved mass, per-path first-crossing bins and crossing-conditional timing.
+  Unsupported reset capacities stop joint support; caller-declared numeric reset
+  schedules and reset-order ties have separate synthetic coverage. Native pairing
+  follows account/source/plan/bucket and window duration; primary/secondary response
+  slots are retained separately. The month study has 18 usable cases per mode;
+  all 36 fitted window maps fail the existing envelope check. Recent paired-window
+  support is absent. Keep these as sensitivity calculations; defer probability/UI
+  promotion pending supported calibration, threshold outcomes and reset-capacity
+  evidence. Independent arithmetic reproduces 9,216 path/horizon results and
+  preserves shared prefixes/mass. Full Core validation passes 956 tests; Windows
+  installation/restart and packaged-tool fixed-report parity pass. This closes
+  the mechanical evaluation/deferral decision, not predictive probability acceptance.
+  [Contract, results and limits](docs/source-notes/STAGE7_THRESHOLDS.md).
 - [ ] **NEXT-003 — Evaluate censoring.** Preserve saturated evidence and current
   ordinary-loss exclusions. Measure selection effects before introducing justified
   lower-bound/censored targets. Unknown reporting lag prevents claiming collection
@@ -1020,9 +1035,9 @@ provider scope and answer-specific eligibility slices have their stated installe
 evidence. **PACE-001–004** implement and evaluate the elapsed-time correction.
 Stage 4's **SCORE-001–003** joint projection, frozen basis/archive and qualified
 scoring are installed. **CAT-001** discovery and picker interaction are verified,
-including hidden-dashboard input restoration. The latest full suite passed 947
-tests; the Windows build installed the activity comparison, retaining the rolling
-comparison, recorded-output scorer, shared status and forecast-computation journal. Deployment
+including hidden-dashboard input restoration. The latest full suite passed 956
+tests; the Windows build installed the coherent-path study, retaining the activity/
+rolling comparisons, recorded-output scorer, shared status and forecast-computation journal. Deployment
 restarted the daily app; fixed-report installed parity passes. Live selection is
 unchanged. Installation evidence is recorded in the Stage 6/7 source notes.
 Fresh provider ingestion, before-target journal recording and installed scoring
@@ -1032,8 +1047,10 @@ are verified; user visual acceptance remains separate.
 support and reset labels still need time; keep those gates and the listed host
 checks open. NEXT-001's explicit activity/amount comparison retains the existing
 owner and defers broader habitual claims. NEXT-002's coherent threshold-path
-question is the next unblocked research checkpoint; reuse the existing bounded
-path owners and keep conditional spread separate from predictive probability.**
+arithmetic is installed in explicit research; probability acceptance is deferred
+because calibration and paired/reset/outcome support remain insufficient.
+NEXT-003's censoring/selection-effects question is the next unblocked checkpoint;
+preserve the existing saturated-evidence and ordinary-loss boundaries.**
 The user selected the exact
 [price policy and frozen TT basis](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md).
 CAT-002 and D-01 are integrated and installed: immutable selections, independent

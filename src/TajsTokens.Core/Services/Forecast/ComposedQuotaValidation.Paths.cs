@@ -16,7 +16,7 @@ public static partial class ComposedQuotaValidation
             receipt.Availability, receipt.Methodology) { JointWorkload = joint, Continuation = receipt };
     }
 
-    private sealed class JointPathInputCheck
+    internal sealed class JointPathInputCheck
     {
         private readonly QuotaCostObservation[] _training;
         private readonly HashSet<(string?, int)> _coordinates;
