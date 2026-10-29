@@ -1162,3 +1162,47 @@ Installed assemblies match publish output:
 After installation, a detailed live computation was confirmed at 11:38:53 UTC
 while provider quota collection continued to 11:42:48 UTC. Hidden/restore use and
 the agreed aggregate CPU/disk/RAM/latency budgets remain PERF-001/DEC-004 host gates.
+
+#### Empty-cache interruption and recovery
+
+A subsequent isolated test at source `3282ba9` starts with no fit-cache file rather
+than inheriting a legacy or warm cache. It reuses the same fixed source snapshot,
+association selection, production cache factory, calculation services and actual
+background job limits. The parent assigns the job before releasing the child.
+Neither attempt changes the installed app or native Codex data.
+
+| Attempt | Wall / CPU seconds | Completion | Persisted fits after exit | Sampled child-private peak |
+|---|---:|---|---:|---:|
+| Empty cache | 600.03 / 48.44 | Budget timeout during quota calculation | 11,624 | 265.20 MiB |
+| Reopened partial cache | 548.03 / 44.88 | Exit 0; quota and token results complete | 12,092 | 280.23 MiB |
+
+The first attempt ran 12:16:50–12:26:50 UTC on October 29. The second ran
+12:27:03–12:36:11 UTC, without resetting or prewarming its partial cache. It reused
+11,894 fits with 35,915 misses. Its complete result SHA-256 is again
+`5288bf92bf32aef54c614811a62d727ca6cec9b4bf3ba7ec1e8d3c81f3dcb82d`;
+quota and token result hashes also match the earlier fixed-input controls. The
+source evidence revision/feature revision remain 24,338/15,495 and the association
+hash is unchanged. Cache files contain 20,086,784 and 21,094,400 bytes respectively,
+within the existing bound; SQLite journals retain their separately stated scope.
+
+This verifies recovery from a real interrupted empty-cache slice for this fixture.
+It does not establish one-slice cold completion, larger/changing-input completion,
+automatic hidden-window integration or whole-app RAM acceptance. The laboratory
+starts the second process directly; it does not test or remove the app's five-minute
+background cooldown. Its numerical anchor is frozen at 10:17:20 UTC, so these are
+calculation/recovery tests, not newly issued live forecasts or prospective scores.
+
+Receipts are under `.codex/temp/stage7/worker-completion/fixed/`:
+
+- `cold-start-first-result.json`: SHA-256
+  `7d7f4e628757689cdb71726c344377953a6f84481472a7cfc97d4edfda65b29c`.
+- `cold-start-background-budget-result.json` (reopened attempt): SHA-256
+  `11dfe13ee4afdf451f579fdc858078a103ea38971c118767f7efef4bfdf71702`.
+- `cold-start-recovery-verification.json` records both results, cache counts,
+  unchanged source/association checks and probe binary hashes: SHA-256
+  `9dc04a1195a3abbe2962f0e89a6f6f863e6d09a065f0dc6992daa080f197e59c`.
+
+The probe-only build succeeds without deployment. Product source and the installed
+daily build are unchanged; the preceding 973-test/full Windows-build milestone
+remains the code validation. Resource-scenario comparisons and acceptance remain
+open in PROJECT.md's host checklist.

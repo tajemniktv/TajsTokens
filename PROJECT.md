@@ -424,6 +424,10 @@ numerical budgets remain open under PERF-001. See
   host/resource acceptance. Partial-scan restart, invalidation and cache-value
   regressions pass; full Core validation passes 973 tests with installed Windows
   build evidence in the same source note.
+  An actual empty-cache background slice times out at 600 seconds but retains
+  11,624 fits; reopening that partial cache completes in 548.0 seconds with identical
+  results and unchanged limits. This verifies fixed-input interruption recovery,
+  not one-slice cold completion or the app's cooldown/hidden-window integration.
 - [x] **PERF-008 — Bound maintenance and queries.** Put legacy privacy scrubs under
   durable migration ownership and enforce privacy in writers. Guard initialization
   with database-replacement recovery. Inspect fleet/reset/cache-stamp query plans;
@@ -1097,9 +1101,12 @@ and perform them on the installed build when back; they do not block source/rese
 - **PACE-003 / SHIP-004:** expand a forecast receipt and check measurement/collection
   times, rate numerator/exposure, fallback reason and the separate sustainable budget
   are readable. Source/round-trip arithmetic proof does not establish presentation.
-- **PERF-001 / DEC-004:** measure app, calibration worker and helpers together during
-  hidden/restore use, then agree the resource budget. The provisional target is not
-  user acceptance.
+- **PERF-001 / DEC-004:** compare startup, warm idle, active appends, representative
+  backlog, hide/restore during work and an observed reset boundary. Measure the app,
+  calibration worker and helpers together, retaining per-process CPU, private commit,
+  working set, live heap/GC pauses, phase timings and attributed physical versus
+  logical I/O. Agree numerical budgets against that hardware/data baseline; the
+  provisional target and isolated fit-cache runs are not user acceptance.
 
 The Stage 1 mechanisms are installed with their stated evidence; PERF-001 resource
 acceptance remains open. Stage 2's chronology, retention, compressed ingestion,
@@ -1168,7 +1175,9 @@ inside its unchanged foreground budget. Fixed-input isolation reduced quota CPU 
 hidden/background completion, RAM acceptance, source publication or prospective
 accuracy. The isolated reopened-input background job now also finishes under its
 unchanged limits (592.9 seconds), using a stable disk-cache subset to avoid replay
-eviction; this does not verify hidden-window integration or larger/cold inputs.
+eviction. A separate empty-cache timeout followed by a reopened slice also completes
+with identical results in 548.0 seconds; hidden-window/cooldown integration, larger
+inputs and one-slice cold completion remain unverified.
 Broader chronological/reset and selected/composed support must mature;
 do not add machinery or weaken targets to manufacture it. [Capture, fix and limits](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md#daily-debug-compute-optimization).
 SHIP-001–004 remain programme-wide gates over those open items;
