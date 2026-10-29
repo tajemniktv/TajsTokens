@@ -111,6 +111,8 @@
                                 <TextBlock x:Name="TtBasisLabel" Style="{StaticResource CaptionStyle}" />
                                 <TextBlock x:Name="WorkDetail" Style="{StaticResource SubtitleStyle}" />
                                 <TextBlock x:Name="NowcastSummary" Style="{StaticResource SubtitleStyle}" />
+                                <HyperlinkButton x:Name="RegimeMarkerLink" Content="History relationship · not assessed"
+                                                 Click="OnAccountingResearch" HorizontalAlignment="Left" Padding="0" />
                                 <HyperlinkButton Content="Inspect quota changes" Click="OnQuotaHistory" HorizontalAlignment="Left" />
                                 <Canvas x:Name="Timeline" Height="180" SizeChanged="OnTimelineSizeChanged"
                                         AutomationProperties.Name="Observed workload over the selected UTC range" />
@@ -241,7 +243,7 @@
                                 <TextBlock x:Name="PeriodsText" Style="{StaticResource TechnicalTextStyle}" />
                             </StackPanel>
                         </Expander>
-                        <Expander Header="Accounting and regime research" HorizontalAlignment="Stretch"
+                        <Expander x:Name="AccountingExpander" Header="Accounting and regime research" HorizontalAlignment="Stretch"
                                   HorizontalContentAlignment="Stretch">
                             <StackPanel Spacing="12">
                                 <Button x:Name="AnalyzeButton" Content="Analyze selected history" Click="OnAnalyze" />

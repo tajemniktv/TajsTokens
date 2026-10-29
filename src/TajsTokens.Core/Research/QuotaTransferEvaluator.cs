@@ -12,7 +12,7 @@ using TajsTokens.Core.Services;
 namespace TajsTokens.Core.Research;
 
 /// <summary>Explicit cross-regime research only. Never supplies a live model or creates TT units.</summary>
-public static class QuotaTransferEvaluator
+public static partial class QuotaTransferEvaluator
 {
     public static QuotaTransferEvaluation Evaluate(CodexForecastDataset data, CancellationToken cancellationToken = default)
     {

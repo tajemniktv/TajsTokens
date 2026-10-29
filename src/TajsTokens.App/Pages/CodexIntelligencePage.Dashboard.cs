@@ -58,6 +58,9 @@ public sealed partial class CodexIntelligencePage
             .Select(x => $"{QuotaOutlookProjection.Name(x.Kind)} · {CodexProductProjection.PaceLabel(x)}"));
         StatusChangeSummary.Text = product.Changes.FirstOrDefault()?.Summary ?? "";
         ForecastText.Text = CodexProductProjection.Details(product);
+        var marker = CodexRegimeMarkerProjection.Build(_snapshot?.Selection, _snapshot?.Accounting, _snapshot?.Regime, _snapshot?.Manifest.Id);
+        RegimeMarkerLink.Content = marker.Summary;
+        ToolTipService.SetToolTip(RegimeMarkerLink, marker.Detail);
         if (_snapshot is not { } snapshot) return;
         TtValue.Text = CodexProductProjection.Tt(product.Work.Tt);
         TtBasisLabel.Text = CodexProductProjection.WorkLabel(product.Work);
@@ -110,6 +113,13 @@ public sealed partial class CodexIntelligencePage
     {
         Views.SelectedIndex = 3;
         QuotaEvidence.IsExpanded = true;
+    }
+
+    private void OnAccountingResearch(object sender, RoutedEventArgs e)
+    {
+        Views.SelectedIndex = 3;
+        AccountingExpander.IsExpanded = true;
+        DispatcherQueue.TryEnqueue(() => { if (_loaded) AccountingExpander.StartBringIntoView(); });
     }
 
     private async void OnQuickRange(object sender, RoutedEventArgs e)

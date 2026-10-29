@@ -7,6 +7,12 @@ using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
+if (args.Length == 4 && args[0] is "--shared-window-study" or "--shared-window-study-strict" or "--shared-window-study-audit" or "--shared-window-study-strict-audit")
+{
+    await ApiPriceCatalogCli.RunAsync(() => SharedWindowsCli.RunAsync(args));
+    return;
+}
+
 if (args.Length == 4 && args[0] is "--censoring-study" or "--censoring-study-strict" or "--censoring-study-audit" or "--censoring-study-strict-audit")
 {
     await ApiPriceCatalogCli.RunAsync(() => CensoringCli.RunAsync(args));

@@ -14,6 +14,8 @@ TajsTokens is a local-first Windows companion for Codex quota, usage and activit
 - A read-only observed account/source inventory in Settings. Backend account keys remain attached to the quota observations that supplied them; historical local work is not assigned to the current login automatically.
 - A headless `--daily-json` report of UTC-day totals using verified source times. Separate all-time coverage retains undated amounts; reports contain aggregates only and do not claim account ownership.
 
+Overview's history relationship marker links to explicit accounting/regime analysis for the selected history. An unexplained change is retrospective evidence, not a confirmed provider-policy change.
+
 Forecasts are estimates, not guarantees. A missing or stale quota lane is not zero usage or unlimited allowance. Whole TT stays unavailable when its supplied quantity totals conflict; retained totals and selected-history scores keep their own scope. The Live fleet's recent-write state is not proof a Codex process is still running.
 
 ## Privacy and local data

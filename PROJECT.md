@@ -976,6 +976,19 @@ rejecting/deferring a candidate. Not every research proposal must become a featu
   the regime owner/frozen reference for the dashboard marker. Separate known plan/
   tier changes, mixture, coverage, attribution and lag before inferring policy drift;
   adaptation must not move the TT ruler.
+  **Evaluated / marker installed; host acceptance open:** exact aligned intervals
+  now compare separate total/category/joint maps with two directional proportional
+  controls, retaining first-20 and frozen development-prefix policies. The fixed
+  month has 237 aligned intervals; recent history has no paired-window support.
+  The paired-report era supplies 30/6 final 5/15-minute intervals, but none has
+  positive recorded local work: equal zero-intercept losses cannot select a cost
+  law. Keep shared-window transfer deferred. The existing frozen regime owner finds
+  no supported boundary in these frames; this is not proof of stability or unchanged
+  provider policy. Overview's selected-history marker links to the existing explicit
+  analysis without fitting automatically. Date/account/work-filter/unload guards
+  are covered; visual/navigation acceptance remains on the host list. Full Core
+  validation passes 969 tests; Windows installation/restart and packaged-report
+  parity pass. [Method, support and limits](docs/source-notes/STAGE7_SHARED_WINDOWS.md).
 - [ ] **NEXT-005 — Decide whether more machinery is warranted.** Test bounded local
   slope, adaptive state/lag or conformal layers only against a demonstrated remaining
   failure and simpler comparators. Record selection/deferral. No universal latent TT,
@@ -1036,6 +1049,11 @@ and perform them on the installed build when back; they do not block source/rese
 - **FORE-004 / SHIP-004:** inspect Overview/Planning native-token and TT scope/freshness
   labels and the collapsed status reasons. Open the tray menu physically; verify its
   read-only summaries and the Plan a session / Why this status? navigation.
+- **NEXT-004 / SHIP-004:** inspect Overview's selected-history relationship marker
+  and tooltip. Its link should open Accounting and regime research without running
+  analysis; explicit analysis should update its qualified state. Change date/account/
+  work filters, refresh, and hide for more than 30 seconds: old assessments must
+  clear when their selected history is replaced or unloaded. Check readability.
 - **SHIP-003/004:** check normal refresh/cancellation, quota/alert behavior and readable
   partial/unsupported/reset-crossing states. Automated proofs remain separately labelled.
 - **PERF-001 / DEC-004:** measure app, calibration worker and helpers together during
@@ -1048,8 +1066,9 @@ provider scope and answer-specific eligibility slices have their stated installe
 evidence. **PACE-001–004** implement and evaluate the elapsed-time correction.
 Stage 4's **SCORE-001–003** joint projection, frozen basis/archive and qualified
 scoring are installed. **CAT-001** discovery and picker interaction are verified,
-including hidden-dashboard input restoration. The latest full suite passed 962
-tests; the Windows build installed the censoring audit, retaining the coherent-path,
+including hidden-dashboard input restoration. The latest full suite passed 969
+tests; the Windows build installed the aligned-window study and selected-history
+relationship marker, retaining the censoring audit, coherent-path,
 activity/rolling comparisons, recorded-output scorer, shared status and forecast-computation journal. Deployment
 restarted the daily app; fixed-report installed parity passes. Live selection is
 unchanged. Installation evidence is recorded in the Stage 6/7 source notes.
@@ -1063,9 +1082,11 @@ owner and defers broader habitual claims. NEXT-002's coherent threshold-path
 arithmetic is installed in explicit research; probability acceptance is deferred
 because calibration and paired/reset/outcome support remain insufficient.
 NEXT-003's audit confirms selection effects while retaining ordinary-loss exclusions;
-latent censored fitting remains deferred. NEXT-004's aligned shared-window/drift
-hypotheses are the next unblocked checkpoint; reuse current owners and preserve
-the frozen TT reference and competing explanations.**
+latent censored fitting remains deferred. NEXT-004's aligned comparison cannot
+select a shared cost law from the available positive-work holdout; its marker's
+host pass remains open. NEXT-005's selection/deferral of further machinery is the
+next unblocked checkpoint; target demonstrated failures with simpler comparators
+and preserve the frozen TT reference and competing explanations.**
 The user selected the exact
 [price policy and frozen TT basis](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md).
 CAT-002 and D-01 are integrated and installed: immutable selections, independent

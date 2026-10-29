@@ -167,6 +167,8 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
             AccountingText.Text = AccountingMethodText.Text = PeriodsText.Text = "";
         TtValue.Text = TtBasisLabel.Text = PlanMeasuredWork.Text = ReferenceDetails.Text = ReferenceActionStatus.Text = "";
         SaveTtButton.IsEnabled = false;
+        RegimeMarkerLink.Content = "History relationship · not assessed";
+        ToolTipService.SetToolTip(RegimeMarkerLink, null);
     }
 
     private async Task LoadAsync(bool allowCached = false)
@@ -379,6 +381,7 @@ public sealed partial class CodexIntelligencePage : Page, IHistoryPresentation
             CodexIntelligenceSnapshot result = await App.Services.CodexIntelligence.AnalyzeAsync(snapshot, request.Token);
             if (!_loaded || !ReferenceEquals(_snapshot?.Ledger, snapshot.Ledger) || request.IsCancellationRequested) return;
             _snapshot = result with { Current = _snapshot!.Current, CurrentState = _snapshot.CurrentState, Workload = _snapshot.Workload };
+            RenderDashboard();
             AccountingText.Text = string.Join(
                                       "\n",
                                       result.Accounting!.Scores.Where(x => x.Candidate is "total" or "categories" or "joint-categories")

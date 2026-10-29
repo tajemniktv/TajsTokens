@@ -391,6 +391,30 @@ censored target enters live training. See [the measured selection effects and
 deferral](source-notes/STAGE7_CENSORING.md). Audit usage-pattern data needs review
 before sharing.
 
+## Aligned shared-window and regime research
+
+```powershell
+dotnet run --project tools/TajsTokens.ForecastEvaluation -c Debug --no-build --no-restore -- --shared-window-study-strict "$env:LOCALAPPDATA/Programs/TajemnikTV/TajsTokens/data/telemetry.db" 2026-10-07T23:49:39.4161790Z 2026-10-09T00:30:41.2278267Z
+```
+
+`--shared-window-study` gives reconstructed replay separately. Append `-audit` to
+either option for numeric training, aligned-frame, prediction and reference rows.
+These read-only commands require a past UTC range of at most 366 days; at most
+2,048 aligned rows per cohort/horizon are examined, with truncation counts exposed.
+The final fifth of the declared timestamp span is held out. First-20 and full
+development-prefix policies remain separate; neither trains on final labels.
+
+The study reuses ordinary-cost and frozen-regime owners, with separate maps and
+two directional proportional controls on identical paired rows. Actual target
+workload is an oracle input, not an end-to-end forecast. Missing pairs, flat scale
+references and no positive-work holdout stay explicit. Aliased audit data contains
+usage patterns and needs review before sharing. See [results and limits](source-notes/STAGE7_SHARED_WINDOWS.md).
+
+Overview's **History relationship** link opens the existing Evidence → Accounting
+and regime research section. Analysis remains explicit. Check the marker/tooltip
+after analysis, date/account/work-filter changes, refresh and hidden-view unload;
+source tests do not establish visual or physical navigation acceptance.
+
 ## Daily installation
 
 A successful default local app build publishes, installs and restarts `%LOCALAPPDATA%\Programs\TajemnikTV\TajsTokens\current`. Persistent database/settings live in sibling `data`; the prior binary is kept in `previous`, and deployment backups are in `backups`. The build does not delete `data`.
