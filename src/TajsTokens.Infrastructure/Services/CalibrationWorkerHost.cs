@@ -24,7 +24,7 @@ public static class CalibrationWorkerHost
             !Path.IsPathFullyQualified(request.CachePath) || request.Lanes is null || request.Associations is null) return 2;
         try
         {
-            using var cache = new SqliteRidgeFitCache(request.CachePath);
+            using var cache = SqliteRidgeFitCache.ForCalibration(request.CachePath);
             using IDisposable scope = RidgeFitCacheScope.Use(cache);
             var repository = new SqliteTelemetryRepository(request.DatabasePath);
             DateTimeOffset now = DateTimeOffset.UtcNow;

@@ -1077,3 +1077,88 @@ or hidden/background completion guarantee. Local evidence is
 `installed-worker-exit.json`, `installed-worker.json` and `installed-journal.json`.
 Quota collection continued to 11:00:40 UTC and compact forecast confirmation to
 11:00:41 UTC; a second detailed computation is confirmed at 10:59:08 UTC.
+
+### Background budget and repeated-scan cache pressure
+
+The same fixed snapshot was evaluated in an isolated child assigned the existing
+`CalibrationWorkerJob` in background mode: 0.5% total-system CPU, 384 MiB private
+commit, 256 MiB managed heap and the unchanged 600-second wall budget. The parent
+waited for job assignment before releasing the child to load data. It changed no
+UI state and wrote only the disposable fixture/cache, not live telemetry. This
+isolates calculation containment; it is not a hidden-dashboard/whole-app test.
+
+The original all-admission cache run timed out at 600.03 seconds after 47.47
+CPU-seconds, still calculating quota, with no complete result. Its last sample had
+271 hits and 36,161 misses. The surviving cache held 16,331 fits (31.80 MB file,
+about 1,079 JSON payload bytes per entry). A reopened, unthrottled continuation
+over the same inputs still produced **393 hits / 47,416 misses**, matching the
+initial full pass. Saved partial fits existed, but scan eviction removed them
+before reuse. A longer timeout alone would not establish useful progress across
+slices. Original evidence is `fixed/background-all-admit*.json*` and
+`isolation/background-resume.jsonl` under the local worker-completion folder.
+
+The calibration worker now admits a stable quarter of eligible completed fit keys to disk,
+selected by SHA-256 of the existing numeric key. Every cache-eligible completed fit still
+enters the existing 256-entry in-memory cache. Rejected disk entries are recomputed
+normally; existing valid entries remain readable regardless of their admission
+class. Ordinary cache instances retain all-admission behavior. The change uses the
+same owner, format, checksums, 16,384-entry and 32 MiB bounds, atomic cache writes
+and numeric invalidation key. It creates no telemetry schema or new service and
+does not remove source evidence, training rows, exact horizons or target outcomes.
+
+Two deterministic disk-admission controls were compared on identical inputs:
+
+| Policy | Initial legacy-cache pass hits / misses | Reopened pass hits / misses | Reopened quota CPU seconds |
+|---|---:|---:|---:|
+| All admitted | 393 / 47,416 | 393 / 47,416 | 51.16 |
+| One third | 10,842 / 36,967 | 13,274 / 34,535 | 41.66 |
+| One quarter | 12,622 / 35,187 | 14,926 / 32,883 | 41.58 |
+
+These are existing-cache/reopened trials, not empty-cache trials. The quarter
+control leaves more space for this replay's retained subset and reduces scan
+pollution without enlarging the disk/memory bound. Timings are host-specific,
+not a universal admission optimum. The production implementation's initial
+legacy-cache pass reproduces 12,622 hits / 35,187 misses, using 43.66 quota CPU
+seconds plus 0.36 token CPU-seconds. Every trial retains the same complete result
+SHA-256 `5288bf92bf32aef54c614811a62d727ca6cec9b4bf3ba7ec1e8d3c81f3dcb82d`.
+
+Regression coverage checks an interrupted oversized scan followed by reopened
+reuse, the unchanged entry bound, memory-hot values even without disk admission,
+stable persisted membership, exact fit values and changed-target invalidation.
+Existing corruption, byte-bound, defensive-copy and chronological-parity checks
+remain applicable. A warm job under the actual background limits is a separate
+runtime gate; passing unthrottled comparisons alone does not close it.
+
+That fixed-fixture warm gate now passes: child **11664** ran from
+11:37:45 to 11:47:38 UTC, exited **0** without timeout in **592.87 seconds**, and
+used 47.75 CPU-seconds. The actual job retained its 0.5% CPU / 384 MiB private
+limit and the child retained the 256 MiB managed limit. It produced 14,926 hits /
+32,883 misses and the same serialized forecast/workload result hash above.
+Sampled child-private peak was 274.99 MiB; this is not combined app/worker/helper
+RAM acceptance. The approximately seven-second wall margin is narrow. This
+specific reopened-input pass is not a guarantee for empty caches, changed/larger
+data, visibility transitions or another machine.
+
+The original all-admission timeout receipt SHA-256 is
+`9616104e3ef33d9c4ba52c233ac08e73aa42a47aa6b0257c771e66c626b91fc2`;
+the successful quarter-admission receipt is
+`aaa866a5a4a739340337749e22f6ea808eb819f71ca029f27ef8b1fd1567006e`.
+Evidence lives in `fixed/background-budget*.json*`; partial original-cache state
+was preserved separately for replay. Numeric/model outputs, scopes and timings
+are distinguished from cache counters and hardware-dependent performance.
+
+The new admission regressions and existing cache checks passed together (7 tests).
+Full Core validation passes 973 tests; Windows build/install passes with zero
+warnings/errors (55.08s), restarting daily app **43316**. Backup:
+`20261029T113547842Z-5691edb0`; pre-commit identity:
+`1.0.0+b56734d69f505f5a546c2d140c4cbfe22afd2781.dirty`, built 11:36:09 UTC.
+Installed assemblies match publish output:
+
+- Core: `f9ac59f29cbab3758e72715d74825353878c9d795361c3cf38ef5cef2de1d151`
+- Infrastructure: `003aa6b66034cf669851e23ade4949378f7739509e2a444955aaf66166f82e03`
+- App: `9ccdf7a3957e163a3a4fe23439687ad100cc50de574bf11b91fa633fb5d652e0`
+- ForecastEvaluation: `a880466cfd877db8fcacbe96594f0f9638be157b47064c83815627ad26bb86b0`
+
+After installation, a detailed live computation was confirmed at 11:38:53 UTC
+while provider quota collection continued to 11:42:48 UTC. Hidden/restore use and
+the agreed aggregate CPU/disk/RAM/latency budgets remain PERF-001/DEC-004 host gates.

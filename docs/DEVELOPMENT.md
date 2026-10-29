@@ -432,6 +432,14 @@ dotnet build TajsTokens.slnx -c Debug -p:Optimize=false -p:DogfoodEnabled=false
 This global override takes precedence over the library defaults and avoids replacing
 the daily build. See [fixed-input timings and result parity](source-notes/STAGE1_RESOURCE_VALIDATION.md#daily-debug-compute-optimization).
 
+The calibration worker's numeric-fit cache persists a deterministic quarter of
+eligible fit keys while retaining the same 256-entry memory cache and 16,384-entry/
+32 MiB disk bounds. This prevents large repeated scans from evicting every useful
+fit before reuse. Unadmitted or missing fits are recomputed; the numeric key,
+checksums and model calculations are unchanged. Ordinary explicit cache instances
+retain their existing all-admission behavior. Empty/changed caches can still make
+a slice exceed its budget; source evidence is independent of this disposable cache.
+
 ## Daily installation
 
 A successful default local app build publishes, installs and restarts `%LOCALAPPDATA%\Programs\TajemnikTV\TajsTokens\current`. Persistent database/settings live in sibling `data`; the prior binary is kept in `previous`, and deployment backups are in `backups`. The build does not delete `data`.

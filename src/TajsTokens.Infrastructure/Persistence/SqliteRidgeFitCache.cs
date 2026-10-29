@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text;
 using System.Security.Cryptography;
+using System.Buffers.Binary;
 using Microsoft.Data.Sqlite;
 using TajsTokens.Core.Interfaces;
 
@@ -12,6 +13,7 @@ public sealed class SqliteRidgeFitCache : IRidgeFitCache, IDisposable
     private readonly SqliteConnection _connection;
     private readonly Dictionary<string, RidgeFitParameters> _memory = new(StringComparer.Ordinal);
     private readonly int _maxEntries;
+    private readonly int _admissionStride;
     private readonly object _sync = new();
     private bool _disabled;
     private int _writes;
@@ -21,10 +23,17 @@ public sealed class SqliteRidgeFitCache : IRidgeFitCache, IDisposable
     public SqliteRidgeFitCache(string path, int maxEntries = 16384)
         : this(path, maxEntries, 8192) { }
 
-    internal SqliteRidgeFitCache(string path, int maxEntries, int maxPages)
+    // Historical replay exceeds the entry budget. A stable disk subset avoids a
+    // sequential scan evicting every useful fit before the next slice reaches it.
+    // All completed fits still enter the same bounded in-process cache.
+    internal static SqliteRidgeFitCache ForCalibration(string path) => new(path, 16384, 8192, 4);
+
+    internal SqliteRidgeFitCache(string path, int maxEntries, int maxPages, int admissionStride = 1)
     {
         if (maxEntries is < 1 or > 16384) throw new ArgumentOutOfRangeException(nameof(maxEntries));
+        if (admissionStride is < 1 or > 16) throw new ArgumentOutOfRangeException(nameof(admissionStride));
         _maxEntries = maxEntries;
+        _admissionStride = admissionStride;
         _connection = new SqliteConnection(new SqliteConnectionStringBuilder
             { DataSource = path, Pooling = false, DefaultTimeout = 1 }.ToString());
         try
@@ -90,11 +99,13 @@ public sealed class SqliteRidgeFitCache : IRidgeFitCache, IDisposable
         if (payload.Length > 16384) return;
         Remember(key, fit);
         if (_disabled) return;
+        if (_admissionStride > 1 && BinaryPrimitives.ReadUInt32LittleEndian(
+                SHA256.HashData(Encoding.UTF8.GetBytes(key))) % _admissionStride != 0) return;
         try
         {
             using SqliteCommand command = _connection.CreateCommand();
             // Each fit is an atomic cache entry: killing a bounded worker never loses source data
-            // or makes an unfinished model look complete. Completed fits survive the next slice.
+            // or makes an unfinished model look complete. Admitted fits survive to later slices.
             int batch = Math.Min(64, _maxEntries);
             if (_writes++ % batch == 0)
             {

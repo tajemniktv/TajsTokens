@@ -782,3 +782,47 @@ policy changed. FORE-005 remains open for broader prospective support, supported
 reset labels and selected/composed prospective comparisons. Physical tray, input
 restoration, alerts and resource acceptance remain separate host checks in
 PROJECT.md; this explicit research slice adds no UI acceptance claim.
+
+### Detailed recorded outcomes at the October 29 noon cutoff
+
+The frozen live-journal cutoff **2026-10-29T12:00:55.5050559Z** contains 389
+computations: 376 compact and 13 detailed, with no invalid entries or truncation.
+The Debug-compute and worker-cache fixes allow detailed before-target recordings
+to accumulate. These are actual retained outputs, not a reconstructed refit.
+
+| Compact horizon | Ordinary matches | Non-overlapping | Blocks | MAE / signed mean, pp remaining |
+|---|---:|---:|---:|---:|
+| 5 minutes | 366 | 73 | 2 | 0.32858 / +0.03616 |
+| 15 minutes | 362 | 26 | 2 | 0.53220 / +0.06421 |
+| 30 minutes | 348 | 13 | 2 | 0.33800 / +0.08648 |
+| 120 minutes | 263 | 3 | 1 | 0.88425 / +0.02228 |
+
+Detailed selected/direct 30-minute outputs have **seven matched ordinary pairs**,
+only **two non-overlapping outcomes in one block**. Both use `time-ewma-2h` and
+have MAE **0.532195pp**. The selected outputs' signed mean is +0.299603pp remaining;
+positive means optimistic remaining quota. All seven selected bands contain their
+reported outcomes, at mean width 2.002521pp; seven overlapping results in one block
+do not validate nominal 80% predictive coverage. Detailed two-hour/24-hour/reset
+targets are still immature at this cutoff. No composed challenger is selected in
+these pairs and no delivered-alert or policy-improvement claim follows.
+
+Independent read-only reconstruction verifies all 389 stored content identities,
+1,984 original output rows, 1,375 compatible target matches and error/non-overlap
+summaries. A separate arithmetic check reproduces 13 score groups' block/band
+metrics and the seven selected/direct pairs. It does not prove complete account
+coverage, backend precision/lag, timely nominal-origin issuance at every horizon
+or population calibration. Before-target recording remains distinct from each of
+those claims.
+
+Local evidence is in `.codex/temp/stage7/worker-completion/`:
+
+- Native report: `recorded-after-admission.json`, SHA-256
+  `b878df7529f83b490f32169cd126a7a57ef283788d4ec6e4033fd74bc2c737ae`.
+- Target/identity proof: `recorded-after-admission-independent.json`, SHA-256
+  `e0568c367697f46249a3367bb1c27a4414e9df341457a7c4d1e8fff6a5fe70d6`.
+- Summary/pair proof: `recorded-after-admission-summary-independent.json`, SHA-256
+  `dd0a83d70c91af354799c01e75885973d45d05aa44df8430641dec6d9693ddd6`.
+
+FORE-005 remains open for broader chronological support, mature reset/long-horizon
+labels and supported selected/composed comparisons. The released selection policy
+and continuation defaults remain unchanged.

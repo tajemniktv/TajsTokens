@@ -414,6 +414,16 @@ numerical budgets remain open under PERF-001. See
   and fall back at read bounds or concurrent evidence changes. Full suite: 707
   passed; Windows build/install passed;
   [matching-output and resource evidence](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md).
+  Large replay recovery is now qualified separately: admitting every completed fit
+  caused the bounded disk cache to churn before saved fits could be reused. The
+  worker retains a deterministic quarter on disk, all cache-eligible fits in its
+  existing bounded memory cache, and the same 16,384-entry/32 MiB bounds. Reopened
+  fixed-input reuse improves from 393 to 14,926 hits with identical outputs. The
+  warm isolated background job completes in 592.9/600 seconds under the unchanged
+  CPU/memory limits; its narrow margin does not close larger/empty-cache or hidden
+  host/resource acceptance. Partial-scan restart, invalidation and cache-value
+  regressions pass; full Core validation passes 973 tests with installed Windows
+  build evidence in the same source note.
 - [x] **PERF-008 — Bound maintenance and queries.** Put legacy privacy scrubs under
   durable migration ownership and enforce privacy in writers. Guard initialization
   with database-replacement recovery. Inspect fleet/reset/cache-stamp query plans;
@@ -914,6 +924,13 @@ shared projection and the existing Planning page; no duplicate planner/estimator
   Before-target recording is not timely nominal-origin issuance for every short
   horizon, nor proof of forecast publication. Broader detailed outcomes and reset
   labels must still mature. [Calculation parity and runtime limits](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md#daily-debug-compute-optimization).
+  At the frozen 12:00:55 UTC cutoff, 389 retained computations include 13 detailed
+  computations. Seven matched detailed 30-minute selected/direct pairs have identical
+  0.532195pp MAE, only two non-overlapping outcomes and one block. Independent
+  checks verify 389 identities, 1,984 frozen rows and 1,375 matched targets, plus
+  block/band/pair summaries. This closes the earlier absence of detailed matched
+  outcomes, not broader prospective/calibration acceptance or a model win.
+  [Latest support and limits](docs/source-notes/STAGE6_CONTINUATION.md#detailed-recorded-outcomes-at-the-october-29-noon-cutoff).
   [Contract and validation](docs/source-notes/STAGE6_CONTINUATION.md#prospective-computation-journal-fore-005).
 
 **Exit:** a recent-work plan is useful end to end with explicit assumptions and
@@ -1074,6 +1091,12 @@ and perform them on the installed build when back; they do not block source/rese
   clear when their selected history is replaced or unloaded. Check readability.
 - **SHIP-003/004:** check normal refresh/cancellation, quota/alert behavior and readable
   partial/unsupported/reset-crossing states. Automated proofs remain separately labelled.
+- **EVID-002 / SHIP-004:** inspect provider-evidence requested/examined/eligible/
+  truncated counts and lookback/cadence labels. Its earlier visual pass stopped at
+  a Windows Security passkey prompt; authentication requires the owner present.
+- **PACE-003 / SHIP-004:** expand a forecast receipt and check measurement/collection
+  times, rate numerator/exposure, fallback reason and the separate sustainable budget
+  are readable. Source/round-trip arithmetic proof does not establish presentation.
 - **PERF-001 / DEC-004:** measure app, calibration worker and helpers together during
   hidden/restore use, then agree the resource budget. The provisional target is not
   user acceptance.
@@ -1084,15 +1107,16 @@ provider scope and answer-specific eligibility slices have their stated installe
 evidence. **PACE-001–004** implement and evaluate the elapsed-time correction.
 Stage 4's **SCORE-001–003** joint projection, frozen basis/archive and qualified
 scoring are installed. **CAT-001** discovery and picker interaction are verified,
-including hidden-dashboard input restoration. The latest full suite passed 970
+including hidden-dashboard input restoration. The latest full suite passed 973
 tests; the Windows build installed the aligned-window study and selected-history
 relationship marker, retaining the censoring audit, coherent-path,
 activity/rolling comparisons, recorded-output scorer, shared status and forecast-computation journal. Deployment
-restarted the daily app; fixed-report installed parity passes. Live selection is
+restarted the daily app; fixed-report installed parity passes. The selection policy is
 unchanged. Installation evidence is recorded in the Stage 6/7 source notes.
 Core/Infrastructure now optimize Debug compute while retaining symbols; fixed
 worker results and 288 captured numeric fits remain bitwise identical. The latest
-Windows build installs those libraries without changing worker/resource budgets.
+Windows build installs those libraries and scan-resistant worker cache admission
+without changing model outputs, cache bounds or worker/resource budgets.
 Fresh provider ingestion, before-target journal recording and installed scoring
 are verified; user visual acceptance remains separate.
 
@@ -1142,7 +1166,10 @@ is confirmed before its targets, and a repeat full worker exits successfully
 inside its unchanged foreground budget. Fixed-input isolation reduced quota CPU from
 90.42 to 47.28 seconds with identical results and fit counts. This does not close
 hidden/background completion, RAM acceptance, source publication or prospective
-accuracy. Broader chronological/reset and selected/composed support must mature;
+accuracy. The isolated reopened-input background job now also finishes under its
+unchanged limits (592.9 seconds), using a stable disk-cache subset to avoid replay
+eviction; this does not verify hidden-window integration or larger/cold inputs.
+Broader chronological/reset and selected/composed support must mature;
 do not add machinery or weaken targets to manufacture it. [Capture, fix and limits](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md#daily-debug-compute-optimization).
 SHIP-001–004 remain programme-wide gates over those open items;
 the latest slice's tests/install proofs do not close the programme. All other
