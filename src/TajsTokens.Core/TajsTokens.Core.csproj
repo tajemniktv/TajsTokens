@@ -4,6 +4,9 @@
         <TargetFramework>net10.0</TargetFramework>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
+        <!-- Daily Debug installs use this compute library in the bounded worker too.
+             Keep symbols, but allow optimized JIT code; -p:Optimize=false overrides it. -->
+        <Optimize>true</Optimize>
     </PropertyGroup>
 
 </Project>

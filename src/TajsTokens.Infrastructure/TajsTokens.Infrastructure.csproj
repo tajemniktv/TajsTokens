@@ -19,6 +19,9 @@
 
     <PropertyGroup>
         <TargetFramework>net10.0</TargetFramework>
+        <!-- The bounded calibration worker also uses these paths in daily Debug installs.
+             Keep symbols; use -p:Optimize=false for an isolated unoptimized debugging build. -->
+        <Optimize>true</Optimize>
         <ImplicitUsings>enable</ImplicitUsings>
         <Nullable>enable</Nullable>
     </PropertyGroup>

@@ -905,6 +905,15 @@ shared projection and the existing Planning page; no duplicate planner/estimator
   128 identities, 640 outputs and all 352 matched targets/errors. Reset labels,
   broader temporal support and detailed selected/composed prospective comparisons
   remain open. No released model or continuation default changed.
+  The October 29 Debug-compute fix retains the same model while allowing the
+  installed foreground worker to record its first detailed computation at
+  10:54:45 UTC. Selected 30m/2h/24h and reset outputs plus direct 5/15/30/120m
+  controls are confirmed before target; generation delay is 156.9 seconds.
+  A repeat installed worker completes with exit code 0 in 167.6 seconds under the
+  unchanged three-minute foreground budget.
+  Before-target recording is not timely nominal-origin issuance for every short
+  horizon, nor proof of forecast publication. Broader detailed outcomes and reset
+  labels must still mature. [Calculation parity and runtime limits](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md#daily-debug-compute-optimization).
   [Contract and validation](docs/source-notes/STAGE6_CONTINUATION.md#prospective-computation-journal-fore-005).
 
 **Exit:** a recent-work plan is useful end to end with explicit assumptions and
@@ -1075,12 +1084,15 @@ provider scope and answer-specific eligibility slices have their stated installe
 evidence. **PACE-001–004** implement and evaluate the elapsed-time correction.
 Stage 4's **SCORE-001–003** joint projection, frozen basis/archive and qualified
 scoring are installed. **CAT-001** discovery and picker interaction are verified,
-including hidden-dashboard input restoration. The latest full suite passed 969
+including hidden-dashboard input restoration. The latest full suite passed 970
 tests; the Windows build installed the aligned-window study and selected-history
 relationship marker, retaining the censoring audit, coherent-path,
 activity/rolling comparisons, recorded-output scorer, shared status and forecast-computation journal. Deployment
 restarted the daily app; fixed-report installed parity passes. Live selection is
 unchanged. Installation evidence is recorded in the Stage 6/7 source notes.
+Core/Infrastructure now optimize Debug compute while retaining symbols; fixed
+worker results and 288 captured numeric fits remain bitwise identical. The latest
+Windows build installs those libraries without changing worker/resource budgets.
 Fresh provider ingestion, before-target journal recording and installed scoring
 are verified; user visual acceptance remains separate.
 
@@ -1124,14 +1136,14 @@ resource-budget decision remain open.
 **Remaining checklist audit:** FORE-003/004 and NEXT-004 need the listed host
 checks; PERF-001 needs controlled resource measurements and DEC-004's agreed
 budget. FORE-005 still needs broader before-target output/outcome support and reset
-labels; the October 29 10:04 UTC journal contains 268 compact computations and no
-detailed computations. The detailed writer is implemented, but successful worker
-completion and matched selected/composed support must be checked separately from
-waiting for labels. A numeric phase capture observes one worker ending around its
-three-minute slice without a detailed computation; successful reads in the next
-slice narrow the investigation. The next unblocked operational checkpoint is to
-isolate current quota replay cost versus token work on a fixed snapshot, retaining
-exact results and existing budgets before choosing a fix. [Capture and limits](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md#installed-detailed-completion-gap-october-29).
+labels. The earlier zero-detailed-recording gap now has an installed foreground
+counterexample after Debug compute optimization: the first detailed computation
+is confirmed before its targets, and a repeat full worker exits successfully
+inside its unchanged foreground budget. Fixed-input isolation reduced quota CPU from
+90.42 to 47.28 seconds with identical results and fit counts. This does not close
+hidden/background completion, RAM acceptance, source publication or prospective
+accuracy. Broader chronological/reset and selected/composed support must mature;
+do not add machinery or weaken targets to manufacture it. [Capture, fix and limits](docs/source-notes/STAGE1_RESOURCE_VALIDATION.md#daily-debug-compute-optimization).
 SHIP-001–004 remain programme-wide gates over those open items;
 the latest slice's tests/install proofs do not close the programme. All other
 Stage 1–7 boxes are completed implementations or explicit evaluated deferrals.

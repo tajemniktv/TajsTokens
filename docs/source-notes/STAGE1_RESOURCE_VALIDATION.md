@@ -987,3 +987,93 @@ Local diagnostic source and `phases.jsonl` are under
 `.codex/temp/stage7/worker-completion/`; capture SHA-256:
 `767f18a2f59a6ef1620c06fbae756bf982eee5951f993ce2aa18d0ae788d4c23`.
 No product source, scheduling policy or running version changed for this capture.
+
+### Daily Debug compute optimization
+
+The completion investigation uses a new consistent app-owned snapshot, with source
+connections opened read-only, a fixed quota anchor at
+`2026-10-29T10:17:20.4482663Z`, and the same starting numeric-fit cache copied for
+each trial. Calculation writes affect only that disposable snapshot. The probe
+separates quota calculation from token work, preserving the worker's 256 MiB
+managed limit and GCConserveMemory=5. Runs below are unthrottled computational
+comparisons, not installed slice-completion or whole-tree resource acceptance.
+
+The baseline quota phase used 90.42 CPU-seconds and 47,028 fit misses; token work
+used 1.00 CPU-second and 388 more misses. A further split puts 77.23 CPU-seconds
+in the composed path, which returned the direct predictions unchanged. Its exact
+elapsed targets change the token training grids; rounding them or dropping hard
+targets would change the model. Support/cohort screening and sparse-arithmetic
+experiments did not remove the required fits or sufficiently close the budget gap;
+none of those source changes is retained.
+
+The installed Debug Core assembly had `DisableOptimizations` in its Debuggable
+flags. Core and Infrastructure now set `Optimize=true`, retaining PDBs. Their
+optimized Debug assemblies use `IgnoreSymbolStoreSequencePoints` without disabling
+JIT optimization. App/tests retain their existing configuration. Release already
+optimizes these libraries. No source algorithm, horizon, training window, cache
+bound, worker budget, acquisition contract or TT basis changes.
+
+| Fixed-input build | Quota wall / CPU seconds | Token wall / CPU seconds |
+|---|---:|---:|
+| Original Debug | 111.82 / 90.42 | 0.72 / 1.00 |
+| Optimized Core only | 55.18 / 51.63 | 0.48 / 0.53 |
+| Optimized Core and Infrastructure | 50.64 / 47.28 | 0.47 / 0.53 |
+
+Concurrent machine activity differs between trials. The approximately 48% quota
+CPU reduction is specific to this Debug fixture; it is not a Release speedup or
+proof that every data size finishes within the unchanged slice budget. Each trial
+retains 393 cache hits and 47,416 total misses. Full result SHA-256 is identical:
+`5288bf92bf32aef54c614811a62d727ca6cec9b4bf3ba7ec1e8d3c81f3dcb82d`.
+Quota result hash is `35d9ca5135bc7722d4fa17e10804ff99c65dfe96734117c7312ed4c194923001`;
+token result hash is `44bc5b161785b1fbd05dcb5a7e09f4d739ebea9a574d6ce48a2ffbb39aacbf2b`.
+
+An independent load of the original installed Core assembly compares 288 synthetic
+fits bit-for-bit, including means, scales, coefficients, signed zeros, sparse and
+constant columns, singular/negative penalties and extreme/nonfinite input cases.
+The committed golden regression preserves that captured digest:
+`b43cb99aea20c7f1ada8fad16335e14d5ea5a9a08775cec9ba602a2b93989234`.
+Reference Core SHA-256 is
+`8976974e7782edac21c30b74d8c0db623a85162a282d9fa46df8dc1cd14521cd`.
+
+Raw local probe sources, fixed input and numeric summaries are under
+`.codex/temp/stage7/worker-completion/`. The fixed database and associations remain
+local, not shared fixtures. Library debugging that requires unoptimized locals
+can explicitly override the default with `-p:Optimize=false`; use an isolated
+`-p:DogfoodEnabled=false` build for that session. [Build procedure](../DEVELOPMENT.md#compute-optimization-in-debug-builds).
+
+Validation passes **970 Core tests** (1m 48s) and the serial Windows build with zero
+warnings/errors (55.62s). The daily app restarted as PID **32504**, backup
+`20261029T105132687Z-16e33fd9`. Pre-commit build identity is
+`1.0.0+c8891fd5627468ef2b593ac81cf6fd5f4e146afb.dirty`, built 10:51:54 UTC.
+Both installed compute libraries have optimization enabled; local PDBs remain.
+The recent and paired-era strict audit reports on the fixed snapshot match the
+old installed tool byte-for-byte (SHA-256
+`c1817552a995f08a1915c66b03499c4adfb605b273951ce5130eba27068b75dd` and
+`4ad2125fdb8cb77ef0a371eb98fd8e2faa7aa8ac3999d168a53be3a878a06ba5`).
+Installed assemblies match normal publish output:
+
+- Core: `0645ef1213fa66900ceb3ec96fc871bb723b37cdae7bb31514f11acecf092c49`
+- Infrastructure: `091688711927673e7c081f7e36c28dcf994796c9f81de93a5bcb7ee900f1b0e0`
+- App: `3475d6ee457761b51a7d6f4c2a93688649e16b415e47b980ad31947e5be5ee22`
+- ForecastEvaluation: `6529c01f8288c08023b1e2fdf88513f9e9f3145d72e97de79ce0fa17a48eabf8`
+
+The unprofiled installed worker 16284 started at 10:52:06 UTC and was last sampled
+at 10:54:46 UTC with 55.39 CPU-seconds, then exited. It recorded the first live
+Detailed computation at **10:54:45.8217242 UTC**, with 156.90 seconds generation
+delay. The existing journal owner verifies supported before-target selected
+30-minute/two-hour/24-hour/reset outputs and direct 5/15/30/120-minute controls.
+The five-minute control has only 2.30 minutes of issue lead; before-target recording
+must not be mistaken for timely nominal-origin issuance at every horizon.
+This narrows the zero-detailed-recording gap for the observed foreground slice.
+It does not prove dashboard publication, improved forecasting accuracy, background
+completion, calibrated reset outcomes or aggregate RAM acceptance.
+
+A repeat installed worker, **32268**, was observed through a retained process
+handle: start `10:56:23.1415936Z`, successful exit **0** observed by
+`10:59:10.7396836Z` (167.60 seconds to observation). This establishes full worker completion for
+that foreground slice independently of the earlier quota-journal write. The
+unchanged three-minute budget still has limited margin; this is not an all-size
+or hidden/background completion guarantee. Local evidence is
+`installed-worker-exit.json`, `installed-worker.json` and `installed-journal.json`.
+Quota collection continued to 11:00:40 UTC and compact forecast confirmation to
+11:00:41 UTC; a second detailed computation is confirmed at 10:59:08 UTC.

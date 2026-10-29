@@ -415,6 +415,23 @@ and regime research section. Analysis remains explicit. Check the marker/tooltip
 after analysis, date/account/work-filter changes, refresh and hidden-view unload;
 source tests do not establish visual or physical navigation acceptance.
 
+## Compute optimization in Debug builds
+
+Core and Infrastructure compile with optimization in Debug as well as Release.
+The daily Debug install uses these libraries in the CPU-bounded calibration worker;
+unoptimized compute can exhaust its wall-time slice before producing detailed
+forecasts. Debug symbols remain available. The app project retains its normal
+Debug configuration.
+
+For an isolated debugging session that needs unoptimized library locals/editing:
+
+```powershell
+dotnet build TajsTokens.slnx -c Debug -p:Optimize=false -p:DogfoodEnabled=false
+```
+
+This global override takes precedence over the library defaults and avoids replacing
+the daily build. See [fixed-input timings and result parity](source-notes/STAGE1_RESOURCE_VALIDATION.md#daily-debug-compute-optimization).
+
 ## Daily installation
 
 A successful default local app build publishes, installs and restarts `%LOCALAPPDATA%\Programs\TajemnikTV\TajsTokens\current`. Persistent database/settings live in sibling `data`; the prior binary is kept in `previous`, and deployment backups are in `backups`. The build does not delete `data`.
