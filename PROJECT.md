@@ -861,9 +861,10 @@ shared projection and the existing Planning page; no duplicate planner/estimator
   source health, conditional runway and bounded current change reasons remain
   separate. The tray menu links to the existing planner/status disclosure. Cached
   TT uses native-generation arrays and basis identity; the tray reads no ledger or
-  calibration dataset. Full Core validation (905 tests), the isolated Windows build
-  and native numeric/refusal checks pass. Installation and manual tray acceptance
-  remain open while the installed Planning build's hide/restore check is pending.
+  calibration dataset. Initial isolated validation (905 tests) and native numeric/
+  refusal checks passed; the shared status is now installed with the FORE-005 journal
+  build (915 tests). Manual tray/Overview acceptance remains open while the user is
+  away; Planning's hide/restore check is listed in the handoff below.
   See [contract and evidence](docs/source-notes/STAGE6_CONTINUATION.md#shared-product-status-fore-004).
 - [ ] **FORE-005 — Earn horizon-specific selection.** Evaluate 5/15/30/120-minute
   targets and supported reset leads with rolling origins, timely inputs/labels and
@@ -872,6 +873,17 @@ shared projection and the existing Planning page; no duplicate planner/estimator
   coverage, missed bursts, false exhaustion warnings and warning lead time. Retain
   timestamped shadow predictions before labels mature; keep reconstructed history
   and operational replay separate.
+  The existing compact/detailed forecast owners now retain immutable closed numeric
+  computations separately from mutable forecast history (intelligence schema 12).
+  Actual post-commit confirmation qualifies before-target recording; late and
+  unconfirmed outputs cannot borrow an earlier generation/insert clock. Fixed direct
+  5/15/30/120-minute comparisons reuse the existing fallback without changing live
+  selection. A bounded read-only journal report exposes availability and issue lead.
+  Full Core validation (915 tests), Windows installation and independent installed
+  hash/numeric/preservation checks pass. Real before-target recording has started.
+  Rolling-origin comparison, outcome metrics and prospective maturation remain open;
+  recording a prediction is not evidence of predictive accuracy or a delivered alert.
+  [Contract and validation](docs/source-notes/STAGE6_CONTINUATION.md#prospective-computation-journal-fore-005).
 
 **Exit:** a recent-work plan is useful end to end with explicit assumptions and
 reproducible evidence. A challenger that fails evaluation leaves the corrected baseline
@@ -952,19 +964,34 @@ complete; one successful early slice does not validate later changes.
 
 #### Current implementation handoff
 
+Host checks are deferred while the user is away. Keep these acceptance items open
+and perform them on the installed build when back; they do not block source/research work:
+
+- **FORE-003:** change Planning mode/context/counts, hide the dashboard for more than
+  30 seconds, restore it, and verify inputs/navigation survive while old results clear.
+- **FORE-004 / SHIP-004:** inspect Overview/Planning native-token and TT scope/freshness
+  labels and the collapsed status reasons. Open the tray menu physically; verify its
+  read-only summaries and the Plan a session / Why this status? navigation.
+- **SHIP-003/004:** check normal refresh/cancellation, quota/alert behavior and readable
+  partial/unsupported/reset-crossing states. Automated proofs remain separately labelled.
+- **PERF-001 / DEC-004:** measure app, calibration worker and helpers together during
+  hidden/restore use, then agree the resource budget. The provisional target is not
+  user acceptance.
+
 The Stage 1 mechanisms are installed with their stated evidence; PERF-001 resource
 acceptance remains open. Stage 2's chronology, retention, compressed ingestion,
 provider scope and answer-specific eligibility slices have their stated installed
 evidence. **PACE-001–004** implement and evaluate the elapsed-time correction.
 Stage 4's **SCORE-001–003** joint projection, frozen basis/archive and qualified
 scoring are installed. **CAT-001** discovery and picker interaction are verified,
-including hidden-dashboard input restoration. The latest full suite passed 905
-tests and the Windows build passed with deployment disabled. The installed Planning
-build remains unchanged while its manual hide/restore check is open; user visual
-acceptance remains separate.
+including hidden-dashboard input restoration. The latest full suite passed 915
+tests and the Windows build installed the shared status and forecast-computation
+journal. The app was stopped before validation; deployment started the new version.
+Fresh provider ingestion and actual before-target journal recording
+are verified; user visual acceptance remains separate.
 
-**FORE-004 is validated in an isolated build; continue FORE-005 while its installation
-and the remaining host checks are pending.** The user selected the exact
+**Continue FORE-005's chronological/outcome evaluation while real shadow records
+accumulate and the listed host checks are pending.** The user selected the exact
 [price policy and frozen TT basis](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md).
 CAT-002 and D-01 are integrated and installed: immutable selections, independent
 price imports, measured TT and explicit original-score saving. Automated checks,
@@ -985,8 +1012,8 @@ Planning flow, retaining the separate count comparator. Automated/installed chec
 pass; the user passed Planning rendering/edited-model results, while the separate
 input-restoration check remains open. FORE-004's shared status, retained native/TT
 scope, change reasons and tray navigation are implemented and pass automated/native
-checks. The isolated build preserves the running Planning version; install it after
-the current hide/restore check, then request physical tray/Overview acceptance.
+checks, and is now installed with FORE-005's journal. The user is away; keep the
+physical tray/Overview and Planning hide/restore checks listed above open.
 Programme-wide acceptance gates, user visual acceptance and the PERF-001
 resource-budget decision remain open.
 

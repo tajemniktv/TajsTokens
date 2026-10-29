@@ -152,7 +152,7 @@ public sealed class WorkloadReferenceTests : IDisposable
         Assert.Equal(1, await Execute("SELECT COUNT(*) FROM api_price_catalog_snapshots", true));
         await Execute("DROP VIEW workload_reference_selections");
         await new WorkloadReferenceService(new(Database)).InitializeAsync(default);
-        Assert.Equal(11, await Execute("SELECT version FROM intelligence_schema", true));
+        Assert.Equal(12, await Execute("SELECT version FROM intelligence_schema", true));
         Assert.Equal(1, await Execute("SELECT COUNT(*) FROM api_price_catalog_snapshots", true));
     }
 

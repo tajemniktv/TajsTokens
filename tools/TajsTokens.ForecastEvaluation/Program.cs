@@ -7,6 +7,12 @@ using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
+if (args.Length == 4 && args[0] == "--forecast-journal")
+{
+    await ApiPriceCatalogCli.RunAsync(() => ForecastJournalCli.RunAsync(args));
+    return;
+}
+
 if (args.Length == 5 && args[0] == "--joint-path-audit")
 {
     await ApiPriceCatalogCli.RunAsync(() => ContinuationCli.AuditPathsAsync(args));

@@ -129,6 +129,6 @@ public sealed class ApiPriceCatalogPersistenceTests : IDisposable
         Assert.Equal(9, await Scalar("SELECT version FROM intelligence_schema"));
         await Execute("DROP VIEW api_price_catalog_snapshots;");
         await new SqliteTelemetryRepository(Database).InitializeIntelligenceAsync(default);
-        Assert.Equal(11, await Scalar("SELECT version FROM intelligence_schema"));
+        Assert.Equal(12, await Scalar("SELECT version FROM intelligence_schema"));
     }
 }

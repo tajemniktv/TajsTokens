@@ -101,6 +101,30 @@ matrices as JSONL for independent checks. Both commands restrict ranges to 366 d
 keep cohort identities aliased and make no selection/write. Do not sum horizon rows
 as independent work. [Methods, retained results and limits](source-notes/STAGE5_IDENTIFICATION.md).
 
+## Forecast computation journal
+
+The existing compact forecast owner and detailed calibration worker retain closed
+numeric outputs in the app-owned database (intelligence component 12). This journal
+is separate from the mutable forecast-history projection. It never backfills old
+history as prospective predictions. Equal retries preserve the first output and
+post-commit confirmation time; changed inputs/outputs get separate identities.
+
+Read a bounded aggregate report without migrating or changing the database:
+
+```powershell
+dotnet run --project tools/TajsTokens.ForecastEvaluation -c Debug --no-build --no-restore -- --forecast-journal "$env:LOCALAPPDATA/Programs/TajemnikTV/TajsTokens/data/telemetry.db" 2026-10-28T00:00:00Z 2026-10-29T00:00:00Z
+```
+
+Use a past UTC recording range of at most 366 days. The report aliases cohorts,
+exports no raw IDs/receipts/content, and limits reads to 10,000 computations with
+an explicit truncation flag. A missing journal returns zero without initialization.
+Before-target, late, invalid-clock and unconfirmed outputs are distinct. Actual
+confirmation lead and generation delay remain visible: before-target recording
+alone does not prove timely nominal-origin issuance. Computation does not prove
+dashboard publication or a sent warning. This command measures retained output
+availability, not future accuracy, coverage or model promotion. See the
+[Stage 6 contract](source-notes/STAGE6_CONTINUATION.md#prospective-computation-journal-fore-005).
+
 ## Forecast threshold study
 
 Run this explicitly against the app-owned telemetry database, with a fixed past UTC range:

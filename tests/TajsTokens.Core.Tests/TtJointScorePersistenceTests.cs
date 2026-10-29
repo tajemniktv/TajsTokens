@@ -156,7 +156,7 @@ public sealed class TtJointScorePersistenceTests : IDisposable
         Assert.Equal(7, await Scalar("SELECT version FROM intelligence_schema"));
         await Execute("DROP VIEW tt_joint_score_snapshots;");
         await new SqliteTelemetryRepository(Database).InitializeIntelligenceAsync(default);
-        Assert.Equal(11, await Scalar("SELECT version FROM intelligence_schema"));
+        Assert.Equal(12, await Scalar("SELECT version FROM intelligence_schema"));
         Assert.Equal(1, await Scalar("SELECT COUNT(*) FROM tt_evaluation_snapshots WHERE snapshot_id='legacy' AND content_hash='original-hash' AND payload='original-bytes'"));
     }
 

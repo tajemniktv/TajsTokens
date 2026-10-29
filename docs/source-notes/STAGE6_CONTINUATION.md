@@ -434,7 +434,95 @@ Core SHA-256 is
 app assembly SHA-256 is
 `ee50bf86e9ac770cbcfc1e07759a87dbb9f4ef97b08edf9f4fe828158cd46700`.
 No installed runtime or presentation claim follows from this isolated build.
-The daily app remains PID 25524 with Core SHA-256
+At this isolated checkpoint the daily app remained PID 25524 with Core SHA-256
 `2794a69be93d5a4c1647ff07fca0598072a8d66031a69ced388e5398457a5753`.
 Its Planning rendering/model-edit check passed; hide/restore is still pending.
-The status/tray slice awaits installation and a subsequent physical host check.
+The status/tray slice then awaited installation and a physical host check. It was
+subsequently installed with the journal slice below; physical acceptance stays open.
+
+## Prospective computation journal (FORE-005)
+
+`quota-forecast-computation/v1` preserves closed numeric computations through the
+existing compact forecast owner and detailed calibration worker. It is separate
+from `forecast_snapshots`, whose upsert and historical-recalculation semantics cannot
+establish what existed before a target matured. The journal is not a second forecast
+selector or a replacement for current forecast history. No old history is backfilled.
+
+Intelligence component 12 adds `quota_forecast_computations`. Each immutable payload
+contains the meter cohort, reset, original/collection/anchor/generation clocks,
+numeric anchor, policy, input hash, existing pace receipt and exact computed outputs.
+Selected reset and fixed-horizon outputs retain point/band values, support/counts,
+numeric inference and conditional exhaustion fields. Source JSON, prompts, tool text
+and credentials are not retained. The input hash covers the available typed quota
+prefix; it is not a claim of complete account history or a recoverable copy of inputs.
+
+Four shadow direct comparisons at 5/15/30/120 minutes reuse
+`QuotaPaceModels.ProductionFallback` on the same compatible epoch. These do not change
+the released fixed-horizon selector, choose a different continuation context or
+promote joint paths. Short prefixes, flat meters and reset crossings remain explicit;
+a flat comparator is a persistence-like benchmark, not measured zero consumption.
+Direct comparisons have no invented interval band. Existing selected horizon outputs
+retain their own models and empirical intervals separately.
+
+The repository stamps insertion after taking the SQLite writer lock. It then commits
+the immutable output before sampling and recording a one-time confirmation clock.
+Only that post-commit confirmation can qualify an output as before-target. A crash or
+cancellation between transactions leaves an **unconfirmed** output; retry confirms it
+at the actual retry time. Equal retries preserve the first payload, insertion and
+confirmation; changed inputs/outputs have a new content-addressed identity. Corrupt
+identity collisions preserve the original and refuse replacement. Future/reversed
+clocks, late confirmation and unconfirmed records have separate classifications.
+
+This proves a **computed output existed before its target**, not that it was shown
+or a warning delivered. A slow worker can produce an output for an obsolete anchor;
+existing publication guards still reject that result. Before-target recording alone
+also does not prove a full nominal-horizon warning lead: actual confirmation lead and
+generation delay must be used. The first live five-minute comparison had only about
+**4.49 minutes** of issue lead. Overlapping outputs are not independent outcomes.
+
+Payloads are bounded to 128 KiB and 16 points, with finite numeric validation. Reads
+use forward `(recorded time, ID)` pagination, at most 1,000 entries/page; the explicit
+`--forecast-journal` report caps the aggregate at 10,000 and exposes truncation.
+Reads use a read-only connection, never initialize/migrate/backfill, alias cohorts and
+export no raw identities or payloads. Unsupported formats/checksums stay visible.
+No automatic age expiry, extra source/network polling or separate runtime is added.
+
+### Validation and installed evidence
+
+Ten targeted regressions cover direct-fallback parity, sparse/flat/reset-crossing
+states, immutable variants, concurrent retry/reopen, actual recording/confirmation
+clocks, interrupted confirmation, cancellation, pagination, scope, corrupt identity
+refusal and migration without relabelling history. Both compact and detailed owners
+record their outputs; the compact path needs no workload-training read. Existing
+schema-refusal and original-record tests remain in the full suite.
+
+The full Core suite passed **915 tests** (1m 56s). The Windows solution build passed
+with zero warnings/errors (1m 00s), installed normally and started PID **43816**;
+the app had been stopped beforehand. Backup is `20261029T051907040Z-df6aa7b1`.
+Installed assembly SHA-256 values:
+
+- Core: `ad8ca0bfbde6228830fe5c07d2071b102d4dae617acd33af6db1ab19e38cbb5d`
+- Infrastructure: `05e304e7d226406b11d464439e987204d47c3556c3bd9bc1c4c25b0c15e42593`
+- App: `5c1a48ec415bec3940d44a8d8017d956004941475bce15914ee21fa795e6066b`
+
+Fresh provider ingestion advanced to October 29. An independent read-only Python
+check of the first **two** journal computations verified both content identities,
+ten before-target outputs and eight direct-pacing calculations with **zero numeric
+difference**. It compared the original tables against the closed deployment backup:
+all six research evaluations, one saved TT result, one selected reference and one
+price snapshot remained byte-equivalent. This does not claim every native projection
+is unchanged or close the wider migration/runtime gates.
+
+The sanitized independent aggregate report SHA-256 is
+`3841a7b9bcf80b00d3e70d6e4a4a5aa255fa2b2e6c19a8ef9a2cdfc4dfa62302`;
+the installed journal availability report SHA-256 is
+`38b56ec5d32d2021992fc6f41a09aee6c2f9972e2e739aa79adbcb08c3e9b2f4`.
+The reports contain aggregate numeric/status evidence only. No visual acceptance is
+claimed; pending host checks are listed in PROJECT.md while the user is away.
+
+**FORE-005 remains open.** Next work is overlap-safe chronological comparison and
+outcome scoring (including signed accumulated error, interval width/coverage, missed
+bursts, false exhaustion and actual warning lead), followed by qualified prospective
+evaluation as labels mature. Reconstructed history, collection-qualified replay and
+genuinely recorded outputs must remain separate. Recording success does not select
+a model, establish warning delivery or demonstrate predictive accuracy.

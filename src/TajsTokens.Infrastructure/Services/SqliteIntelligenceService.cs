@@ -242,6 +242,9 @@ public sealed class SqliteIntelligenceService : IIntelligenceService
                     current.WindowMinutes,
                     current.ResetsAtUtc,
                     current.AccountKey);
+                if (QuotaForecastComputationBuilder.Build(current, forecast, anchored,
+                    includeWorkload ? QuotaForecastComputationPhase.Detailed : QuotaForecastComputationPhase.CompactPace) is { } computation)
+                    await _telemetryRepository.RecordForecastComputationAsync(computation, cancellationToken);
                 await _telemetryRepository.UpsertForecastSnapshotAsync(persisted, cancellationToken);
                 results.Add(
                     new CurrentQuotaForecast(
