@@ -4,7 +4,7 @@ namespace TajsTokens.Core.Services;
 
 public static partial class ComposedQuotaValidation
 {
-    private static PredictedWorkload DescribeJoint(CodexJointWorkload joint, WorkloadContinuationReceipt receipt)
+    internal static PredictedWorkload DescribeJoint(CodexJointWorkload joint, WorkloadContinuationReceipt receipt)
     {
         double[] categories = Enumerable.Range(0, 5).Select(c => (double)(joint.Cells.Sum(x => TtJointWorkloadBasis.Amount(x, (TtTokenCategory)c)) +
             (joint.Overflow is { } overflow ? TtJointWorkloadBasis.Amount(overflow, (TtTokenCategory)c) : 0))).ToArray();

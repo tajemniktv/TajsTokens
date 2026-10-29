@@ -308,6 +308,29 @@ database, past UTC origin, context hours and horizon hours to reproduce one fini
 64-path ensemble. These commands neither select a live model nor turn raw path
 quantiles into calibrated intervals; audit files stay private until reviewed.
 
+## Rolling quota-model comparison
+
+Run the explicit expanding-prefix comparison over a fixed retained range:
+
+```powershell
+dotnet run --project tools/TajsTokens.ForecastEvaluation -c Debug --no-build --no-restore -- --rolling-joint-strict "$env:LOCALAPPDATA/Programs/TajemnikTV/TajsTokens/data/telemetry.db" 2026-10-22T00:00:00Z 2026-10-28T16:40:00Z
+```
+
+`--rolling-joint` keeps reconstructed event-time replay separate. Append `-audit`
+to either command for numeric JSONL fit samples and individual trials; the final
+line is the report. These commands read the existing app-owned dataset without
+writing, refitting a live model or starting network acquisition. Audit files contain
+model names and numeric workload evidence; review them before sharing.
+
+The comparison retains direct pace, the released forecasting head and the frozen
+first-20 fit, alongside growing category/joint fits and one block-path challenger.
+Targets stay at the nominal 5/15/30/120-minute horizon despite polling delay. The
+last fifth of each cohort's timestamp span is held out; development alone chooses
+a policy. Candidate policies retain the released head when composition is unavailable,
+and raw availability is reported separately. This is current-code replay, distinct
+from the journal's genuinely recorded outputs. See the
+[method, fixed studies and limits](source-notes/STAGE6_CONTINUATION.md#rolling-joint-comparison-fore-005).
+
 ## Daily installation
 
 A successful default local app build publishes, installs and restarts `%LOCALAPPDATA%\Programs\TajemnikTV\TajsTokens\current`. Persistent database/settings live in sibling `data`; the prior binary is kept in `previous`, and deployment backups are in `backups`. The build does not delete `data`.

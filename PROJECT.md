@@ -887,12 +887,24 @@ shared projection and the existing Planning page; no duplicate planner/estimator
   computed threshold/report-lead metrics. The first fixed prospective cutoff has ten
   five-minute and one fifteen-minute matches, only two/one non-overlapping outcomes;
   independent checks reproduce all eleven targets and error summaries. This small
-  sample does not establish a winning model or delivered-alert behavior. Fair rolling
-  joint/direct comparison and broader prospective maturation remain open.
+  sample does not establish a winning model or delivered-alert behavior.
   The scorer passes 18 focused regressions, the 933-test full suite, the Windows
   build and installed frozen-cutoff repeat/independent checks. A later cutoff adds
-  two thirty-minute matches (one non-overlapping); two-hour/reset targets remain
-  immature. No released model or continuation default changed.
+  two thirty-minute matches (one non-overlapping).
+  The explicit rolling-origin comparison now reuses existing owners with expanding
+  category/joint fits, fixed nominal horizons, collection-qualified/reconstructed
+  replay, development-only selection and a final time holdout. Raw availability is
+  separate from full candidate policies that retain the head when composition is
+  unavailable. Four fixed native studies (recent/month × both replay modes) retain
+  the released head in every group. Independent checks reproduce 257 sampled fits,
+  matched scores and policy choices; the full Core suite passes 941 tests. The
+  Windows build installs/restarts normally; packaged-tool fixed-report parity passes.
+  At the October 29 07:37 UTC prospective cutoff, 128 computations yield
+  123/114/100/15 ordinary matches at 5/15/30/120 minutes, only 25/8/4/1
+  non-overlapping outcomes in one block per horizon. Independent checks reproduce
+  128 identities, 640 outputs and all 352 matched targets/errors. Reset labels,
+  broader temporal support and detailed selected/composed prospective comparisons
+  remain open. No released model or continuation default changed.
   [Contract and validation](docs/source-notes/STAGE6_CONTINUATION.md#prospective-computation-journal-fore-005).
 
 **Exit:** a recent-work plan is useful end to end with explicit assumptions and
@@ -994,14 +1006,19 @@ provider scope and answer-specific eligibility slices have their stated installe
 evidence. **PACE-001–004** implement and evaluate the elapsed-time correction.
 Stage 4's **SCORE-001–003** joint projection, frozen basis/archive and qualified
 scoring are installed. **CAT-001** discovery and picker interaction are verified,
-including hidden-dashboard input restoration. The latest full suite passed 933
-tests and the Windows build installed the recorded-output scorer, retaining the
-shared status and forecast-computation journal. Deployment restarted the daily app.
+including hidden-dashboard input restoration. The latest full suite passed 941
+tests and the Windows build installed the rolling comparison, retaining the
+recorded-output scorer, shared status and forecast-computation journal. Deployment
+restarted the daily app; fixed-report installed parity passes. Live selection is
+unchanged. Installation evidence is recorded in the Stage 6 source note.
 Fresh provider ingestion, before-target journal recording and installed scoring
 are verified; user visual acceptance remains separate.
 
-**Continue FORE-005's rolling-origin model comparison while real shadow records
-accumulate and the listed host checks are pending.** The user selected the exact
+**FORE-005's fixed rolling comparison retains the released head. Broader prospective
+support and reset labels still need time; keep those gates and the listed host
+checks open. NEXT-001's separate usual-activity question is the next unblocked
+research checkpoint, using existing owners before introducing another model.**
+The user selected the exact
 [price policy and frozen TT basis](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md).
 CAT-002 and D-01 are integrated and installed: immutable selections, independent
 price imports, measured TT and explicit original-score saving. Automated checks,

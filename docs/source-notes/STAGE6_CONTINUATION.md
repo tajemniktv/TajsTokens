@@ -634,7 +634,151 @@ paths, source content or credentials. Future reports can legitimately differ whe
 the cutoff or selected retained evidence changes; a fixed-cutoff check is not a
 claim that later interpretation repairs cannot revise an outcome assessment.
 
-FORE-005 still needs the fair rolling-origin joint/direct comparison and broader
-qualified prospective evidence. This scorer supplies descriptive issued-output
+The following comparison supplies rolling-origin joint/direct evidence; broader
+qualified prospective evidence remains open. This scorer supplies descriptive issued-output
 metrics; it does not choose a winner, supply missing long-horizon/reset truth or
 close physical alert/visual acceptance. Host checks remain listed in PROJECT.md.
+
+## Rolling joint comparison (FORE-005)
+
+`rolling-joint-comparison/v1` reuses the existing cost-interval, nonnegative ridge,
+joint projection, block-path, pace and calibration owners. Research orchestration
+lives under `Core.Research`; product services do not depend on it. The original
+frozen-fit comparison and its artifacts remain separate.
+
+### Targets, availability and selection
+
+Each prediction uses its **nominal** 5/15/30/120-minute duration. A tolerated later
+quota poll supplies the observed label without extending projected work. These are
+ordinary displayed-meter outcomes, not exact latent costs. The existing builder
+excludes saturated/invalid/cross-boundary intervals; report availability is
+conditional on those constructed targets, rather than measured live abstention.
+The prospective journal measures actual retained issuance separately.
+
+Reconstruction uses event clocks. Collection-qualified replay uses known collection
+times as effective quota clocks, retaining original measured times. Unknown,
+negative or over-five-minute lag creates a boundary. Training must have ended and
+its token evidence must have been available by the origin. Unknown collection
+never turns late workload into timely free work. Same-meter plan/reset/conflict/
+decrease boundaries remain owned by the existing quota policy.
+
+Eight fixed candidates are compared: direct fallback, released head, frozen
+first-20 joint/two-hour context, expanding category and joint fits under 30-minute
+and two-hour contexts, and a two-hour contiguous-block joint-path challenger.
+Vocabulary/scaling use training data only; expanding fits use earlier matured
+same-cohort/horizon rows. The existing 20-row fit floor remains an engineering
+comparator, not a universal sample-size guarantee. At most 2,048 intervals per
+cohort/horizon are examined, with source/examined counts reporting truncation.
+
+The last fifth of each cohort's retained **timestamp span** is final holdout;
+quota values and target eligibility cannot move that split. Development labels
+must mature by the split. Boundary-overlapping labels cannot choose a policy.
+The development choice is then fixed. Expanding fits may learn from earlier
+matured final outcomes under that fixed rule; final results cannot tune the choice.
+
+Raw candidate availability and full policies are reported separately. A candidate
+policy keeps the released head when composition is unavailable, and is scored on
+the full head-supported target set. It cannot improve by dropping difficult targets.
+Selection requires at least 16 actual composed, non-overlapping outcomes in eight
+six-hour blocks, more than 0.1pp and 10% block-balanced envelope-loss improvement
+over both direct and released controls, and a majority of winning blocks. Richer
+joint/path candidates must also beat the matched simpler parent policy. These
+inherited support/margin floors are engineering gates, not proof of independence
+or a complete production-promotion policy. No automatic live promotion occurs.
+
+Signed remaining-error sums use non-overlapping outcomes. Point availability,
+paired MAE/envelope loss, band availability, coverage and width retain separate
+denominators. Residual calibration uses earlier emitted clipped predictions and
+the existing completed-block owner. Raw block-path P10/P90 remains conditional
+spread; it is not a calibrated predictive band or an identification range.
+
+### Fixed native studies
+
+Both ranges were run in reconstructed and collection-qualified modes:
+
+| Range (UTC) | Input quota rows | Qualified-clock rows | Constructed intervals | Cohort/horizon groups | Truncated groups |
+|---|---:|---:|---:|---:|---:|
+| October 22 00:00–October 28 16:40 | 15,950 | 6,110 | 488 | 4 | 0 |
+| September 27 00:00–October 27 14:58 | 29,663 | 14,794 | 2,981 | 12 | 0 |
+
+**Every development choice retained the released head in all four studies.**
+Recent development support was sparse; the month study also had sufficiently
+spaced Weekly evidence, without a candidate earning the required full-policy
+improvement. This supports retaining the incumbent for these fixed comparisons,
+not a universal claim that composition cannot help.
+
+Recent collection-qualified final outcomes illustrate why raw availability and
+full-policy comparisons must stay separate:
+
+| Horizon | Head-supported outcomes | Raw expanding joint/two-hour outcomes | Head MAE | Joint policy with head fallback MAE |
+|---|---:|---:|---:|---:|
+| 5 minutes | 229 | 198 | 0.206350pp | 0.196510pp |
+| 15 minutes | 90 | 69 | 0.442804pp | 0.456891pp |
+| 30 minutes | 45 | 34 | 0.678261pp | 0.652988pp |
+| 120 minutes | 3 | 0 | 1.306472pp | 1.306472pp |
+
+Final improvements cannot retroactively choose a model. In the month study's first
+four Weekly horizon groups, the same full joint policy has MAE
+0.250000/0.607599/0.825447/1.691870pp versus head
+0.250000/0.543469/0.550119/1.903222pp over 12/59/34/14 outcomes at
+5/15/30/120 minutes. Five-hour and other Weekly cohorts stay separate; they must
+not be pooled into an apparent account-wide accuracy or independent sample count.
+
+Eight regressions cover growing/frozen fits, nominal horizons despite delayed polls,
+future-data invariance, collection-clock qualification, unavailable token training,
+honest head fallback, parent/support gates, mature residual bands, raw-path spread,
+zero work and sparse history. Independent NumPy arithmetic reproduced 257 sampled
+category/joint fits (maximum absolute difference below 7.2e-15), 50,720 nominal-target/
+training checks, raw/policy scores and development/final-policy decisions across
+the four studies. The full Core suite passed **941 tests** (2m 8s).
+
+### Prospective maturation
+
+At **2026-10-29T07:37:22.3758837Z**, the installed journal scorer read 128 compact
+computations. Ordinary matched targets at 5/15/30/120 minutes were
+123/114/100/15, with only 25/8/4/1 non-overlapping outcomes, all in one six-hour
+block per horizon. MAE was 0.350486/0.554487/0.547012/1.677254pp. The two-hour
+signed mean error was +1.677254pp, an optimistic remaining-quota error. One mature
+target per horizon lacked a compatible label; it was withheld. Reset targets were
+still immature. There were no detailed selected/composed pairs or banded outputs
+at that cutoff. More overlapping readings do not establish an independent win,
+calibrated warning probability or delivered-alert behavior.
+
+Independent arithmetic verified all 128 journal content identities, 640 frozen
+output rows and 352 matched targets/errors at this cutoff. The report SHA-256 is
+`8acb76ea036cf83b07cc5ddd119c57633270c963e7e78178ebfe59d8293bc3d2`;
+the independent aggregate proof is
+`0e5f52159cbfecefdb335f927ba088e91af63c8bbe6abc4aac39632634061732`.
+
+### Installation and reproducibility
+
+The Windows solution build passed with zero warnings/errors (53s), installed
+normally and restarted the app as PID **46768**. Backup is
+`20261029T074148631Z-9da5fc40`. Its pre-commit build identity is
+`1.0.0+8fb9dd588622113019d1cf7716047ada5fc070ad.dirty` at 07:42:09 UTC;
+the assembly hashes identify the validated source patch. Fresh quota collection
+advanced to 07:44:29 UTC and forecast confirmation to 07:44:31 UTC after restart.
+Installed Core/Infrastructure/App/tool assemblies
+match the normal publish output:
+
+- Core: `6984f81349ce4b36e7fa932b5500ae75b3d5f91ffa46fe663a2615cdbca22f5c`
+- Infrastructure: `116938f4cc3493f27586c09e4101fc9de581fbf098875efcb49df0cb3278e73d`
+- App: `707be11a8a688b7d0fc825c2bf63199e5904bfdc790f0ac88e9b6ad36262af87`
+- ForecastEvaluation: `0820bfdc1536934ecbe486aa1e7bc2e27cf078ef6cae761cafc70d57d9c364b7`
+
+The installed tool reproduced both the recent collection-qualified audit and the
+fixed prospective report byte-for-byte. Frozen study artifacts under
+`.codex/temp/stage6/` have these SHA-256 identities:
+
+| Study | Native audit | Independent aggregate proof |
+|---|---|---|
+| Recent reconstructed | `281a89c480313f2be4d552c650f13596da86beeb036763bfb4177a3eb56f35a2` | `a4c314161cc862e5c5f7a87822c540e2be88175c77bacb5015ec172390fc5730` |
+| Recent collection-qualified | `d828b74d74aa39a9031e71a682543720ac2afbdbbb9b277579b4258993daf035` | `cd43563a835825bc540fe770b787d65ce66e02cee6a34e5295057a0916e56936` |
+| Month reconstructed | `545c9ef138469c8747cdb4f476c17b652b0d2c0ec267ca69fcaf250a6e26474f` | `b8c90970a0bc0e6972c066a55f5f093f2a38c1c843598f488e97a20ba86d4013` |
+| Month collection-qualified | `8ad7a3f6fcc85f0a0010284753dc5d313af9afc43d22dedfafd4c4fead43275a` | `db66de5d163beacd3d81de33b7b67f528c7e80e88d78f013d7f87257c44621d6` |
+
+No source acquisition, durable schema, TT weights or released continuation/model
+policy changed. FORE-005 remains open for broader prospective support, supported
+reset labels and selected/composed prospective comparisons. Physical tray, input
+restoration, alerts and resource acceptance remain separate host checks in
+PROJECT.md; this explicit research slice adds no UI acceptance claim.
