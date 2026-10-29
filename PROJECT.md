@@ -916,10 +916,24 @@ selected; uncalibrated ranges do not hide otherwise supported point estimates.
 Begin only with a supported question and earlier evidence; completion may mean
 rejecting/deferring a candidate. Not every research proposal must become a feature.
 
-- [ ] **NEXT-001 — Evaluate usual activity separately.** Start with supported historical
+- [x] **NEXT-001 — Evaluate usual activity separately.** Start with supported historical
   activity and recent positive-work amounts; compare a small activity/amount model
   only if needed. A hurdle mean is not a path distribution or exhaustion probability.
   Label habitual activity separately from current-work continuation.
+  **Evaluated / retain existing owner:** the fixed recent/month studies compare
+  age-group/global activity frequency, the existing positive mean, a latest-eight
+  positive amount control, recent continuation and zero work at 5/15/30/120 minutes.
+  Independent reconstruction reproduces 6,668 origins and all score/coverage rows.
+  Age grouping adds reconstructed activity information; amount gains are mixed
+  across ranges and do not consistently beat simple continuation. Keep live
+  30/60-minute selection unchanged; defer a larger activity model. The existing
+  recent-activity frame excludes long idle periods, and quiet targets have no
+  independent collection-completeness proof. Broader habitual/deployment claims
+  need that evidence and chronological validation, not extra model complexity.
+  Full Core validation passes 947 tests; Windows installation/restart and both
+  packaged-tool fixed-study comparisons pass. This closes the evaluation/deferral
+  decision, not a shipped all-day habitual forecast.
+  [Method, results and limits](docs/source-notes/STAGE7_ACTIVITY.md).
 - [ ] **NEXT-002 — Evaluate coherent threshold paths.** Propagate the same workload
   paths through both windows with explicit supported resets. Preserve no-crossing
   mass and label crossing-conditional timing. Do not take minima of marginal quantiles
@@ -1006,18 +1020,20 @@ provider scope and answer-specific eligibility slices have their stated installe
 evidence. **PACE-001–004** implement and evaluate the elapsed-time correction.
 Stage 4's **SCORE-001–003** joint projection, frozen basis/archive and qualified
 scoring are installed. **CAT-001** discovery and picker interaction are verified,
-including hidden-dashboard input restoration. The latest full suite passed 941
-tests and the Windows build installed the rolling comparison, retaining the
-recorded-output scorer, shared status and forecast-computation journal. Deployment
+including hidden-dashboard input restoration. The latest full suite passed 947
+tests; the Windows build installed the activity comparison, retaining the rolling
+comparison, recorded-output scorer, shared status and forecast-computation journal. Deployment
 restarted the daily app; fixed-report installed parity passes. Live selection is
-unchanged. Installation evidence is recorded in the Stage 6 source note.
+unchanged. Installation evidence is recorded in the Stage 6/7 source notes.
 Fresh provider ingestion, before-target journal recording and installed scoring
 are verified; user visual acceptance remains separate.
 
 **FORE-005's fixed rolling comparison retains the released head. Broader prospective
 support and reset labels still need time; keep those gates and the listed host
-checks open. NEXT-001's separate usual-activity question is the next unblocked
-research checkpoint, using existing owners before introducing another model.**
+checks open. NEXT-001's explicit activity/amount comparison retains the existing
+owner and defers broader habitual claims. NEXT-002's coherent threshold-path
+question is the next unblocked research checkpoint; reuse the existing bounded
+path owners and keep conditional spread separate from predictive probability.**
 The user selected the exact
 [price policy and frozen TT basis](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md).
 CAT-002 and D-01 are integrated and installed: immutable selections, independent

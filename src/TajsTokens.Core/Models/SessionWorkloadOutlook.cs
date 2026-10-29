@@ -23,7 +23,11 @@ public sealed record SessionWorkloadTrial(
     double ObservedTokens,
     SessionWorkloadPrediction Prediction,
     double BaselineProbability,
-    double PaceTokens);
+    double PaceTokens)
+{
+    // Explicit research comparator; no change to the live conditional-amount selection.
+    public double? RecentPositiveMeanTokens { get; init; }
+}
 
 public sealed record SessionWorkloadScore(
     double HorizonHours,

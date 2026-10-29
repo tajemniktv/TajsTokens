@@ -7,6 +7,12 @@ using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
+if (args.Length == 5 && args[0] is "--usual-activity" or "--usual-activity-audit")
+{
+    await ApiPriceCatalogCli.RunAsync(() => UsualActivityCli.RunAsync(args));
+    return;
+}
+
 if (args.Length == 4 && args[0] is "--rolling-joint" or "--rolling-joint-strict" or "--rolling-joint-audit" or "--rolling-joint-strict-audit")
 {
     await ApiPriceCatalogCli.RunAsync(() => RollingJointCli.RunAsync(args));

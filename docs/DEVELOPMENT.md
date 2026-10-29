@@ -331,6 +331,28 @@ and raw availability is reported separately. This is current-code replay, distin
 from the journal's genuinely recorded outputs. See the
 [method, fixed studies and limits](source-notes/STAGE6_CONTINUATION.md#rolling-joint-comparison-fore-005).
 
+## Recorded activity research
+
+Compare the existing activity/positive-amount owner with simple continuation controls:
+
+```powershell
+dotnet run --project tools/TajsTokens.ForecastEvaluation -c Debug --no-build --no-restore -- --usual-activity "$env:LOCALAPPDATA/Programs/TajemnikTV/TajsTokens/data/telemetry.db" 2026-10-22T00:00:00Z 2026-10-28T16:40:00Z 2026-10-29T07:54:52.1151393Z
+```
+
+The three UTC arguments are target-range start, target-range end and retained-evidence
+as-of. They must be past and ordered; the target range is bounded to 366 days. The
+read-only command uses existing selected native token evidence, without quota reads
+or new acquisition. `--usual-activity-audit` adds numerical origin rows and observed/
+collection timestamps with token totals, excluding raw identifiers and content.
+Audit output reveals usage patterns; review it before sharing.
+
+This is reconstructed local recorded-work research at 5/15/30/120 minutes. It
+preserves the live 30/60-minute policy, compares existing age-group/global activity
+and positive means, and reports raw/shared-target amount errors separately. Quiet
+targets do not establish collection completeness or account inactivity. The
+[Stage 7 decision and evidence](source-notes/STAGE7_ACTIVITY.md) distinguish this
+comparison from a shipped habitual forecast or workload-path probability.
+
 ## Daily installation
 
 A successful default local app build publishes, installs and restarts `%LOCALAPPDATA%\Programs\TajemnikTV\TajsTokens\current`. Persistent database/settings live in sibling `data`; the prior binary is kept in `previous`, and deployment backups are in `backups`. The build does not delete `data`.

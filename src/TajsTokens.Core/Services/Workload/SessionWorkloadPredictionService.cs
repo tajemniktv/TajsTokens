@@ -47,6 +47,15 @@ public static class SessionWorkloadPredictionService
         return EvaluateCore(data, origin, data.CapturedAtUtc, cancellationToken, [horizon]);
     }
 
+    internal static SessionWorkloadReport ReconstructHorizons(CodexForecastDataset data, DateTimeOffset through,
+        IReadOnlyList<double> horizons, CancellationToken token)
+    {
+        if (horizons.Count is 0 or > 5 || horizons.Distinct().Count() != horizons.Count ||
+            horizons.Any(h => !double.IsFinite(h) || h <= 0 || h > 168))
+            throw new ArgumentException("Choose distinct finite positive horizons up to 168 hours.", nameof(horizons));
+        return EvaluateCore(data, through, data.CapturedAtUtc, token, horizons);
+    }
+
     private static SessionWorkloadReport EvaluateCore(
         CodexForecastDataset data,
         DateTimeOffset now,
@@ -107,7 +116,7 @@ public static class SessionWorkloadPredictionService
                 int group = AgeGroup(origin);
                 if (group == 4) continue; // No multi-day grid extrapolation from abandoned work.
                 double target = Window(origin, origin + step);
-                if (Predict(origin, group) is { } prediction)
+                if (Predict(origin, group, out double? recentPositive) is { } prediction)
                     trials.Add(
                         new SessionWorkloadTrial(
                             origin,
@@ -116,22 +125,26 @@ public static class SessionWorkloadPredictionService
                             target,
                             prediction,
                             Probability(history.Where(x => x.End <= origin).TakeLast(120).Select(x => x.Target)),
-                            Window(origin.AddMinutes(-30), origin) * horizon / .5));
+                            Window(origin.AddMinutes(-30), origin) * horizon / .5)
+                        { RecentPositiveMeanTokens = recentPositive });
                 history.Add((origin + step, group, target));
             }
             scores.Add(Score(horizon, trials));
             int currentGroup = AgeGroup(now);
             // Same ten-minute token recency requirement as the current nowcast, not an activity oracle.
-            if (currentGroup < 2 && Predict(now, currentGroup) is { } live) current.Add(live);
+            if (currentGroup < 2 && Predict(now, currentGroup, out _) is { } live) current.Add(live);
             allTrials.AddRange(trials);
 
-            SessionWorkloadPrediction? Predict(DateTimeOffset at, int group)
+            SessionWorkloadPrediction? Predict(DateTimeOffset at, int group, out double? recentPositive)
             {
+                recentPositive = null;
                 (DateTimeOffset End, int Group, double Target)[] past = history.Where(x => x.End <= at).TakeLast(120).ToArray();
                 if (past.Length < 20) return null;
                 (DateTimeOffset End, int Group, double Target)[] similar = past.Where(x => x.Group == group).ToArray();
                 (DateTimeOffset End, int Group, double Target)[] training = similar.Length >= 20 ? similar : past;
-                double[] active = training.Where(x => x.Target > 0).Select(x => x.Target).Order().ToArray();
+                double[] positives = training.Where(x => x.Target > 0).Select(x => x.Target).ToArray();
+                if (positives.Length >= 8) recentPositive = positives.TakeLast(8).Average();
+                double[] active = positives.Order().ToArray();
                 double probability = Probability(training.Select(x => x.Target));
                 SessionWorkloadTrial[] validation = trials.Where(x => x.EndUtc <= at && x.AgeGroup == group).TakeLast(128).ToArray();
                 SessionWorkloadScore score = Score(horizon, validation);
