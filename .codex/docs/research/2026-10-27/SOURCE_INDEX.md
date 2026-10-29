@@ -94,6 +94,13 @@ The checklist IDs below refer to PROJECT.md, where status is maintained.
 
 ## Dispositions and unresolved choices
 
+This section records the **planning-time** dispositions at `e609aeb`. Subsequent
+decisions and implementation are authoritative in [PROJECT.md](../../../../PROJECT.md#current-work):
+the user selected the frozen October 28 TT basis and explicit official-snapshot
+imports; T-01/D-01 and their scoped acceptance are implemented. The baseline source
+findings and preserved documents above remain dated evidence, not current defects
+or an additional backlog.
+
 Adopt as implementation direction: repair existing owners; retain rich, reconciled
 evidence; use answer-specific support; preserve joint model/category quantities;
 define a frozen public TT ruler; keep direct/composed routes and one product snapshot.
