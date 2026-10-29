@@ -7,6 +7,12 @@ using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
+if (args.Length == 4 && args[0] is "--censoring-study" or "--censoring-study-strict" or "--censoring-study-audit" or "--censoring-study-strict-audit")
+{
+    await ApiPriceCatalogCli.RunAsync(() => CensoringCli.RunAsync(args));
+    return;
+}
+
 if (args.Length == 4 && args[0] is "--coherent-thresholds" or "--coherent-thresholds-strict" or "--coherent-thresholds-audit" or "--coherent-thresholds-strict-audit")
 {
     await ApiPriceCatalogCli.RunAsync(() => CoherentPathsCli.RunAsync(args));

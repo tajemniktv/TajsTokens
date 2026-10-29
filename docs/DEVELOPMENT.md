@@ -372,6 +372,25 @@ calculations under explicit fitted maps, not calibrated probability forecasts.
 Sampling, unavailable pairs/training/contexts and fit-compatibility issues remain
 visible. See [the method, evidence and deferral](source-notes/STAGE7_THRESHOLDS.md).
 
+## Ceiling selection and censoring research
+
+```powershell
+dotnet run --project tools/TajsTokens.ForecastEvaluation -c Debug --no-build --no-restore -- --censoring-study-strict "$env:LOCALAPPDATA/Programs/TajemnikTV/TajsTokens/data/telemetry.db" 2026-09-27T00:00:00Z 2026-10-27T14:58:00Z
+```
+
+`--censoring-study` keeps reconstructed analysis separate. Append `-audit` to either
+command for closed numeric/time attempt rows. The range is past UTC, at most 366
+days; the study refuses more than 100,000 attempts rather than truncating it.
+It reads existing evidence without new collection, database writes or fitting.
+
+The construction observer preserves ordinary intervals and first-rejection counts.
+Ceiling attempts can overlap/reuse a report, so summaries separate attempted,
+distinct-endpoint and non-overlapping counts. Availability/collection diagnostics
+do not establish physical crossing or a latent clipped-cost lower bound. No
+censored target enters live training. See [the measured selection effects and
+deferral](source-notes/STAGE7_CENSORING.md). Audit usage-pattern data needs review
+before sharing.
+
 ## Daily installation
 
 A successful default local app build publishes, installs and restarts `%LOCALAPPDATA%\Programs\TajemnikTV\TajsTokens\current`. Persistent database/settings live in sibling `data`; the prior binary is kept in `previous`, and deployment backups are in `backups`. The build does not delete `data`.

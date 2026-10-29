@@ -954,10 +954,23 @@ rejecting/deferring a candidate. Not every research proposal must become a featu
   installation/restart and packaged-tool fixed-report parity pass. This closes
   the mechanical evaluation/deferral decision, not predictive probability acceptance.
   [Contract, results and limits](docs/source-notes/STAGE7_THRESHOLDS.md).
-- [ ] **NEXT-003 — Evaluate censoring.** Preserve saturated evidence and current
+- [x] **NEXT-003 — Evaluate censoring.** Preserve saturated evidence and current
   ordinary-loss exclusions. Measure selection effects before introducing justified
   lower-bound/censored targets. Unknown reporting lag prevents claiming collection
   times bracket true crossing; clipped usage is not exact latent cost.
+  **Evaluated / retain exclusions:** an optional construction observer now audits
+  accepted and ceiling-excluded attempts without changing ordinary rows, first-
+  rejection coverage or retained evidence. The fixed month frame has 50 excluded
+  attempts, but only one non-overlapping attempt per horizon in one affected reset
+  episode. Low-headroom/workload selection is visible; overlapping attempts and
+  repeated reports do not create independent censored targets. Timely collection
+  does not establish backend lag or hidden cost. Defer latent lower-bound/censored
+  fitting pending an explicit reporting/clipping target contract, distinct episodes
+  and chronological validation. Independent ledger arithmetic verifies 7,038
+  attempted workloads and all summaries across four reports. Full Core validation
+  passes 962 tests; Windows installation/restart and packaged-tool fixed-report
+  parity pass. This closes selection measurement/deferral, not a censored-model claim.
+  [Method, selection effects and limits](docs/source-notes/STAGE7_CENSORING.md).
 - [ ] **NEXT-004 — Test shared-window and drift hypotheses.** Compare proportional
   shared-cost against separate conversions on aligned compatible evidence. Reuse
   the regime owner/frozen reference for the dashboard marker. Separate known plan/
@@ -1035,9 +1048,9 @@ provider scope and answer-specific eligibility slices have their stated installe
 evidence. **PACE-001–004** implement and evaluate the elapsed-time correction.
 Stage 4's **SCORE-001–003** joint projection, frozen basis/archive and qualified
 scoring are installed. **CAT-001** discovery and picker interaction are verified,
-including hidden-dashboard input restoration. The latest full suite passed 956
-tests; the Windows build installed the coherent-path study, retaining the activity/
-rolling comparisons, recorded-output scorer, shared status and forecast-computation journal. Deployment
+including hidden-dashboard input restoration. The latest full suite passed 962
+tests; the Windows build installed the censoring audit, retaining the coherent-path,
+activity/rolling comparisons, recorded-output scorer, shared status and forecast-computation journal. Deployment
 restarted the daily app; fixed-report installed parity passes. Live selection is
 unchanged. Installation evidence is recorded in the Stage 6/7 source notes.
 Fresh provider ingestion, before-target journal recording and installed scoring
@@ -1049,8 +1062,10 @@ checks open. NEXT-001's explicit activity/amount comparison retains the existing
 owner and defers broader habitual claims. NEXT-002's coherent threshold-path
 arithmetic is installed in explicit research; probability acceptance is deferred
 because calibration and paired/reset/outcome support remain insufficient.
-NEXT-003's censoring/selection-effects question is the next unblocked checkpoint;
-preserve the existing saturated-evidence and ordinary-loss boundaries.**
+NEXT-003's audit confirms selection effects while retaining ordinary-loss exclusions;
+latent censored fitting remains deferred. NEXT-004's aligned shared-window/drift
+hypotheses are the next unblocked checkpoint; reuse current owners and preserve
+the frozen TT reference and competing explanations.**
 The user selected the exact
 [price policy and frozen TT basis](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md).
 CAT-002 and D-01 are integrated and installed: immutable selections, independent

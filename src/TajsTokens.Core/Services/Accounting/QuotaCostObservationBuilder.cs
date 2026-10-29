@@ -34,7 +34,8 @@ public static class QuotaCostObservationBuilder
         CodexForecastDataset data,
         CancellationToken cancellationToken = default,
         bool userConfirmedRolloutOwnership = false,
-        IReadOnlyList<double>? horizons = null)
+        IReadOnlyList<double>? horizons = null,
+        Action<QuotaCostCandidate>? auditCandidate = null)
     {
         var result = new List<QuotaCostObservation>();
         var coverage = new List<QuotaCostConstructionCoverage>();
@@ -99,6 +100,23 @@ public static class QuotaCostObservationBuilder
                     Reject("intervening-incompatible-cohort");
                     continue;
                 }
+                double hours = (end.CapturedAtUtc - start.CapturedAtUtc).TotalHours;
+                CodexForecastFeatures? features = null;
+                if (auditCandidate is not null)
+                {
+                    featureIndex ??= new CodexForecastFeatureIndex(data);
+                    features = featureIndex.Build(end.CapturedAtUtc, hours, ForecastReplayAvailability.ReconstructedEventTime);
+                    var auditTokens = featureIndex.TokenWindow(end.CapturedAtUtc, hours, ForecastReplayAvailability.ReconstructedEventTime);
+                    var auditQuota = epoch.Take(i + 1).Append(end).ToArray();
+                    DateTimeOffset?[] clocks = auditQuota.Select(q => q.CollectedAtUtc).Concat(auditTokens.Select(t => t.CapturedAtUtc)).ToArray();
+                    auditCandidate(new(stream.Key, epoch[0].CapturedAtUtc, epoch[0].ResetsAtUtc!.Value,
+                        start.CapturedAtUtc, target, end.CapturedAtUtc, start.ReplayMeasuredAtUtc ?? start.CapturedAtUtc,
+                        end.ReplayMeasuredAtUtc ?? end.CapturedAtUtc, horizon, start.UsedPercent!.Value, end.UsedPercent!.Value,
+                        features.Tokens, auditTokens.Length, auditTokens.All(QuotaEvaluationCoverageBuilder.HasCompleteCategories),
+                        clocks.All(t => t is not null) ? clocks.Max() : null,
+                        auditQuota.All(q => q.CollectedAtUtc >= (q.ReplayMeasuredAtUtc ?? q.CapturedAtUtc)) &&
+                        auditTokens.All(t => t.CapturedAtUtc >= t.ObservedAtUtc)));
+                }
                 // Saturation hides any further usage; it is not an ordinary bounded delta target.
                 if (end.UsedPercent >= 100)
                 {
@@ -106,9 +124,8 @@ public static class QuotaCostObservationBuilder
                     continue;
                 }
                 previousEnd = end.CapturedAtUtc;
-                double hours = (end.CapturedAtUtc - start.CapturedAtUtc).TotalHours;
                 featureIndex ??= new CodexForecastFeatureIndex(data);
-                CodexForecastFeatures features = featureIndex.Build(end.CapturedAtUtc, hours, ForecastReplayAvailability.ReconstructedEventTime);
+                features ??= featureIndex.Build(end.CapturedAtUtc, hours, ForecastReplayAvailability.ReconstructedEventTime);
                 CodexPredictiveTokenEvent[] tokens = data.Tokens
                     .Where(x => x.ObservedAtUtc > start.CapturedAtUtc && x.ObservedAtUtc <= end.CapturedAtUtc).ToArray();
 
