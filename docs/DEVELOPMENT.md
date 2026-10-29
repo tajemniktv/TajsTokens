@@ -125,6 +125,28 @@ dashboard publication or a sent warning. This command measures retained output
 availability, not future accuracy, coverage or model promotion. See the
 [Stage 6 contract](source-notes/STAGE6_CONTINUATION.md#prospective-computation-journal-fore-005).
 
+Score recorded outputs against retained quota outcomes at a fixed cutoff:
+
+```powershell
+dotnet run --project tools/TajsTokens.ForecastEvaluation -c Debug --no-build --no-restore -- --forecast-score "$env:LOCALAPPDATA/Programs/TajemnikTV/TajsTokens/data/telemetry.db" 2026-10-29T00:00:00Z 2026-10-29T05:35:35.1734214Z
+```
+
+`--forecast-score-audit` additionally emits aliased numeric trials for independent
+checks. Both commands are read-only. The range selects recording times; its end is
+also the outcome-availability cutoff. Quota reads include the preceding reported
+window (capped at 366 days) to preserve reset/regime boundaries, with the existing
+500,000-row read limit. No token ledger or workload-training dataset is loaded.
+
+The scorer keeps the original prediction/target, requires before-target post-commit
+confirmation and timely compatible labels, and separates point/band availability,
+late/immature/unmatched outcomes and saturation. Error sums use non-overlapping
+outcomes; band coverage uses matched nonsaturated banded outcomes only. Threshold
+comparisons concern computed predictions, not delivered alerts or execution stops.
+Negative reset labels require a reading exactly at reset; earlier proxies cannot
+prove survival. Warning lead is measured to an observed saturation report, not a
+known physical crossing. No fit, policy tuning, database write or model promotion is
+performed. See [methods and evidence](source-notes/STAGE6_CONTINUATION.md#recorded-forecast-outcomes-fore-005).
+
 ## Forecast threshold study
 
 Run this explicitly against the app-owned telemetry database, with a fixed past UTC range:

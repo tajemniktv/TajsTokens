@@ -7,7 +7,7 @@ using TajsTokens.Core.Services;
 using TajsTokens.Infrastructure.Persistence;
 using TajsTokens.Infrastructure.Services;
 
-if (args.Length == 4 && args[0] == "--forecast-journal")
+if (args.Length == 4 && args[0] is "--forecast-journal" or "--forecast-score" or "--forecast-score-audit")
 {
     await ApiPriceCatalogCli.RunAsync(() => ForecastJournalCli.RunAsync(args));
     return;

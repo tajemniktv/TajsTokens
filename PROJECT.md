@@ -881,8 +881,18 @@ shared projection and the existing Planning page; no duplicate planner/estimator
   selection. A bounded read-only journal report exposes availability and issue lead.
   Full Core validation (915 tests), Windows installation and independent installed
   hash/numeric/preservation checks pass. Real before-target recording has started.
-  Rolling-origin comparison, outcome metrics and prospective maturation remain open;
-  recording a prediction is not evidence of predictive accuracy or a delivered alert.
+  A read-only recorded-output scorer now matches original targets to timely compatible
+  outcomes, with separate point/band/issue availability, ordinary and censored
+  targets, non-overlapping signed error, coverage/width, missed displayed bursts and
+  computed threshold/report-lead metrics. The first fixed prospective cutoff has ten
+  five-minute and one fifteen-minute matches, only two/one non-overlapping outcomes;
+  independent checks reproduce all eleven targets and error summaries. This small
+  sample does not establish a winning model or delivered-alert behavior. Fair rolling
+  joint/direct comparison and broader prospective maturation remain open.
+  The scorer passes 18 focused regressions, the 933-test full suite, the Windows
+  build and installed frozen-cutoff repeat/independent checks. A later cutoff adds
+  two thirty-minute matches (one non-overlapping); two-hour/reset targets remain
+  immature. No released model or continuation default changed.
   [Contract and validation](docs/source-notes/STAGE6_CONTINUATION.md#prospective-computation-journal-fore-005).
 
 **Exit:** a recent-work plan is useful end to end with explicit assumptions and
@@ -984,13 +994,13 @@ provider scope and answer-specific eligibility slices have their stated installe
 evidence. **PACE-001–004** implement and evaluate the elapsed-time correction.
 Stage 4's **SCORE-001–003** joint projection, frozen basis/archive and qualified
 scoring are installed. **CAT-001** discovery and picker interaction are verified,
-including hidden-dashboard input restoration. The latest full suite passed 915
-tests and the Windows build installed the shared status and forecast-computation
-journal. The app was stopped before validation; deployment started the new version.
-Fresh provider ingestion and actual before-target journal recording
+including hidden-dashboard input restoration. The latest full suite passed 933
+tests and the Windows build installed the recorded-output scorer, retaining the
+shared status and forecast-computation journal. Deployment restarted the daily app.
+Fresh provider ingestion, before-target journal recording and installed scoring
 are verified; user visual acceptance remains separate.
 
-**Continue FORE-005's chronological/outcome evaluation while real shadow records
+**Continue FORE-005's rolling-origin model comparison while real shadow records
 accumulate and the listed host checks are pending.** The user selected the exact
 [price policy and frozen TT basis](docs/source-notes/PRICE_AND_TT_PROPOSAL_2026-10-28.md).
 CAT-002 and D-01 are integrated and installed: immutable selections, independent

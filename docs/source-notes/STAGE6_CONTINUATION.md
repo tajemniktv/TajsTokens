@@ -520,9 +520,121 @@ the installed journal availability report SHA-256 is
 The reports contain aggregate numeric/status evidence only. No visual acceptance is
 claimed; pending host checks are listed in PROJECT.md while the user is away.
 
-**FORE-005 remains open.** Next work is overlap-safe chronological comparison and
-outcome scoring (including signed accumulated error, interval width/coverage, missed
-bursts, false exhaustion and actual warning lead), followed by qualified prospective
-evaluation as labels mature. Reconstructed history, collection-qualified replay and
-genuinely recorded outputs must remain separate. Recording success does not select
-a model, establish warning delivery or demonstrate predictive accuracy.
+**FORE-005 remains open.** The following scorer adds recorded-outcome evaluation;
+fair rolling-origin joint/direct comparison and broader prospective evidence remain
+next work. Reconstructed history, collection-qualified replay and genuinely recorded
+outputs stay separate. Recording success alone does not select a model, establish
+warning delivery or demonstrate predictive accuracy.
+
+## Recorded forecast outcomes (FORE-005)
+
+`recorded-quota-evaluation/v1` evaluates immutable journal outputs without refitting,
+selecting or extending a prediction to a delayed target measurement. The recording
+range's end is a fixed availability cutoff. Source collection after that cutoff cannot
+improve the report; future confirmations and immature targets remain explicit.
+The existing read-only quota dataset owner supplies original measurement/collection
+clocks and selected source membership, without reading token/workload datasets.
+Its quota-only route also avoids training-schema dependencies. A preceding reported
+window is read so reporting boundaries do not restart a reset-jitter or plan history.
+
+Labels must retain the anchor's source/account/bucket/plan/window and compatible
+reset generation. Existing bounded one-second reset jitter applies to the whole
+range; transitive drift cannot merge generations. Invalid readings, same-time
+conflicts, decreases and returning plan regimes remain boundaries. Equal copies
+add neither a boundary nor an independent interval. Revised/missing anchors and
+unsupported points stay separate from measured zero. Installed observations include
+sub-second reset jitter; exact reset-string equality is not the compatibility rule.
+
+Fixed targets use the first compatible measurement at/after the original target,
+within `min(5 minutes, 20% of horizon)`. A late/unknown collection cannot be replaced
+by a more convenient later label: collection must be known, no earlier than the
+measurement, within five minutes and by cutoff. Reset outcomes use the last
+within-five-minute pre-reset proxy. These are displayed-meter targets, not exact
+latent consumption or a provider lag/precision guarantee.
+
+The report separates computed point/band availability, before-target availability,
+matched targets, ordinary-loss outcomes, saturated targets and withheld reasons.
+Saturation stays counted but is excluded from ordinary error and band coverage.
+Signed remaining error is positive for optimistic predictions. Absolute/squared
+errors use their stated matched denominators; accumulated signed error uses only
+non-overlapping outcomes from the existing chronological-block owner. Six-hour block
+counts describe spacing, not proof of independence. Selected/direct errors are paired
+only within the same computation, target, reset-lead group and ordinary outcome.
+
+A missed displayed burst means at least 2pp observed movement with under 1pp
+predicted; these are declared reporting thresholds rather than tuned precision
+assumptions. Fixed-horizon negative threshold labels require a compatible positive
+remaining reading at/after target. A first saturation report after target cannot
+prove crossing by target. Negative reset labels require a reading exactly at reset;
+a pre-reset proxy cannot establish survival. Positive labels require an actual
+timely saturation report by target. Warning lead uses the actual post-commit
+confirmation and first timely saturation report; it can be negative and does not
+bracket physical crossing under unknown backend lag. These are computed threshold
+comparisons, not evidence of a delivered warning, execution stop or reset capacity.
+
+### First fixed prospective outcome check
+
+At **2026-10-29T05:35:35.1734214Z**, the journal had 15 compact computations with
+75 output rows. All 15 content identities and 75 stored output values were checked
+independently. Eleven original targets matched timely outcomes; independent Python
+arithmetic reproduced point/signed/squared error and non-overlapping sums.
+
+| Horizon | Computations | Ordinary matched outcomes | Non-overlapping outcomes | Signed mean remaining error | MAE |
+|---|---:|---:|---:|---:|---:|
+| 5 minutes | 15 | 10 | 2 | +0.252484pp | 0.446229pp |
+| 15 minutes | 15 | 1 | 1 | +0.613824pp | 0.613824pp |
+| 30 minutes | 15 | 0 | 0 | unavailable | unavailable |
+| 120 minutes | 15 | 0 | 0 | unavailable | unavailable |
+
+Thirty-minute, two-hour and reset targets were immature at this fixed cutoff.
+There were no recorded detailed outputs there, so no paired selected/direct
+comparison, interval-coverage result or reset-warning accuracy can be claimed from
+this sample. The compact points have no invented band. This early sample is
+prospective evidence, not a context/default selection or an accuracy guarantee.
+
+A later installed cutoff, **2026-10-29T05:52:36.882744Z**, contains 31 compact
+computations: 25/16/2 ordinary matches at 5/15/30 minutes, with only 5/2/1
+non-overlapping outcomes. The thirty-minute MAE is 1.732648pp over two overlapping
+outcomes. One nominally mature target per fixed horizon still lacks a compatible
+reading at that cutoff; it is withheld rather than assigned zero. Two-hour/reset
+targets remain immature. This later report is a progression check, not a new
+independent numerical validation or a basis for changing defaults.
+
+### Scorer validation and installation
+
+Eighteen focused regressions cover fixed-output/delayed-label behavior, same-target
+selected/direct pairing, point/band/issue availability, ordinary versus saturated
+loss, threshold timing, actual confirmation lead (including negative lead), no
+pre-reset survival inference, overlap-safe sums, unknown/late collection, cutoff
+leakage, account/anchor mismatch and bounded reset/plan/conflict/decrease semantics.
+The quota-only reader also works with token and training sources deliberately made
+unavailable, retaining original clocks. A separate base-database regression exposed
+and repairs its old dependency on `rollout_files`: quota-only operation now works
+without an Observatory store, while unverified non-null native memberships stay
+excluded. The full Core suite passed **933 tests** (2m 9s). No production model/
+continuation policy or durable schema changed here.
+
+The Windows solution build passed with zero warnings/errors (53s), installed
+normally and restarted the daily app as PID **28504**. Backup is
+`20261029T060159687Z-f7710311`. All **40** pre-deployment journal computations retained
+their exact payload/hash, insertion and confirmation timestamps. Installed hashes:
+
+- Core: `9cfdccc424901edc9d88df806f694cefffe093bc455c51fff7bb89ba55066cf5`
+- Infrastructure: `905fce555775258fc841e19445439609c99ed1ba26df65e8d3dd1f9d43ec9fd3`
+- App: `dae62e2640264c5dd024704437c118097b25e67cbbf9480e40d9fa774002d5dd`
+
+The installed fixed-cutoff audit reproduced byte-for-byte on a second fresh read.
+Its SHA-256 is `68b4a7ec9611ec7b8de9802dadb1b69ec5f8b207000e5b1c558774dd2c2cf699`;
+the independent aggregate proof is
+`61a725824f70c1df2c7caec0b5c5d596327996374b6584c4b074d7b2b555442d`.
+The later-cutoff report is
+`c2a354eb2a7fb48720c8a52ffe6ab8bb571bd02a2756cdf1d3c3de3607dd95e8`.
+These reports contain aliased numeric/status evidence, no raw account/source IDs,
+paths, source content or credentials. Future reports can legitimately differ when
+the cutoff or selected retained evidence changes; a fixed-cutoff check is not a
+claim that later interpretation repairs cannot revise an outcome assessment.
+
+FORE-005 still needs the fair rolling-origin joint/direct comparison and broader
+qualified prospective evidence. This scorer supplies descriptive issued-output
+metrics; it does not choose a winner, supply missing long-horizon/reset truth or
+close physical alert/visual acceptance. Host checks remain listed in PROJECT.md.

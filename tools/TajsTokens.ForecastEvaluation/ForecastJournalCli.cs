@@ -1,7 +1,9 @@
 using System.Globalization;
 using System.Text.Json;
 using TajsTokens.Core.Models;
+using TajsTokens.Core.Research;
 using TajsTokens.Infrastructure.Persistence;
+using TajsTokens.Infrastructure.Services;
 
 internal static class ForecastJournalCli
 {
@@ -27,6 +29,28 @@ internal static class ForecastJournalCli
             if (page[^1].RecordedAtUtc is null) throw new InvalidOperationException("Cannot paginate an invalid recording clock.");
             after = page[^1].RecordedAtUtc; id = page[^1].Id;
             if (page.Count < 1000) break;
+        }
+        if (args[0] is "--forecast-score" or "--forecast-score-audit")
+        {
+            var computations = entries.Where(e => e.Problem is null && e.Computation is not null).Select(e => e.Computation!).ToArray();
+            IReadOnlyList<QuotaSnapshot> quota = [];
+            if (computations.Any(c => c.AnchorUtc < to))
+            {
+                DateTimeOffset firstAnchor = computations.Where(c => c.AnchorUtc < to).Min(c => c.AnchorUtc);
+                // Include the preceding reported window so a bounded reset-jitter chain or
+                // returning plan regime is not accidentally restarted at the report boundary.
+                double windowMinutes = computations.Max(c => (double)Math.Clamp(c.Cohort.WindowMinutes ?? 10080, 1, 527040));
+                DateTimeOffset contextFrom = firstAnchor - DateTimeOffset.MinValue > TimeSpan.FromMinutes(windowMinutes)
+                    ? firstAnchor.AddMinutes(-windowMinutes) : DateTimeOffset.MinValue;
+                var data = await new SqliteForecastDatasetReader(args[1]).ReadQuotaOnlyAsync("codex", "default",
+                    contextFrom, to, cancellation.Token, accountKey: null);
+                quota = data.Quota;
+            }
+            var report = RecordedQuotaForecastEvaluation.Evaluate(entries, quota, to, cancellation.Token,
+                includeTrials: args[0] == "--forecast-score-audit");
+            Console.WriteLine(JsonSerializer.Serialize(new { JournalTruncated = truncated, Report = report },
+                new JsonSerializerOptions { WriteIndented = true }));
+            return;
         }
         // Alias private cohorts. No raw IDs, receipts, paths, native records or arbitrary payloads leave the report.
         var cohorts = entries.Where(e => e.Computation is not null).Select(e => e.Computation!.Cohort)

@@ -30,7 +30,7 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
         bool includeLedger = false)
         => await ReadCoreAsync(provider, profile, fromUtc, toUtc, cancellationToken, accountKey, includeQuota, includeLedger, false);
 
-    internal Task<CodexForecastDataset> ReadQuotaOnlyAsync(string provider, string profile,
+    public Task<CodexForecastDataset> ReadQuotaOnlyAsync(string provider, string profile,
         DateTimeOffset fromUtc, DateTimeOffset toUtc, CancellationToken token, string? accountKey)
         => ReadCoreAsync(provider, profile, fromUtc, toUtc, token, accountKey, true, false, true);
 
@@ -98,10 +98,16 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
         bool hasAccountKey = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 1;
         command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('quota_snapshots') WHERE name = 'observation_id';";
         bool hasProvenance = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 1;
-        command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('codex_workload_observations') WHERE name = 'service_tier';";
-        bool hasServiceTier = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 1;
+        command.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='rollout_files';";
+        bool hasRolloutFiles = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 1;
+        bool hasServiceTier = false;
+        if (!quotaOnly)
+        {
+            command.CommandText = "SELECT COUNT(*) FROM pragma_table_info('codex_workload_observations') WHERE name = 'service_tier';";
+            hasServiceTier = Convert.ToInt32(await command.ExecuteScalarAsync(cancellationToken), CultureInfo.InvariantCulture) == 1;
+        }
         command.Parameters.AddWithValue("$from", Utc(fromUtc));
-        command.Parameters.AddWithValue("$lookback", Utc(fromUtc.AddHours(-2)));
+        command.Parameters.AddWithValue("$lookback", Utc(quotaOnly ? fromUtc : fromUtc.AddHours(-2)));
         command.Parameters.AddWithValue("$to", Utc(toUtc));
         command.Parameters.AddWithValue("$provider", provider);
         command.Parameters.AddWithValue("$profile", profile);
@@ -119,7 +125,9 @@ public sealed class SqliteForecastDatasetReader(string databasePath, IReadOnlyLi
                                FROM quota_snapshots WHERE provider=$provider AND profile=$profile AND $includeQuota=1
                                  AND captured_at_utc >= $from AND captured_at_utc <= $to
                                  AND (source LIKE 'codex-app-server:%' OR source LIKE 'codex-rollout:%')
-                                 {(hasProvenance ? "AND (source_identity IS NULL OR EXISTS(SELECT 1 FROM rollout_files f WHERE f.source_identity=quota_snapshots.source_identity))" : "")}
+                                 {(hasProvenance ? hasRolloutFiles
+                                     ? "AND (source_identity IS NULL OR EXISTS(SELECT 1 FROM rollout_files f WHERE f.source_identity=quota_snapshots.source_identity))"
+                                     : "AND source_identity IS NULL" : "")}
                                  AND ($account IS NULL OR {(hasAccountKey ? "account_key=$account OR ($asserted=1 AND (account_key IS NULL OR account_key=''))" : "0")})
                                ORDER BY captured_at_utc LIMIT 500001;
                                """;
